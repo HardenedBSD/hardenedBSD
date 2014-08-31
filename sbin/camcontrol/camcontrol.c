@@ -5379,6 +5379,7 @@ scsiformat(struct cam_device *device, int argc, char **argv,
 	 && (timeout == 0)) {
 		char str[1024];
 		int new_timeout = 0;
+		const char *errstr = NULL;
 
 		fprintf(stdout, "Enter new timeout in seconds or press\n"
 			"return to keep the current timeout [%d] ",
@@ -5386,7 +5387,11 @@ scsiformat(struct cam_device *device, int argc, char **argv,
 
 		if (fgets(str, sizeof(str), stdin) != NULL) {
 			if (str[0] != '\0')
-				new_timeout = atoi(str);
+				new_timeout = strtonum(str, 0, INT_MAX, &errstr);
+				if (errstr) {
+					fprintf(stderr, "Invalid new timeout %s\n", errstr);
+					goto scsiformat_bailout;
+				}
 		}
 
 		if (new_timeout != 0) {
@@ -5787,6 +5792,8 @@ scsisanitize(struct cam_device *device, int argc, char **argv,
 	 && (timeout == 0)) {
 		char str[1024];
 		int new_timeout = 0;
+		const char *errstr = NULL;
+		
 
 		fprintf(stdout, "Enter new timeout in seconds or press\n"
 			"return to keep the current timeout [%d] ",
@@ -5794,7 +5801,11 @@ scsisanitize(struct cam_device *device, int argc, char **argv,
 
 		if (fgets(str, sizeof(str), stdin) != NULL) {
 			if (str[0] != '\0')
-				new_timeout = atoi(str);
+				new_timeout = strtonum(str, 0, INT_MAX, &errstr);
+				if (errstr) {
+					fprintf(stderr, "Invalid new timeout %s\n", errstr);
+					goto scsisanitize_bailout;
+				}
 		}
 
 		if (new_timeout != 0) {
