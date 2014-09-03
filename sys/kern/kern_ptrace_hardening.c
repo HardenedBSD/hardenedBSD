@@ -71,8 +71,8 @@ SYSCTL_NODE(_security_ptrace, OID_AUTO, hardening, CTLFLAG_RD, 0,
     "PTrace hardening (calls restrictions).");
 
 SYSCTL_PROC(_security_ptrace_hardening, OID_AUTO, status, 
-            CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, 
-            NULL, 0, sysctl_ptrace_hardening_status, "I",
+            CTLTYPE_UINT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, 
+            NULL, 0, sysctl_ptrace_hardening_status, "IU",
             "Restrictions status. "
             "0 - disabled, "
             "1 - enabled");
@@ -88,7 +88,7 @@ int
 sysctl_ptrace_hardening_status(SYSCTL_HANDLER_ARGS)
 {
     int err, val;
-    err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+    err = sysctl_handle_int(oidp, &val, 0, req);
     if (err || (req->newptr == NULL))
         return (err);
 
@@ -96,6 +96,7 @@ sysctl_ptrace_hardening_status(SYSCTL_HANDLER_ARGS)
     case PTRACE_HARDENING_DISABLED:
     case PTRACE_HARDENING_ENABLED:
         ptrace_hardening_status = val;
+	break;
     default:
         return (EINVAL);
     }
@@ -140,4 +141,4 @@ ptrace_hardening_init(void)
     printf("[PTRACE HARDENING GROUP] %d\n", ptrace_hardening_allowed_gid);
 #endif
 }
-SYSINIT(hardening, SI_SUB_PTRACE_HARDENING, SI_ORDER_FIRST, ptrace_hardening_init, NULL);
+SYSINIT(ptrace, SI_SUB_PTRACE_HARDENING, SI_ORDER_FIRST, ptrace_hardening_init, NULL);
