@@ -300,7 +300,7 @@ parse(const char *string, int lineno)
  				} else {
 					intval = (int)strtol(newval, &endptr,
 					    0);
-					if (endptr == newval || *endptr != '\0') {
+					if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 						warnx("invalid integer '%s'%s",
 						    (char *)newval, line);
 						return (1);
@@ -311,7 +311,7 @@ parse(const char *string, int lineno)
 				break;
 			case CTLTYPE_UINT:
 				uintval = (int) strtoul(newval, &endptr, 0);
-				if (endptr == newval || *endptr != '\0') {
+				if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 					warnx("invalid unsigned integer '%s'%s",
 					    (char *)newval, line);
 					return (1);
@@ -321,7 +321,7 @@ parse(const char *string, int lineno)
 				break;
 			case CTLTYPE_LONG:
 				longval = strtol(newval, &endptr, 0);
-				if (endptr == newval || *endptr != '\0') {
+				if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 					warnx("invalid long integer '%s'%s",
 					    (char *)newval, line);
 					return (1);
@@ -331,7 +331,7 @@ parse(const char *string, int lineno)
 				break;
 			case CTLTYPE_ULONG:
 				ulongval = strtoul(newval, &endptr, 0);
-				if (endptr == newval || *endptr != '\0') {
+				if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 					warnx("invalid unsigned long integer"
 					    " '%s'%s", (char *)newval, line);
 					return (1);
@@ -343,7 +343,7 @@ parse(const char *string, int lineno)
 				break;
 			case CTLTYPE_S64:
 				i64val = strtoimax(newval, &endptr, 0);
-				if (endptr == newval || *endptr != '\0') {
+				if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 					warnx("invalid int64_t '%s'%s",
 					    (char *)newval, line);
 					return (1);
@@ -353,7 +353,7 @@ parse(const char *string, int lineno)
 				break;
 			case CTLTYPE_U64:
 				u64val = strtoumax(newval, &endptr, 0);
-				if (endptr == newval || *endptr != '\0') {
+				if (errno == ERANGE || endptr == newval || *endptr != '\0') {
 					warnx("invalid uint64_t '%s'%s",
 					    (char *)newval, line);
 					return (1);

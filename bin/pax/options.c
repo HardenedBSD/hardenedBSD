@@ -189,6 +189,7 @@ pax_options(int argc, char **argv)
 	unsigned int flg = 0;
 	unsigned int bflg = 0;
 	char *pt;
+	const char *errstr = NULL;
 	FSUB tmp;
 
 	/*
@@ -417,9 +418,12 @@ pax_options(int argc, char **argv)
 			flg |= CEF;
 			if (strcmp(NONE, optarg) == 0)
 				maxflt = -1;
-			else if ((maxflt = atoi(optarg)) < 0) {
-				paxwarn(1, "Error count value must be positive");
-				pax_usage();
+			else {
+				maxflt = strtonum(optarg, 0, INT_MAX, &errstr);
+				if (errstr) { 
+					paxwarn(1, "Error count value %s", errstr);
+					pax_usage();
+				}
 			}
 			break;
 		case 'G':
@@ -1016,6 +1020,7 @@ cpio_options(int argc, char **argv)
 	int c;
 	size_t i;
 	char *str;
+	const char *errstr = NULL;
 	FSUB tmp;
 	FILE *fp;
 
@@ -1143,7 +1148,11 @@ cpio_options(int argc, char **argv)
 				/*
 				 * set block size in bytes
 				 */
-				wrblksz = atoi(optarg);
+				wrblksz = strtonum(optarg, 0, INT_MAX, &errstr);
+				if (errstr) {
+					paxwarn(1, "Invalid block size %s", errstr);
+					cpio_usage();
+				}
 				break;
 			case 'E':
 				/*

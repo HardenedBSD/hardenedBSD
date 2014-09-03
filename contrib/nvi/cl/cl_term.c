@@ -360,6 +360,7 @@ cl_ssize(SCR *sp, int sigwinch, size_t *rowp, size_t *colp, int *changedp)
 	size_t col, row;
 	int rval;
 	char *p;
+	char *rowptr = NULL, *colptr = NULL;
 
 	/* Assume it's changed. */
 	if (changedp != NULL)
@@ -451,10 +452,16 @@ noterm:	if (row == 0)
 	 * deleting the LINES and COLUMNS environment variables from their
 	 * dot-files.
 	 */
-	if ((p = getenv("LINES")) != NULL)
-		row = strtol(p, NULL, 10);
-	if ((p = getenv("COLUMNS")) != NULL)
-		col = strtol(p, NULL, 10);
+	if ((p = getenv("LINES")) != NULL) {
+		row = strtol(p, &rowptr, 10);
+		if (errno == ERANGE || *rowptr != '\0')
+			row = 24;
+	}
+	if ((p = getenv("COLUMNS")) != NULL) {
+		col = strtol(p, &colptr, 10);
+		if (errno == ERANGE || *colptr != '\0')
+			col = 80;
+	}
 
 	if (rowp != NULL)
 		*rowp = row;
