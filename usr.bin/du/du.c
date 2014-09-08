@@ -92,6 +92,7 @@ main(int argc, char *argv[])
 	int		Hflag, Lflag, aflag, sflag, dflag, cflag;
 	int		hflag, lflag, ch, notused, rval;
 	char 		**save;
+	char		*ptr;
 	static char	dot[] = ".";
 
 	setlocale(LC_ALL, "");
@@ -116,8 +117,8 @@ main(int argc, char *argv[])
 			break;
 		case 'B':
 			errno = 0;
-			cblocksize = atoi(optarg);
-			if (errno == ERANGE || cblocksize <= 0) {
+			cblocksize = strtol(optarg, &ptr, 10);
+			if (errno == ERANGE || *ptr != '\0' || cblocksize <= 0) {
 				warnx("invalid argument to option B: %s",
 				    optarg);
 				usage();
@@ -146,8 +147,8 @@ main(int argc, char *argv[])
 		case 'd':
 			dflag = 1;
 			errno = 0;
-			depth = atoi(optarg);
-			if (errno == ERANGE || depth < 0) {
+			depth = strtol(optarg, &ptr, 10);
+			if (errno == ERANGE || *ptr != '\0' || depth < 0) {
 				warnx("invalid argument to option d: %s",
 				    optarg);
 				usage();

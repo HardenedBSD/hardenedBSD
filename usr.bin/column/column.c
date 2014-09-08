@@ -84,12 +84,15 @@ main(int argc, char **argv)
 	const char *src;
 	wchar_t *newsep;
 	size_t seplen;
+	const char *errstr = NULL;
 
 	setlocale(LC_ALL, "");
 
 	if (ioctl(1, TIOCGWINSZ, &win) == -1 || !win.ws_col) {
 		if ((p = getenv("COLUMNS")))
-			termwidth = atoi(p);
+			termwidth = strtonum(p, 0, INT_MAX, &errstr);
+			if (errstr)
+				termwidth = 80;
 	} else
 		termwidth = win.ws_col;
 
@@ -97,7 +100,9 @@ main(int argc, char **argv)
 	while ((ch = getopt(argc, argv, "c:s:tx")) != -1)
 		switch(ch) {
 		case 'c':
-			termwidth = atoi(optarg);
+			termwidth = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr)
+				termwidth = 80;
 			break;
 		case 's':
 			src = optarg;

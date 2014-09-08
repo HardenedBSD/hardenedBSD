@@ -928,6 +928,10 @@ PAX_ASLR	opt_pax.h
 PAX_ASLR_MAX_SEC	opt_pax.h
 PAX_SYSCTLS	opt_pax.h
 
+# PTrace hardening
+PTRACE_HARDENING	opt_ptrace_hardening.h
+PTRACE_HARDENING_GRP	opt_ptrace_hardening.h
+
 # Random number generator(s)
 RANDOM_YARROW	opt_random.h
 RANDOM_FORTUNA	opt_random.h

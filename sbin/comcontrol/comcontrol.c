@@ -57,6 +57,7 @@ main(int argc, char *argv[])
 	int     res = 0;
 	int     print_dtrwait = 1, print_drainwait = 1;
 	int     dtrwait = -1, drainwait = -1;
+	char	*dtrwaitptr = NULL, *drainwaitptr = NULL;
 
 	if (argc < 2)
 		usage();
@@ -97,14 +98,18 @@ main(int argc, char *argv[])
 					usage();
 				if (argv[3] == NULL || !isdigit(argv[3][0]))
 					usage();
-				dtrwait = atoi(argv[3]);
+				dtrwait = strtol(argv[3], &dtrwaitptr, 10);
+				if (errno == ERANGE || *dtrwaitptr != '\0')
+					usage();
 				argv += 2;
 			} else if (!strcmp(argv[2],"drainwait")) {
 				if (drainwait >= 0)
 					usage();
 				if (argv[3] == NULL || !isdigit(argv[3][0]))
 					usage();
-				drainwait = atoi(argv[3]);
+				drainwait = strtol(argv[3], &drainwaitptr, 10);
+				if (errno == ERANGE || *drainwaitptr != '\0')
+					usage();
 				argv += 2;
 			} else
 				usage();

@@ -252,6 +252,7 @@ main(int argc, char *argv[])
 {
 	int ch, ktrlen, size;
 	void *m;
+	const char *errstr = NULL;
 	int trpoints = ALL_POINTS;
 	int drop_logged;
 	pid_t pid = 0;
@@ -276,13 +277,17 @@ main(int argc, char *argv[])
 			tail = 1;
 			break;
 		case 'm':
-			maxdata = atoi(optarg);
+			maxdata = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "invalid maxdata %s", errstr);
 			break;
 		case 'n':
 			fancy = 0;
 			break;
 		case 'p':
-			pid = atoi(optarg);
+			pid = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				errx(1, "invalid pid %s", errstr);	
 			break;
 		case 'r':
 			resolv = 1;

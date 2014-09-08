@@ -100,6 +100,7 @@ do_fstat(int argc, char **argv)
 	struct kinfo_proc *p;
 	struct passwd *passwd;
 	struct procstat *procstat;
+	const char *errstr = NULL;
 	int arg, ch, what;
 	int cnt, i;
 
@@ -131,7 +132,11 @@ do_fstat(int argc, char **argv)
 				usage();
 			}
 			what = KERN_PROC_PID;
-			arg = atoi(optarg);
+			arg = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr) {
+				warnx("-p requires a valid process id (%s)", errstr);
+				usage();
+			}
 			break;
 		case 'u':
 			if (uflg++)

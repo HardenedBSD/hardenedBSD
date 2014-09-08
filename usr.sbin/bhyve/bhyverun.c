@@ -680,6 +680,7 @@ main(int argc, char *argv[])
 	int c, error, gdb_port, err, bvmcons;
 	int dump_guest_memory, max_vcpus, mptgen;
 	struct vmctx *ctx;
+	const char *guest_ncpuserrstr = NULL, *gdb_porterrstr = NULL;
 	uint64_t rip;
 	size_t memsize;
 
@@ -709,13 +710,16 @@ main(int argc, char *argv[])
                         }
 			break;
                 case 'c':
-			guest_ncpus = atoi(optarg);
+			guest_ncpus = strtonum(optarg, 1, INT_MAX, &guest_ncpuserrstr);
+			/* The proper limits will be caught later */
 			break;
 		case 'C':
 			dump_guest_memory = 1;
 			break;
 		case 'g':
-			gdb_port = atoi(optarg);
+			gdb_port = strtonum(optarg, 0, 65535, &gdb_porterrstr);
+
+			/* The proper limits will be caught later */
 			break;
 		case 'l':
 			if (lpc_device_parse(optarg) != 0) {
@@ -787,6 +791,11 @@ main(int argc, char *argv[])
 	}
 
 	max_vcpus = num_vcpus_allowed(ctx);
+	if (guest_ncpuserrstr) {
+		fprintf(stderr, "Invalid vCPUs requested %s\n",
+			guest_ncpuserrstr);
+		exit(1);
+	}
 	if (guest_ncpus > max_vcpus) {
 		fprintf(stderr, "%d vCPUs requested but only %d available\n",
 			guest_ncpus, max_vcpus);
@@ -817,6 +826,11 @@ main(int argc, char *argv[])
 	if (init_pci(ctx) != 0)
 		exit(1);
 
+	if (gdb_porterrstr) {
+		fprintf(stderr, "Invalid GDB port requested %s",
+			gdb_porterrstr);
+		exit(1);
+	}
 	if (gdb_port != 0)
 		init_dbgport(gdb_port);
 
