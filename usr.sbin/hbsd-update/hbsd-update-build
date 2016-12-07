@@ -166,12 +166,12 @@ build_source() {
 		       	if [ -f "${KERNCONFIGFILE}" ]; then
 				cp -f ${KERNCONFIGFILE} ${CHROOTDIR}/usr/src/sys/$(uname -m)/conf
 				chroot ${CHROOTDIR} make \
-				-C /usr/src \
-				KERNCONF=${kernel} \
-				-sj$(sysctl -n hw.ncpu) \
-				$(echo ${DEVMODE} | \
-					sed 's/yes/-DNO_KERNELCLEAN/') \
-				buildkernel
+					-C /usr/src \
+					KERNCONF=${kernel} \
+					-sj$(sysctl -n hw.ncpu) \
+					$(echo ${DEVMODE} | \
+						sed 's/yes/-DNO_KERNELCLEAN/') \
+					buildkernel
 				res=${?}
 				if [ ${res} -gt 0 ]; then
 					return ${res}
@@ -182,12 +182,12 @@ build_source() {
 			fi
 		else
 			chroot ${CHROOTDIR} make \
-			-C /usr/src \
-			KERNCONF=${kernel} \
-			-sj$(sysctl -n hw.ncpu) \
-			$(echo ${DEVMODE} | \
-				sed 's/yes/-DNO_KERNELCLEAN/') \
-			buildkernel
+				-C /usr/src \
+				KERNCONF=${kernel} \
+				-sj$(sysctl -n hw.ncpu) \
+				$(echo ${DEVMODE} | \
+					sed 's/yes/-DNO_KERNELCLEAN/') \
+				buildkernel
 			res=${?}
 			if [ ${res} -gt 0 ]; then
 				return ${res}
