@@ -232,8 +232,6 @@ random_fortuna_process_event(struct harvest_event *event)
 	 * We must be locked against pool state modification which can happen
 	 * during accumulation/reseeding and reading/regating.
 	 */
-
-
 	pl = event->he_destination % RANDOM_FORTUNA_NPOOLS;
 	
 	/* we toss low entropy static/counter fields towards the end of the 
@@ -248,7 +246,6 @@ random_fortuna_process_event(struct harvest_event *event)
 	else if (event->he_size == 8)
 		entropy_data_size = 12;
 	uint8_t entropy_data[entropy_data_size];
-
 	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash, entropy_data, entropy_data_size);
 	/*-
 	 * Don't wrap the length. Doing this the hard way so as not to wrap at MAXUINT.
