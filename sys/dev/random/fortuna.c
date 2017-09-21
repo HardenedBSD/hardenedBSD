@@ -241,7 +241,8 @@ random_fortuna_process_event(struct harvest_event *event)
 	 *  -- wdf
 	 */
 	ssize_t entropy_data_size;
-	KASSERT((event.he_entropy == 4) || (event.he_entropy == 8));
+	entropy_data_size = 0;
+	KASSERT((event->he_size == 4) || (event->he_size == 8), ("%s: invalid entropy harvest size %d\n",__func__, event->he_size ));
 	if (event->he_size == 4)
 		entropy_data_size = 8;
 	else if (event->he_size == 8)
