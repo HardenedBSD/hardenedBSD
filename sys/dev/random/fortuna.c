@@ -241,11 +241,13 @@ random_fortuna_process_event(struct harvest_event *event)
 	 *  -- wdf
 	 */
 	ssize_t entropy_data_size;
+	KASSERT((event.he_entropy == 4) || (event.he_entropy == 8));
 	if (event->he_size == 4)
 		entropy_data_size = 8;
 	else if (event->he_size == 8)
 		entropy_data_size = 12;
 	uint8_t entropy_data[entropy_data_size];
+	memcpy(entropy_data, event, entropy_data_size);
 	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash, entropy_data, entropy_data_size);
 	/*-
 	 * Don't wrap the length. Doing this the hard way so as not to wrap at MAXUINT.
