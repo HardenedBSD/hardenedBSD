@@ -485,6 +485,10 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	 * Temporary fix until upstream includes full patch from jmg.
 	 *  -- wdf
 	 */
+#if 0
+	if (!(harvest_context.hc_source_mask & (1 << origin)))
+		return;
+#endif
 	size = MIN(size, sizeof(event.he_entropy));
 	event.he_somecounter = (uint32_t)get_cyclecount();
 	event.he_size = size;

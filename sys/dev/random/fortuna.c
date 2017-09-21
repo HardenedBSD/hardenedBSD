@@ -240,7 +240,7 @@ random_fortuna_process_event(struct harvest_event *event)
 	 *
 	 *  -- wdf
 	 */
-	uint32_t entropy_data_size = 0;
+	ssize_t entropy_data_size;
 	if (event->he_size == 4)
 		entropy_data_size = 8;
 	else if (event->he_size == 8)
