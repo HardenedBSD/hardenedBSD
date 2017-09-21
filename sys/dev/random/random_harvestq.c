@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2017 W. Dean Freeman
  * Copyright (c) 2000-2015 Mark R V Murray
  * Copyright (c) 2013 Arthur Mesh
  * Copyright (c) 2004 Robert N. M. Watson
@@ -480,8 +481,10 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	struct harvest_event event;
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
-	if (!(harvest_context.hc_source_mask & (1 << origin)))
-		return;
+	/* removed harvest mask check. This value cannot be set in current setup and so RDRND and Via Padlock don't get mixed in.
+	 * Temporary fix until upstream includes full patch from jmg.
+	 *  -- wdf
+	 */
 	size = MIN(size, sizeof(event.he_entropy));
 	event.he_somecounter = (uint32_t)get_cyclecount();
 	event.he_size = size;
