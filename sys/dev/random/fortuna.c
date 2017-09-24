@@ -262,12 +262,10 @@ random_fortuna_process_event(struct harvest_event *event)
 	 * but it's been useful debugging to see them all.
 	 */
 #ifdef HBSD_RANDOM_HIGH_ENTROPY
-	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > 
-	    (sizeof(event->he_somecounter) + event->he_size)) {
-		fortuna_state.fs_pool[pl].fsp_length +=
-		    (sizeof(event->he_somecounter) + event->he_size);
-	} else
-		fortuna_state.fs_pool[pl].fsp_length = RANDOM_FORTUNA_MAXPOOLSIZE;
+	fortuna_state.fs_pool[pl].fsp_length = MIN(RANDOM_FORTUNA_MAXPOOLSIZE,
+			fortuna_state.fs_pool[pl].fsp_length + 
+			sizeof(event->he_somecounter) + 
+			event->he_size);
 #else
 	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > event->he_size)
 		fortuna_state.fs_pool[pl].fsp_length += event->he_size;
