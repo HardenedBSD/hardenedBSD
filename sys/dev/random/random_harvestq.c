@@ -265,7 +265,7 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	 * from the pure entropy sources.
 	 * We won't allow to modify the pure entropy source.
 	 */
-	*(u_int *)arg1 = ((value) | ((orig_value & RANDOM_HARVEST_PURE_MASK))));
+	*(u_int *)arg1 = value | (orig_value & RANDOM_HARVEST_PURE_MASK);
 
 	return (0);
 }
@@ -522,8 +522,7 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	 * Temporary fix until upstream includes full patch from jmg.
 	 *  -- wdf
 	 */
-	//if (!(harvest_context.hc_source_mask & (1 << origin)))
-	if(!(RANDOM_HARVEST_PURE_MASK & (1 << origin)))
+	if (!(harvest_context.hc_source_mask & (1 << origin)))
 		return;
 #endif
 	size = MIN(size, sizeof(event.he_entropy));
@@ -541,16 +540,14 @@ void
 random_harvest_register_source(enum random_entropy_source source)
 {
 
-	printf("\n\nDEBUG: mask: %d\n", harvest_context.hc_source_mask);
-	harvest_context.hc_source_mask |= source;
-	printf("DEBUG: mask now %d\n\n", harvest_context.hc_source_mask);
+	harvest_context.hc_source_mask |= (1 << source);
 }
 
 void
 random_harvest_deregister_source(enum random_entropy_source source)
 {
 
-	harvest_context.hc_source_mask &= ~source;
+	harvest_context.hc_source_mask &= ~(1 << source);
 }
 
 MODULE_VERSION(random_harvestq, 1);

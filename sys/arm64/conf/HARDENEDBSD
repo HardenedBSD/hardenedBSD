@@ -7,4 +7,5 @@ options 	PAX_SYSCTLS
 options 	PAX_HARDENING
 options		PAX_NOEXEC
 options		PAX_SEGVGUARD
+options 	HBSD_RANDOM_HIGH_ENTROPY # Mixin HW entropy srcs & feed the relevant parts of event structs
 options		HARDEN_RANDOMPID

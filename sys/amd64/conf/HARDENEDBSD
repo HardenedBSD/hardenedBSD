@@ -95,6 +95,7 @@ options 	PAX_HARDENING		# Various hardening options
 options 	PAX_SEGVGUARD		# prevent brute-force attacks
 options		HARDEN_RANDOMPID	# Force random PIDs
 options 	HBSD_DEBUG
+options 	HBSD_RANDOM_HIGH_ENTROPY # Mixin HW entropy srcs & feed the relevant parts of event structs
 
 # Debugging support.  Always need this:
 options 	KDB			# Enable kernel debugger support.

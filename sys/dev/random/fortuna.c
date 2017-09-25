@@ -38,6 +38,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/limits.h>
 
 #ifdef _KERNEL
+
+#include "opt_pax.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
@@ -233,7 +236,7 @@ random_fortuna_process_event(struct harvest_event *event)
 	 * during accumulation/reseeding and reading/regating.
 	 */
 	pl = event->he_destination % RANDOM_FORTUNA_NPOOLS;
-
+#ifdef HBSD_RANDOM_HIGH_ENTROPY
 	/* 
 	 * We toss low entropy static/counter fields towards the end of the
 	 * he_event structure in order to increase measurable entropy when
@@ -248,18 +251,29 @@ random_fortuna_process_event(struct harvest_event *event)
 	    (const void *)&event->he_somecounter, sizeof(event->he_somecounter));
 	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash,
 	    (const void *)event->he_entropy, event->he_size);
+#else
+	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash, event, sizeof(*event));
+#endif
+
 	/*-
 	 * Don't wrap the length. Doing this the hard way so as not to wrap at MAXUINT.
 	 * This is a "saturating" add.
 	 * XXX: FIX!!: We don't actually need lengths for anything but fs_pool[0],
 	 * but it's been useful debugging to see them all.
 	 */
+#ifdef HBSD_RANDOM_HIGH_ENTROPY
 	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > 
 	    (sizeof(event->he_somecounter) + event->he_size)) {
 		fortuna_state.fs_pool[pl].fsp_length +=
 		    (sizeof(event->he_somecounter) + event->he_size);
 	} else
 		fortuna_state.fs_pool[pl].fsp_length = RANDOM_FORTUNA_MAXPOOLSIZE;
+#else
+	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > event->he_size)
+		fortuna_state.fs_pool[pl].fsp_length += event->he_size;
+	else
+		fortuna_state.fs_pool[pl].fsp_length = RANDOM_FORTUNA_MAXPOOLSIZE;
+#endif
 	explicit_bzero(event, sizeof(*event));
 	RANDOM_RESEED_UNLOCK();
 }
