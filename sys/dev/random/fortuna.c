@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2017 W. Dean Freeman, CISSP CSSLP
  * Copyright (c) 2013-2015 Mark R V Murray
  * All rights reserved.
  *
@@ -232,16 +233,32 @@ random_fortuna_process_event(struct harvest_event *event)
 	 * during accumulation/reseeding and reading/regating.
 	 */
 	pl = event->he_destination % RANDOM_FORTUNA_NPOOLS;
-	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash, event, sizeof(*event));
+
+	/* 
+	 * We toss low entropy static/counter fields towards the end of the
+	 * he_event structure in order to increase measurable entropy when
+	 * conducting SP800-90B entropy analysis measurements of seed material
+	 * fed into PRNG.
+	 * -- wdf
+	 */
+	KASSERT(event->he_size <= sizeof(event->he_entropy),
+	    ("%s: event->he_size: %hhu > sizeof(event->he_entropy): %zu\n",
+	    __func__, event->he_size, sizeof(event->he_entropy)));
+	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash,
+	    (const void *)&event->he_somecounter, sizeof(event->he_somecounter));
+	randomdev_hash_iterate(&fortuna_state.fs_pool[pl].fsp_hash,
+	    (const void *)event->he_entropy, event->he_size);
 	/*-
 	 * Don't wrap the length. Doing this the hard way so as not to wrap at MAXUINT.
 	 * This is a "saturating" add.
 	 * XXX: FIX!!: We don't actually need lengths for anything but fs_pool[0],
 	 * but it's been useful debugging to see them all.
 	 */
-	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > event->he_size)
-		fortuna_state.fs_pool[pl].fsp_length += event->he_size;
-	else
+	if (RANDOM_FORTUNA_MAXPOOLSIZE - fortuna_state.fs_pool[pl].fsp_length > 
+	    (sizeof(event->he_somecounter) + event->he_size)) {
+		fortuna_state.fs_pool[pl].fsp_length +=
+		    (sizeof(event->he_somecounter) + event->he_size);
+	} else
 		fortuna_state.fs_pool[pl].fsp_length = RANDOM_FORTUNA_MAXPOOLSIZE;
 	explicit_bzero(event, sizeof(*event));
 	RANDOM_RESEED_UNLOCK();

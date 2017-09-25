@@ -1,4 +1,6 @@
 /*-
+ * Copyright (c) 2017 Oliver Pinter
+ * Copyright (c) 2017 W. Dean Freeman
  * Copyright (c) 2000-2015 Mark R V Murray
  * Copyright (c) 2013 Arthur Mesh
  * Copyright (c) 2004 Robert N. M. Watson
@@ -29,6 +31,8 @@
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
+
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -240,7 +244,31 @@ read_rate_increment(u_int chunk)
 }
 
 /* ARGSUSED */
-RANDOM_CHECK_UINT(harvestmask, 0, RANDOM_HARVEST_EVERYTHING_MASK);
+static int
+random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
+{
+	int error;
+	u_int value, orig_value;
+
+	KASSERT(arg1 != NULL, ("Missing harvestmask."));
+
+	orig_value = value = *(u_int *)arg1;
+	error = sysctl_handle_int(oidp, &value, 0, req);
+	if (error || !req->newptr)
+		return (error);
+
+	if (value >= ENTROPYSOURCE)
+		return (EINVAL);
+
+	/*
+	 * Set the new environmental harvest mask, regardless 
+	 * from the pure entropy sources.
+	 * We won't allow to modify the pure entropy source.
+	 */
+	*(u_int *)arg1 = ((value) | ((orig_value & RANDOM_HARVEST_PURE_MASK))));
+
+	return (0);
+}
 
 /* ARGSUSED */
 static int
@@ -252,7 +280,7 @@ random_print_harvestmask(SYSCTL_HANDLER_ARGS)
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error == 0) {
 		sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
-		for (i = RANDOM_ENVIRONMENTAL_END; i >= 0; i--)
+		for (i = ENTROPYSOURCE - 1; i >= 0; i--)
 			sbuf_cat(&sbuf, (harvest_context.hc_source_mask & (1 << i)) ? "1" : "0");
 		error = sbuf_finish(&sbuf);
 		sbuf_delete(&sbuf);
@@ -272,7 +300,7 @@ static const char *(random_source_descr[]) = {
 	"SWI",
 	"FS_ATIME",
 	"UMA", /* ENVIRONMENTAL_END */
-	"PURE_OCTEON",
+	"PURE_OCTEON", /* PURE_START */
 	"PURE_SAFE",
 	"PURE_GLXSB",
 	"PURE_UBSEC",
@@ -289,15 +317,21 @@ random_print_harvestmask_symbolic(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sbuf;
 	int error, i;
+	bool first = true;
 
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error == 0) {
 		sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
-		for (i = RANDOM_ENVIRONMENTAL_END; i >= 0; i--) {
-			sbuf_cat(&sbuf, (i == RANDOM_ENVIRONMENTAL_END) ? "" : ",");
+		for (i = ENTROPYSOURCE - 1; i >= 0; i--) {
+			if (i >= RANDOM_PURE_START &&
+			    (harvest_context.hc_source_mask & (1 << i)) == 0)
+				continue;
+			if (!first)
+				sbuf_cat(&sbuf, ",");
 			sbuf_cat(&sbuf, !(harvest_context.hc_source_mask & (1 << i)) ? "[" : "");
 			sbuf_cat(&sbuf, random_source_descr[i]);
 			sbuf_cat(&sbuf, !(harvest_context.hc_source_mask & (1 << i)) ? "]" : "");
+			first = false;
 		}
 		error = sbuf_finish(&sbuf);
 		sbuf_delete(&sbuf);
@@ -480,8 +514,18 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	struct harvest_event event;
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
-	if (!(harvest_context.hc_source_mask & (1 << origin)))
+#ifndef HBSD_RANDOM_HIGH_ENTROPY
+	/*
+	 * Removed harvest mask check.
+	 * This value cannot be set in current setup and so RDRND and
+	 * Via Padlock don't get mixed in. 
+	 * Temporary fix until upstream includes full patch from jmg.
+	 *  -- wdf
+	 */
+	//if (!(harvest_context.hc_source_mask & (1 << origin)))
+	if(!(RANDOM_HARVEST_PURE_MASK & (1 << origin)))
 		return;
+#endif
 	size = MIN(size, sizeof(event.he_entropy));
 	event.he_somecounter = (uint32_t)get_cyclecount();
 	event.he_size = size;
@@ -491,6 +535,22 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	memcpy(event.he_entropy, entropy, size);
 	random_harvestq_fast_process_event(&event);
 	explicit_bzero(&event, sizeof(event));
+}
+
+void
+random_harvest_register_source(enum random_entropy_source source)
+{
+
+	printf("\n\nDEBUG: mask: %d\n", harvest_context.hc_source_mask);
+	harvest_context.hc_source_mask |= source;
+	printf("DEBUG: mask now %d\n\n", harvest_context.hc_source_mask);
+}
+
+void
+random_harvest_deregister_source(enum random_entropy_source source)
+{
+
+	harvest_context.hc_source_mask &= ~source;
 }
 
 MODULE_VERSION(random_harvestq, 1);
