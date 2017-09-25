@@ -257,8 +257,13 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	if (error || !req->newptr)
 		return (error);
 
+#if 0
 	if (value >= ENTROPYSOURCE)
 		return (EINVAL);
+#else
+	if (flsl(value) >= ENTROPYSOURCE)
+		return (EINVAL);
+#endif
 
 	/*
 	 * Set the new environmental harvest mask, regardless 
