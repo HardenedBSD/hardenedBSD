@@ -66,6 +66,7 @@ static void random_kthread(void);
 static void random_sources_feed(void);
 
 static u_int read_rate;
+u_int random_hmask_val;
 
 /* List for the dynamic sysctls */
 static struct sysctl_ctx_list random_clist;
@@ -154,7 +155,6 @@ static void
 random_kthread(void)
 {
         u_int maxloop, ring_out, i;
-
 	/*
 	 * Locking is not needed as this is the only place we modify ring.out, and
 	 * we only examine ring.in without changing it. Both of these are volatile,
@@ -251,7 +251,13 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	u_int value, orig_value;
 
 	KASSERT(arg1 != NULL, ("Missing harvestmask."));
-
+	
+	/* check byte alignment of arg1 */
+	if (*(u_int *)arg1 & sizeof(u_int) - 1)
+	{
+		printf("Error: harvest mask not aligned\n");
+		return (1);
+	}	
 	orig_value = value = *(u_int *)arg1;
 	error = sysctl_handle_int(oidp, &value, 0, req);
 	if (error || !req->newptr)
@@ -271,7 +277,8 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	 * We won't allow to modify the pure entropy source.
 	 */
 	*(u_int *)arg1 = value | (orig_value & RANDOM_HARVEST_PURE_MASK);
-
+	/* copy out for a global copy of the harvest mask */
+	random_hmask_val = *(u_int *)arg1;
 	return (0);
 }
 
@@ -322,7 +329,8 @@ random_print_harvestmask_symbolic(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sbuf;
 	int error, i;
-	bool first = true;
+	bool first;
+	first = true;
 
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error == 0) {
@@ -462,8 +470,13 @@ random_harvest_queue(const void *entropy, u_int size, u_int bits, enum random_en
 	u_int ring_in;
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
+#if 0
+	/* we don't need this because I moved the check out to where it is pushed in order to
+	 * save the effort in harvesting only to throw away the data, which is wasteful
+	 */
 	if (!(harvest_context.hc_source_mask & (1 << origin)))
 		return;
+#endif
 	RANDOM_HARVEST_LOCK();
 	ring_in = (harvest_context.hc_entropy_ring.in + 1)%RANDOM_RING_MAX;
 	if (ring_in != harvest_context.hc_entropy_ring.out) {
