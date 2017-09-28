@@ -251,13 +251,16 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	u_int value, orig_value;
 
 	KASSERT(arg1 != NULL, ("Missing harvestmask."));
-	
+#if 0
+	/* disabling this code. Will re-visit it later  -- wdf */ 
+
 	/* check byte alignment of arg1 */
 	if ((uintptr_t)arg1 & (sizeof(u_int) - 1))
 	{
 		printf("Error: harvest mask not aligned\n");
 		return (1);
 	}	
+#endif
 	orig_value = value = *(u_int *)arg1;
 	error = sysctl_handle_int(oidp, &value, 0, req);
 	if (error || !req->newptr)
@@ -330,6 +333,7 @@ random_print_harvestmask_symbolic(SYSCTL_HANDLER_ARGS)
 	struct sbuf sbuf;
 	int error, i;
 	bool first;
+	
 	first = true;
 
 	error = sysctl_wire_old_buffer(req, 0);
