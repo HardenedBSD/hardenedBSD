@@ -250,18 +250,7 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	int error;
 	u_int value, orig_value;
 
-	KASSERT(arg1 != NULL, ("Missing harvestmask."));
-#if 0
-	/* disabling this code. Will re-visit it later  -- wdf */ 
-
-	/* check byte alignment of arg1 */
-	if ((uintptr_t)arg1 & (sizeof(u_int) - 1))
-	{
-		printf("Error: harvest mask not aligned\n");
-		return (1);
-	}	
-#endif
-	orig_value = value = *(u_int *)arg1;
+	orig_value = value = harvest_context.hc_source_mask;
 	error = sysctl_handle_int(oidp, &value, 0, req);
 	if (error || !req->newptr)
 		return (error);
@@ -279,9 +268,9 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	 * from the pure entropy sources.
 	 * We won't allow to modify the pure entropy source.
 	 */
-	*(u_int *)arg1 = value | (orig_value & RANDOM_HARVEST_PURE_MASK);
+	harvest_context.hc_source_mask = value | (orig_value & RANDOM_HARVEST_PURE_MASK);
 	/* copy out for a global copy of the harvest mask */
-	random_hmask_val = *(u_int *)arg1;
+	random_hmask_val = harvest_context.hc_source_mask;
 	return (0);
 }
 
@@ -370,7 +359,7 @@ random_harvestq_init(void *unused __unused)
 	SYSCTL_ADD_PROC(&random_clist,
 	    SYSCTL_CHILDREN(random_sys_o),
 	    OID_AUTO, "mask", CTLTYPE_UINT | CTLFLAG_RW,
-	    &harvest_context.hc_source_mask, 0,
+	    NULL, 0,
 	    random_check_uint_harvestmask, "IU",
 	    "Entropy harvesting mask");
 	SYSCTL_ADD_PROC(&random_clist,
