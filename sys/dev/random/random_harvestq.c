@@ -253,7 +253,7 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	KASSERT(arg1 != NULL, ("Missing harvestmask."));
 	
 	/* check byte alignment of arg1 */
-	if (*(u_int *)arg1 & sizeof(u_int) - 1)
+	if ((uintptr_t)arg1 & (sizeof(u_int) - 1))
 	{
 		printf("Error: harvest mask not aligned\n");
 		return (1);
