@@ -66,7 +66,6 @@ static void random_kthread(void);
 static void random_sources_feed(void);
 
 static u_int read_rate;
-u_int random_hmask_val;
 
 /* List for the dynamic sysctls */
 static struct sysctl_ctx_list random_clist;
@@ -269,8 +268,6 @@ random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 	 * We won't allow to modify the pure entropy source.
 	 */
 	harvest_context.hc_source_mask = value | (orig_value & RANDOM_HARVEST_PURE_MASK);
-	/* copy out for a global copy of the harvest mask */
-	random_hmask_val = harvest_context.hc_source_mask;
 	return (0);
 }
 
