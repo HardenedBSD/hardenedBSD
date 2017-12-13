@@ -150,7 +150,7 @@ int
 findproto(char *cp, int n)
 {
 	struct sockaddr *sa;
-	int i;
+	unsigned int i;
 
 	if (n == 0)
 		return -1;
