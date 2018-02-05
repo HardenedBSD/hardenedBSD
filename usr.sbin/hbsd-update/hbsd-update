@@ -53,6 +53,7 @@ install_src=0
 keeptmp=0
 local_resolver=0
 nodownload=0
+fetchonly=0
 nobase=0
 
 update_hash=""
@@ -87,6 +88,7 @@ usage() {
 	debug_print "\t-b BEname\tInstall updates to ZFS Boot Environment <BEname>"
 	debug_print "\t-c config\tUse a non-default config file"
 	debug_print "\t-d\t\tDo not use DNSSEC validation"
+	debug_print "\t-f\t\tFetch only"
 	debug_print "\t-h\t\tShow this help screen"
 	debug_print "\t-I\t\tInteractively remove obsolete files"
 	debug_print "\t-i\t\tIgnore version check"
@@ -877,6 +879,11 @@ check_sanity() {
 		exit 1
 	fi
 
+	if [ ${fetchonly} -gt 0 ] && [ ${nodownload} -gt 0]; then
+		debug_print "[-] Fetch only and no download options cannot be combined"
+		exit 1
+	fi
+
 	if [ ! -z "${zfsbe}" ] && [ ! -x ${BEADM} ]; then
 		debug_print "[-] Please install sysutils/beadm"
 		exit 1
@@ -940,6 +947,9 @@ main() {
 				;;
 			D)
 				nodownload=1
+				;;
+			f)
+				fetchonly=1
 				;;
 			i)
 				ignorever=1
@@ -1039,6 +1049,10 @@ main() {
 			cleanup
 			exit 1
 		fi
+	fi
+
+	if [ ${fetchonly} -gt 0 ]; then
+		exit 0
 	fi
 
 	set_kernel_config
