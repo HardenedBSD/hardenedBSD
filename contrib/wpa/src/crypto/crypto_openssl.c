@@ -33,7 +33,7 @@
 #include "aes_wrap.h"
 #include "crypto.h"
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L)
 /* Compatibility wrappers for older versions. */
 
 static HMAC_CTX * HMAC_CTX_new(void)
