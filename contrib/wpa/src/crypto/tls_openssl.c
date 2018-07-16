@@ -60,7 +60,7 @@ typedef int stack_index_t;
 
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L || \
     (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L) && \
-    !defined(BORINGSSL_API_VERSION)
+    !defined(BORINGSSL_API_VERSION))
 /*
  * SSL_get_client_random() and SSL_get_server_random() were added in OpenSSL
  * 1.1.0 and newer BoringSSL revisions. Provide compatibility wrappers for
