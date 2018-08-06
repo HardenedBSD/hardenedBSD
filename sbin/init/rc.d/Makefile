@@ -262,7 +262,7 @@ CONFS+=		ntpd
 .endif
 
 .if ${MK_OPENNTPD} != "no"
-FILES+=		local_openntpd
+CONFS+=		local_openntpd
 .endif
 
 .if ${MK_OFED} != "no"
