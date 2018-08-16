@@ -193,6 +193,7 @@ pax_init_hardening(void *dummy __unused)
 		return;
 
 	kern_unsetenv("init_chroot");
+	kern_unsetenv("init_exec");
 	kern_unsetenv("init_path");
 	kern_unsetenv("init_script");
 	kern_unsetenv("init_shell");

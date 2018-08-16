@@ -1,4 +1,4 @@
-/* $OpenBSD: ecs_ossl.c,v 1.9 2017/01/29 17:49:23 beck Exp $ */
+/* $OpenBSD: ecs_ossl.c,v 1.9.2.1 2018/06/13 15:08:08 jsing Exp $ */
 /*
  * Written by Nils Larsch for the OpenSSL project
  */
@@ -273,7 +273,7 @@ ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 			ECDSAerror(ERR_R_BN_LIB);
 			goto err;
 		}
-		if (!BN_mod_add_quick(s, tmp, m, order)) {
+		if (!BN_mod_add(s, tmp, m, order, ctx)) {
 			ECDSAerror(ERR_R_BN_LIB);
 			goto err;
 		}

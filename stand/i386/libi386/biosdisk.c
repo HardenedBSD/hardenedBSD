@@ -91,13 +91,12 @@ static struct bdinfo
 static int nbdinfo = 0;
 
 #define	BD(dev)		(bdinfo[(dev)->dd.d_unit])
+#define	BD_RD		0
+#define	BD_WR		1
 
 static void bd_io_workaround(struct disk_devdesc *dev);
 
-static int bd_read(struct disk_devdesc *dev, daddr_t dblk, int blks,
-    caddr_t dest);
-static int bd_write(struct disk_devdesc *dev, daddr_t dblk, int blks,
-    caddr_t dest);
+static int bd_io(struct disk_devdesc *, daddr_t, int, caddr_t, int);
 static int bd_int13probe(struct bdinfo *bd);
 
 static int bd_init(void);
@@ -451,17 +450,11 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 	struct disk_devdesc *dev = (struct disk_devdesc *)devdata;
 	uint64_t		disk_blocks;
 	int			blks, rc;
-#ifdef BD_SUPPORT_FRAGS /* XXX: sector size */
-	char		fragbuf[BIOSDISK_SECSIZE];
-	size_t		fragsize;
 
-	fragsize = size % BIOSDISK_SECSIZE;
-#else
 	if (size % BD(dev).bd_sectorsize) {
 		panic("bd_strategy: %d bytes I/O not multiple of block size",
 		    size);
 	}
-#endif
 
 	DEBUG("open_disk %p", dev);
 
@@ -512,7 +505,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 	case F_READ:
 		DEBUG("read %d from %lld to %p", blks, dblk, buf);
 
-		if (blks && (rc = bd_read(dev, dblk, blks, buf))) {
+		if (blks && (rc = bd_io(dev, dblk, blks, buf, BD_RD))) {
 			/* Filter out floppy controller errors */
 			if (BD(dev).bd_flags != BD_FLOPPY || rc != 0x20) {
 				printf("read %d from %lld to %p, error: 0x%x\n",
@@ -520,29 +513,14 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
 			}
 			return (EIO);
 		}
-#ifdef BD_SUPPORT_FRAGS /* XXX: sector size */
-		DEBUG("bd_strategy: frag read %d from %d+%d to %p",
-		    fragsize, dblk, blks, buf + (blks * BIOSDISK_SECSIZE));
-		if (fragsize && bd_read(od, dblk + blks, 1, fragsize)) {
-			DEBUG("frag read error");
-			return (EIO);
-		}
-		bcopy(fragbuf, buf + (blks * BIOSDISK_SECSIZE), fragsize);
-#endif
 		break;
 	case F_WRITE :
 		DEBUG("write %d from %lld to %p", blks, dblk, buf);
 
-		if (blks && bd_write(dev, dblk, blks, buf)) {
+		if (blks && bd_io(dev, dblk, blks, buf, BD_WR)) {
 			DEBUG("write error");
 			return (EIO);
 		}
-#ifdef BD_SUPPORT_FRAGS
-		if (fragsize) {
-			DEBUG("Attempted to write a frag");
-			return (EIO);
-		}
-#endif
 		break;
 	default:
 		/* DO NOTHING */
@@ -568,7 +546,7 @@ bd_edd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 	v86.ctl = V86_FLAGS;
 	v86.addr = 0x13;
 	/* Should we Write with verify ?? 0x4302 ? */
-	if (dowrite)
+	if (dowrite == BD_WR)
 		v86.eax = 0x4300;
 	else
 		v86.eax = 0x4200;
@@ -604,7 +582,7 @@ bd_chs_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 
 	v86.ctl = V86_FLAGS;
 	v86.addr = 0x13;
-	if (dowrite)
+	if (dowrite == BD_WR)
 		v86.eax = 0x300 | blks;
 	else
 		v86.eax = 0x200 | blks;
@@ -692,7 +670,7 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 		 * Put your Data In, Put your Data out,
 		 * Put your Data In, and shake it all about 
 		 */
-		if (dowrite && bbuf != NULL)
+		if (dowrite == BD_WR && bbuf != NULL)
 			bcopy(p, bbuf, x * BD(dev).bd_sectorsize);
 
 		/*
@@ -717,7 +695,7 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 				break;
 		}
 
-		if (dowrite)
+		if (dowrite == BD_WR)
 			DEBUG("Write %d sector(s) from %p (0x%x) to %lld %s", x,
 			    p, VTOP(p), dblk, result ? "failed" : "ok");
 		else
@@ -726,7 +704,7 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 		if (result) {
 			return (result);
 		}
-		if (!dowrite && bbuf != NULL)
+		if (dowrite == BD_RD && bbuf != NULL)
 			bcopy(bbuf, p, x * BD(dev).bd_sectorsize);
 		p += (x * BD(dev).bd_sectorsize);
 		dblk += x;
@@ -734,20 +712,6 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
 	}
 
 	return (0);
-}
-
-static int
-bd_read(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest)
-{
-
-	return (bd_io(dev, dblk, blks, dest, 0));
-}
-
-static int
-bd_write(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest)
-{
-
-	return (bd_io(dev, dblk, blks, dest, 1));
 }
 
 /*

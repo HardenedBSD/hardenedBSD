@@ -12,6 +12,7 @@ FILES=		chmod \
 		rw \
 		sched \
 		sendrecv \
+		systop \
 		tcp \
 		udp \
 		udplite \

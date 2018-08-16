@@ -831,6 +831,13 @@ IMAKE+=		__MAKE_SHELL=${INSTALLTMP}/sh
 .else
 IMAKEENV+=	PATH=${TMPPATH}:${INSTALLTMP}
 .endif
+
+# When generating install media, do not allow user and group information from
+# the build host to affect the contents of the distribution.
+.if make(distributeworld)
+DB_FROM_SRC=	yes
+.endif
+
 .if defined(DB_FROM_SRC)
 INSTALLFLAGS+=	-N ${.CURDIR}/etc
 MTREEFLAGS+=	-N ${.CURDIR}/etc
@@ -1937,13 +1944,17 @@ update: .PHONY
 _elftoolchain_libs= lib/libelf lib/libdwarf
 .endif
 
+# libnv and libl are both requirements for config(8), which is an unconditional
+# bootstrap-tool.
+_config_deps= lib/libnv usr.bin/lex/lib
+
 legacy: .PHONY
 .if ${BOOTSTRAPPING} < ${MINIMUM_SUPPORTED_OSREL} && ${BOOTSTRAPPING} != 0
 	@echo "ERROR: Source upgrades from versions prior to ${MINIMUM_SUPPORTED_REL} are not supported."; \
 	false
 .endif
 
-.for _tool in tools/build ${_elftoolchain_libs} lib/libnv
+.for _tool in tools/build ${_elftoolchain_libs} ${_config_deps}
 	${_+_}@${ECHODIR} "===> ${_tool} (obj,includes,all,install)"; \
 	    cd ${.CURDIR}/${_tool}; \
 	    if [ -z "${NO_OBJWALK}" ]; then ${MAKE} DIRPRFX=${_tool}/ obj; fi; \
@@ -2514,7 +2525,7 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} \
 		${_cddl_lib_libumem} ${_cddl_lib_libnvpair} \
 		${_cddl_lib_libuutil} \
 		${_cddl_lib_libavl} \
-		${_cddl_lib_libzfs_core} \
+		${_cddl_lib_libzfs_core} ${_cddl_lib_libzfs} \
 		${_cddl_lib_libctf} \
 		lib/libufs \
 		lib/libutil lib/libpjdlog ${_lib_libypclnt} lib/libz lib/msun \
@@ -2587,7 +2598,15 @@ _cddl_lib_libavl= cddl/lib/libavl
 _cddl_lib_libuutil= cddl/lib/libuutil
 .if ${MK_ZFS} != "no"
 _cddl_lib_libzfs_core= cddl/lib/libzfs_core
+_cddl_lib_libzfs= cddl/lib/libzfs
+
 cddl/lib/libzfs_core__L: cddl/lib/libnvpair__L
+
+cddl/lib/libzfs__L: cddl/lib/libzfs_core__L lib/msun__L lib/libutil__L
+cddl/lib/libzfs__L: lib/libthr__L lib/libmd__L lib/libz__L cddl/lib/libumem__L
+cddl/lib/libzfs__L: cddl/lib/libuutil__L cddl/lib/libavl__L lib/libgeom__L
+
+cddl/lib/libbe__L: cddl/lib/libzfs__L
 .endif
 _cddl_lib_libctf= cddl/lib/libctf
 _cddl_lib= cddl/lib

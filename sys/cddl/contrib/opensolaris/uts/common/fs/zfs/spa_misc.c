@@ -437,6 +437,10 @@ SYSCTL_UQUAD(_vfs_zfs, OID_AUTO, spa_min_slop, CTLFLAG_RWTUN,
 
 int spa_allocators = 4;
 
+SYSCTL_INT(_vfs_zfs, OID_AUTO, spa_allocators, CTLFLAG_RWTUN,
+    &spa_allocators, 0,
+    "Number of allocators per metaslab group");
+
 /*PRINTFLIKE2*/
 void
 spa_load_failed(spa_t *spa, const char *fmt, ...)
@@ -708,6 +712,7 @@ spa_add(const char *name, nvlist_t *config, const char *altroot)
 	mutex_init(&spa->spa_scrub_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_suspend_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&spa->spa_vdev_top_lock, NULL, MUTEX_DEFAULT, NULL);
+	mutex_init(&spa->spa_feat_stats_lock, NULL, MUTEX_DEFAULT, NULL);
 
 	cv_init(&spa->spa_async_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&spa->spa_evicting_os_cv, NULL, CV_DEFAULT, NULL);
@@ -881,6 +886,7 @@ spa_remove(spa_t *spa)
 
 	nvlist_free(spa->spa_label_features);
 	nvlist_free(spa->spa_load_info);
+	nvlist_free(spa->spa_feat_stats);
 	spa_config_set(spa, NULL);
 
 #ifdef illumos
@@ -922,6 +928,7 @@ spa_remove(spa_t *spa)
 	mutex_destroy(&spa->spa_scrub_lock);
 	mutex_destroy(&spa->spa_suspend_lock);
 	mutex_destroy(&spa->spa_vdev_top_lock);
+	mutex_destroy(&spa->spa_feat_stats_lock);
 
 	kmem_free(spa, sizeof (spa_t));
 }
@@ -1016,18 +1023,13 @@ typedef struct spa_aux {
 	int		aux_count;
 } spa_aux_t;
 
-static int
+static inline int
 spa_aux_compare(const void *a, const void *b)
 {
-	const spa_aux_t *sa = a;
-	const spa_aux_t *sb = b;
+	const spa_aux_t *sa = (const spa_aux_t *)a;
+	const spa_aux_t *sb = (const spa_aux_t *)b;
 
-	if (sa->aux_guid < sb->aux_guid)
-		return (-1);
-	else if (sa->aux_guid > sb->aux_guid)
-		return (1);
-	else
-		return (0);
+	return (AVL_CMP(sa->aux_guid, sb->aux_guid));
 }
 
 void
@@ -2053,11 +2055,8 @@ spa_name_compare(const void *a1, const void *a2)
 	int s;
 
 	s = strcmp(s1->spa_name, s2->spa_name);
-	if (s > 0)
-		return (1);
-	if (s < 0)
-		return (-1);
-	return (0);
+
+	return (AVL_ISIGN(s));
 }
 
 int
@@ -2299,6 +2298,16 @@ spa_maxblocksize(spa_t *spa)
 	else
 		return (SPA_OLD_MAXBLOCKSIZE);
 }
+
+int
+spa_maxdnodesize(spa_t *spa)
+{
+	if (spa_feature_is_enabled(spa, SPA_FEATURE_LARGE_DNODE))
+		return (DNODE_MAX_SIZE);
+	else
+		return (DNODE_MIN_SIZE);
+}
+
 
 /*
  * Returns the txg that the last device removal completed. No indirect mappings

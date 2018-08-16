@@ -388,7 +388,10 @@ format_header(const char *uname_field)
 		sbuf_printf(header, "%*s", ps.jail ? TOP_JID_LEN : 0,
 									ps.jail ? " JID" : "");
 		sbuf_printf(header, " %-*.*s  ", namelength, namelength, uname_field);
-		sbuf_cat(header, "THR PRI NICE   SIZE    RES ");
+		if (!ps.thread) {
+			sbuf_cat(header, "THR ");
+		}
+		sbuf_cat(header, "PRI NICE   SIZE    RES ");
 		if (ps.swap) {
 			sbuf_printf(header, "%*s ", TOP_SWAP_LEN - 1, "SWAP");
 		}
@@ -519,8 +522,12 @@ get_system_info(struct system_info *si)
 		GETSYSCTL("kstat.zfs.misc.arcstats.hdr_size", arc_stat);
 		GETSYSCTL("kstat.zfs.misc.arcstats.l2_hdr_size", arc_stat2);
 		arc_stats[4] = (arc_stat + arc_stat2) >> 10;
-		GETSYSCTL("kstat.zfs.misc.arcstats.other_size", arc_stat);
+		GETSYSCTL("kstat.zfs.misc.arcstats.bonus_size", arc_stat);
 		arc_stats[5] = arc_stat >> 10;
+		GETSYSCTL("kstat.zfs.misc.arcstats.dnode_size", arc_stat);
+		arc_stats[5] += arc_stat >> 10;
+		GETSYSCTL("kstat.zfs.misc.arcstats.dbuf_size", arc_stat);
+		arc_stats[5] += arc_stat >> 10;
 		si->arc = arc_stats;
 	}
 	if (carc_enabled) {

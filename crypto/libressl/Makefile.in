@@ -193,9 +193,8 @@ CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
 am__DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/libcrypto.pc.in \
 	$(srcdir)/libssl.pc.in $(srcdir)/libtls.pc.in \
-	$(srcdir)/openssl.pc.in COPYING ChangeLog INSTALL compile \
-	config.guess config.sub depcomp install-sh ltmain.sh missing \
-	tap-driver.sh
+	$(srcdir)/openssl.pc.in COPYING ChangeLog compile config.guess \
+	config.sub depcomp install-sh ltmain.sh missing tap-driver.sh
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)

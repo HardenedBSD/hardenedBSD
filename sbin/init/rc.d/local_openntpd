@@ -45,10 +45,4 @@ local_openntpd_checkconfig()
 	eval ${command} ${command_args} ${local_openntpd_flags} -n
 }
 
-local_openntpd_precmd()
-{
-	local_openntpd_checkconfig
-	chown 0:0 /var/db/ntp
-}
-
 run_rc_command "$1"
