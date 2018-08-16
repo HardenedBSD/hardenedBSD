@@ -275,6 +275,9 @@ distrib-dirs: ${MTREES:N/*} distrib-cleanup .PHONY
 		${MTREE_CMD} -deU ${MTREE_FSCHG} ${MTREE_FOLLOWS_SYMLINKS} \
 		    -p $$d; \
 	done; true
+.if ${MK_OPENNTPD} != "no"
+	chown 0:0 /var/db/ntp
+.endif
 .if defined(NO_ROOT)
 	@set ${MTREES}; \
 	while test $$# -ge 2; do \
