@@ -67,6 +67,7 @@ setup_environment() {
 	TARGET=$(uname -m)
 	TARGET_ARCH=$(uname -p)
 	NEED_CROSS_UTILS=1
+	WANT_CHROOT_BUILD=0
 	SCRIPTFILE=""
 	SILENT=""
 	JOBS=$(sysctl -n hw.ncpu)
@@ -111,6 +112,18 @@ setup_chroot() {
 	fi
 
 	cd ${SRCDIR}
+
+	if [ $WANT_CHROOT_BUILD -eq 1 ]; then
+		debug_print "[*] Checking out bootstrap world"
+		clone_source /
+		debug_print "[*] Building bootstrap world"
+		make -C /usr/src \
+			${SILENT} \
+			-j${JOBS} \
+			$(echo ${DEVMODE} | sed 's/yes/-DNO_CLEAN/') \
+			buildworld
+	fi
+
 	make -s installworld distribution DESTDIR=${CHROOTDIR}
 	res=${?}
 	if [ ${res} -gt 0 ]; then
@@ -123,16 +136,18 @@ setup_chroot() {
 }
 
 clone_source() {
-	local res
+	local res destdir
 
-	if [ ! -d ${CHROOTDIR}/usr/src/.git ]; then
-		git clone ${REPO} ${CHROOTDIR}/usr/src
+	destdir=${1:-"/"}
+
+	if [ ! -d ${destdir}/usr/src/.git ]; then
+		git clone ${REPO} ${destdir}/usr/src
 		res=${?}
 		if [ ${res} -gt 0 ]; then
 			return ${res}
 		fi
 
-		cd ${CHROOTDIR}/usr/src
+		cd ${destdir}/usr/src
 		branch=$(git branch | grep -F "* " | awk '{print $2;}')
 		if [ ! "${branch}" = "${BRANCH}" ]; then
 			git checkout -b ${BRANCH} origin/${BRANCH}
@@ -142,7 +157,7 @@ clone_source() {
 			fi
 		fi
 	else
-		cd ${CHROOTDIR}/usr/src
+		cd ${destdir}/usr/src
 		git pull
 		res=${?}
 		if [ ${res} -gt 0 ]; then
@@ -791,7 +806,7 @@ main() {
 			if [ ! $(uname -m) = "${TARGET}" ]; then
 				install_binutils || exit 1
 			fi
-			clone_source || exit 1
+			clone_source ${CHROOTDIR} || exit 1
 			create_src_conf || exit 1
 
 			export TARGET
