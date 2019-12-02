@@ -153,7 +153,6 @@ device		mps			# LSI-Logic MPT-Fusion 2
 device		mpr			# LSI-Logic MPT-Fusion 3
 #device		ncr			# NCR/Symbios Logic
 device		sym			# NCR/Symbios Logic (newer chipsets + those of `ncr')
-#device		trm			# Tekram DC395U/UW/F DC315U adapters
 
 device		isci			# Intel C600 SAS controller
 
