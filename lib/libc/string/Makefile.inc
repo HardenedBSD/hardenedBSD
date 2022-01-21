@@ -13,7 +13,7 @@ CFLAGS+= -I${LIBC_SRCTOP}/locale
 MISRCS+=bcmp.c bcopy.c bzero.c explicit_bzero.c \
 	ffs.c ffsl.c ffsll.c fls.c flsl.c flsll.c \
 	memccpy.c memchr.c memrchr.c memcmp.c \
-	memcpy.c memmem.c memmove.c mempcpy.c memset.c memset_s.c \
+	memmem.c memmove.c mempcpy.c memset.c memset_s.c \
 	stpcpy.c stpncpy.c strcasecmp.c \
 	strcat.c strcasestr.c strchr.c strchrnul.c strcmp.c strcoll.c strcpy.c\
 	strcspn.c strdup.c strerror.c strlcat.c strlcpy.c strlen.c strmode.c \
@@ -29,6 +29,10 @@ MISRCS+=bcmp.c bcopy.c bzero.c explicit_bzero.c \
 	wcsrchr.c wcsspn.c wcsstr.c wcstok.c wcswidth.c wcsxfrm.c wmemchr.c \
 	wmemcmp.c \
 	wmemcpy.c wmemmove.c wmempcpy.c wmemset.c
+
+.if ${MK_SNMALLOC} == "no"
+MISRCS+= memcpy.c
+.endif
 
 SYM_MAPS+=	${LIBC_SRCTOP}/string/Symbol.map
 

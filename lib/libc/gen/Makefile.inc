@@ -101,7 +101,6 @@ SRCS+=	__getosreldate.c \
 	libc_dlopen.c \
 	lockf.c \
 	lrand48.c \
-	memalign.c \
 	mrand48.c \
 	nftw.c \
 	nftw-compat11.c \
@@ -173,6 +172,10 @@ SRCS+=	__getosreldate.c \
 	waitpid.c \
 	waitid.c \
 	wordexp.c
+
+.if ${MK_SNMALLOC} == "no"
+SRCS+=	memalign.c
+.endif
 
 CFLAGS.arc4random.c= -I${SRCTOP}/sys -I${SRCTOP}/sys/crypto/chacha20
 

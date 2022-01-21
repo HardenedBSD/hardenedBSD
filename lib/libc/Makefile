@@ -116,7 +116,11 @@ NOASM=
 .include "${LIBC_SRCTOP}/resolv/Makefile.inc"
 .include "${LIBC_SRCTOP}/stdio/Makefile.inc"
 .include "${LIBC_SRCTOP}/stdlib/Makefile.inc"
+.if ${MK_SNMALLOC} != "no"
+.include "${LIBC_SRCTOP}/stdlib/snmalloc/Makefile.inc"
+.else
 .include "${LIBC_SRCTOP}/stdlib/jemalloc/Makefile.inc"
+.endif
 .include "${LIBC_SRCTOP}/stdtime/Makefile.inc"
 .include "${LIBC_SRCTOP}/string/Makefile.inc"
 .include "${LIBC_SRCTOP}/sys/Makefile.inc"
@@ -210,7 +214,9 @@ CFLAGS+= -I${SRCTOP}/lib/msun/${MSUN_ARCH_SUBDIR}
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
 CFLAGS+= -I${SRCTOP}/lib/msun/x86
 .endif
-CFLAGS+= -I${SRCTOP}/lib/msun/src
+# Add msun headers *after* the default ones so that #include_next in libc++'s
+# math.h can find them.
+CFLAGS+= --include-directory-after ${SRCTOP}/lib/msun/src
 # and we do not want to record a dependency on msun
 .if ${.MAKE.LEVEL} > 0
 GENDIRDEPS_FILTER+= N${RELDIR:H}/msun

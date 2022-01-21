@@ -6480,6 +6480,19 @@ realloc(void *cp, size_t nbytes)
 	return (__crt_realloc(cp, nbytes));
 }
 
+void *
+memcpy(void *dst, const void *src, size_t len)
+{
+	const char *s = src;
+	char *d = dst;
+
+	for (size_t i=0 ; i<len ; i++)
+	{
+		d[i] = s[i];
+	}
+	return d;
+}
+
 extern int _rtld_version__FreeBSD_version __exported;
 int _rtld_version__FreeBSD_version = __FreeBSD_version;
 
