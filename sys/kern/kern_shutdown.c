@@ -113,6 +113,10 @@ static int panic_reboot_wait_time = PANIC_REBOOT_WAIT_TIME;
 SYSCTL_INT(_kern, OID_AUTO, panic_reboot_wait_time, CTLFLAG_RWTUN,
     &panic_reboot_wait_time, 0,
     "Seconds to wait before rebooting after a panic");
+static int reboot_wait_time = 0;
+SYSCTL_INT(_kern, OID_AUTO, reboot_wait_time, CTLFLAG_RWTUN,
+    &reboot_wait_time, 0,
+    "Seconds to wait before rebooting");
 
 /*
  * Note that stdarg.h and the ANSI style va_start macro is used for both
@@ -712,7 +716,7 @@ shutdown_reset(void *junk, int howto)
 {
 
 	printf("Rebooting...\n");
-	DELAY(1000000);	/* wait 1 sec for printf's to complete and be read */
+	DELAY(reboot_wait_time * 1000000);
 
 	/*
 	 * Acquiring smp_ipi_mtx here has a double effect:
@@ -837,7 +841,7 @@ kassert_panic(const char *fmt, ...)
 	 * If we are suppressing secondary panics, log the warning but do not
 	 * re-enter panic/kdb.
 	 */
-	if (panicstr != NULL && kassert_suppress_in_panic) {
+	if (KERNEL_PANICKED() && kassert_suppress_in_panic) {
 		if (kassert_do_log) {
 			printf("KASSERT failed: %s\n", buf);
 #ifdef KDB
@@ -934,7 +938,7 @@ vpanic(const char *fmt, va_list ap)
 
 	bootopt = RB_AUTOBOOT;
 	newpanic = 0;
-	if (panicstr)
+	if (KERNEL_PANICKED())
 		bootopt |= RB_NOSYNC;
 	else {
 		bootopt |= RB_DUMP;
@@ -1021,7 +1025,7 @@ kproc_shutdown(void *arg, int howto)
 	struct proc *p;
 	int error;
 
-	if (panicstr)
+	if (KERNEL_PANICKED())
 		return;
 
 	p = (struct proc *)arg;
@@ -1041,7 +1045,7 @@ kthread_shutdown(void *arg, int howto)
 	struct thread *td;
 	int error;
 
-	if (panicstr)
+	if (KERNEL_PANICKED())
 		return;
 
 	td = (struct thread *)arg;
@@ -1832,7 +1836,7 @@ dump_init_header(const struct dumperinfo *di, struct kerneldumpheader *kdh,
 }
 
 #ifdef DDB
-DB_SHOW_COMMAND(panic, db_show_panic)
+DB_SHOW_COMMAND_FLAGS(panic, db_show_panic, DB_CMD_MEMSAFE)
 {
 
 	if (panicstr == NULL)

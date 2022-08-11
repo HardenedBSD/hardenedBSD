@@ -1523,13 +1523,6 @@ vdev_metaslab_init(vdev_t *vd, uint64_t txg)
 	if (txg == 0)
 		spa_config_exit(spa, SCL_ALLOC, FTAG);
 
-	/*
-	 * Regardless whether this vdev was just added or it is being
-	 * expanded, the metaslab count has changed. Recalculate the
-	 * block limit.
-	 */
-	spa_log_sm_set_blocklimit(spa);
-
 	return (0);
 }
 
@@ -5240,7 +5233,7 @@ vdev_split(vdev_t *vd)
 }
 
 void
-vdev_deadman(vdev_t *vd, char *tag)
+vdev_deadman(vdev_t *vd, const char *tag)
 {
 	for (int c = 0; c < vd->vdev_children; c++) {
 		vdev_t *cvd = vd->vdev_child[c];
@@ -5503,7 +5496,7 @@ vdev_props_set_sync(void *arg, dmu_tx_t *tx)
 		}
 
 		switch (prop = vdev_name_to_prop(propname)) {
-		case VDEV_PROP_USER:
+		case VDEV_PROP_USERPROP:
 			if (vdev_prop_user(propname)) {
 				strval = fnvpair_value_string(elem);
 				if (strlen(strval) == 0) {
@@ -5587,7 +5580,7 @@ vdev_prop_set(vdev_t *vd, nvlist_t *innvl, nvlist_t *outnvl)
 		uint64_t intval = 0;
 		char *strval = NULL;
 
-		if (prop == VDEV_PROP_USER && !vdev_prop_user(propname)) {
+		if (prop == VDEV_PROP_USERPROP && !vdev_prop_user(propname)) {
 			error = EINVAL;
 			goto end;
 		}
@@ -5797,7 +5790,7 @@ vdev_prop_get(vdev_t *vd, nvlist_t *innvl, nvlist_t *outnvl)
 					    KM_SLEEP);
 				for (uint64_t i = 0; i < vd->vdev_children;
 				    i++) {
-					char *vname;
+					const char *vname;
 
 					vname = vdev_name(vd->vdev_child[i],
 					    namebuf, sizeof (namebuf));
@@ -5944,7 +5937,7 @@ vdev_prop_get(vdev_t *vd, nvlist_t *innvl, nvlist_t *outnvl)
 			case VDEV_PROP_COMMENT:
 				/* Exists in the ZAP below */
 				/* FALLTHRU */
-			case VDEV_PROP_USER:
+			case VDEV_PROP_USERPROP:
 				/* User Properites */
 				src = ZPROP_SRC_LOCAL;
 

@@ -265,6 +265,10 @@ SYSCTL_INT(_hw_vmm, OID_AUTO, trace_guest_exceptions, CTLFLAG_RDTUN,
     &trace_guest_exceptions, 0,
     "Trap into hypervisor on all guest exceptions and reflect them back");
 
+static int trap_wbinvd;
+SYSCTL_INT(_hw_vmm, OID_AUTO, trap_wbinvd, CTLFLAG_RDTUN, &trap_wbinvd, 0,
+    "WBINVD triggers a VM-exit");
+
 static void vm_free_memmap(struct vm *vm, int ident);
 static bool sysmem_mapping(struct vm *vm, struct mem_map *mm);
 static void vcpu_notify_event_locked(struct vcpu *vcpu, bool lapic_intr);
@@ -339,6 +343,12 @@ vcpu_trace_exceptions(struct vm *vm, int vcpuid)
 {
 
 	return (trace_guest_exceptions);
+}
+
+int
+vcpu_trap_wbinvd(struct vm *vm, int vcpuid)
+{
+	return (trap_wbinvd);
 }
 
 struct vm_exit *
@@ -687,7 +697,7 @@ vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem)
 			return (EINVAL);
 	}
 
-	obj = vm_object_allocate(OBJT_DEFAULT, len >> PAGE_SHIFT);
+	obj = vm_object_allocate(OBJT_SWAP, len >> PAGE_SHIFT);
 	if (obj == NULL)
 		return (ENOMEM);
 
@@ -1321,7 +1331,7 @@ vm_handle_rendezvous(struct vm *vm, int vcpuid)
 		RENDEZVOUS_CTR0(vm, vcpuid, "Wait for rendezvous completion");
 		mtx_sleep(&vm->rendezvous_func, &vm->rendezvous_mtx, 0,
 		    "vmrndv", hz);
-		if ((td->td_flags & TDF_NEEDSUSPCHK) != 0) {
+		if (td_ast_pending(td, TDA_SUSPEND)) {
 			mtx_unlock(&vm->rendezvous_mtx);
 			error = thread_check_susp(td, true);
 			if (error != 0)
@@ -1411,7 +1421,7 @@ vm_handle_hlt(struct vm *vm, int vcpuid, bool intr_disabled, bool *retu)
 		msleep_spin(vcpu, &vcpu->mtx, wmesg, hz);
 		vcpu_require_state_locked(vm, vcpuid, VCPU_FROZEN);
 		vmm_stat_incr(vm, vcpuid, VCPU_IDLE_TICKS, ticks - t);
-		if ((td->td_flags & TDF_NEEDSUSPCHK) != 0) {
+		if (td_ast_pending(td, TDA_SUSPEND)) {
 			vcpu_unlock(vcpu);
 			error = thread_check_susp(td, false);
 			if (error != 0)
@@ -1583,7 +1593,7 @@ vm_handle_suspend(struct vm *vm, int vcpuid, bool *retu)
 			vcpu_require_state_locked(vm, vcpuid, VCPU_SLEEPING);
 			msleep_spin(vcpu, &vcpu->mtx, "vmsusp", hz);
 			vcpu_require_state_locked(vm, vcpuid, VCPU_FROZEN);
-			if ((td->td_flags & TDF_NEEDSUSPCHK) != 0) {
+			if (td_ast_pending(td, TDA_SUSPEND)) {
 				vcpu_unlock(vcpu);
 				error = thread_check_susp(td, false);
 				vcpu_lock(vcpu);
@@ -1811,6 +1821,7 @@ restart:
 	if (error == 0 && retu == false)
 		goto restart;
 
+	vmm_stat_incr(vm, vcpuid, VMEXIT_USERSPACE, 1);
 	VCPU_CTR2(vm, vcpuid, "retu %d/%d", error, vme->exitcode);
 
 	/* copy the exit information */

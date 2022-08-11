@@ -5,6 +5,7 @@ PACKAGE=	tests
 TESTSDIR=	${TESTSBASE}/sys/netinet6
 FILESDIR=	${TESTSDIR}
 
+ATF_TESTS_PYTEST=	test_ip6_output.py
 ATF_TESTS_SH=			\
 				exthdr \
 				mld \
@@ -15,7 +16,8 @@ ATF_TESTS_SH=			\
 				output6 \
 				lpm6 \
 				fibs6 \
-				ndp
+				ndp \
+				proxy_ndp
 TEST_METADATA.output6+=	required_programs="python"
 
 ${PACKAGE}FILES+=		exthdr.py

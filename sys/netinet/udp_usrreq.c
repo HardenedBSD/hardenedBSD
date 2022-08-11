@@ -332,8 +332,9 @@ udp_append(struct inpcb *inp, struct ip *ip, struct mbuf *n, int off,
 			ip_savecontrol(inp, &opts, ip, n);
 	}
 	if ((inp->inp_vflag & INP_IPV4) && (inp->inp_flags2 & INP_ORIGDSTADDR)) {
-		tmpopts = sbcreatecontrol((caddr_t)&udp_in[1],
-			sizeof(struct sockaddr_in), IP_ORIGDSTADDR, IPPROTO_IP);
+		tmpopts = sbcreatecontrol(&udp_in[1],
+		    sizeof(struct sockaddr_in), IP_ORIGDSTADDR, IPPROTO_IP,
+		    M_NOWAIT);
 		if (tmpopts) {
 			if (opts) {
 				tmpopts->m_next = opts;
@@ -1533,7 +1534,6 @@ udp_attach(struct socket *so, int proto, struct thread *td)
 		return (error);
 
 	inp = sotoinpcb(so);
-	inp->inp_vflag |= INP_IPV4;
 	inp->inp_ip_ttl = V_ip_defttl;
 	inp->inp_flowid = atomic_fetchadd_int(&udp_flowid, 1);
 	inp->inp_flowtype = M_HASHTYPE_OPAQUE;

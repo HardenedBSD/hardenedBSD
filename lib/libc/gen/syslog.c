@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <fcntl.h>
 #include <paths.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,10 +62,12 @@ __FBSDID("$FreeBSD$");
 #define	MAXLINE		8192
 
 static int	LogFile = -1;		/* fd for log */
-static int	status;			/* connection status */
+static bool	connected;		/* have done connect */
 static int	opened;			/* have done openlog() */
 static int	LogStat = 0;		/* status bits, set by openlog() */
+static pid_t	LogPid = -1;		/* process id to tag the entry with */
 static const char *LogTag = NULL;	/* string to tag the entry with */
+static int	LogTagLength = -1;	/* usable part of LogTag */
 static int	LogFacility = LOG_USER;	/* default facility code */
 static int	LogMask = 0xff;		/* mask of priorities to be logged */
 static pthread_mutex_t	syslog_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -84,12 +87,7 @@ static pthread_mutex_t	syslog_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void	disconnectlog(void); /* disconnect from syslogd */
 static void	connectlog(void);	/* (re)connect to syslogd */
 static void	openlog_unlocked(const char *, int, int);
-
-enum {
-	NOCONN = 0,
-	CONNDEF,
-	CONNPRIV,
-};
+static void	parse_tag(void);	/* parse ident[NNN] if needed */
 
 /*
  * Format of the magic cookie passed through the stdio hook
@@ -209,13 +207,20 @@ vsyslog1(int pri, const char *fmt, va_list ap)
 	/* Application name. */
 	if (LogTag == NULL)
 		LogTag = _getprogname();
-	(void)fprintf(fp, "%s ", LogTag == NULL ? NILVALUE : LogTag);
+	else if (LogTagLength == -1)
+		parse_tag();
+	if (LogTagLength > 0)
+		(void)fprintf(fp, "%.*s ", LogTagLength, LogTag);
+	else
+		(void)fprintf(fp, "%s ", LogTag == NULL ? NILVALUE : LogTag);
 	/*
 	 * Provide the process ID regardless of whether LOG_PID has been
 	 * specified, as it provides valuable information. Many
 	 * applications tend not to use this, even though they should.
 	 */
-	(void)fprintf(fp, "%d ", getpid());
+	if (LogPid == -1)
+		LogPid = getpid();
+	(void)fprintf(fp, "%d ", (int)LogPid);
 	/* Message ID. */
 	(void)fputs(NILVALUE " ", fp);
 	/* Structured data. */
@@ -291,46 +296,17 @@ vsyslog1(int pri, const char *fmt, va_list ap)
 	connectlog();
 
 	/*
-	 * If the send() fails, there are two likely scenarios: 
-	 *  1) syslogd was restarted
-	 *  2) /var/run/log is out of socket buffer space, which
-	 *     in most cases means local DoS.
-	 * If the error does not indicate a full buffer, we address
-	 * case #1 by attempting to reconnect to /var/run/log[priv]
-	 * and resending the message once.
-	 *
-	 * If we are working with a privileged socket, the retry
-	 * attempts end there, because we don't want to freeze a
-	 * critical application like su(1) or sshd(8).
-	 *
-	 * Otherwise, we address case #2 by repeatedly retrying the
-	 * send() to give syslogd a chance to empty its socket buffer.
+	 * If the send() failed, there are two likely scenarios:
+	 * 1) syslogd was restarted.  In this case make one (only) attempt
+	 *    to reconnect.
+	 * 2) We filled our buffer due to syslogd not being able to read
+	 *    as fast as we write.  In this case prefer to lose the current
+	 *    message rather than whole buffer of previously logged data.
 	 */
-
 	if (send(LogFile, tbuf, cnt, 0) < 0) {
 		if (errno != ENOBUFS) {
-			/*
-			 * Scenario 1: syslogd was restarted
-			 * reconnect and resend once
-			 */
 			disconnectlog();
 			connectlog();
-			if (send(LogFile, tbuf, cnt, 0) >= 0)
-				return;
-			/*
-			 * if the resend failed, fall through to
-			 * possible scenario 2
-			 */
-		}
-		while (errno == ENOBUFS) {
-			/*
-			 * Scenario 2: out of socket buffer space
-			 * possible DoS, fail fast on a privileged
-			 * socket
-			 */
-			if (status == CONNPRIV)
-				break;
-			_usleep(1);
 			if (send(LogFile, tbuf, cnt, 0) >= 0)
 				return;
 		}
@@ -389,7 +365,7 @@ disconnectlog(void)
 		_close(LogFile);
 		LogFile = -1;
 	}
-	status = NOCONN;			/* retry connect */
+	connected = false;			/* retry connect */
 }
 
 /* Should be called with mutex acquired */
@@ -413,41 +389,16 @@ connectlog(void)
 			}
 		}
 	}
-	if (LogFile != -1 && status == NOCONN) {
+	if (!connected) {
 		SyslogAddr.sun_len = sizeof(SyslogAddr);
 		SyslogAddr.sun_family = AF_UNIX;
 
-		/*
-		 * First try privileged socket. If no success,
-		 * then try default socket.
-		 */
-		(void)strncpy(SyslogAddr.sun_path, _PATH_LOG_PRIV,
+		(void)strncpy(SyslogAddr.sun_path, _PATH_LOG,
 		    sizeof SyslogAddr.sun_path);
 		if (_connect(LogFile, (struct sockaddr *)&SyslogAddr,
 		    sizeof(SyslogAddr)) != -1)
-			status = CONNPRIV;
-
-		if (status == NOCONN) {
-			(void)strncpy(SyslogAddr.sun_path, _PATH_LOG,
-			    sizeof SyslogAddr.sun_path);
-			if (_connect(LogFile, (struct sockaddr *)&SyslogAddr,
-			    sizeof(SyslogAddr)) != -1)
-				status = CONNDEF;
-		}
-
-		if (status == NOCONN) {
-			/*
-			 * Try the old "/dev/log" path, for backward
-			 * compatibility.
-			 */
-			(void)strncpy(SyslogAddr.sun_path, _PATH_OLDLOG,
-			    sizeof SyslogAddr.sun_path);
-			if (_connect(LogFile, (struct sockaddr *)&SyslogAddr,
-			    sizeof(SyslogAddr)) != -1)
-				status = CONNDEF;
-		}
-
-		if (status == NOCONN) {
+			connected = true;
+		else {
 			(void)_close(LogFile);
 			LogFile = -1;
 		}
@@ -457,9 +408,12 @@ connectlog(void)
 static void
 openlog_unlocked(const char *ident, int logstat, int logfac)
 {
-	if (ident != NULL)
+	if (ident != NULL) {
 		LogTag = ident;
+		LogTagLength = -1;
+	}
 	LogStat = logstat;
+	parse_tag();
 	if (logfac != 0 && (logfac &~ LOG_FACMASK) == 0)
 		LogFacility = logfac;
 
@@ -489,7 +443,8 @@ closelog(void)
 		LogFile = -1;
 	}
 	LogTag = NULL;
-	status = NOCONN;
+	LogTagLength = -1;
+	connected = false;
 	THREAD_UNLOCK();
 }
 
@@ -505,4 +460,38 @@ setlogmask(int pmask)
 		LogMask = pmask;
 	THREAD_UNLOCK();
 	return (omask);
+}
+
+/*
+ * Obtain LogPid from LogTag formatted as following: ident[NNN]
+ */
+static void
+parse_tag(void)
+{
+	char *begin, *end, *p;
+	pid_t pid;
+
+	if (LogTag == NULL || (LogStat & LOG_PID) != 0)
+		return;
+	/*
+	 * LogTagLength is -1 if LogTag was not parsed yet.
+	 * Avoid multiple passes over same LogTag.
+	 */
+	LogTagLength = 0;
+
+	/* Check for presence of opening [ and non-empty ident. */
+	if ((begin = strchr(LogTag, '[')) == NULL || begin == LogTag)
+		return;
+	/* Check for presence of closing ] at the very end and non-empty pid. */
+	if ((end = strchr(begin + 1, ']')) == NULL || end[1] != 0 ||
+	    (end - begin) < 2)
+		return;
+
+	/* Check for pid to contain digits only. */
+	pid = (pid_t)strtol(begin + 1, &p, 10);
+	if (p != end)
+		return;
+
+	LogPid = pid;
+	LogTagLength = begin - LogTag;
 }

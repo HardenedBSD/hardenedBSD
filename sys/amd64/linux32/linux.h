@@ -93,6 +93,11 @@ typedef struct {
 	l_suseconds_t	tv_usec;
 } l_timeval;
 
+typedef struct {
+	l_time64_t	tv_sec;
+	l_time64_t	tv_usec;
+} l_sock_timeval;
+
 #define	l_fd_set	fd_set
 
 /*
@@ -258,11 +263,6 @@ struct l_statfs64 {
 #define	LINUX_SA_NOMASK		0x40000000
 #define	LINUX_SA_ONESHOT	0x80000000
 
-/* sigprocmask actions */
-#define	LINUX_SIG_BLOCK		0
-#define	LINUX_SIG_UNBLOCK	1
-#define	LINUX_SIG_SETMASK	2
-
 /* sigaltstack */
 #define	LINUX_MINSIGSTKSZ	2048
 
@@ -426,6 +426,7 @@ struct l_user_desc {
 #define	LINUX_GET_USEABLE(desc)		\
 	(((desc)->b >> LINUX_ENTRY_B_USEABLE) & 1)
 
+#ifdef _KERNEL
 struct iovec;
 struct uio;
 
@@ -439,6 +440,7 @@ int linux32_copyiniov(struct l_iovec32 *iovp32, l_ulong iovcnt,
 int linux32_copyinuio(struct l_iovec32 *iovp, l_ulong iovcnt,
 			    struct uio **uiop);
 int linux_copyout_rusage(struct rusage *ru, void *uaddr);
+#endif /* _KERNEL */
 
 /* robust futexes */
 struct linux_robust_list {
@@ -472,11 +474,13 @@ struct linux_pt_regset32 {
 	l_uint ss;
 };
 
+#ifdef _KERNEL
 struct reg32;
 
 void	bsd_to_linux_regset32(const struct reg32 *b_reg,
 	    struct linux_pt_regset32 *l_regset);
 
 extern bool linux32_emulate_i386;
+#endif /* _KERNEL */
 
 #endif /* !_AMD64_LINUX_H_ */

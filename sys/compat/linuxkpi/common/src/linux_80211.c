@@ -118,6 +118,9 @@ SYSCTL_INT(_compat_linuxkpi_80211, OID_AUTO, debug, CTLFLAG_RWTUN,
 /* This is DSAP | SSAP | CTRL | ProtoID/OrgCode{3}. */
 const uint8_t rfc1042_header[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
 
+/* IEEE 802.11-05/0257r1 */
+const uint8_t bridge_tunnel_header[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0xf8 };
+
 const uint8_t tid_to_mac80211_ac[] = {
 	IEEE80211_AC_BE,
 	IEEE80211_AC_BK,
@@ -179,9 +182,12 @@ lkpi_lsta_remove(struct lkpi_sta *lsta, struct lkpi_vif *lvif)
 
 	lsta->ni = NULL;
 	ni->ni_drv_data = NULL;
-	ieee80211_free_node(ni);
+	if (ni != NULL)
+		ieee80211_free_node(ni);
 
-	IMPROVE("free lsta here?  We won't have a pointer to it from the node anymore.");
+	IMPROVE("more from lkpi_ic_node_free() should happen here.");
+
+	free(lsta, M_LKPI80211);
 }
 
 static struct lkpi_sta *
@@ -219,27 +225,27 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 	for (tid = 0; tid < nitems(sta->txq); tid++) {
 		struct lkpi_txq *ltxq;
 
-		/*
-		 * We are neither limiting ourselves to hw.queues here,
-		 * nor do we check if driver wants IEEE80211_NUM_TIDS queue.
-		 */
-
+		/* We are not limiting ourselves to hw.queues here. */
 		ltxq = malloc(sizeof(*ltxq) + hw->txq_data_size,
 		    M_LKPI80211, M_NOWAIT | M_ZERO);
 		if (ltxq == NULL)
 			goto cleanup;
-		ltxq->seen_dequeue = false;
-		skb_queue_head_init(&ltxq->skbq);
 		/* iwlwifi//mvm/sta.c::tid_to_mac80211_ac[] */
 		if (tid == IEEE80211_NUM_TIDS) {
-			IMPROVE();
+			if (!ieee80211_hw_check(hw, STA_MMPDU_TXQ)) {
+				free(ltxq, M_LKPI80211);
+				continue;
+			}
+			IMPROVE("AP/if we support non-STA here too");
 			ltxq->txq.ac = IEEE80211_AC_VO;
 		} else {
 			ltxq->txq.ac = tid_to_mac80211_ac[tid & 7];
 		}
+		ltxq->seen_dequeue = false;
+		ltxq->txq.vif = vif;
 		ltxq->txq.tid = tid;
 		ltxq->txq.sta = sta;
-		ltxq->txq.vif = vif;
+		skb_queue_head_init(&ltxq->skbq);
 		sta->txq[tid] = &ltxq->txq;
 	}
 
@@ -522,6 +528,31 @@ linuxkpi_ieee80211_get_channel(struct wiphy *wiphy, uint32_t freq)
 	}
 
 	return (NULL);
+}
+
+void
+linuxkpi_cfg80211_bss_flush(struct wiphy *wiphy)
+{
+	struct lkpi_hw *lhw;
+	struct ieee80211com *ic;
+	struct ieee80211vap *vap;
+
+	lhw = wiphy_priv(wiphy);
+	ic = lhw->ic;
+
+	/*
+	 * If we haven't called ieee80211_ifattach() yet
+	 * or there is no VAP, there are no scans to flush.
+	 */
+	if (ic == NULL ||
+	    (lhw->sc_flags & LKPI_MAC80211_DRV_STARTED) == 0)
+		return;
+
+	/* Should only happen on the current one? Not seen it late enough. */
+	IEEE80211_LOCK(ic);
+	TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next)
+		ieee80211_scan_flush(vap);
+	IEEE80211_UNLOCK(ic);
 }
 
 #ifdef TRY_HW_CRYPTO
@@ -998,12 +1029,15 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 			goto out;
 		}
 		lsta->ni = ieee80211_ref_node(ni);
-		LKPI_80211_LVIF_LOCK(lvif);
-		TAILQ_INSERT_TAIL(&lvif->lsta_head, lsta, lsta_entry);
-		LKPI_80211_LVIF_UNLOCK(lvif);
 	} else {
 		lsta = ni->ni_drv_data;
 	}
+
+	/* Insert the [l]sta into the list of known stations. */
+	LKPI_80211_LVIF_LOCK(lvif);
+	TAILQ_INSERT_TAIL(&lvif->lsta_head, lsta, lsta_entry);
+	LKPI_80211_LVIF_UNLOCK(lvif);
+
 	/* Add (or adjust) sta and change state (from NOTEXIST) to NONE. */
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NOTEXIST, ("%s: lsta %p state not "
@@ -1029,53 +1063,6 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	 * for all queues.
 	 */
 	lkpi_wake_tx_queues(hw, sta, false, false);
-
-	{
-		int i, count;
-
-		count = 3 * (hw->queues + 1);
-		KASSERT(count > hw->queues, ("Integer overflow"));
-		count = 0;
-
-		for (i = 3 * (hw->queues + 1); i > 0; i--) {
-			struct lkpi_txq *ltxq;
-			int tid;
-
-			count = 0;
-			/* Wake up all queues to know they are allocated in the driver. */
-			for (tid = 0; tid < nitems(sta->txq); tid++) {
-
-				if (tid == IEEE80211_NUM_TIDS) {
-					IMPROVE("station specific?");
-					if (!ieee80211_hw_check(hw, STA_MMPDU_TXQ))
-						continue;
-				} else if (tid >= hw->queues)
-					continue;
-
-				if (sta->txq[tid] == NULL)
-					continue;
-
-				ltxq = TXQ_TO_LTXQ(sta->txq[tid]);
-				if (!ltxq->seen_dequeue) {
-					KASSERT(count + 1 > count, ("Integer overflow"));
-					count++;
-				}
-			}
-			if (count == 0)
-				break;
-#ifdef LINUXKPI_DEBUG_80211
-			if (count > 0)
-				ic_printf(vap->iv_ic, "%s: waiting for %d queues "
-				    "to be allocated by driver\n", __func__, count);
-#endif
-			pause("lkpi80211txq", hz/10);
-		}
-#ifdef LINUXKPI_DEBUG_80211
-		if (count > 0)
-			ic_printf(vap->iv_ic, "%s: %d queues still not "
-			    "allocated by driver\n", __func__, count);
-#endif
-	}
 
 	/* Start mgd_prepare_tx. */
 	memset(&prep_tx_info, 0, sizeof(prep_tx_info));
@@ -1596,12 +1583,9 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	}
 
 	/* Update sta_state (ASSOC to AUTHORIZED). */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_ASSOC, ("%s: lsta %p state not "
 	    "ASSOC: %#x\n", __func__, lsta, lsta->state));
-	sta = LSTA_TO_STA(lsta);
 	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_AUTHORIZED);
 	if (error != 0) {
 		IMPROVE("undo some changes?");
@@ -2082,8 +2066,8 @@ lkpi_iv_update_bss(struct ieee80211vap *vap, struct ieee80211_node *ni)
 	struct lkpi_vif *lvif;
 	struct ieee80211_node *obss;
 	struct lkpi_sta *lsta;
+	struct ieee80211_sta *sta;
 
-	lvif = VAP_TO_LVIF(vap);
 	obss = vap->iv_bss;
 
 #ifdef LINUXKPI_DEBUG_80211
@@ -2110,13 +2094,20 @@ lkpi_iv_update_bss(struct ieee80211vap *vap, struct ieee80211_node *ni)
 	lsta = obss->ni_drv_data;
 	obss->ni_drv_data = ni->ni_drv_data;
 	ni->ni_drv_data = lsta;
-	if (lsta != NULL)
+	if (lsta != NULL) {
 		lsta->ni = ni;
+		sta = LSTA_TO_STA(lsta);
+		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
+	}
 	lsta = obss->ni_drv_data;
-	if (lsta != NULL)
+	if (lsta != NULL) {
 		lsta->ni = obss;
+		sta = LSTA_TO_STA(lsta);
+		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
+	}
 
 out:
+	lvif = VAP_TO_LVIF(vap);
 	return (lvif->iv_update_bss(vap, ni));
 }
 
@@ -2818,7 +2809,6 @@ lkpi_ic_node_init(struct ieee80211_node *ni)
 	struct ieee80211com *ic;
 	struct lkpi_hw *lhw;
 	struct lkpi_sta *lsta;
-	struct lkpi_vif *lvif;
 	int error;
 
 	ic = ni->ni_ic;
@@ -2830,16 +2820,10 @@ lkpi_ic_node_init(struct ieee80211_node *ni)
 			return (error);
 	}
 
-	lvif = VAP_TO_LVIF(ni->ni_vap);
-
 	lsta = ni->ni_drv_data;
 
 	/* Now take the reference before linking it to the table. */
 	lsta->ni = ieee80211_ref_node(ni);
-
-	LKPI_80211_LVIF_LOCK(lvif);
-	TAILQ_INSERT_TAIL(&lvif->lsta_head, lsta, lsta_entry);
-	LKPI_80211_LVIF_UNLOCK(lvif);
 
 	/* XXX-BZ Sync other state over. */
 	IMPROVE();
@@ -2890,11 +2874,11 @@ lkpi_ic_node_free(struct ieee80211_node *ni)
 	mtx_destroy(&lsta->txq_mtx);
 
 	/* Remove lsta if added_to_drv. */
+
 	/* Remove lsta from vif */
-
-	/* remove ref from lsta node... */
-
+	/* Remove ref from lsta node... */
 	/* Free lsta. */
+	lkpi_lsta_remove(lsta, VAP_TO_LVIF(ni->ni_vap));
 
 out:
 	if (lhw->ic_node_free != NULL)
@@ -3052,8 +3036,22 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 
 	if (sta != NULL) {
 		struct lkpi_txq *ltxq;
+		struct ieee80211_hdr *hdr;
 
-		ltxq = TXQ_TO_LTXQ(sta->txq[ac]);	/* XXX-BZ re-check */
+		hdr = (void *)skb->data;
+		if (lsta->added_to_drv &&
+		    !ieee80211_is_data_present(hdr->frame_control)) {
+			if (sta->txq[IEEE80211_NUM_TIDS] != NULL)
+				ltxq = TXQ_TO_LTXQ(sta->txq[IEEE80211_NUM_TIDS]);
+			else
+				goto ops_tx;
+		} else if (lsta->added_to_drv) {
+			ltxq = TXQ_TO_LTXQ(sta->txq[ac]);	/* XXX-BZ re-check */
+		} else
+			goto ops_tx;
+		KASSERT(ltxq != NULL, ("%s: lsta %p sta %p m %p skb %p "
+		    "ltxq %p != NULL\n", __func__, lsta, sta, m, skb, ltxq));
+
 		/*
 		 * We currently do not use queues but do direct TX.
 		 * The exception to the rule is initial packets, as we cannot
@@ -3062,6 +3060,7 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 		 * calls.  In the time until then we queue packets and
 		 * let the driver deal with them.
 		 */
+#if 0
 		if (!ltxq->seen_dequeue) {
 
 			/* Prevent an ordering problem, likely other issues. */
@@ -3079,25 +3078,29 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 		}
 		if (0 && ltxq->seen_dequeue && skb_queue_empty(&ltxq->skbq))
 			goto ops_tx;
+#endif
 
 		skb_queue_tail(&ltxq->skbq, skb);
 #ifdef LINUXKPI_DEBUG_80211
 		if (linuxkpi_debug_80211 & D80211_TRACE_TX)
-			printf("%s:%d lsta %p sta %p ni %p %6D skb %p lxtq %p "
-			    "qlen %u WAKE_TX_Q ac %d prio %u qmap %u\n",
-			    __func__, __LINE__, lsta, sta, ni,
-			    ni->ni_macaddr, ":", skb, ltxq,
-			    skb_queue_len(&ltxq->skbq), ac,
-			    skb->priority, skb->qmap);
+			printf("%s:%d mo_wake_tx_queue :: %d %u lsta %p sta %p "
+			    "ni %p %6D skb %p lxtq %p { qlen %u, ac %d tid %u } "
+			    "WAKE_TX_Q ac %d prio %u qmap %u\n",
+			    __func__, __LINE__,
+			    curthread->td_tid, (unsigned int)ticks,
+			    lsta, sta, ni, ni->ni_macaddr, ":", skb, ltxq,
+			    skb_queue_len(&ltxq->skbq), ltxq->txq.ac,
+			    ltxq->txq.tid, ac, skb->priority, skb->qmap);
 #endif
-		lkpi_80211_mo_wake_tx_queue(hw, sta->txq[ac]);	/* XXX-BZ */
+		lkpi_80211_mo_wake_tx_queue(hw, &ltxq->txq);
 		return;
 	}
 
 ops_tx:
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_TX)
-		printf("%s:%d lsta %p sta %p ni %p %6D skb %p TX ac %d prio %u qmap %u\n",
+		printf("%s:%d mo_tx :: lsta %p sta %p ni %p %6D skb %p "
+		    "TX ac %d prio %u qmap %u\n",
 		    __func__, __LINE__, lsta, sta, ni, ni->ni_macaddr, ":",
 		    skb, ac, skb->priority, skb->qmap);
 #endif
@@ -3876,6 +3879,7 @@ no_trace_beacons:
 
 	ok = ieee80211_add_rx_params(m, &rx_stats);
 	if (ok == 0) {
+		m_freem(m);
 		counter_u64_add(ic->ic_ierrors, 1);
 		goto err;
 	}
@@ -3966,8 +3970,11 @@ skip_device_ts:
 	if (ni != NULL) {
 		ok = ieee80211_input_mimo(ni, m);
 		ieee80211_free_node(ni);
+		if (ok < 0)
+			m_freem(m);
 	} else {
 		ok = ieee80211_input_mimo_all(ic, m);
+		/* mbuf got consumed. */
 	}
 	NET_EPOCH_EXIT(et);
 

@@ -15,19 +15,21 @@ Encrypted datasets have keys loaded automatically or prompted for.
 
 If the root dataset contains children with `mountpoint=`s of `/etc`, `/bin`, `/lib*`, or `/usr`, they're mounted too.
 
+For complete documentation, see `dracut.zfs(7)`.
+
 ## cmdline
-1. `root=`            | Root dataset is…                                         | Pools imported |
-   -------------------|----------------------------------------------------------|----------------|
-   *(empty)*          | the first `bootfs=` after `zpool import -aN`             | all            |
-   `zfs:AUTO`         | *(as above, but overriding other autoselection methods)* | all            |
-   `ZFS=pool/dataset` | `pool/dataset`                                           | `pool`         |
-   `zfs:pool/dataset` | *(as above)*                                             | `pool`         |
+1. `root=`                    | Root dataset is…                                         |
+   ---------------------------|----------------------------------------------------------|
+   *(empty)*                  | the first `bootfs=` after `zpool import -aN`             |
+   `zfs:AUTO`, `zfs:`, `zfs`  | *(as above, but overriding other autoselection methods)* |
+   `ZFS=pool/dataset`         | `pool/dataset`                                           |
+   `zfs:pool/dataset`         | *(as above)*                                             |
 
    All `+`es are replaced with spaces (i.e. to boot from `root pool/data set`, pass `root=zfs:root+pool/data+set`).
 
    The dataset can be at any depth, including being the pool's root dataset (i.e. `root=zfs:pool`).
 
-   `rootfstype=zfs` is mostly equivalent to `root=zfs:AUTO`.
+   `rootfstype=zfs` is equivalent to `root=zfs:AUTO`, `rootfstype=zfs root=pool/dataset` is equivalent to `root=zfs:pool/dataset`.
 
 2. `spl_hostid`: passed to `zgenhostid -f`, useful to override the `/etc/hostid` file baked into the initrd.
 
@@ -36,7 +38,7 @@ If the root dataset contains children with `mountpoint=`s of `/etc`, `/bin`, `/l
    after pool import but before the rootfs is mounted.
    Failure to create the snapshot is noted, but booting continues.
 
-4. `bootfs.rollback`, `bootfs.rollback=snapshot-name`: enables `zfs-snapshot-bootfs.service`,
+4. `bootfs.rollback`, `bootfs.rollback=snapshot-name`: enables `zfs-rollback-bootfs.service`,
    which `-Rf` rolls back to `$root_dataset@$(uname -r)` (or, in the second form, `$root_dataset@snapshot-name`)
    after pool import but before the rootfs is mounted.
    Failure to roll back will fall down to the rescue shell.

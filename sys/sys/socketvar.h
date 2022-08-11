@@ -210,7 +210,6 @@ struct socket {
  * Many fields will be read without locks to improve performance and avoid
  * lock order issues.  However, this approach must be used with caution.
  */
-#define	SS_NOFDREF		0x0001	/* no file table ref any more */
 #define	SS_ISCONNECTED		0x0002	/* socket connected to a peer */
 #define	SS_ISCONNECTING		0x0004	/* in process of connecting to peer */
 #define	SS_ISDISCONNECTING	0x0008	/* in process of disconnecting */
@@ -218,15 +217,6 @@ struct socket {
 #define	SS_ASYNC		0x0200	/* async i/o notify */
 #define	SS_ISCONFIRMING		0x0400	/* deciding to accept connection req */
 #define	SS_ISDISCONNECTED	0x2000	/* socket disconnected from peer */
-
-/*
- * Protocols can mark a socket as SS_PROTOREF to indicate that, following
- * pru_detach, they still want the socket to persist, and will free it
- * themselves when they are done.  Protocols should only ever call sofree()
- * following setting this flag in pru_detach(), and never otherwise, as
- * sofree() bypasses socket reference counting.
- */
-#define	SS_PROTOREF		0x4000	/* strong protocol reference */
 
 #ifdef _KERNEL
 
@@ -251,6 +241,11 @@ struct socket {
 } while (0)
 #define	SOLISTEN_LOCK_ASSERT(sol)	do {				\
 	mtx_assert(&(sol)->so_lock, MA_OWNED);				\
+	KASSERT(SOLISTENING(sol),					\
+	    ("%s: %p not listening", __func__, (sol)));			\
+} while (0)
+#define	SOLISTEN_UNLOCK_ASSERT(sol)	do {				\
+	mtx_assert(&(sol)->so_lock, MA_NOTOWNED);			\
 	KASSERT(SOLISTENING(sol),					\
 	    ("%s: %p not listening", __func__, (sol)));			\
 } while (0)
@@ -474,13 +469,15 @@ int	socreate(int dom, struct socket **aso, int type, int proto,
 int	sodisconnect(struct socket *so);
 void	sodtor_set(struct socket *, so_dtor_t *);
 struct	sockaddr *sodupsockaddr(const struct sockaddr *sa, int mflags);
-void	sofree(struct socket *so);
 void	sohasoutofband(struct socket *so);
 int	solisten(struct socket *so, int backlog, struct thread *td);
 void	solisten_proto(struct socket *so, int backlog);
 void	solisten_proto_abort(struct socket *so);
 int	solisten_proto_check(struct socket *so);
+void	solisten_enqueue(struct socket *, int);
 int	solisten_dequeue(struct socket *, struct socket **, int);
+struct socket *
+	solisten_clone(struct socket *);
 struct socket *
 	sonewconn(struct socket *head, int connstatus);
 struct socket *
@@ -501,6 +498,7 @@ int	soreceive_generic(struct socket *so, struct sockaddr **paddr,
 	    struct uio *uio, struct mbuf **mp0, struct mbuf **controlp,
 	    int *flagsp);
 void	sorele_locked(struct socket *so);
+void	sodealloc(struct socket *);
 int	soreserve(struct socket *so, u_long sndcc, u_long rcvcc);
 void	sorflush(struct socket *so);
 int	sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
@@ -577,8 +575,8 @@ struct xsocket {
 		uint32_t	sb_cc;
 		uint32_t	sb_hiwat;
 		uint32_t	sb_mbcnt;
-		uint32_t	sb_mcnt;
-		uint32_t	sb_ccnt;
+		uint32_t	sb_spare0;	/* was sb_mcnt */
+		uint32_t	sb_spare1;	/* was sb_ccnt */
 		uint32_t	sb_mbmax;
 		int32_t		sb_lowat;
 		int32_t		sb_timeo;

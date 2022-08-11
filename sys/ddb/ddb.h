@@ -94,11 +94,12 @@ extern vm_offset_t ksymtab, kstrtab, ksymtab_size, ksymtab_relbase;
  * - The last one for sub-commands of 'show all'; type 'show all'
  *   without any argument to get a list.
  */
-struct command;
-LIST_HEAD(command_table, command);
-extern struct command_table db_cmd_table;
-extern struct command_table db_show_table;
-extern struct command_table db_show_all_table;
+struct db_command;
+LIST_HEAD(db_command_table, db_command);
+extern struct db_command_table db_cmd_table;
+extern struct db_command_table db_show_table;
+extern struct db_command_table db_show_all_table;
+extern struct db_command_table db_show_active_table;
 
 /*
  * Type signature for a function implementing a ddb command.
@@ -109,16 +110,21 @@ typedef void db_cmdfcn_t(db_expr_t addr, bool have_addr, db_expr_t count,
 /*
  * Command table entry.
  */
-struct command {
-	char *	name;		/* command name */
+struct db_command {
+	char *name;		/* command name */
 	db_cmdfcn_t *fcn;	/* function to call */
-	int	flag;		/* extra info: */
+	int flag;
 #define	CS_OWN		0x1	/* non-standard syntax */
 #define	CS_MORE		0x2	/* standard syntax, but may have other words
 				 * at end */
 #define	CS_SET_DOT	0x100	/* set dot after command */
-	struct command_table *more; /* another level of command */
-	LIST_ENTRY(command) next; /* next entry in the command table */
+#define	DB_CMD_MEMSAFE	0x1000	/* Command does not allow reads or writes to
+				 * arbitrary memory. */
+#define	DB_MAC1		0x10000	/* For MAC policy use */
+#define	DB_MAC2		0x20000
+	struct db_command_table *more; /* another level of command */
+	LIST_ENTRY(db_command) next; /* next entry in the command table */
+	void *mac_priv;		/* For MAC policy use */
 };
 
 /*
@@ -128,7 +134,7 @@ struct command {
  * the module is loaded.
  */
 #define	_DB_SET(_suffix, _name, _func, list, _flag, _more)	\
-static struct command __CONCAT(_name,_suffix) = {		\
+static struct db_command __CONCAT(_name,_suffix) = {		\
 	.name	= __STRING(_name),				\
 	.fcn	= _func,					\
 	.flag	= _flag,					\
@@ -164,18 +170,28 @@ _func(db_expr_t addr, bool have_addr, db_expr_t count, char *modif)
 #define	DB_FUNC(_name, _func, list, _flag, _more)		\
 	_DB_FUNC(_cmd, _name, _func, list, _flag, _more)
 
+#define	DB_COMMAND_FLAGS(cmd_name, func_name, flags) \
+	_DB_FUNC(_cmd, cmd_name, func_name, db_cmd_table, flags, NULL)
 #define	DB_COMMAND(cmd_name, func_name) \
-	_DB_FUNC(_cmd, cmd_name, func_name, db_cmd_table, 0, NULL)
+	DB_COMMAND_FLAGS(cmd_name, func_name, 0)
+#define	DB_ALIAS_FLAGS(alias_name, func_name, flags) \
+	_DB_SET(_cmd, alias_name, func_name, db_cmd_table, flags, NULL)
 #define	DB_ALIAS(alias_name, func_name) \
-	_DB_SET(_cmd, alias_name, func_name, db_cmd_table, 0, NULL)
+	DB_ALIAS_FLAGS(alias_name, func_name, 0)
+#define	DB_SHOW_COMMAND_FLAGS(cmd_name, func_name, flags) \
+	_DB_FUNC(_show, cmd_name, func_name, db_show_table, flags, NULL)
 #define	DB_SHOW_COMMAND(cmd_name, func_name) \
-	_DB_FUNC(_show, cmd_name, func_name, db_show_table, 0, NULL)
+	DB_SHOW_COMMAND_FLAGS(cmd_name, func_name, 0)
+#define	DB_SHOW_ALIAS_FLAGS(alias_name, func_name, flags) \
+	_DB_SET(_show, alias_name, func_name, db_show_table, flags, NULL)
 #define	DB_SHOW_ALIAS(alias_name, func_name) \
-	_DB_SET(_show, alias_name, func_name, db_show_table, 0, NULL)
-#define	DB_SHOW_ALL_COMMAND(cmd_name, func_name) \
-	_DB_FUNC(_show_all, cmd_name, func_name, db_show_all_table, 0, NULL)
-#define	DB_SHOW_ALL_ALIAS(alias_name, func_name) \
-	_DB_SET(_show_all, alias_name, func_name, db_show_all_table, 0, NULL)
+	DB_SHOW_ALIAS_FLAGS(alias_name, func_name, 0)
+#define	DB_SHOW_ALL_COMMAND(cmd_name, func_name)			\
+	_DB_FUNC(_show_all, cmd_name, func_name, db_show_all_table,	\
+	    DB_CMD_MEMSAFE, NULL)
+#define	DB_SHOW_ALL_ALIAS(alias_name, func_name)			\
+	_DB_SET(_show_all, alias_name, func_name, db_show_all_table,	\
+	    DB_CMD_MEMSAFE, NULL)
 
 extern db_expr_t db_maxoff;
 extern int db_indent;
@@ -225,8 +241,10 @@ bool		db_value_of_name(const char *name, db_expr_t *valuep);
 bool		db_value_of_name_pcpu(const char *name, db_expr_t *valuep);
 bool		db_value_of_name_vnet(const char *name, db_expr_t *valuep);
 int		db_write_bytes(vm_offset_t addr, size_t size, char *data);
-void		db_command_register(struct command_table *, struct command *);
-void		db_command_unregister(struct command_table *, struct command *);
+void		db_command_register(struct db_command_table *,
+		    struct db_command *);
+void		db_command_unregister(struct db_command_table *,
+		    struct db_command *);
 int		db_fetch_ksymtab(vm_offset_t ksym_start, vm_offset_t ksym_end,
 		    vm_offset_t relbase);
 

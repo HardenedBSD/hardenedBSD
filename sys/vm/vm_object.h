@@ -202,7 +202,8 @@ struct vm_object {
 #define	OBJ_SIZEVNLOCK	0x0040		/* lock vnode to check obj size */
 #define	OBJ_PG_DTOR	0x0080		/* dont reset object, leave that for dtor */
 #define	OBJ_SHADOWLIST	0x0100		/* Object is on the shadow list. */
-#define	OBJ_SWAP	0x0200		/* object swaps */
+#define	OBJ_SWAP	0x0200		/* object swaps, type will be OBJT_SWAP
+					   or dynamically registered */
 #define	OBJ_SPLIT	0x0400		/* object is being split */
 #define	OBJ_COLLAPSING	0x0800		/* Parent of collapse. */
 #define	OBJ_COLORED	0x1000		/* pg_color is defined */
@@ -317,7 +318,7 @@ vm_object_color(vm_object_t object, u_short color)
 
 	if ((object->flags & OBJ_COLORED) == 0) {
 		object->pg_color = color;
-		object->flags |= OBJ_COLORED;
+		vm_object_set_flag(object, OBJ_COLORED);
 	}
 }
 

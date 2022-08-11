@@ -249,9 +249,6 @@ static void	pmc_process_thread_delete(struct thread *td);
 static void	pmc_process_thread_userret(struct thread *td);
 static void	pmc_remove_owner(struct pmc_owner *po);
 static void	pmc_remove_process_descriptor(struct pmc_process *pp);
-static void	pmc_restore_cpu_binding(struct pmc_binding *pb);
-static void	pmc_save_cpu_binding(struct pmc_binding *pb);
-static void	pmc_select_cpu(int cpu);
 static int	pmc_start(struct pmc *pm);
 static int	pmc_stop(struct pmc *pm);
 static int	pmc_syscall_handler(struct thread *td, void *syscall_args);
@@ -295,7 +292,7 @@ SYSCTL_COUNTER_U64(_kern_hwpmc_stats, OID_AUTO, buffer_requests, CTLFLAG_RW,
 SYSCTL_COUNTER_U64(_kern_hwpmc_stats, OID_AUTO, buffer_requests_failed, CTLFLAG_RW,
 				   &pmc_stats.pm_buffer_requests_failed, "# of buffer requests which failed");
 SYSCTL_COUNTER_U64(_kern_hwpmc_stats, OID_AUTO, log_sweeps, CTLFLAG_RW,
-				   &pmc_stats.pm_log_sweeps, "# of ?");
+				   &pmc_stats.pm_log_sweeps, "# of times samples were processed");
 SYSCTL_COUNTER_U64(_kern_hwpmc_stats, OID_AUTO, merges, CTLFLAG_RW,
 				   &pmc_stats.pm_merges, "# of times kernel stack was found for user trace");
 SYSCTL_COUNTER_U64(_kern_hwpmc_stats, OID_AUTO, overwrites, CTLFLAG_RW,
@@ -365,6 +362,14 @@ SYSCTL_INT(_kern_hwpmc, OID_AUTO, threadfreelist_max, CTLFLAG_RW,
     &pmc_threadfreelist_max, 0,
     "maximum number of available thread entries before freeing some");
 
+
+/*
+ * kern.hwpmc.mincount -- minimum sample count
+ */
+static u_int pmc_mincount = 1000;
+SYSCTL_INT(_kern_hwpmc, OID_AUTO, mincount, CTLFLAG_RWTUN,
+    &pmc_mincount, 0,
+    "minimum count for sampling counters");
 
 /*
  * security.bsd.unprivileged_syspmcs -- allow non-root processes to
@@ -739,13 +744,14 @@ pmc_ri_to_classdep(struct pmc_mdep *md, int ri, int *adjri)
  * save the cpu binding of the current kthread
  */
 
-static void
+void
 pmc_save_cpu_binding(struct pmc_binding *pb)
 {
 	PMCDBG0(CPU,BND,2, "save-cpu");
 	thread_lock(curthread);
 	pb->pb_bound = sched_is_bound(curthread);
 	pb->pb_cpu   = curthread->td_oncpu;
+	pb->pb_priority = curthread->td_priority;
 	thread_unlock(curthread);
 	PMCDBG1(CPU,BND,2, "save-cpu cpu=%d", pb->pb_cpu);
 }
@@ -754,16 +760,16 @@ pmc_save_cpu_binding(struct pmc_binding *pb)
  * restore the cpu binding of the current thread
  */
 
-static void
+void
 pmc_restore_cpu_binding(struct pmc_binding *pb)
 {
 	PMCDBG2(CPU,BND,2, "restore-cpu curcpu=%d restore=%d",
 	    curthread->td_oncpu, pb->pb_cpu);
 	thread_lock(curthread);
-	if (pb->pb_bound)
-		sched_bind(curthread, pb->pb_cpu);
-	else
+	sched_bind(curthread, pb->pb_cpu);
+	if (!pb->pb_bound)
 		sched_unbind(curthread);
+	sched_prio(curthread, pb->pb_priority);
 	thread_unlock(curthread);
 	PMCDBG0(CPU,BND,2, "restore-cpu done");
 }
@@ -772,7 +778,7 @@ pmc_restore_cpu_binding(struct pmc_binding *pb)
  * move execution over the specified cpu and bind it there.
  */
 
-static void
+void
 pmc_select_cpu(int cpu)
 {
 	KASSERT(cpu >= 0 && cpu < pmc_cpu_max(),
@@ -784,6 +790,7 @@ pmc_select_cpu(int cpu)
 
 	PMCDBG1(CPU,SEL,2, "select-cpu cpu=%d", cpu);
 	thread_lock(curthread);
+	sched_prio(curthread, PRI_MIN);
 	sched_bind(curthread, cpu);
 	thread_unlock(curthread);
 
@@ -2452,7 +2459,7 @@ pmc_thread_descriptor_pool_free_task(void *arg __unused, int pending __unused)
  * Drain the thread free pool, freeing all allocations.
  */
 static void
-pmc_thread_descriptor_pool_drain()
+pmc_thread_descriptor_pool_drain(void)
 {
 	struct pmc_thread *pt, *next;
 
@@ -3951,13 +3958,16 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 		/* XXX set lower bound on sampling for process counters */
 		if (PMC_IS_SAMPLING_MODE(mode)) {
 			/*
-			 * Don't permit requested sample rate to be less than 1000
+			 * Don't permit requested sample rate to be
+			 * less than pmc_mincount.
 			 */
-			if (pa.pm_count < 1000)
-				log(LOG_WARNING,
-					"pmcallocate: passed sample rate %ju - setting to 1000\n",
-					(uintmax_t)pa.pm_count);
-			pmc->pm_sc.pm_reloadcount = MAX(1000, pa.pm_count);
+			if (pa.pm_count < MAX(1, pmc_mincount))
+				log(LOG_WARNING, "pmcallocate: passed sample "
+				    "rate %ju - setting to %u\n",
+				    (uintmax_t)pa.pm_count,
+				    MAX(1, pmc_mincount));
+			pmc->pm_sc.pm_reloadcount = MAX(MAX(1, pmc_mincount),
+			    pa.pm_count);
 		} else
 			pmc->pm_sc.pm_initial = pa.pm_count;
 
@@ -4475,13 +4485,16 @@ pmc_syscall_handler(struct thread *td, void *syscall_args)
 
 		if (PMC_IS_SAMPLING_MODE(PMC_TO_MODE(pm))) {
 			/*
-			 * Don't permit requested sample rate to be less than 1000
+			 * Don't permit requested sample rate to be
+			 * less than pmc_mincount.
 			 */
-			if (sc.pm_count < 1000)
-				log(LOG_WARNING,
-					"pmcsetcount: passed sample rate %ju - setting to 1000\n",
-					(uintmax_t)sc.pm_count);
-			pm->pm_sc.pm_reloadcount = MAX(1000, sc.pm_count);
+			if (sc.pm_count < MAX(1, pmc_mincount))
+				log(LOG_WARNING, "pmcsetcount: passed sample "
+				    "rate %ju - setting to %u\n",
+				    (uintmax_t)sc.pm_count,
+				    MAX(1, pmc_mincount));
+			pm->pm_sc.pm_reloadcount = MAX(MAX(1, pmc_mincount),
+			    sc.pm_count);
 		} else
 			pm->pm_sc.pm_initial = sc.pm_count;
 	}
@@ -4788,8 +4801,6 @@ pmc_capture_user_callchain(int cpu, int ring, struct trapframe *tf)
 	uint64_t considx, prodidx;
 	int nsamples, nrecords, pass, iter;
 #ifdef	INVARIANTS
-	int ncallchains;
-	int nfree;
 	int start_ticks = ticks;
 #endif
 	psb = pmc_pcpu[cpu]->pc_sb[ring];
@@ -4799,10 +4810,6 @@ pmc_capture_user_callchain(int cpu, int ring, struct trapframe *tf)
 	    ("[pmc,%d] Retrieving callchain for thread that doesn't want it",
 		__LINE__));
 
-#ifdef	INVARIANTS
-	ncallchains = 0;
-	nfree = 0;
-#endif
 	nrecords = INT_MAX;
 	pass = 0;
  restart:
@@ -4821,13 +4828,8 @@ pmc_capture_user_callchain(int cpu, int ring, struct trapframe *tf)
 
 #ifdef	INVARIANTS
 		if (ps->ps_nsamples == PMC_SAMPLE_FREE) {
-			nfree++;
 			continue;
 		}
-
-		if ((ps->ps_pmc == NULL) ||
-		    (ps->ps_pmc->pm_state != PMC_STATE_RUNNING))
-			nfree++;
 #endif
 		if (ps->ps_td != td ||
 		   ps->ps_nsamples != PMC_USER_CALLCHAIN_PENDING ||
@@ -4857,10 +4859,6 @@ pmc_capture_user_callchain(int cpu, int ring, struct trapframe *tf)
 		 * Retrieve the callchain and mark the sample buffer
 		 * as 'processable' by the timer tick sweep code.
 		 */
-
-#ifdef INVARIANTS
-		ncallchains++;
-#endif
 
 		if (__predict_true(nsamples < pmc_callchaindepth - 1))
 			nsamples += pmc_save_user_callchain(ps->ps_pc + nsamples,
@@ -5587,6 +5585,16 @@ pmc_initialize(void)
 			return (ENOSYS);
         }
 
+	/*
+	 * Refresh classes base ri. Optional classes may come in different
+	 * order.
+	 */
+	for (ri = c = 0; c < md->pmd_nclass; c++) {
+		pcd = &md->pmd_classdep[c];
+		pcd->pcd_ri = ri;
+		ri += pcd->pcd_num;
+	}
+
 	KASSERT(md->pmd_nclass >= 1 && md->pmd_npmc >= 1,
 	    ("[pmc,%d] no classes or pmcs", __LINE__));
 
@@ -5629,7 +5637,9 @@ pmc_initialize(void)
 		if (md->pmd_pcpu_init)
 			error = md->pmd_pcpu_init(md, cpu);
 		for (n = 0; error == 0 && n < md->pmd_nclass; n++)
-			error = md->pmd_classdep[n].pcd_pcpu_init(md, cpu);
+			if (md->pmd_classdep[n].pcd_num > 0)
+				error = md->pmd_classdep[n].pcd_pcpu_init(md,
+				    cpu);
 	}
 	pmc_restore_cpu_binding(&pb);
 
@@ -5742,6 +5752,8 @@ pmc_initialize(void)
 	if (error == 0) {
 		printf(PMC_MODULE_NAME ":");
 		for (n = 0; n < (int) md->pmd_nclass; n++) {
+			if (md->pmd_classdep[n].pcd_num == 0)
+				continue;
 			pcd = &md->pmd_classdep[n];
 			printf(" %s/%d/%d/0x%b",
 			    pmc_name_of_pmcclass(pcd->pcd_class),
@@ -5864,7 +5876,9 @@ pmc_cleanup(void)
 				continue;
 			pmc_select_cpu(cpu);
 			for (c = 0; c < md->pmd_nclass; c++)
-				md->pmd_classdep[c].pcd_pcpu_fini(md, cpu);
+				if (md->pmd_classdep[c].pcd_num > 0)
+					md->pmd_classdep[c].pcd_pcpu_fini(md,
+					    cpu);
 			if (md->pmd_pcpu_fini)
 				md->pmd_pcpu_fini(md, cpu);
 		}

@@ -79,16 +79,12 @@ zpool_get_all_props(zpool_handle_t *zhp)
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 
-	if (zcmd_alloc_dst_nvlist(hdl, &zc, 0) != 0)
-		return (-1);
+	zcmd_alloc_dst_nvlist(hdl, &zc, 0);
 
 	while (zfs_ioctl(hdl, ZFS_IOC_POOL_GET_PROPS, &zc) != 0) {
-		if (errno == ENOMEM) {
-			if (zcmd_expand_dst_nvlist(hdl, &zc) != 0) {
-				zcmd_free_nvlists(&zc);
-				return (-1);
-			}
-		} else {
+		if (errno == ENOMEM)
+			zcmd_expand_dst_nvlist(hdl, &zc);
+		else {
 			zcmd_free_nvlists(&zc);
 			return (-1);
 		}
@@ -123,7 +119,7 @@ zpool_get_prop_string(zpool_handle_t *zhp, zpool_prop_t prop,
     zprop_source_t *src)
 {
 	nvlist_t *nv, *nvl;
-	char *value;
+	const char *value;
 	zprop_source_t source;
 
 	nvl = zhp->zpool_props;
@@ -132,7 +128,7 @@ zpool_get_prop_string(zpool_handle_t *zhp, zpool_prop_t prop,
 		value = fnvlist_lookup_string(nv, ZPROP_VALUE);
 	} else {
 		source = ZPROP_SRC_DEFAULT;
-		if ((value = (char *)zpool_prop_default_string(prop)) == NULL)
+		if ((value = zpool_prop_default_string(prop)) == NULL)
 			value = "-";
 	}
 
@@ -780,7 +776,7 @@ zpool_set_prop(zpool_handle_t *zhp, const char *propname, const char *propval)
 {
 	zfs_cmd_t zc = {"\0"};
 	int ret = -1;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *nvl = NULL;
 	nvlist_t *realprops;
 	uint64_t version;
@@ -813,10 +809,7 @@ zpool_set_prop(zpool_handle_t *zhp, const char *propname, const char *propval)
 	 */
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 
-	if (zcmd_write_src_nvlist(zhp->zpool_hdl, &zc, nvl) != 0) {
-		nvlist_free(nvl);
-		return (-1);
-	}
+	zcmd_write_src_nvlist(zhp->zpool_hdl, &zc, nvl);
 
 	ret = zfs_ioctl(zhp->zpool_hdl, ZFS_IOC_POOL_SET_PROPS, &zc);
 
@@ -861,7 +854,7 @@ zpool_expand_proplist(zpool_handle_t *zhp, zprop_list_t **plp,
 		for (i = 0; i < SPA_FEATURES; i++) {
 			zprop_list_t *entry = zfs_alloc(hdl,
 			    sizeof (zprop_list_t));
-			entry->pl_prop = ZPROP_INVAL;
+			entry->pl_prop = ZPROP_USERPROP;
 			entry->pl_user_prop = zfs_asprintf(hdl, "feature@%s",
 			    spa_feature_table[i].fi_uname);
 			entry->pl_width = strlen(entry->pl_user_prop);
@@ -905,7 +898,7 @@ zpool_expand_proplist(zpool_handle_t *zhp, zprop_list_t **plp,
 		}
 
 		entry = zfs_alloc(hdl, sizeof (zprop_list_t));
-		entry->pl_prop = ZPROP_INVAL;
+		entry->pl_prop = ZPROP_USERPROP;
 		entry->pl_user_prop = propname;
 		entry->pl_width = strlen(entry->pl_user_prop);
 		entry->pl_all = B_TRUE;
@@ -918,7 +911,7 @@ zpool_expand_proplist(zpool_handle_t *zhp, zprop_list_t **plp,
 		if (entry->pl_fixed && !literal)
 			continue;
 
-		if (entry->pl_prop != ZPROP_INVAL &&
+		if (entry->pl_prop != ZPROP_USERPROP &&
 		    zpool_get_prop(zhp, entry->pl_prop, buf, sizeof (buf),
 		    NULL, literal) == 0) {
 			if (strlen(buf) > entry->pl_width)
@@ -974,7 +967,7 @@ vdev_expand_proplist(zpool_handle_t *zhp, const char *vdevname,
 
 			/* Skip properties that are not user defined */
 			if ((prop = vdev_name_to_prop(propname)) !=
-			    VDEV_PROP_USER)
+			    VDEV_PROP_USERPROP)
 				continue;
 
 			if (nvpair_value_nvlist(elem, &propval) != 0)
@@ -982,10 +975,8 @@ vdev_expand_proplist(zpool_handle_t *zhp, const char *vdevname,
 
 			strval = fnvlist_lookup_string(propval, ZPROP_VALUE);
 
-			if ((entry = zfs_alloc(zhp->zpool_hdl,
-			    sizeof (zprop_list_t))) == NULL)
-				return (ENOMEM);
-
+			entry = zfs_alloc(zhp->zpool_hdl,
+			    sizeof (zprop_list_t));
 			entry->pl_prop = prop;
 			entry->pl_user_prop = zfs_strdup(zhp->zpool_hdl,
 			    propname);
@@ -1179,8 +1170,7 @@ zpool_open_canfail(libzfs_handle_t *hdl, const char *pool)
 		return (NULL);
 	}
 
-	if ((zhp = zfs_alloc(hdl, sizeof (zpool_handle_t))) == NULL)
-		return (NULL);
+	zhp = zfs_alloc(hdl, sizeof (zpool_handle_t));
 
 	zhp->zpool_hdl = hdl;
 	(void) strlcpy(zhp->zpool_name, pool, sizeof (zhp->zpool_name));
@@ -1211,8 +1201,7 @@ zpool_open_silent(libzfs_handle_t *hdl, const char *pool, zpool_handle_t **ret)
 	zpool_handle_t *zhp;
 	boolean_t missing;
 
-	if ((zhp = zfs_alloc(hdl, sizeof (zpool_handle_t))) == NULL)
-		return (-1);
+	zhp = zfs_alloc(hdl, sizeof (zpool_handle_t));
 
 	zhp->zpool_hdl = hdl;
 	(void) strlcpy(zhp->zpool_name, pool, sizeof (zhp->zpool_name));
@@ -1379,23 +1368,22 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 	nvlist_t *hidden_args = NULL;
 	uint8_t *wkeydata = NULL;
 	uint_t wkeylen = 0;
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	int ret = -1;
 
-	(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "cannot create '%s'"), pool);
 
 	if (!zpool_name_valid(hdl, B_FALSE, pool))
-		return (zfs_error(hdl, EZFS_INVALIDNAME, msg));
+		return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 
-	if (zcmd_write_conf_nvlist(hdl, &zc, nvroot) != 0)
-		return (-1);
+	zcmd_write_conf_nvlist(hdl, &zc, nvroot);
 
 	if (props) {
 		prop_flags_t flags = { .create = B_TRUE, .import = B_FALSE };
 
 		if ((zc_props = zpool_valid_proplist(hdl, pool, props,
-		    SPA_VERSION_1, flags, msg)) == NULL) {
+		    SPA_VERSION_1, flags, errbuf)) == NULL) {
 			goto create_failed;
 		}
 	}
@@ -1409,7 +1397,7 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 		    strcmp(zonestr, "on") == 0);
 
 		if ((zc_fsprops = zfs_valid_proplist(hdl, ZFS_TYPE_FILESYSTEM,
-		    fsprops, zoned, NULL, NULL, B_TRUE, msg)) == NULL) {
+		    fsprops, zoned, NULL, NULL, B_TRUE, errbuf)) == NULL) {
 			goto create_failed;
 		}
 
@@ -1419,7 +1407,7 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "%s property requires a special vdev"),
 			    zfs_prop_to_name(ZFS_PROP_SPECIAL_SMALL_BLOCKS));
-			(void) zfs_error(hdl, EZFS_BADPROP, msg);
+			(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
 			goto create_failed;
 		}
 
@@ -1429,7 +1417,7 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 		}
 		if (zfs_crypto_create(hdl, NULL, zc_fsprops, props, B_TRUE,
 		    &wkeydata, &wkeylen) != 0) {
-			zfs_error(hdl, EZFS_CRYPTOFAILED, msg);
+			zfs_error(hdl, EZFS_CRYPTOFAILED, errbuf);
 			goto create_failed;
 		}
 		if (nvlist_add_nvlist(zc_props,
@@ -1450,8 +1438,8 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 		}
 	}
 
-	if (zc_props && zcmd_write_src_nvlist(hdl, &zc, zc_props) != 0)
-		goto create_failed;
+	if (zc_props)
+		zcmd_write_src_nvlist(hdl, &zc, zc_props);
 
 	(void) strlcpy(zc.zc_name, pool, sizeof (zc.zc_name));
 
@@ -1477,7 +1465,7 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 			    "one or more vdevs refer to the same device, or "
 			    "one of\nthe devices is part of an active md or "
 			    "lvm device"));
-			return (zfs_error(hdl, EZFS_BADDEV, msg));
+			return (zfs_error(hdl, EZFS_BADDEV, errbuf));
 
 		case ERANGE:
 			/*
@@ -1492,7 +1480,7 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 			 */
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "record size invalid"));
-			return (zfs_error(hdl, EZFS_BADPROP, msg));
+			return (zfs_error(hdl, EZFS_BADPROP, errbuf));
 
 		case EOVERFLOW:
 			/*
@@ -1511,12 +1499,12 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 				    "one or more devices is less than the "
 				    "minimum size (%s)"), buf);
 			}
-			return (zfs_error(hdl, EZFS_BADDEV, msg));
+			return (zfs_error(hdl, EZFS_BADDEV, errbuf));
 
 		case ENOSPC:
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "one or more devices is out of space"));
-			return (zfs_error(hdl, EZFS_BADDEV, msg));
+			return (zfs_error(hdl, EZFS_BADDEV, errbuf));
 
 		case EINVAL:
 			if (zpool_has_draid_vdev(nvroot) &&
@@ -1524,13 +1512,14 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "dRAID vdevs are unsupported by the "
 				    "kernel"));
-				return (zfs_error(hdl, EZFS_BADDEV, msg));
+				return (zfs_error(hdl, EZFS_BADDEV, errbuf));
 			} else {
-				return (zpool_standard_error(hdl, errno, msg));
+				return (zpool_standard_error(hdl, errno,
+				    errbuf));
 			}
 
 		default:
-			return (zpool_standard_error(hdl, errno, msg));
+			return (zpool_standard_error(hdl, errno, errbuf));
 		}
 	}
 
@@ -1554,7 +1543,7 @@ zpool_destroy(zpool_handle_t *zhp, const char *log_str)
 	zfs_cmd_t zc = {"\0"};
 	zfs_handle_t *zfp = NULL;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 
 	if (zhp->zpool_state == POOL_STATE_ACTIVE &&
 	    (zfp = zfs_open(hdl, zhp->zpool_name, ZFS_TYPE_FILESYSTEM)) == NULL)
@@ -1564,15 +1553,15 @@ zpool_destroy(zpool_handle_t *zhp, const char *log_str)
 	zc.zc_history = (uint64_t)(uintptr_t)log_str;
 
 	if (zfs_ioctl(hdl, ZFS_IOC_POOL_DESTROY, &zc) != 0) {
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot destroy '%s'"), zhp->zpool_name);
 
 		if (errno == EROFS) {
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "one or more devices is read only"));
-			(void) zfs_error(hdl, EZFS_BADDEV, msg);
+			(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 		} else {
-			(void) zpool_standard_error(hdl, errno, msg);
+			(void) zpool_standard_error(hdl, errno, errbuf);
 		}
 
 		if (zfp)
@@ -1595,14 +1584,14 @@ int
 zpool_checkpoint(zpool_handle_t *zhp)
 {
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	int error;
 
 	error = lzc_pool_checkpoint(zhp->zpool_name);
 	if (error != 0) {
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot checkpoint '%s'"), zhp->zpool_name);
-		(void) zpool_standard_error(hdl, error, msg);
+		(void) zpool_standard_error(hdl, error, errbuf);
 		return (-1);
 	}
 
@@ -1616,14 +1605,14 @@ int
 zpool_discard_checkpoint(zpool_handle_t *zhp)
 {
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	int error;
 
 	error = lzc_pool_checkpoint_discard(zhp->zpool_name);
 	if (error != 0) {
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot discard checkpoint in '%s'"), zhp->zpool_name);
-		(void) zpool_standard_error(hdl, error, msg);
+		(void) zpool_standard_error(hdl, error, errbuf);
 		return (-1);
 	}
 
@@ -1640,11 +1629,11 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 	zfs_cmd_t zc = {"\0"};
 	int ret;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t **spares, **l2cache;
 	uint_t nspares, nl2cache;
 
-	(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "cannot add to '%s'"), zhp->zpool_name);
 
 	if (zpool_get_prop_int(zhp, ZPOOL_PROP_VERSION, NULL) <
@@ -1653,7 +1642,7 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 	    &spares, &nspares) == 0) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "pool must be "
 		    "upgraded to add hot spares"));
-		return (zfs_error(hdl, EZFS_BADVERSION, msg));
+		return (zfs_error(hdl, EZFS_BADVERSION, errbuf));
 	}
 
 	if (zpool_get_prop_int(zhp, ZPOOL_PROP_VERSION, NULL) <
@@ -1662,11 +1651,10 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 	    &l2cache, &nl2cache) == 0) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "pool must be "
 		    "upgraded to add cache devices"));
-		return (zfs_error(hdl, EZFS_BADVERSION, msg));
+		return (zfs_error(hdl, EZFS_BADVERSION, errbuf));
 	}
 
-	if (zcmd_write_conf_nvlist(hdl, &zc, nvroot) != 0)
-		return (-1);
+	zcmd_write_conf_nvlist(hdl, &zc, nvroot);
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 
 	if (zfs_ioctl(hdl, ZFS_IOC_VDEV_ADD, &zc) != 0) {
@@ -1680,7 +1668,7 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 			 */
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "one or more vdevs refer to the same device"));
-			(void) zfs_error(hdl, EZFS_BADDEV, msg);
+			(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 			break;
 
 		case EINVAL:
@@ -1697,7 +1685,7 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 				    "raidz or dRAID vdevs"));
 			}
 
-			(void) zfs_error(hdl, EZFS_BADDEV, msg);
+			(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 			break;
 
 		case EOVERFLOW:
@@ -1717,17 +1705,17 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 				    "device is less than the minimum "
 				    "size (%s)"), buf);
 			}
-			(void) zfs_error(hdl, EZFS_BADDEV, msg);
+			(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 			break;
 
 		case ENOTSUP:
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "pool must be upgraded to add these vdevs"));
-			(void) zfs_error(hdl, EZFS_BADVERSION, msg);
+			(void) zfs_error(hdl, EZFS_BADVERSION, errbuf);
 			break;
 
 		default:
-			(void) zpool_standard_error(hdl, errno, msg);
+			(void) zpool_standard_error(hdl, errno, errbuf);
 		}
 
 		ret = -1;
@@ -2022,7 +2010,7 @@ zpool_import_props(libzfs_handle_t *hdl, nvlist_t *config, const char *newname,
 	char *origname;
 	int ret;
 	int error = 0;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 
 	origname = fnvlist_lookup_string(config, ZPOOL_CONFIG_POOL_NAME);
 
@@ -2048,10 +2036,7 @@ zpool_import_props(libzfs_handle_t *hdl, nvlist_t *config, const char *newname,
 		if ((props = zpool_valid_proplist(hdl, origname,
 		    props, version, flags, errbuf)) == NULL)
 			return (-1);
-		if (zcmd_write_src_nvlist(hdl, &zc, props) != 0) {
-			nvlist_free(props);
-			return (-1);
-		}
+		zcmd_write_src_nvlist(hdl, &zc, props);
 		nvlist_free(props);
 	}
 
@@ -2059,23 +2044,13 @@ zpool_import_props(libzfs_handle_t *hdl, nvlist_t *config, const char *newname,
 
 	zc.zc_guid = fnvlist_lookup_uint64(config, ZPOOL_CONFIG_POOL_GUID);
 
-	if (zcmd_write_conf_nvlist(hdl, &zc, config) != 0) {
-		zcmd_free_nvlists(&zc);
-		return (-1);
-	}
-	if (zcmd_alloc_dst_nvlist(hdl, &zc, zc.zc_nvlist_conf_size * 2) != 0) {
-		zcmd_free_nvlists(&zc);
-		return (-1);
-	}
+	zcmd_write_conf_nvlist(hdl, &zc, config);
+	zcmd_alloc_dst_nvlist(hdl, &zc, zc.zc_nvlist_conf_size * 2);
 
 	zc.zc_cookie = flags;
 	while ((ret = zfs_ioctl(hdl, ZFS_IOC_POOL_IMPORT, &zc)) != 0 &&
-	    errno == ENOMEM) {
-		if (zcmd_expand_dst_nvlist(hdl, &zc) != 0) {
-			zcmd_free_nvlists(&zc);
-			return (-1);
-		}
-	}
+	    errno == ENOMEM)
+		zcmd_expand_dst_nvlist(hdl, &zc);
 	if (ret != 0)
 		error = errno;
 
@@ -2136,7 +2111,7 @@ zpool_import_props(libzfs_handle_t *hdl, nvlist_t *config, const char *newname,
 		case EREMOTEIO:
 			if (nv != NULL && nvlist_lookup_nvlist(nv,
 			    ZPOOL_CONFIG_LOAD_INFO, &nvinfo) == 0) {
-				char *hostname = "<unknown>";
+				const char *hostname = "<unknown>";
 				uint64_t hostid = 0;
 				mmp_state_t mmp_state;
 
@@ -2542,11 +2517,11 @@ zpool_trim(zpool_handle_t *zhp, pool_trim_func_t cmd_type, nvlist_t *vds,
 				goto out;
 			}
 		} else {
-			char msg[1024];
+			char errbuf[ERRBUFLEN];
 
-			(void) snprintf(msg, sizeof (msg),
+			(void) snprintf(errbuf, sizeof (errbuf),
 			    dgettext(TEXT_DOMAIN, "operation failed"));
-			zpool_standard_error(zhp->zpool_hdl, err, msg);
+			zpool_standard_error(zhp->zpool_hdl, err, errbuf);
 			retval = -1;
 			goto out;
 		}
@@ -2571,7 +2546,7 @@ int
 zpool_scan(zpool_handle_t *zhp, pool_scan_func_t func, pool_scrub_cmd_t cmd)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	int err;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
@@ -2594,21 +2569,22 @@ zpool_scan(zpool_handle_t *zhp, pool_scan_func_t func, pool_scrub_cmd_t cmd)
 
 	if (func == POOL_SCAN_SCRUB) {
 		if (cmd == POOL_SCRUB_PAUSE) {
-			(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
-			    "cannot pause scrubbing %s"), zc.zc_name);
+			(void) snprintf(errbuf, sizeof (errbuf),
+			    dgettext(TEXT_DOMAIN, "cannot pause scrubbing %s"),
+			    zc.zc_name);
 		} else {
 			assert(cmd == POOL_SCRUB_NORMAL);
-			(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
-			    "cannot scrub %s"), zc.zc_name);
+			(void) snprintf(errbuf, sizeof (errbuf),
+			    dgettext(TEXT_DOMAIN, "cannot scrub %s"),
+			    zc.zc_name);
 		}
 	} else if (func == POOL_SCAN_RESILVER) {
 		assert(cmd == POOL_SCRUB_NORMAL);
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot restart resilver on %s"), zc.zc_name);
 	} else if (func == POOL_SCAN_NONE) {
-		(void) snprintf(msg, sizeof (msg),
-		    dgettext(TEXT_DOMAIN, "cannot cancel scrubbing %s"),
-		    zc.zc_name);
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
+		    "cannot cancel scrubbing %s"), zc.zc_name);
 	} else {
 		assert(!"unexpected result");
 	}
@@ -2625,18 +2601,19 @@ zpool_scan(zpool_handle_t *zhp, pool_scan_func_t func, pool_scrub_cmd_t cmd)
 		if (ps && ps->pss_func == POOL_SCAN_SCRUB &&
 		    ps->pss_state == DSS_SCANNING) {
 			if (cmd == POOL_SCRUB_PAUSE)
-				return (zfs_error(hdl, EZFS_SCRUB_PAUSED, msg));
+				return (zfs_error(hdl, EZFS_SCRUB_PAUSED,
+				    errbuf));
 			else
-				return (zfs_error(hdl, EZFS_SCRUBBING, msg));
+				return (zfs_error(hdl, EZFS_SCRUBBING, errbuf));
 		} else {
-			return (zfs_error(hdl, EZFS_RESILVERING, msg));
+			return (zfs_error(hdl, EZFS_RESILVERING, errbuf));
 		}
 	} else if (err == ENOENT) {
-		return (zfs_error(hdl, EZFS_NO_SCRUB, msg));
+		return (zfs_error(hdl, EZFS_NO_SCRUB, errbuf));
 	} else if (err == ENOTSUP && func == POOL_SCAN_RESILVER) {
-		return (zfs_error(hdl, EZFS_NO_RESILVER_DEFER, msg));
+		return (zfs_error(hdl, EZFS_NO_RESILVER_DEFER, errbuf));
 	} else {
-		return (zpool_standard_error(hdl, err, msg));
+		return (zpool_standard_error(hdl, err, errbuf));
 	}
 }
 
@@ -3113,28 +3090,28 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
     vdev_state_t *newstate)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache, islog;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
 	if (flags & ZFS_ONLINE_EXPAND) {
-		(void) snprintf(msg, sizeof (msg),
+		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot expand %s"), path);
 	} else {
-		(void) snprintf(msg, sizeof (msg),
+		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot online %s"), path);
 	}
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    &islog)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
 
 	if (avail_spare)
-		return (zfs_error(hdl, EZFS_ISSPARE, msg));
+		return (zfs_error(hdl, EZFS_ISSPARE, errbuf));
 
 #ifndef __FreeBSD__
 	char *pathname;
@@ -3152,7 +3129,7 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
 		if (l2cache) {
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "cannot expand cache devices"));
-			return (zfs_error(hdl, EZFS_VDEVNOTSUP, msg));
+			return (zfs_error(hdl, EZFS_VDEVNOTSUP, errbuf));
 		}
 
 		if (wholedisk) {
@@ -3165,12 +3142,12 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
 				    sizeof (buf));
 				if (error != 0)
 					return (zfs_error(hdl, EZFS_NODEVICE,
-					    msg));
+					    errbuf));
 
 				fullpath = buf;
 			}
 
-			error = zpool_relabel_disk(hdl, fullpath, msg);
+			error = zpool_relabel_disk(hdl, fullpath, errbuf);
 			if (error != 0)
 				return (error);
 		}
@@ -3185,9 +3162,9 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "was split "
 			    "from this pool into a new one.  Use '%s' "
 			    "instead"), "zpool detach");
-			return (zfs_error(hdl, EZFS_POSTSPLIT_ONLINE, msg));
+			return (zfs_error(hdl, EZFS_POSTSPLIT_ONLINE, errbuf));
 		}
-		return (zpool_standard_error(hdl, errno, msg));
+		return (zpool_standard_error(hdl, errno, errbuf));
 	}
 
 	*newstate = zc.zc_cookie;
@@ -3201,23 +3178,23 @@ int
 zpool_vdev_offline(zpool_handle_t *zhp, const char *path, boolean_t istmp)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot offline %s"), path);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    NULL)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
 
 	if (avail_spare)
-		return (zfs_error(hdl, EZFS_ISSPARE, msg));
+		return (zfs_error(hdl, EZFS_ISSPARE, errbuf));
 
 	zc.zc_cookie = VDEV_STATE_OFFLINE;
 	zc.zc_obj = istmp ? ZFS_OFFLINE_TEMPORARY : 0;
@@ -3231,16 +3208,16 @@ zpool_vdev_offline(zpool_handle_t *zhp, const char *path, boolean_t istmp)
 		/*
 		 * There are no other replicas of this device.
 		 */
-		return (zfs_error(hdl, EZFS_NOREPLICAS, msg));
+		return (zfs_error(hdl, EZFS_NOREPLICAS, errbuf));
 
 	case EEXIST:
 		/*
 		 * The log device has unplayed logs
 		 */
-		return (zfs_error(hdl, EZFS_UNPLAYED_LOGS, msg));
+		return (zfs_error(hdl, EZFS_UNPLAYED_LOGS, errbuf));
 
 	default:
-		return (zpool_standard_error(hdl, errno, msg));
+		return (zpool_standard_error(hdl, errno, errbuf));
 	}
 }
 
@@ -3251,10 +3228,10 @@ int
 zpool_vdev_fault(zpool_handle_t *zhp, uint64_t guid, vdev_aux_t aux)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot fault %llu"), (u_longlong_t)guid);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
@@ -3271,10 +3248,10 @@ zpool_vdev_fault(zpool_handle_t *zhp, uint64_t guid, vdev_aux_t aux)
 		/*
 		 * There are no other replicas of this device.
 		 */
-		return (zfs_error(hdl, EZFS_NOREPLICAS, msg));
+		return (zfs_error(hdl, EZFS_NOREPLICAS, errbuf));
 
 	default:
-		return (zpool_standard_error(hdl, errno, msg));
+		return (zpool_standard_error(hdl, errno, errbuf));
 	}
 
 }
@@ -3286,10 +3263,10 @@ int
 zpool_vdev_degrade(zpool_handle_t *zhp, uint64_t guid, vdev_aux_t aux)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot degrade %llu"), (u_longlong_t)guid);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
@@ -3300,7 +3277,7 @@ zpool_vdev_degrade(zpool_handle_t *zhp, uint64_t guid, vdev_aux_t aux)
 	if (zfs_ioctl(hdl, ZFS_IOC_VDEV_SET_STATE, &zc) == 0)
 		return (0);
 
-	return (zpool_standard_error(hdl, errno, msg));
+	return (zpool_standard_error(hdl, errno, errbuf));
 }
 
 /*
@@ -3338,7 +3315,7 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
     const char *new_disk, nvlist_t *nvroot, int replacing, boolean_t rebuild)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	int ret;
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache, islog;
@@ -3350,22 +3327,22 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
 	if (replacing)
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot replace %s with %s"), old_disk, new_disk);
 	else
-		(void) snprintf(msg, sizeof (msg), dgettext(TEXT_DOMAIN,
+		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "cannot attach %s to %s"), new_disk, old_disk);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, old_disk, &avail_spare, &l2cache,
 	    &islog)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	if (avail_spare)
-		return (zfs_error(hdl, EZFS_ISSPARE, msg));
+		return (zfs_error(hdl, EZFS_ISSPARE, errbuf));
 
 	if (l2cache)
-		return (zfs_error(hdl, EZFS_ISL2CACHE, msg));
+		return (zfs_error(hdl, EZFS_ISL2CACHE, errbuf));
 
 	zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
 	zc.zc_cookie = replacing;
@@ -3375,14 +3352,14 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 	    zfeature_lookup_guid("org.openzfs:device_rebuild", NULL) != 0) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "the loaded zfs module doesn't support device rebuilds"));
-		return (zfs_error(hdl, EZFS_POOL_NOTSUP, msg));
+		return (zfs_error(hdl, EZFS_POOL_NOTSUP, errbuf));
 	}
 
 	if (nvlist_lookup_nvlist_array(nvroot, ZPOOL_CONFIG_CHILDREN,
 	    &child, &children) != 0 || children != 1) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "new device must be a single disk"));
-		return (zfs_error(hdl, EZFS_INVALCONFIG, msg));
+		return (zfs_error(hdl, EZFS_INVALCONFIG, errbuf));
 	}
 
 	config_root = fnvlist_lookup_nvlist(zpool_get_config(zhp, NULL),
@@ -3403,13 +3380,12 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "can only be replaced by another hot spare"));
 		free(newname);
-		return (zfs_error(hdl, EZFS_BADTARGET, msg));
+		return (zfs_error(hdl, EZFS_BADTARGET, errbuf));
 	}
 
 	free(newname);
 
-	if (zcmd_write_conf_nvlist(hdl, &zc, nvroot) != 0)
-		return (-1);
+	zcmd_write_conf_nvlist(hdl, &zc, nvroot);
 
 	ret = zfs_ioctl(hdl, ZFS_IOC_VDEV_ATTACH, &zc);
 
@@ -3462,7 +3438,7 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 				    "disks"));
 			}
 		}
-		(void) zfs_error(hdl, EZFS_BADTARGET, msg);
+		(void) zfs_error(hdl, EZFS_BADTARGET, errbuf);
 		break;
 
 	case EINVAL:
@@ -3471,14 +3447,14 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 		 */
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "new device must be a single disk"));
-		(void) zfs_error(hdl, EZFS_INVALCONFIG, msg);
+		(void) zfs_error(hdl, EZFS_INVALCONFIG, errbuf);
 		break;
 
 	case EBUSY:
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "%s is busy, "
 		    "or device removal is in progress"),
 		    new_disk);
-		(void) zfs_error(hdl, EZFS_BADDEV, msg);
+		(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 		break;
 
 	case EOVERFLOW:
@@ -3487,7 +3463,7 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 		 */
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "device is too small"));
-		(void) zfs_error(hdl, EZFS_BADDEV, msg);
+		(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 		break;
 
 	case EDOM:
@@ -3497,18 +3473,18 @@ zpool_vdev_attach(zpool_handle_t *zhp, const char *old_disk,
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "new device has a different optimal sector size; use the "
 		    "option '-o ashift=N' to override the optimal size"));
-		(void) zfs_error(hdl, EZFS_BADDEV, msg);
+		(void) zfs_error(hdl, EZFS_BADDEV, errbuf);
 		break;
 
 	case ENAMETOOLONG:
 		/*
 		 * The resulting top-level vdev spec won't fit in the label.
 		 */
-		(void) zfs_error(hdl, EZFS_DEVOVERFLOW, msg);
+		(void) zfs_error(hdl, EZFS_DEVOVERFLOW, errbuf);
 		break;
 
 	default:
-		(void) zpool_standard_error(hdl, errno, msg);
+		(void) zpool_standard_error(hdl, errno, errbuf);
 	}
 
 	return (-1);
@@ -3521,24 +3497,24 @@ int
 zpool_vdev_detach(zpool_handle_t *zhp, const char *path)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot detach %s"), path);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    NULL)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	if (avail_spare)
-		return (zfs_error(hdl, EZFS_ISSPARE, msg));
+		return (zfs_error(hdl, EZFS_ISSPARE, errbuf));
 
 	if (l2cache)
-		return (zfs_error(hdl, EZFS_ISL2CACHE, msg));
+		return (zfs_error(hdl, EZFS_ISL2CACHE, errbuf));
 
 	zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
 
@@ -3553,18 +3529,18 @@ zpool_vdev_detach(zpool_handle_t *zhp, const char *path)
 		 */
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "only "
 		    "applicable to mirror and replacing vdevs"));
-		(void) zfs_error(hdl, EZFS_BADTARGET, msg);
+		(void) zfs_error(hdl, EZFS_BADTARGET, errbuf);
 		break;
 
 	case EBUSY:
 		/*
 		 * There are no other replicas of this device.
 		 */
-		(void) zfs_error(hdl, EZFS_NOREPLICAS, msg);
+		(void) zfs_error(hdl, EZFS_NOREPLICAS, errbuf);
 		break;
 
 	default:
-		(void) zpool_standard_error(hdl, errno, msg);
+		(void) zpool_standard_error(hdl, errno, errbuf);
 	}
 
 	return (-1);
@@ -3619,7 +3595,7 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
     nvlist_t *props, splitflags_t flags)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024], *bias;
+	char errbuf[ERRBUFLEN], *bias;
 	nvlist_t *tree, *config, **child, **newchild, *newconfig = NULL;
 	nvlist_t **varray = NULL, *zc_props = NULL;
 	uint_t c, children, newchildren, lastlog = 0, vcount, found = 0;
@@ -3628,11 +3604,11 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
 	boolean_t freelist = B_FALSE, memory_err = B_TRUE;
 	int retval = 0;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "Unable to split %s"), zhp->zpool_name);
 
 	if (!zpool_name_valid(hdl, B_FALSE, newname))
-		return (zfs_error(hdl, EZFS_INVALIDNAME, msg));
+		return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 
 	if ((config = zpool_get_config(zhp, NULL)) == NULL) {
 		(void) fprintf(stderr, gettext("Internal error: unable to "
@@ -3646,7 +3622,7 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
 	if (props) {
 		prop_flags_t flags = { .create = B_FALSE, .import = B_TRUE };
 		if ((zc_props = zpool_valid_proplist(hdl, zhp->zpool_name,
-		    props, vers, flags, msg)) == NULL)
+		    props, vers, flags, errbuf)) == NULL)
 			return (-1);
 		(void) nvlist_lookup_uint64(zc_props,
 		    zpool_prop_to_name(ZPOOL_PROP_READONLY), &readonly);
@@ -3718,7 +3694,7 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
 		} else if (strcmp(type, VDEV_TYPE_MIRROR) != 0) {
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "Source pool must be composed only of mirrors\n"));
-			retval = zfs_error(hdl, EZFS_INVALCONFIG, msg);
+			retval = zfs_error(hdl, EZFS_INVALCONFIG, errbuf);
 			goto out;
 		}
 
@@ -3766,7 +3742,7 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
 	if (found != newchildren) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "Device list must "
 		    "include at most one disk from each mirror"));
-		retval = zfs_error(hdl, EZFS_INVALCONFIG, msg);
+		retval = zfs_error(hdl, EZFS_INVALCONFIG, errbuf);
 		goto out;
 	}
 
@@ -3815,13 +3791,12 @@ zpool_vdev_split(zpool_handle_t *zhp, char *newname, nvlist_t **newroot,
 		zc.zc_cookie = ZPOOL_EXPORT_AFTER_SPLIT;
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	(void) strlcpy(zc.zc_string, newname, sizeof (zc.zc_string));
-	if (zcmd_write_conf_nvlist(hdl, &zc, newconfig) != 0)
-		goto out;
-	if (zc_props != NULL && zcmd_write_src_nvlist(hdl, &zc, zc_props) != 0)
-		goto out;
+	zcmd_write_conf_nvlist(hdl, &zc, newconfig);
+	if (zc_props != NULL)
+		zcmd_write_src_nvlist(hdl, &zc, zc_props);
 
 	if (zfs_ioctl(hdl, ZFS_IOC_VDEV_SPLIT, &zc) != 0) {
-		retval = zpool_standard_error(hdl, errno, msg);
+		retval = zpool_standard_error(hdl, errno, errbuf);
 		goto out;
 	}
 
@@ -3860,31 +3835,31 @@ int
 zpool_vdev_remove(zpool_handle_t *zhp, const char *path)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache, islog;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 	uint64_t version;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot remove %s"), path);
 
 	if (zpool_is_draid_spare(path)) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "dRAID spares cannot be removed"));
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 	}
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    &islog)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	version = zpool_get_prop_int(zhp, ZPOOL_PROP_VERSION, NULL);
 	if (islog && version < SPA_VERSION_HOLES) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "pool must be upgraded to support log removal"));
-		return (zfs_error(hdl, EZFS_BADVERSION, msg));
+		return (zfs_error(hdl, EZFS_BADVERSION, errbuf));
 	}
 
 	zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
@@ -3898,7 +3873,7 @@ zpool_vdev_remove(zpool_handle_t *zhp, const char *path)
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "invalid config; all top-level vdevs must "
 		    "have the same sector size and not be raidz."));
-		(void) zfs_error(hdl, EZFS_INVALCONFIG, msg);
+		(void) zfs_error(hdl, EZFS_INVALCONFIG, errbuf);
 		break;
 
 	case EBUSY:
@@ -3909,21 +3884,21 @@ zpool_vdev_remove(zpool_handle_t *zhp, const char *path)
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "Pool busy; removal may already be in progress"));
 		}
-		(void) zfs_error(hdl, EZFS_BUSY, msg);
+		(void) zfs_error(hdl, EZFS_BUSY, errbuf);
 		break;
 
 	case EACCES:
 		if (islog) {
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "Mount encrypted datasets to replay logs."));
-			(void) zfs_error(hdl, EZFS_BUSY, msg);
+			(void) zfs_error(hdl, EZFS_BUSY, errbuf);
 		} else {
-			(void) zpool_standard_error(hdl, errno, msg);
+			(void) zpool_standard_error(hdl, errno, errbuf);
 		}
 		break;
 
 	default:
-		(void) zpool_standard_error(hdl, errno, msg);
+		(void) zpool_standard_error(hdl, errno, errbuf);
 	}
 	return (-1);
 }
@@ -3932,10 +3907,10 @@ int
 zpool_vdev_remove_cancel(zpool_handle_t *zhp)
 {
 	zfs_cmd_t zc = {{0}};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot cancel removal"));
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
@@ -3944,25 +3919,25 @@ zpool_vdev_remove_cancel(zpool_handle_t *zhp)
 	if (zfs_ioctl(hdl, ZFS_IOC_VDEV_REMOVE, &zc) == 0)
 		return (0);
 
-	return (zpool_standard_error(hdl, errno, msg));
+	return (zpool_standard_error(hdl, errno, errbuf));
 }
 
 int
 zpool_vdev_indirect_size(zpool_handle_t *zhp, const char *path,
     uint64_t *sizep)
 {
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache, islog;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot determine indirect size of %s"),
 	    path);
 
 	if ((tgt = zpool_find_vdev(zhp, path, &avail_spare, &l2cache,
 	    &islog)) == NULL)
-		return (zfs_error(hdl, EZFS_NODEVICE, msg));
+		return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 	if (avail_spare || l2cache || islog) {
 		*sizep = 0;
@@ -3972,7 +3947,7 @@ zpool_vdev_indirect_size(zpool_handle_t *zhp, const char *path,
 	if (nvlist_lookup_uint64(tgt, ZPOOL_CONFIG_INDIRECT_SIZE, sizep) != 0) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "indirect size not available"));
-		return (zfs_error(hdl, EINVAL, msg));
+		return (zfs_error(hdl, EINVAL, errbuf));
 	}
 	return (0);
 }
@@ -3984,7 +3959,7 @@ int
 zpool_clear(zpool_handle_t *zhp, const char *path, nvlist_t *rewindnvl)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *tgt;
 	zpool_load_policy_t policy;
 	boolean_t avail_spare, l2cache;
@@ -3993,11 +3968,11 @@ zpool_clear(zpool_handle_t *zhp, const char *path, nvlist_t *rewindnvl)
 	int error;
 
 	if (path)
-		(void) snprintf(msg, sizeof (msg),
+		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot clear errors for %s"),
 		    path);
 	else
-		(void) snprintf(msg, sizeof (msg),
+		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot clear errors for %s"),
 		    zhp->zpool_name);
 
@@ -4005,14 +3980,14 @@ zpool_clear(zpool_handle_t *zhp, const char *path, nvlist_t *rewindnvl)
 	if (path) {
 		if ((tgt = zpool_find_vdev(zhp, path, &avail_spare,
 		    &l2cache, NULL)) == NULL)
-			return (zfs_error(hdl, EZFS_NODEVICE, msg));
+			return (zfs_error(hdl, EZFS_NODEVICE, errbuf));
 
 		/*
 		 * Don't allow error clearing for hot spares.  Do allow
 		 * error clearing for l2cache devices.
 		 */
 		if (avail_spare)
-			return (zfs_error(hdl, EZFS_ISSPARE, msg));
+			return (zfs_error(hdl, EZFS_ISSPARE, errbuf));
 
 		zc.zc_guid = fnvlist_lookup_uint64(tgt, ZPOOL_CONFIG_GUID);
 	}
@@ -4020,19 +3995,12 @@ zpool_clear(zpool_handle_t *zhp, const char *path, nvlist_t *rewindnvl)
 	zpool_get_load_policy(rewindnvl, &policy);
 	zc.zc_cookie = policy.zlp_rewind;
 
-	if (zcmd_alloc_dst_nvlist(hdl, &zc, zhp->zpool_config_size * 2) != 0)
-		return (-1);
-
-	if (zcmd_write_src_nvlist(hdl, &zc, rewindnvl) != 0)
-		return (-1);
+	zcmd_alloc_dst_nvlist(hdl, &zc, zhp->zpool_config_size * 2);
+	zcmd_write_src_nvlist(hdl, &zc, rewindnvl);
 
 	while ((error = zfs_ioctl(hdl, ZFS_IOC_CLEAR, &zc)) != 0 &&
-	    errno == ENOMEM) {
-		if (zcmd_expand_dst_nvlist(hdl, &zc) != 0) {
-			zcmd_free_nvlists(&zc);
-			return (-1);
-		}
-	}
+	    errno == ENOMEM)
+		zcmd_expand_dst_nvlist(hdl, &zc);
 
 	if (!error || ((policy.zlp_rewind & ZPOOL_TRY_REWIND) &&
 	    errno != EPERM && errno != EACCES)) {
@@ -4049,7 +4017,7 @@ zpool_clear(zpool_handle_t *zhp, const char *path, nvlist_t *rewindnvl)
 	}
 
 	zcmd_free_nvlists(&zc);
-	return (zpool_standard_error(hdl, errno, msg));
+	return (zpool_standard_error(hdl, errno, errbuf));
 }
 
 /*
@@ -4059,10 +4027,10 @@ int
 zpool_vdev_clear(zpool_handle_t *zhp, uint64_t guid)
 {
 	zfs_cmd_t zc = {"\0"};
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot clear errors for %llx"),
 	    (u_longlong_t)guid);
 
@@ -4073,7 +4041,7 @@ zpool_vdev_clear(zpool_handle_t *zhp, uint64_t guid)
 	if (zfs_ioctl(hdl, ZFS_IOC_CLEAR, &zc) == 0)
 		return (0);
 
-	return (zpool_standard_error(hdl, errno, msg));
+	return (zpool_standard_error(hdl, errno, errbuf));
 }
 
 /*
@@ -4082,18 +4050,18 @@ zpool_vdev_clear(zpool_handle_t *zhp, uint64_t guid)
 int
 zpool_reguid(zpool_handle_t *zhp)
 {
-	char msg[1024];
+	char errbuf[ERRBUFLEN];
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
 	zfs_cmd_t zc = {"\0"};
 
-	(void) snprintf(msg, sizeof (msg),
+	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot reguid '%s'"), zhp->zpool_name);
 
 	(void) strlcpy(zc.zc_name, zhp->zpool_name, sizeof (zc.zc_name));
 	if (zfs_ioctl(hdl, ZFS_IOC_POOL_REGUID, &zc) == 0)
 		return (0);
 
-	return (zpool_standard_error(hdl, errno, msg));
+	return (zpool_standard_error(hdl, errno, errbuf));
 }
 
 /*
@@ -4158,10 +4126,11 @@ char *
 zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
     int name_flags)
 {
-	char *path, *type, *env;
+	char *type, *tpath;
+	const char *path;
 	uint64_t value;
 	char buf[PATH_BUF_LEN];
-	char tmpbuf[PATH_BUF_LEN];
+	char tmpbuf[PATH_BUF_LEN * 2];
 
 	/*
 	 * vdev_name will be "root"/"root-0" for the root vdev, but it is the
@@ -4171,19 +4140,11 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 	if (zhp != NULL && strcmp(type, "root") == 0)
 		return (zfs_strdup(hdl, zpool_get_name(zhp)));
 
-	env = getenv("ZPOOL_VDEV_NAME_PATH");
-	if (env && (strtoul(env, NULL, 0) > 0 ||
-	    !strncasecmp(env, "YES", 3) || !strncasecmp(env, "ON", 2)))
+	if (libzfs_envvar_is_set("ZPOOL_VDEV_NAME_PATH"))
 		name_flags |= VDEV_NAME_PATH;
-
-	env = getenv("ZPOOL_VDEV_NAME_GUID");
-	if (env && (strtoul(env, NULL, 0) > 0 ||
-	    !strncasecmp(env, "YES", 3) || !strncasecmp(env, "ON", 2)))
+	if (libzfs_envvar_is_set("ZPOOL_VDEV_NAME_GUID"))
 		name_flags |= VDEV_NAME_GUID;
-
-	env = getenv("ZPOOL_VDEV_NAME_FOLLOW_LINKS");
-	if (env && (strtoul(env, NULL, 0) > 0 ||
-	    !strncasecmp(env, "YES", 3) || !strncasecmp(env, "ON", 2)))
+	if (libzfs_envvar_is_set("ZPOOL_VDEV_NAME_FOLLOW_LINKS"))
 		name_flags |= VDEV_NAME_FOLLOW_LINKS;
 
 	if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_NOT_PRESENT, &value) == 0 ||
@@ -4191,7 +4152,9 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 		(void) nvlist_lookup_uint64(nv, ZPOOL_CONFIG_GUID, &value);
 		(void) snprintf(buf, sizeof (buf), "%llu", (u_longlong_t)value);
 		path = buf;
-	} else if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &path) == 0) {
+	} else if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &tpath) == 0) {
+		path = tpath;
+
 		if (name_flags & VDEV_NAME_FOLLOW_LINKS) {
 			char *rp = realpath(path, NULL);
 			if (rp) {
@@ -4408,13 +4371,11 @@ zpool_log_history(libzfs_handle_t *hdl, const char *message)
 {
 	zfs_cmd_t zc = {"\0"};
 	nvlist_t *args;
-	int err;
 
 	args = fnvlist_alloc();
 	fnvlist_add_string(args, "message", message);
-	err = zcmd_write_src_nvlist(hdl, &zc, args);
-	if (err == 0)
-		err = zfs_ioctl(hdl, ZFS_IOC_LOG_HISTORY, &zc);
+	zcmd_write_src_nvlist(hdl, &zc, args);
+	int err = zfs_ioctl(hdl, ZFS_IOC_LOG_HISTORY, &zc);
 	nvlist_free(args);
 	zcmd_free_nvlists(&zc);
 	return (err);
@@ -4476,17 +4437,17 @@ int
 zpool_get_history(zpool_handle_t *zhp, nvlist_t **nvhisp, uint64_t *off,
     boolean_t *eof)
 {
+	libzfs_handle_t *hdl = zhp->zpool_hdl;
 	char *buf;
 	int buflen = 128 * 1024;
 	nvlist_t **records = NULL;
 	uint_t numrecords = 0;
-	int err, i;
+	int err = 0, i;
 	uint64_t start = *off;
 
-	buf = malloc(buflen);
-	if (buf == NULL)
-		return (ENOMEM);
-	/* process about 1MB a time */
+	buf = zfs_alloc(hdl, buflen);
+
+	/* process about 1MiB a time */
 	while (*off - start < 1024 * 1024) {
 		uint64_t bytes_read = buflen;
 		uint64_t leftover;
@@ -4501,8 +4462,12 @@ zpool_get_history(zpool_handle_t *zhp, nvlist_t **nvhisp, uint64_t *off,
 		}
 
 		if ((err = zpool_history_unpack(buf, bytes_read,
-		    &leftover, &records, &numrecords)) != 0)
+		    &leftover, &records, &numrecords)) != 0) {
+			zpool_standard_error_fmt(hdl, err,
+			    dgettext(TEXT_DOMAIN,
+			    "cannot get history for '%s'"), zhp->zpool_name);
 			break;
+		}
 		*off -= leftover;
 		if (leftover == bytes_read) {
 			/*
@@ -4511,9 +4476,7 @@ zpool_get_history(zpool_handle_t *zhp, nvlist_t **nvhisp, uint64_t *off,
 			 */
 			buflen *= 2;
 			free(buf);
-			buf = malloc(buflen);
-			if (buf == NULL)
-				return (ENOMEM);
+			buf = zfs_alloc(hdl, buflen);
 		}
 	}
 
@@ -4556,8 +4519,7 @@ zpool_events_next(libzfs_handle_t *hdl, nvlist_t **nvp,
 	if (flags & ZEVENT_NONBLOCK)
 		zc.zc_guid = ZEVENT_NONBLOCK;
 
-	if (zcmd_alloc_dst_nvlist(hdl, &zc, ZEVENT_SIZE) != 0)
-		return (-1);
+	zcmd_alloc_dst_nvlist(hdl, &zc, ZEVENT_SIZE);
 
 retry:
 	if (zfs_ioctl(hdl, ZFS_IOC_EVENTS_NEXT, &zc) != 0) {
@@ -4574,13 +4536,8 @@ retry:
 
 			goto out;
 		case ENOMEM:
-			if (zcmd_expand_dst_nvlist(hdl, &zc) != 0) {
-				error = zfs_error_fmt(hdl, EZFS_NOMEM,
-				    dgettext(TEXT_DOMAIN, "cannot get event"));
-				goto out;
-			} else {
-				goto retry;
-			}
+			zcmd_expand_dst_nvlist(hdl, &zc);
+			goto retry;
 		default:
 			error = zpool_standard_error_fmt(hdl, errno,
 			    dgettext(TEXT_DOMAIN, "cannot get event"));
@@ -5044,7 +5001,7 @@ zpool_vdev_guid(zpool_handle_t *zhp, const char *vdevname, uint64_t *vdev_guid)
 
 	verify(zhp != NULL);
 	if (zpool_get_state(zhp) == POOL_STATE_UNAVAIL) {
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "pool is in an unavailable state"));
 		return (zfs_error(zhp->zpool_hdl, EZFS_POOLUNAVAIL, errbuf));
@@ -5052,7 +5009,7 @@ zpool_vdev_guid(zpool_handle_t *zhp, const char *vdevname, uint64_t *vdev_guid)
 
 	if ((tgt = zpool_find_vdev(zhp, vdevname, &avail_spare, &l2cache,
 	    NULL)) == NULL) {
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "can not find %s in %s"),
 		    vdevname, zhp->zpool_name);
@@ -5072,11 +5029,11 @@ zpool_get_vdev_prop_value(nvlist_t *nvprop, vdev_prop_t prop, char *prop_name,
     char *buf, size_t len, zprop_source_t *srctype, boolean_t literal)
 {
 	nvlist_t *nv;
-	char *strval;
+	const char *strval;
 	uint64_t intval;
 	zprop_source_t src = ZPROP_SRC_NONE;
 
-	if (prop == VDEV_PROP_USER) {
+	if (prop == VDEV_PROP_USERPROP) {
 		/* user property, prop_name must contain the property name */
 		assert(prop_name != NULL);
 		if (nvlist_lookup_nvlist(nvprop, prop_name, &nv) == 0) {
@@ -5102,8 +5059,7 @@ zpool_get_vdev_prop_value(nvlist_t *nvprop, vdev_prop_t prop, char *prop_name,
 			strval = fnvlist_lookup_string(nv, ZPROP_VALUE);
 		} else {
 			src = ZPROP_SRC_DEFAULT;
-			if ((strval = (char *)vdev_prop_default_string(prop))
-			    == NULL)
+			if ((strval = vdev_prop_default_string(prop)) == NULL)
 				strval = "-";
 		}
 		(void) strlcpy(buf, strval, len);
@@ -5225,7 +5181,7 @@ zpool_get_vdev_prop(zpool_handle_t *zhp, const char *vdevname, vdev_prop_t prop,
 {
 	nvlist_t *reqnvl, *reqprops;
 	nvlist_t *retprops = NULL;
-	uint64_t vdev_guid;
+	uint64_t vdev_guid = 0;
 	int ret;
 
 	if ((ret = zpool_vdev_guid(zhp, vdevname, &vdev_guid)) != 0)
@@ -5238,7 +5194,7 @@ zpool_get_vdev_prop(zpool_handle_t *zhp, const char *vdevname, vdev_prop_t prop,
 
 	fnvlist_add_uint64(reqnvl, ZPOOL_VDEV_PROPS_GET_VDEV, vdev_guid);
 
-	if (prop != VDEV_PROP_USER) {
+	if (prop != VDEV_PROP_USERPROP) {
 		/* prop_name overrides prop value */
 		if (prop_name != NULL)
 			prop = vdev_name_to_prop(prop_name);
@@ -5262,7 +5218,7 @@ zpool_get_vdev_prop(zpool_handle_t *zhp, const char *vdevname, vdev_prop_t prop,
 		ret = zpool_get_vdev_prop_value(retprops, prop, prop_name, buf,
 		    len, srctype, literal);
 	} else {
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot get vdev property %s from"
 		    " %s in %s"), prop_name, vdevname, zhp->zpool_name);
@@ -5284,7 +5240,7 @@ zpool_get_all_vdev_props(zpool_handle_t *zhp, const char *vdevname,
     nvlist_t **outnvl)
 {
 	nvlist_t *nvl = NULL;
-	uint64_t vdev_guid;
+	uint64_t vdev_guid = 0;
 	int ret;
 
 	if ((ret = zpool_vdev_guid(zhp, vdevname, &vdev_guid)) != 0)
@@ -5300,7 +5256,7 @@ zpool_get_all_vdev_props(zpool_handle_t *zhp, const char *vdevname,
 	nvlist_free(nvl);
 
 	if (ret) {
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		(void) snprintf(errbuf, sizeof (errbuf),
 		    dgettext(TEXT_DOMAIN, "cannot get vdev properties for"
 		    " %s in %s"), vdevname, zhp->zpool_name);
@@ -5341,7 +5297,7 @@ zpool_set_vdev_prop(zpool_handle_t *zhp, const char *vdevname,
 		return (no_memory(zhp->zpool_hdl));
 	}
 
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	(void) snprintf(errbuf, sizeof (errbuf),
 	    dgettext(TEXT_DOMAIN, "cannot set property %s for %s on %s"),
 	    propname, vdevname, zhp->zpool_name);

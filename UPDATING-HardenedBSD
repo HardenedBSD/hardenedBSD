@@ -1,3 +1,22 @@
+[20220610] Introduce Trusted Path Execution (TPE)
+
+	TPE limits the scope of what files can be executed. By default, TPE is
+	left disabled, but can be enabled via the `hardening.pax.tpe.status`
+	sysctl tunable.
+	
+	When enabled, TPE will check the to-be-executed file's parent directory
+	to determine whether the directory is owned by the caller and is
+	writable to users/groups other than the owner.
+	
+	The above logic is only run when:
+	
+	1. The hardening.pax.tpe.all sysctl tunable is non-zero;
+	2. The user's primary group is the group specified in the
+	   hardening.pax.tpe.gid group;
+	3. When the hardening.pax.tpe.negate sysctl tunable is non-zero, the
+	   user's primary group is *NOT* the group specified in the
+	   hardening.pax.tpe.gid group.
+
 [20220406] Introduce insecure kernel module hardening
 __HardenedBSD_version = 1400002
 

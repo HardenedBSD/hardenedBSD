@@ -48,7 +48,7 @@
  * Programmable PMCs.
  */
 struct pmc_md_iap_op_pmcallocate {
-	uint32_t	pm_iap_config;
+	uint64_t	pm_iap_config;
 	uint64_t	pm_iap_rsp;
 };
 
@@ -75,9 +75,8 @@ struct pmc_md_iap_op_pmcallocate {
  * Fixed-function counters.
  */
 
-#define	IAF_MASK				0xF
+#define	IAF_MASK				0x000000010000000f
 
-#define	IAF_COUNTER_MASK			0x0000ffffffffffff
 #define	IAF_CTR0				0x309
 #define	IAF_CTR1				0x30A
 #define	IAF_CTR2				0x30B
@@ -86,21 +85,30 @@ struct pmc_md_iap_op_pmcallocate {
  * The IAF_CTRL MSR is laid out in the following way.
  *
  * Bit Position    Use
- * 63 - 12         Reserved (do not touch)
+ * 63 - 45         Reserved (do not touch)
+ * 44              Ctr 3 Adaptive Record (v5)
+ * 43 - 41         Reserved (do not touch)
+ * 40              Ctr 2 Adaptive Record (v5)
+ * 39 - 37         Reserved (do not touch)
+ * 36              Ctr 1 Adaptive Record (v5)
+ * 35 - 33         Reserved (do not touch)
+ * 32              Ctr 0 Adaptive Record (v5)
+ * 15              Ctr 3 PMI
+ * 14              Ctr 3 Any Thread (v3)
+ * 13-12           Ctr 3 Enable
  * 11              Ctr 2 PMI
- * 10              Reserved (do not touch)
+ * 10              Ctr 2 Any Thread (v3)
  * 9-8             Ctr 2 Enable
  * 7               Ctr 1 PMI
- * 6               Reserved (do not touch)
+ * 6               Ctr 1 Any Thread (v3)
  * 5-4             Ctr 1 Enable
  * 3               Ctr 0 PMI
- * 2               Reserved (do not touch)
+ * 2               Ctr 0 Any Thread (v3)
  * 1-0             Ctr 0 Enable (3: All Levels, 2: User, 1: OS, 0: Disable)
  */
 
 #define	IAF_OFFSET				32
 #define	IAF_CTRL				0x38D
-#define	IAF_CTRL_MASK				0x0000000000000bbb
 
 /*
  * Programmable counters.
@@ -113,11 +121,14 @@ struct pmc_md_iap_op_pmcallocate {
  * IAP_EVSEL(n) is laid out in the following way.
  *
  * Bit Position    Use
- * 63-31           Reserved (do not touch)
+ * 63-35           Reserved (do not touch)
+ * 34              Adaptive Record (v5)
+ * 33              IN_TX (v3)
+ * 32              IN_TXCP (v3)
  * 31-24           Counter Mask
  * 23              Invert
  * 22              Enable
- * 21              Reserved (do not touch)
+ * 21              Any Thread (v3)
  * 20              APIC Interrupt Enable
  * 19              Pin Control
  * 18              Edge Detect
@@ -127,7 +138,6 @@ struct pmc_md_iap_op_pmcallocate {
  * 7-0             Event Select
  */
 
-#define	IAP_EVSEL_MASK				0x00000000ffdfffff
 #define	IAP_EVSEL0				0x186
 
 /*
@@ -142,26 +152,29 @@ struct pmc_md_iap_op_pmcallocate {
  * IA_GLOBAL_CTRL is laid out in the following way.
  * 
  * Bit Position    Use
- * 63-35           Reserved (do not touch)
+ * 63-49           Reserved (do not touch)
+ * 48              Perf Metrics Enable (v5)
+ * 47-36           Reserved (do not touch)
+ * 35              IAF Counter 3 Enable
  * 34              IAF Counter 2 Enable
  * 33              IAF Counter 1 Enable
  * 32              IAF Counter 0 Enable
  * 31-0            Depends on programmable counters
  */
 
-/* The mask is only for the fixed porttion of the register. */
-#define	IAF_GLOBAL_CTRL_MASK			0x0000000700000000
-
-/* The mask is only for the programmable porttion of the register. */
-#define IAP_GLOBAL_CTRL_MASK			0x00000000ffffffff
-
-/* The mask is for both the fixed and programmable porttions of the register. */
-#define IA_GLOBAL_CTRL_MASK			0x00000007ffffffff
-
 #define	IA_GLOBAL_OVF_CTRL			0x390
+#define	IA_GLOBAL_STATUS_RESET			0x390
+#define	IA_GLOBAL_STATUS_SET			0x391		/* v4 */
 
 #define	IA_GLOBAL_STATUS_FLAG_CONDCHG		(1ULL << 63)
 #define	IA_GLOBAL_STATUS_FLAG_OVFBUF		(1ULL << 62)
+#define	IA_GLOBAL_STATUS_FLAG_OVFUNCORE		(1ULL << 61)	/* v3 */
+#define	IA_GLOBAL_STATUS_FLAG_ASCI		(1ULL << 60)	/* v4 */
+#define	IA_GLOBAL_STATUS_FLAG_CTR_FRZ		(1ULL << 59)	/* v4 */
+#define	IA_GLOBAL_STATUS_FLAG_LBP_FRZ		(1ULL << 58)	/* v4 */
+#define	IA_GLOBAL_STATUS_FLAG_TRACETOPAPMI	(1ULL << 55)	/* v4 */
+
+#define	IA_GLOBAL_INUSE				0x392		/* v4 */
 
 /*
  * Offcore response configuration.
@@ -174,7 +187,7 @@ struct pmc_md_iaf_pmc {
 };
 
 struct pmc_md_iap_pmc {
-	uint32_t	pm_iap_evsel;
+	uint64_t	pm_iap_evsel;
 	uint64_t	pm_iap_rsp;
 };
 

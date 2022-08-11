@@ -10,15 +10,15 @@ sinclude(dnscrypt/dnscrypt.m4)
 
 # must be numbers. ac_defun because of later processing
 m4_define([VERSION_MAJOR],[1])
-m4_define([VERSION_MINOR],[15])
-m4_define([VERSION_MICRO],[0])
+m4_define([VERSION_MINOR],[16])
+m4_define([VERSION_MICRO],[2])
 AC_INIT([unbound],m4_defn([VERSION_MAJOR]).m4_defn([VERSION_MINOR]).m4_defn([VERSION_MICRO]),[unbound-bugs@nlnetlabs.nl or https://github.com/NLnetLabs/unbound/issues],[unbound])
 AC_SUBST(UNBOUND_VERSION_MAJOR, [VERSION_MAJOR])
 AC_SUBST(UNBOUND_VERSION_MINOR, [VERSION_MINOR])
 AC_SUBST(UNBOUND_VERSION_MICRO, [VERSION_MICRO])
 
 LIBUNBOUND_CURRENT=9
-LIBUNBOUND_REVISION=15
+LIBUNBOUND_REVISION=18
 LIBUNBOUND_AGE=1
 # 1.0.0 had 0:12:0
 # 1.0.1 had 0:13:0
@@ -101,6 +101,9 @@ LIBUNBOUND_AGE=1
 # 1.13.2 had 9:13:1
 # 1.14.0 had 9:14:1
 # 1.15.0 had 9:15:1
+# 1.16.0 had 9:16:1
+# 1.16.1 had 9:17:1
+# 1.16.2 had 9:18:1
 
 #   Current  -- the number of the binary API that we're implementing
 #   Revision -- which iteration of the implementation of the binary
@@ -905,7 +908,7 @@ else
 	AC_MSG_RESULT([no])
 fi
 AC_CHECK_HEADERS([openssl/conf.h openssl/engine.h openssl/bn.h openssl/dh.h openssl/dsa.h openssl/rsa.h openssl/core_names.h openssl/param_build.h],,, [AC_INCLUDES_DEFAULT])
-AC_CHECK_FUNCS([OPENSSL_config EVP_sha1 EVP_sha256 EVP_sha512 FIPS_mode EVP_MD_CTX_new OpenSSL_add_all_digests OPENSSL_init_crypto EVP_cleanup ENGINE_cleanup ERR_load_crypto_strings CRYPTO_cleanup_all_ex_data ERR_free_strings RAND_cleanup DSA_SIG_set0 EVP_dss1 EVP_DigestVerify EVP_aes_256_cbc EVP_EncryptInit_ex HMAC_Init_ex CRYPTO_THREADID_set_callback EVP_MAC_CTX_set_params OSSL_PARAM_BLD_new BIO_set_callback_ex])
+AC_CHECK_FUNCS([OPENSSL_config EVP_sha1 EVP_sha256 EVP_sha512 FIPS_mode EVP_default_properties_is_fips_enabled EVP_MD_CTX_new OpenSSL_add_all_digests OPENSSL_init_crypto EVP_cleanup ENGINE_cleanup ERR_load_crypto_strings CRYPTO_cleanup_all_ex_data ERR_free_strings RAND_cleanup DSA_SIG_set0 EVP_dss1 EVP_DigestVerify EVP_aes_256_cbc EVP_EncryptInit_ex HMAC_Init_ex CRYPTO_THREADID_set_callback EVP_MAC_CTX_set_params OSSL_PARAM_BLD_new BIO_set_callback_ex])
 
 # these check_funcs need -lssl
 BAKLIBS="$LIBS"
@@ -1498,7 +1501,7 @@ if test x_$enable_static_exe = x_yes; then
 		else
 			LIBS="$LIBS -lgdi32"
 		fi
-		LIBS="$LIBS -lz"
+		AC_CHECK_LIB([z], [compress], [ LIBS="$LIBS -lz" ])
 		LIBS="$LIBS -l:libssp.a"
 	fi
 fi
@@ -1515,7 +1518,7 @@ if test x_$enable_fully_static = x_yes; then
 		else
 			LIBS="$LIBS -lgdi32"
 		fi
-		LIBS="$LIBS -lz"
+		AC_CHECK_LIB([z], [compress], [ LIBS="$LIBS -lz" ])
 		LIBS="$LIBS -l:libssp.a"
 	fi
 fi
@@ -1553,6 +1556,7 @@ if test "$USE_WINSOCK" = 1; then
 	AC_SUBST(WIN_CONTROL_OBJ_LINK)
 	WIN_CHECKCONF_OBJ_LINK="rsrc_unbound_checkconf.o"
 	AC_SUBST(WIN_CHECKCONF_OBJ_LINK)
+	AC_DEFINE(__USE_MINGW_ANSI_STDIO, 1, [defined to use gcc ansi snprintf and sscanf that understands %lld when compiled for windows.])
 fi
 if test $ac_cv_func_getaddrinfo = no; then
 	AC_LIBOBJ([fake-rfc2553])
@@ -1878,11 +1882,17 @@ case "$enable_ipset" in
 			withval="/usr/local /opt/local /usr/lib /usr/pkg /usr/sfw /usr"
 		fi
 		for dir in $withval ; do
-			if test -f "$dir/include/libmnl/libmnl.h"; then
+			if test -f "$dir/include/libmnl/libmnl.h" -o -f "$dir/include/libmnl/libmnl/libmnl.h"; then
 				found_libmnl="yes"
 				dnl assume /usr is in default path.
+				extralibmnl=""
+				if test -f "$dir/include/libmnl/libmnl/libmnl.h"; then
+					extralibmnl="/libmnl"
+				fi
+				if test "$dir" != "/usr" -o -n "$extralibmnl"; then
+					CPPFLAGS="$CPPFLAGS -I$dir/include$extralibmnl"
+				fi
 				if test "$dir" != "/usr"; then
-					CPPFLAGS="$CPPFLAGS -I$dir/include"
 					LDFLAGS="$LDFLAGS -L$dir/lib"
 				fi
 				AC_MSG_RESULT(found in $dir)
@@ -2060,7 +2070,7 @@ dnl includes
 #include <ws2tcpip.h>
 #endif
 
-#ifndef USE_WINSOCK
+#if !defined(USE_WINSOCK) || !defined(HAVE_SNPRINTF) || defined(SNPRINTF_RET_BROKEN) || defined(__USE_MINGW_ANSI_STDIO)
 #define ARG_LL "%ll"
 #else
 #define ARG_LL "%I64"

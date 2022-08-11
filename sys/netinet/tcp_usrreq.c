@@ -172,11 +172,9 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 	KASSERT(inp == NULL, ("tcp_usr_attach: inp != NULL"));
 	TCPDEBUG1();
 
-	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
-		error = soreserve(so, V_tcp_sendspace, V_tcp_recvspace);
-		if (error)
-			goto out;
-	}
+	error = soreserve(so, V_tcp_sendspace, V_tcp_recvspace);
+	if (error)
+		goto out;
 
 	so->so_rcv.sb_flags |= SB_AUTOSIZE;
 	so->so_snd.sb_flags |= SB_AUTOSIZE;
@@ -184,16 +182,6 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 	if (error)
 		goto out;
 	inp = sotoinpcb(so);
-#ifdef INET6
-	if (inp->inp_vflag & INP_IPV6PROTO) {
-		inp->inp_vflag |= INP_IPV6;
-		if ((inp->inp_flags & IN6P_IPV6_V6ONLY) == 0)
-			inp->inp_vflag |= INP_IPV4;
-		inp->in6p_hops = -1;	/* use kernel default */
-	}
-	else
-#endif
-		inp->inp_vflag |= INP_IPV4;
 	tp = tcp_newtcpcb(inp);
 	if (tp == NULL) {
 		error = ENOBUFS;
@@ -272,23 +260,15 @@ tcp_usr_detach(struct socket *so)
 		}
 	} else {
 		/*
-		 * If the connection is not in timewait, we consider two
-		 * two conditions: one in which no further processing is
-		 * necessary (dropped || embryonic), and one in which TCP is
-		 * not yet done, but no longer requires the socket, so the
-		 * pcb will persist for the time being.
-		 *
-		 * XXXRW: Does the second case still occur?
+		 * If the connection is not in timewait, it must be either
+		 * dropped or embryonic.
 		 */
-		if (inp->inp_flags & INP_DROPPED ||
-		    tp->t_state < TCPS_SYN_SENT) {
-			tcp_discardcb(tp);
-			in_pcbdetach(inp);
-			in_pcbfree(inp);
-		} else {
-			in_pcbdetach(inp);
-			INP_WUNLOCK(inp);
-		}
+		KASSERT(inp->inp_flags & INP_DROPPED ||
+		    tp->t_state < TCPS_SYN_SENT,
+		    ("%s: inp %p not dropped or embryonic", __func__, inp));
+		tcp_discardcb(tp);
+		in_pcbdetach(inp);
+		in_pcbfree(inp);
 	}
 }
 
@@ -1370,9 +1350,7 @@ tcp_usr_abort(struct socket *so)
 		TCP_PROBE2(debug__user, tp, PRU_ABORT);
 	}
 	if (!(inp->inp_flags & INP_DROPPED)) {
-		SOCK_LOCK(so);
-		so->so_state |= SS_PROTOREF;
-		SOCK_UNLOCK(so);
+		soref(so);
 		inp->inp_flags |= INP_SOCKREF;
 	}
 	INP_WUNLOCK(inp);
@@ -1406,15 +1384,14 @@ tcp_usr_close(struct socket *so)
 	if (!(inp->inp_flags & INP_TIMEWAIT) &&
 	    !(inp->inp_flags & INP_DROPPED)) {
 		tp = intotcpcb(inp);
+		tp->t_flags |= TF_CLOSED;
 		TCPDEBUG1();
 		tcp_disconnect(tp);
 		TCPDEBUG2(PRU_CLOSE);
 		TCP_PROBE2(debug__user, tp, PRU_CLOSE);
 	}
 	if (!(inp->inp_flags & INP_DROPPED)) {
-		SOCK_LOCK(so);
-		so->so_state |= SS_PROTOREF;
-		SOCK_UNLOCK(so);
+		soref(so);
 		inp->inp_flags |= INP_SOCKREF;
 	}
 	INP_WUNLOCK(inp);
@@ -2206,13 +2183,13 @@ tcp_default_ctloutput(struct inpcb *inp, struct sockopt *sopt)
 		switch (sopt->sopt_name) {
 #if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
 		case TCP_MD5SIG:
-			if (!TCPMD5_ENABLED()) {
-				INP_WUNLOCK(inp);
+			INP_WUNLOCK(inp);
+			if (!TCPMD5_ENABLED())
 				return (ENOPROTOOPT);
-			}
 			error = TCPMD5_PCBCTL(inp, sopt);
 			if (error)
 				return (error);
+			INP_WLOCK_RECHECK(inp);
 			goto unlock_and_done;
 #endif /* IPSEC */
 
@@ -2584,10 +2561,9 @@ unlock_and_done:
 		switch (sopt->sopt_name) {
 #if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
 		case TCP_MD5SIG:
-			if (!TCPMD5_ENABLED()) {
-				INP_WUNLOCK(inp);
+			INP_WUNLOCK(inp);
+			if (!TCPMD5_ENABLED())
 				return (ENOPROTOOPT);
-			}
 			error = TCPMD5_PCBCTL(inp, sopt);
 			break;
 #endif

@@ -651,8 +651,8 @@ pipelock(struct pipe *cpipe, int catch)
 		    ("%s: bad waiter count %d", __func__,
 		    cpipe->pipe_waiters));
 		cpipe->pipe_waiters++;
-		error = msleep(cpipe, PIPE_MTX(cpipe),
-		    prio, "pipelk", 0);
+		error = msleep(&cpipe->pipe_waiters, PIPE_MTX(cpipe), prio,
+		    "pipelk", 0);
 		cpipe->pipe_waiters--;
 		if (error != 0)
 			return (error);
@@ -675,9 +675,8 @@ pipeunlock(struct pipe *cpipe)
 	    ("%s: bad waiter count %d", __func__,
 	    cpipe->pipe_waiters));
 	cpipe->pipe_state &= ~PIPE_LOCKFL;
-	if (cpipe->pipe_waiters > 0) {
-		wakeup_one(cpipe);
-	}
+	if (cpipe->pipe_waiters > 0)
+		wakeup_one(&cpipe->pipe_waiters);
 }
 
 void
@@ -1614,6 +1613,9 @@ pipe_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 	kif->kf_un.kf_pipe.kf_pipe_addr = (uintptr_t)pi;
 	kif->kf_un.kf_pipe.kf_pipe_peer = (uintptr_t)pi->pipe_peer;
 	kif->kf_un.kf_pipe.kf_pipe_buffer_cnt = pi->pipe_buffer.cnt;
+	kif->kf_un.kf_pipe.kf_pipe_buffer_in = pi->pipe_buffer.in;
+	kif->kf_un.kf_pipe.kf_pipe_buffer_out = pi->pipe_buffer.out;
+	kif->kf_un.kf_pipe.kf_pipe_buffer_size = pi->pipe_buffer.size;
 	return (0);
 }
 

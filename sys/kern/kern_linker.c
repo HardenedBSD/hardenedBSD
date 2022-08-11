@@ -54,7 +54,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
-#include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/vnode.h>
 
@@ -1413,7 +1412,7 @@ kern_kldstat(struct thread *td, int fileid, struct kld_file_stat *stat)
 }
 
 #ifdef DDB
-DB_COMMAND(kldstat, db_kldstat)
+DB_COMMAND_FLAGS(kldstat, db_kldstat, DB_CMD_MEMSAFE)
 {
 	linker_file_t lf;
 

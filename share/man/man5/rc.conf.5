@@ -24,7 +24,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd March 3, 2022
+.Dd July 7, 2022
 .Dt RC.CONF 5
 .Os
 .Sh NAME
@@ -87,14 +87,14 @@ which will be included by the
 function.
 For jail configurations you could use the file
 .Pa /etc/rc.conf.d/jail
-to store jail specific configuration options.
+to store jail-specific configuration options.
 If
 .Va local_startup
 contains
 .Pa /usr/local/etc/rc.d
 and
 .Pa /opt/conf ,
-.Pa /usr/local/rc.conf.d/jail
+.Pa /usr/local/etc/rc.conf.d/jail
 and
 .Pa /opt/conf/rc.conf.d/jail
 will be loaded.
@@ -221,6 +221,7 @@ The
 .Xr nice 1
 value to run the service under.
 .It Ao Ar name Ac Ns Va _oomprotect
+.Pq Vt str
 Use
 .Xr protect 1
 to prevent the service from being killed when swap space
@@ -229,13 +230,15 @@ Use
 .Dq Li YES
 to protect only the service itself, and
 .Dq Li ALL
-to protect the service and all child processes.
+to protect the service and all its child processes.
 .Pp
-Please note rc scripts that redefine
-.Bd -literal
-${name}_cmd
-.Ed
+Please note that rc scripts which redefine
+.Dl ${argument}_cmd
+.Pq see Xr rc.subr 8
 such as PostgreSQL will not inherit the OOM killer protection.
+.Pp
+This variable has no effect on services running within a
+.Xr jail 8 .
 .It Ao Ar name Ac Ns Va _user
 .Pq Vt str
 Run the service under this user account.
@@ -2067,6 +2070,12 @@ If set to
 .Pa /etc/rc.d/zfs
 will attempt to automatically mount ZFS file systems and initialize ZFS volumes
 (ZVOLs).
+.It Va zpool_reguid
+.Pq Vt str
+A space-separated list of ZFS pool names for which new pool GUIDs should be
+assigned upon first boot.
+This is useful when using a ZFS pool copied from a template, such as a virtual
+machine image.
 .It Va gptboot_enable
 .Pq Vt bool
 If set to
@@ -3987,7 +3996,7 @@ set from
 set from
 .Va jail_ Ns Ao Ar jname Ac Ns Va _consolelog .
 The default value is
-.Pa /var/log/jail_ Ao Ar jname Ac Pa _console.log .
+.Pa /var/log/jail_ Ns Ao Ar jname Ac Ns Pa _console.log .
 .It Li interface
 set from
 .Va jail_ Ns Ao Ar jname Ac Ns Va _interface .
@@ -4667,11 +4676,12 @@ to unlock an encrypted dataset.
 The default is 10.
 .El
 .Sh FILES
-.Bl -tag -width ".Pa /etc/defaults/rc.conf" -compact
+.Bl -tag -width "/etc/defaults/rc.conf" -compact
 .It Pa /etc/defaults/rc.conf
 .It Pa /etc/defaults/vendor.conf
 .It Pa /etc/rc.conf
 .It Pa /etc/rc.conf.local
+.It Pa /etc/rc.conf.d/
 .El
 .Sh SEE ALSO
 .Xr chmod 1 ,

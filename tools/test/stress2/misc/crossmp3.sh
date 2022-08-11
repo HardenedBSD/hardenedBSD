@@ -57,8 +57,7 @@ if [ $# -eq 0 ]; then
 		mdconfig -l | grep -q md$m && mdconfig -d -u $m
 
 		mdconfig -a -t swap -s ${size}m -u $m
-		bsdlabel -w md$m auto
-		newfs $newfs_flags md${m}$part > /dev/null 2>&1
+		newfs $newfs_flags md${m} > /dev/null 2>&1
 	done
 
 	# start the parallel tests
@@ -87,9 +86,10 @@ else
 	else
 		export runRUNTIME=20s
 		# The test: Parallel mount and unmounts
+		start=`date +%s`
 		for i in `jot 3`; do
 			m=$1
-			mount /dev/md${m}$part ${mntpoint}$m &&
+			mount /dev/md${m} ${mntpoint}$m &&
 			   chmod 777 ${mntpoint}$m
 			export RUNDIR=${mntpoint}$m/stressX
 			export CTRLDIR=${mntpoint}$m/stressX.control
@@ -102,7 +102,10 @@ else
 				umount $opt ${mntpoint}$m > /dev/null 2>&1
 				[ -f $CONT ] || break 2
 			done
+			[ $((`date +%s` - start)) -gt 600 ] && 
+			    { echo "Timed out"; s=1; }
 		done
 		rm -f $CONT
 	fi
+	exit $s
 fi

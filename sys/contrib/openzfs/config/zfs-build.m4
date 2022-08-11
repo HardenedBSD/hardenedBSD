@@ -173,7 +173,7 @@ AC_DEFUN([ZFS_AC_DEBUG_KMEM_TRACKING], [
 ])
 
 AC_DEFUN([ZFS_AC_DEBUG_INVARIANTS_DETECT_FREEBSD], [
-	AS_IF([sysctl -n kern.conftxt | fgrep -qx $'options\tINVARIANTS'],
+	AS_IF([sysctl -n kern.conftxt | grep -Fqx $'options\tINVARIANTS'],
 		[enable_invariants="yes"],
 		[enable_invariants="no"])
 ])
@@ -210,6 +210,7 @@ AC_DEFUN([ZFS_AC_CONFIG_ALWAYS], [
 	AC_SUBST(CPU_COUNT)
 
 	ZFS_AC_CONFIG_ALWAYS_CC_NO_CLOBBERED
+	ZFS_AC_CONFIG_ALWAYS_CC_INFINITE_RECURSION
 	ZFS_AC_CONFIG_ALWAYS_CC_IMPLICIT_FALLTHROUGH
 	ZFS_AC_CONFIG_ALWAYS_CC_FRAME_LARGER_THAN
 	ZFS_AC_CONFIG_ALWAYS_CC_NO_FORMAT_TRUNCATION
@@ -259,17 +260,26 @@ AC_DEFUN([ZFS_AC_CONFIG], [
 		AC_SUBST(TEST_JOBS)
 	])
 
+	ZFS_INIT_SYSV=
+	ZFS_INIT_SYSTEMD=
+	ZFS_WANT_MODULES_LOAD_D=
+
 	case "$ZFS_CONFIG" in
 		kernel) ZFS_AC_CONFIG_KERNEL ;;
 		user)	ZFS_AC_CONFIG_USER   ;;
 		all)    ZFS_AC_CONFIG_USER
 			ZFS_AC_CONFIG_KERNEL ;;
+		dist)                        ;;
 		srpm)                        ;;
 		*)
 		AC_MSG_RESULT([Error!])
 		AC_MSG_ERROR([Bad value "$ZFS_CONFIG" for --with-config,
 		              user kernel|user|all|srpm]) ;;
 	esac
+
+	AM_CONDITIONAL([INIT_SYSV],           [test "x$ZFS_INIT_SYSV" = "xyes"])
+	AM_CONDITIONAL([INIT_SYSTEMD],        [test "x$ZFS_INIT_SYSTEMD" = "xyes"])
+	AM_CONDITIONAL([WANT_MODULES_LOAD_D], [test "x$ZFS_WANT_MODULES_LOAD_D" = "xyes"])
 
 	AM_CONDITIONAL([CONFIG_USER],
 	    [test "$ZFS_CONFIG" = user -o "$ZFS_CONFIG" = all])
@@ -324,6 +334,10 @@ AC_DEFUN([ZFS_AC_RPM], [
 	RPM_DEFINE_COMMON=${RPM_DEFINE_COMMON}' --define "$(DEBUG_KMEM_TRACKING_ZFS) 1"'
 	RPM_DEFINE_COMMON=${RPM_DEFINE_COMMON}' --define "$(ASAN_ZFS) 1"'
 	RPM_DEFINE_COMMON=${RPM_DEFINE_COMMON}' --define "$(UBSAN_ZFS) 1"'
+
+	AS_IF([test "x$enable_debuginfo" = xyes], [
+		RPM_DEFINE_COMMON=${RPM_DEFINE_COMMON}' --define "__strip /bin/true"'
+	])
 
 	RPM_DEFINE_UTIL=' --define "_initconfdir $(initconfdir)"'
 

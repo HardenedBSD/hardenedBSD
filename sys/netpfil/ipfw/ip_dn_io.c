@@ -669,6 +669,11 @@ dummynet_task(void *context, int pending)
 		memset(&q, 0, sizeof(struct mq));
 		CURVNET_SET(vnet_iter);
 
+		if (! V_dn_cfg.init_done) {
+			CURVNET_RESTORE();
+			continue;
+		}
+
 		DN_BH_WLOCK();
 
 		/* Update number of lost(coalesced) ticks. */
@@ -766,12 +771,13 @@ dummynet_send(struct mbuf *m)
 			/* extract the dummynet info, rename the tag
 			 * to carry reinject info.
 			 */
-			if (pkt->dn_dir == (DIR_OUT | PROTO_LAYER2) &&
-				pkt->ifp == NULL) {
+			ifp = ifnet_byindexgen(pkt->if_index, pkt->if_idxgen);
+			if (((pkt->dn_dir == (DIR_OUT | PROTO_LAYER2)) ||
+			    (pkt->dn_dir == (DIR_OUT | PROTO_LAYER2 | PROTO_IPV6))) &&
+				ifp == NULL) {
 				dst = DIR_DROP;
 			} else {
 				dst = pkt->dn_dir;
-				ifp = pkt->ifp;
 				tag->m_tag_cookie = MTAG_IPFW_RULE;
 				tag->m_tag_id = 0;
 			}
@@ -804,6 +810,7 @@ dummynet_send(struct mbuf *m)
 
 			break;
 
+		case DIR_IN | PROTO_LAYER2 | PROTO_IPV6:
 		case DIR_IN | PROTO_LAYER2: /* DN_TO_ETH_DEMUX: */
 			/*
 			 * The Ethernet code assumes the Ethernet header is
@@ -819,7 +826,9 @@ dummynet_send(struct mbuf *m)
 			ether_demux(m->m_pkthdr.rcvif, m);
 			break;
 
+		case DIR_OUT | PROTO_LAYER2 | PROTO_IPV6:
 		case DIR_OUT | PROTO_LAYER2: /* DN_TO_ETH_OUT: */
+			MPASS(ifp != NULL);
 			ether_output_frame(ifp, m);
 			break;
 
@@ -852,7 +861,11 @@ tag_mbuf(struct mbuf *m, int dir, struct ip_fw_args *fwa)
 	/* only keep this info */
 	dt->rule.info &= (IPFW_ONEPASS | IPFW_IS_DUMMYNET);
 	dt->dn_dir = dir;
-	dt->ifp = fwa->flags & IPFW_ARGS_OUT ? fwa->ifp : NULL;
+	if (fwa->flags & IPFW_ARGS_OUT && fwa->ifp != NULL) {
+		NET_EPOCH_ASSERT();
+		dt->if_index = fwa->ifp->if_index;
+		dt->if_idxgen = fwa->ifp->if_idxgen;
+	}
 	/* dt->output tame is updated as we move through */
 	dt->output_time = V_dn_cfg.curr_time;
 	dt->iphdr_off = (dir & PROTO_LAYER2) ? ETHER_HDR_LEN : 0;

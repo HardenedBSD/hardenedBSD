@@ -113,7 +113,7 @@ lattzfs_zpool_get_status(lattzfs_ctx_t *ctx, lattzfs_zpool_status_t *status,
 {
 	zpool_errata_t zerrata;
 	zpool_status_t zstatus;
-	char *msgid;
+	const char *msgid;
 
 	if (ctx == NULL || status == NULL || errata == NULL) {
 		return (false);

@@ -734,7 +734,7 @@ zfs_send_space(zfs_handle_t *zhp, const char *snapname, const char *from,
 	if (error == 0)
 		return (0);
 
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "warning: cannot estimate space for '%s'"), snapname);
 
@@ -804,7 +804,7 @@ dump_ioctl(zfs_handle_t *zhp, const char *fromsnap, uint64_t fromsnap_obj,
 	}
 
 	if (zfs_ioctl(zhp->zfs_hdl, ZFS_IOC_SEND, &zc) != 0) {
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		int error = errno;
 
 		(void) snprintf(errbuf, sizeof (errbuf), "%s '%s'",
@@ -851,6 +851,11 @@ dump_ioctl(zfs_handle_t *zhp, const char *fromsnap, uint64_t fromsnap_obj,
 		case EINVAL:
 			zfs_error_aux(hdl, "%s", strerror(errno));
 			return (zfs_error(hdl, EZFS_BADBACKUP, errbuf));
+		case ENOTSUP:
+			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+			    "large blocks detected but large_blocks feature "
+			    "is inactive; raw send unsupported"));
+			return (zfs_error(hdl, EZFS_NOTSUP, errbuf));
 
 		default:
 			return (zfs_standard_error(hdl, errno, errbuf));
@@ -910,7 +915,7 @@ send_progress_thread(void *arg)
 	uint64_t blocks;
 	char buf[16];
 	time_t t;
-	struct tm *tm;
+	struct tm tm;
 	int err;
 
 	if (!pa->pa_parsable) {
@@ -934,31 +939,45 @@ send_progress_thread(void *arg)
 		}
 
 		(void) time(&t);
-		tm = localtime(&t);
+		localtime_r(&t, &tm);
 
 		if (pa->pa_verbosity >= 2 && pa->pa_parsable) {
 			(void) fprintf(stderr,
 			    "%02d:%02d:%02d\t%llu\t%llu\t%s\n",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    tm.tm_hour, tm.tm_min, tm.tm_sec,
 			    (u_longlong_t)bytes, (u_longlong_t)blocks,
 			    zhp->zfs_name);
 		} else if (pa->pa_verbosity >= 2) {
 			zfs_nicenum(bytes, buf, sizeof (buf));
 			(void) fprintf(stderr,
 			    "%02d:%02d:%02d   %5s    %8llu    %s\n",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    tm.tm_hour, tm.tm_min, tm.tm_sec,
 			    buf, (u_longlong_t)blocks, zhp->zfs_name);
 		} else if (pa->pa_parsable) {
 			(void) fprintf(stderr, "%02d:%02d:%02d\t%llu\t%s\n",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    tm.tm_hour, tm.tm_min, tm.tm_sec,
 			    (u_longlong_t)bytes, zhp->zfs_name);
 		} else {
 			zfs_nicebytes(bytes, buf, sizeof (buf));
 			(void) fprintf(stderr, "%02d:%02d:%02d   %5s   %s\n",
-			    tm->tm_hour, tm->tm_min, tm->tm_sec,
+			    tm.tm_hour, tm.tm_min, tm.tm_sec,
 			    buf, zhp->zfs_name);
 		}
 	}
+}
+
+static boolean_t
+send_progress_thread_exit(libzfs_handle_t *hdl, pthread_t ptid)
+{
+	void *status = NULL;
+	(void) pthread_cancel(ptid);
+	(void) pthread_join(ptid, &status);
+	int error = (int)(uintptr_t)status;
+	if (error != 0 && status != PTHREAD_CANCELED)
+		return (zfs_standard_error(hdl, error,
+		    dgettext(TEXT_DOMAIN, "progress thread exited nonzero")));
+	else
+		return (B_FALSE);
 }
 
 static void
@@ -1133,17 +1152,9 @@ dump_snapshot(zfs_handle_t *zhp, void *arg)
 		err = dump_ioctl(zhp, sdd->prevsnap, sdd->prevsnap_obj,
 		    fromorigin, sdd->outfd, flags, sdd->debugnv);
 
-		if (sdd->progress) {
-			void *status = NULL;
-			(void) pthread_cancel(tid);
-			(void) pthread_join(tid, &status);
-			int error = (int)(uintptr_t)status;
-			if (error != 0 && status != PTHREAD_CANCELED) {
-				return (zfs_standard_error(zhp->zfs_hdl, error,
-				    dgettext(TEXT_DOMAIN,
-				    "progress thread exited nonzero")));
-			}
-		}
+		if (sdd->progress &&
+		    send_progress_thread_exit(zhp->zfs_hdl, tid))
+			return (-1);
 	}
 
 	(void) strcpy(sdd->prevsnap, thissnap);
@@ -1505,20 +1516,8 @@ estimate_size(zfs_handle_t *zhp, const char *from, int fd, sendflags_t *flags,
 	    lzc_flags_from_sendflags(flags), resumeobj, resumeoff, bytes,
 	    redactbook, fd, &size);
 
-	if (flags->progress) {
-		void *status = NULL;
-		(void) pthread_cancel(ptid);
-		(void) pthread_join(ptid, &status);
-		int error = (int)(uintptr_t)status;
-		if (error != 0 && status != PTHREAD_CANCELED) {
-			char errbuf[1024];
-			(void) snprintf(errbuf, sizeof (errbuf),
-			    dgettext(TEXT_DOMAIN, "progress thread exited "
-			    "nonzero"));
-			return (zfs_standard_error(zhp->zfs_hdl, error,
-			    errbuf));
-		}
-	}
+	if (flags->progress && send_progress_thread_exit(zhp->zfs_hdl, ptid))
+		return (-1);
 
 	if (err != 0) {
 		zfs_error_aux(zhp->zfs_hdl, "%s", strerror(err));
@@ -1621,7 +1620,7 @@ find_redact_book(libzfs_handle_t *hdl, const char *path,
     const uint64_t *redact_snap_guids, int num_redact_snaps,
     char **bookname)
 {
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *bmarks;
 
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
@@ -1685,7 +1684,7 @@ static int
 zfs_send_resume_impl_cb_impl(libzfs_handle_t *hdl, sendflags_t *flags,
     int outfd, nvlist_t *resume_nvl)
 {
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	char *toname;
 	char *fromname = NULL;
 	uint64_t resumeobj, resumeoff, toguid, fromguid, bytes;
@@ -1830,21 +1829,10 @@ zfs_send_resume_impl_cb_impl(libzfs_handle_t *hdl, sendflags_t *flags,
 		if (redact_book != NULL)
 			free(redact_book);
 
-		if (flags->progress) {
-			void *status = NULL;
-			(void) pthread_cancel(tid);
-			(void) pthread_join(tid, &status);
-			int error = (int)(uintptr_t)status;
-			if (error != 0 && status != PTHREAD_CANCELED) {
-				char errbuf[1024];
-				(void) snprintf(errbuf, sizeof (errbuf),
-				    dgettext(TEXT_DOMAIN,
-				    "progress thread exited nonzero"));
-				return (zfs_standard_error(hdl, error, errbuf));
-			}
-		}
+		if (flags->progress && send_progress_thread_exit(hdl, tid))
+			return (-1);
 
-		char errbuf[1024];
+		char errbuf[ERRBUFLEN];
 		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 		    "warning: cannot send '%s'"), zhp->zfs_name);
 
@@ -1924,7 +1912,7 @@ zfs_send_resume(libzfs_handle_t *hdl, sendflags_t *flags, int outfd,
     const char *resume_token)
 {
 	int ret;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	nvlist_t *resume_nvl;
 
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
@@ -1955,7 +1943,7 @@ zfs_send_saved(zfs_handle_t *zhp, sendflags_t *flags, int outfd,
 	uint64_t saved_guid = 0, resume_guid = 0;
 	uint64_t obj = 0, off = 0, bytes = 0;
 	char token_buf[ZFS_MAXPROPLEN];
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "saved send failed"));
@@ -2077,9 +2065,9 @@ send_prelim_records(zfs_handle_t *zhp, const char *from, int fd,
 	/* name of filesystem/volume that contains snapshot we are sending */
 	char tofs[ZFS_MAX_DATASET_NAME_LEN];
 	/* short name of snap we are sending */
-	char *tosnap = "";
+	const char *tosnap = "";
 
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "warning: cannot send '%s'"), zhp->zfs_name);
 	if (zhp->zfs_type == ZFS_TYPE_FILESYSTEM && zfs_prop_get_int(zhp,
@@ -2204,7 +2192,7 @@ zfs_send_cb_impl(zfs_handle_t *zhp, const char *fromsnap, const char *tosnap,
     sendflags_t *flags, int outfd, snapfilter_cb_t filter_func,
     void *cb_arg, nvlist_t **debugnvp)
 {
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	send_dump_data_t sdd = { 0 };
 	int err = 0;
 	nvlist_t *fss = NULL;
@@ -2383,9 +2371,9 @@ zfs_send_cb_impl(zfs_handle_t *zhp, const char *fromsnap, const char *tosnap,
 		 * there was some error, because it might not be totally
 		 * failed.
 		 */
-		err = send_conclusion_record(outfd, NULL);
-		if (err != 0)
-			return (zfs_standard_error(zhp->zfs_hdl, err, errbuf));
+		int err2 = send_conclusion_record(outfd, NULL);
+		if (err2 != 0)
+			return (zfs_standard_error(zhp->zfs_hdl, err2, errbuf));
 	}
 
 	return (err || sdd.err);
@@ -2527,7 +2515,7 @@ zfs_send_one_cb_impl(zfs_handle_t *zhp, const char *from, int fd,
 	pthread_t ptid;
 	progress_arg_t pa = { 0 };
 
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "warning: cannot send '%s'"), name);
 
@@ -2641,17 +2629,8 @@ zfs_send_one_cb_impl(zfs_handle_t *zhp, const char *from, int fd,
 	err = lzc_send_redacted(name, from, fd,
 	    lzc_flags_from_sendflags(flags), redactbook);
 
-	if (flags->progress) {
-		void *status = NULL;
-		if (err != 0)
-			(void) pthread_cancel(ptid);
-		(void) pthread_join(ptid, &status);
-		int error = (int)(uintptr_t)status;
-		if (error != 0 && status != PTHREAD_CANCELED)
-			return (zfs_standard_error_fmt(hdl, error,
-			    dgettext(TEXT_DOMAIN,
-			    "progress thread exited nonzero")));
-	}
+	if (flags->progress && send_progress_thread_exit(hdl, ptid))
+			return (-1);
 
 	if (err == 0 && (flags->props || flags->holds || flags->backup)) {
 		/* Write the final end record. */
@@ -2700,6 +2679,11 @@ zfs_send_one_cb_impl(zfs_handle_t *zhp, const char *from, int fd,
 		case EROFS:
 			zfs_error_aux(hdl, "%s", strerror(errno));
 			return (zfs_error(hdl, EZFS_BADBACKUP, errbuf));
+		case ENOTSUP:
+			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+			    "large blocks detected but large_blocks feature "
+			    "is inactive; raw send unsupported"));
+			return (zfs_error(hdl, EZFS_NOTSUP, errbuf));
 
 		default:
 			return (zfs_standard_error(hdl, errno, errbuf));
@@ -2778,8 +2762,6 @@ recv_read_nvlist(libzfs_handle_t *hdl, int fd, int len, nvlist_t **nvp,
 	int err;
 
 	buf = zfs_alloc(hdl, len);
-	if (buf == NULL)
-		return (ENOMEM);
 
 	if (len > hdl->libzfs_max_nvlist) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "nvlist too large"));
@@ -3521,12 +3503,10 @@ again:
 				zc.zc_cookie = B_TRUE; /* received */
 				(void) snprintf(zc.zc_name, sizeof (zc.zc_name),
 				    "%s@%s", fsname, nvpair_name(snapelem));
-				if (zcmd_write_src_nvlist(hdl, &zc,
-				    props) == 0) {
-					(void) zfs_ioctl(hdl,
-					    ZFS_IOC_SET_PROP, &zc);
-					zcmd_free_nvlists(&zc);
-				}
+				zcmd_write_src_nvlist(hdl, &zc, props);
+				(void) zfs_ioctl(hdl,
+				    ZFS_IOC_SET_PROP, &zc);
+				zcmd_free_nvlists(&zc);
 			}
 
 			/* check for different snapname */
@@ -3684,7 +3664,7 @@ zfs_receive_package(libzfs_handle_t *hdl, int fd, const char *destname,
 	char *cp;
 	char tofs[ZFS_MAX_DATASET_NAME_LEN];
 	char sendfs[ZFS_MAX_DATASET_NAME_LEN];
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	dmu_replay_record_t drre;
 	int error;
 	boolean_t anyerr = B_FALSE;
@@ -3901,7 +3881,7 @@ recv_skip(libzfs_handle_t *hdl, int fd, boolean_t byteswap)
 	dmu_replay_record_t *drr;
 	void *buf = zfs_alloc(hdl, SPA_MAXBLOCKSIZE);
 	uint64_t payload_size;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 
 	(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
 	    "cannot receive"));
@@ -4269,7 +4249,7 @@ zfs_receive_one(libzfs_handle_t *hdl, int infd, const char *tosnap,
 	int ioctl_err, ioctl_errno, err;
 	char *cp;
 	struct drr_begin *drrb = &drr->drr_u.drr_begin;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	const char *chopprefix;
 	boolean_t newfs = B_FALSE;
 	boolean_t stream_wantsnewfs, stream_resumingnewfs;
@@ -4879,10 +4859,9 @@ zfs_receive_one(libzfs_handle_t *hdl, int infd, const char *tosnap,
 
 		(void) strcpy(zc.zc_name, destsnap);
 		zc.zc_cookie = B_TRUE; /* received */
-		if (zcmd_write_src_nvlist(hdl, &zc, snapprops_nvlist) == 0) {
-			(void) zfs_ioctl(hdl, ZFS_IOC_SET_PROP, &zc);
-			zcmd_free_nvlists(&zc);
-		}
+		zcmd_write_src_nvlist(hdl, &zc, snapprops_nvlist);
+		(void) zfs_ioctl(hdl, ZFS_IOC_SET_PROP, &zc);
+		zcmd_free_nvlists(&zc);
 	}
 	if (err == 0 && snapholds_nvlist) {
 		nvpair_t *pair;
@@ -5138,7 +5117,7 @@ zfs_receive_checkprops(libzfs_handle_t *hdl, nvlist_t *props,
 		name = nvpair_name(nvp);
 		prop = zfs_name_to_prop(name);
 
-		if (prop == ZPROP_INVAL) {
+		if (prop == ZPROP_USERPROP) {
 			if (!zfs_prop_user(name)) {
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "%s: invalid property '%s'"), errbuf, name);
@@ -5182,7 +5161,7 @@ zfs_receive_impl(libzfs_handle_t *hdl, const char *tosnap,
 	int err;
 	dmu_replay_record_t drr, drr_noswap;
 	struct drr_begin *drrb = &drr.drr_u.drr_begin;
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	zio_cksum_t zcksum = { { 0 } };
 	uint64_t featureflags;
 	int hdrtype;

@@ -180,16 +180,16 @@ CTASSERT(offsetof(struct mbuf, m_pktdat) % 8 == 0);
  */
 #if defined(__LP64__)
 CTASSERT(offsetof(struct mbuf, m_dat) == 32);
-CTASSERT(sizeof(struct pkthdr) == 56);
+CTASSERT(sizeof(struct pkthdr) == 64);
 CTASSERT(sizeof(struct m_ext) == 160);
 #else
 CTASSERT(offsetof(struct mbuf, m_dat) == 24);
-CTASSERT(sizeof(struct pkthdr) == 48);
+CTASSERT(sizeof(struct pkthdr) == 56);
 #if defined(__powerpc__) && defined(BOOKE)
 /* PowerPC booke has 64-bit physical pointers. */
-CTASSERT(sizeof(struct m_ext) == 184);
+CTASSERT(sizeof(struct m_ext) == 176);
 #else
-CTASSERT(sizeof(struct m_ext) == 180);
+CTASSERT(sizeof(struct m_ext) == 172);
 #endif
 #endif
 
@@ -1899,8 +1899,12 @@ m_uiotombuf(struct uio *uio, int how, int len, int align, int flags)
 
 		mb->m_len = length;
 		progress += length;
-		if (flags & M_PKTHDR)
+		if (flags & M_PKTHDR) {
 			m->m_pkthdr.len += length;
+			m->m_pkthdr.memlen += MSIZE;
+			if (mb->m_flags & M_EXT)
+				m->m_pkthdr.memlen += mb->m_ext.ext_size;
+		}
 	}
 	KASSERT(progress == total, ("%s: progress != total", __func__));
 

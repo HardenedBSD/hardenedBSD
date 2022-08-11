@@ -241,10 +241,17 @@ contrib/openzfs/module/zcommon/zprop_common.c		optional zfs compile-with "${ZFS_
 # zfs edon-r hash support
 contrib/openzfs/module/icp/algs/edonr/edonr.c		optional zfs compile-with "${ZFS_C}"
 
+# zfs blake3 hash support
+contrib/openzfs/module/icp/algs/blake3/blake3.c		optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/icp/algs/blake3/blake3_generic.c	optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/icp/algs/blake3/blake3_impl.c	optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/icp/algs/blake3/blake3_x86-64.c	optional zfs compile-with "${ZFS_C}"
+
 #zfs core common code
 contrib/openzfs/module/zfs/abd.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/aggsum.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/arc.c		optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/zfs/blake3_zfs.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/blkptr.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/bplist.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/bpobj.c		optional zfs compile-with "${ZFS_C}"
@@ -342,7 +349,8 @@ contrib/openzfs/module/zfs/zcp_set.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/zcp_synctask.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/zfeature.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/zfs_byteswap.c		optional zfs compile-with "${ZFS_C}"
-contrib/openzfs/module/zfs/zfs_fm.c		optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/zfs/zfs_chksum.c		optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/zfs/zfs_fm.c		optional zfs compile-with "${ZFS_C} ${NO_WUNUSED_BUT_SET_VARIABLE}"
 contrib/openzfs/module/zfs/zfs_fuid.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/zfs_ioctl.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zfs/zfs_log.c		optional zfs compile-with "${ZFS_C}"
@@ -486,7 +494,8 @@ contrib/dev/acpica/components/hardware/hwtimer.c	optional acpi
 contrib/dev/acpica/components/hardware/hwvalid.c	optional acpi
 contrib/dev/acpica/components/hardware/hwxface.c	optional acpi
 contrib/dev/acpica/components/hardware/hwxfsleep.c	optional acpi
-contrib/dev/acpica/components/namespace/nsaccess.c	optional acpi
+contrib/dev/acpica/components/namespace/nsaccess.c	optional acpi \
+	compile-with "${NORMAL_C} ${NO_WUNUSED_BUT_SET_VARIABLE}"
 contrib/dev/acpica/components/namespace/nsalloc.c	optional acpi
 contrib/dev/acpica/components/namespace/nsarguments.c	optional acpi
 contrib/dev/acpica/components/namespace/nsconvert.c	optional acpi
@@ -669,15 +678,17 @@ contrib/ngatm/netnatm/sig/sig_verify.c optional ngatm_uni \
 	compile-with "${NORMAL_C} -I$S/contrib/ngatm"
 # xz
 dev/xz/xz_mod.c	optional xz \
-	compile-with "${NORMAL_C} -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
 contrib/xz-embedded/linux/lib/xz/xz_crc32.c	optional xz \
-	compile-with "${NORMAL_C} -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+contrib/xz-embedded/linux/lib/xz/xz_crc64.c	optional xz \
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
 contrib/xz-embedded/linux/lib/xz/xz_dec_bcj.c	optional xz \
-	compile-with "${NORMAL_C} -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
 contrib/xz-embedded/linux/lib/xz/xz_dec_lzma2.c	optional xz \
-	compile-with "${NORMAL_C} -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
 contrib/xz-embedded/linux/lib/xz/xz_dec_stream.c optional xz \
-	compile-with "${NORMAL_C} -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
+	compile-with "${NORMAL_C} -DXZ_USE_CRC64 -I$S/contrib/xz-embedded/freebsd/ -I$S/contrib/xz-embedded/linux/lib/xz/ -I$S/contrib/xz-embedded/linux/include/linux/"
 # Zstd
 contrib/zstd/lib/freebsd/zstd_kmalloc.c		optional zstdio compile-with ${ZSTD_C}
 contrib/zstd/lib/common/zstd_common.c		optional zstdio compile-with ${ZSTD_C}
@@ -1448,7 +1459,7 @@ dev/cxgbe/common/t4_hw.c	optional cxgbe pci \
 	compile-with "${NORMAL_C} -I$S/dev/cxgbe"
 dev/cxgbe/common/t4vf_hw.c	optional cxgbev pci \
 	compile-with "${NORMAL_C} -I$S/dev/cxgbe"
-dev/cxgbe/crypto/t4_kern_tls.c	optional cxgbe pci kern_tls \
+dev/cxgbe/crypto/t6_kern_tls.c	optional cxgbe pci kern_tls \
 	compile-with "${NORMAL_C} -I$S/dev/cxgbe"
 dev/cxgbe/crypto/t4_keyctx.c	optional cxgbe pci \
 	compile-with "${NORMAL_C} -I$S/dev/cxgbe"
@@ -1848,12 +1859,11 @@ dev/iicbus/iicoc_pci.c		optional iicoc pci
 dev/iicbus/isl12xx.c		optional isl12xx
 dev/iicbus/lm75.c		optional lm75
 dev/iicbus/max44009.c		optional max44009
-dev/iicbus/mux/pca9547.c	optional pca9547 iicmux fdt
 dev/iicbus/mux/iicmux.c		optional iicmux
 dev/iicbus/mux/iicmux_if.m	optional iicmux
 dev/iicbus/mux/iic_gpiomux.c	optional iic_gpiomux fdt
 dev/iicbus/mux/ltc430x.c	optional ltc430x
-dev/iicbus/mux/pca954x.c	optional pca954x
+dev/iicbus/mux/pca954x.c	optional pca954x iicbus iicmux
 dev/iicbus/nxprtc.c		optional nxprtc | pcf8563
 dev/iicbus/ofw_iicbus.c		optional fdt iicbus
 dev/iicbus/ofw_iicbus_if.m	optional fdt iicbus
@@ -2424,6 +2434,7 @@ dev/mii/mii_bitbang.c		optional miibus | mii_bitbang
 dev/mii/mii_physubr.c		optional miibus | mii
 dev/mii/mii_fdt.c		optional miibus fdt | mii fdt
 dev/mii/miibus_if.m		optional miibus | mii
+dev/mii/mv88e151x.c		optional miibus | mv88e151x
 dev/mii/nsgphy.c		optional miibus | nsgphy
 dev/mii/nsphy.c			optional miibus | nsphy
 dev/mii/nsphyter.c		optional miibus | nsphyter
@@ -3089,13 +3100,6 @@ dev/smc/if_smc_fdt.c		optional smc fdt
 dev/snp/snp.c			optional snp
 dev/sound/clone.c		optional sound
 dev/sound/unit.c		optional sound
-dev/sound/isa/ad1816.c		optional snd_ad1816 isa
-dev/sound/isa/ess.c		optional snd_ess isa
-dev/sound/isa/gusc.c		optional snd_gusc isa
-dev/sound/isa/mss.c		optional snd_mss isa
-dev/sound/isa/sb16.c		optional snd_sb16 isa
-dev/sound/isa/sb8.c		optional snd_sb8 isa
-dev/sound/isa/sbc.c		optional snd_sbc isa
 dev/sound/isa/sndbuf_dma.c	optional sound isa
 dev/sound/pci/als4000.c		optional snd_als4000 pci
 dev/sound/pci/atiixp.c		optional snd_atiixp pci
@@ -3783,6 +3787,7 @@ kern/kern_cpu.c			standard
 kern/kern_cpuset.c		standard
 kern/kern_context.c		standard
 kern/kern_descrip.c		standard
+kern/kern_devctl.c		standard
 kern/kern_dtrace.c		optional kdtrace_hooks
 kern/kern_dump.c		standard
 kern/kern_environment.c		standard
@@ -4092,7 +4097,8 @@ contrib/zlib/compress.c		optional crypto | geom_uzip | \
 	mxge | ddb_ctf | gzio | zfs | zlib \
 	compile-with "${NORMAL_C} -Wno-cast-qual"
 contrib/zlib/crc32.c		optional crypto | geom_uzip | \
-	mxge | ddb_ctf | gzio | zfs | zlib
+	mxge | ddb_ctf | gzio | zfs | zlib \
+	compile-with "${NORMAL_C} ${NO_WSTRICT_PROTOTYPES}"
 contrib/zlib/deflate.c		optional crypto | geom_uzip | \
 	mxge | ddb_ctf | gzio | zfs | zlib \
 	compile-with "${NORMAL_C} -Wno-cast-qual"
@@ -4103,12 +4109,14 @@ contrib/zlib/inflate.c		optional crypto | geom_uzip | \
 contrib/zlib/inftrees.c		optional crypto | geom_uzip | \
 	mxge | ddb_ctf | gzio | zfs | zlib
 contrib/zlib/trees.c		optional crypto | geom_uzip | \
-	mxge | ddb_ctf | gzio | zfs | zlib
+	mxge | ddb_ctf | gzio | zfs | zlib \
+	compile-with "${NORMAL_C} ${NO_WSTRICT_PROTOTYPES}"
 contrib/zlib/uncompr.c		optional crypto | geom_uzip | \
 	mxge | ddb_ctf | gzio | zfs | zlib \
 	compile-with "${NORMAL_C} -Wno-cast-qual"
 contrib/zlib/zutil.c		optional crypto | geom_uzip | \
-	mxge | ddb_ctf | gzio | zfs | zlib
+	mxge | ddb_ctf | gzio | zfs | zlib \
+	compile-with "${NORMAL_C} ${NO_WSTRICT_PROTOTYPES}"
 dev/zlib/zlib_mod.c		optional crypto | geom_uzip | \
 	mxge | ddb_ctf | gzio | zfs | zlib
 dev/zlib/zcalloc.c		optional crypto | geom_uzip | \
@@ -4149,6 +4157,7 @@ net/if_llatbl.c			standard
 net/if_me.c			optional me inet
 net/if_media.c			standard
 net/if_mib.c			standard
+net/if_ovpn.c			optional ovpn inet | ovpn inet6
 net/if_stf.c			optional stf inet inet6
 net/if_tuntap.c			optional tuntap
 net/if_vlan.c			optional vlan
@@ -4167,7 +4176,6 @@ net/radix.c			standard
 net/raw_cb.c			standard
 net/raw_usrreq.c		standard
 net/route.c			standard
-net/route/mpath_ctl.c		optional route_mpath
 net/route/nhgrp.c		optional route_mpath
 net/route/nhgrp_ctl.c		optional route_mpath
 net/route/nhop.c		standard
@@ -4178,6 +4186,8 @@ net/route/route_ctl.c		standard
 net/route/route_ddb.c		optional ddb
 net/route/route_helpers.c	standard
 net/route/route_ifaddrs.c	standard
+net/route/route_rtentry.c	standard
+net/route/route_subscription.c	standard
 net/route/route_tables.c	standard
 net/route/route_temporal.c	standard
 net/rss_config.c		optional inet rss | inet6 rss
@@ -4724,6 +4734,37 @@ ofed/drivers/infiniband/ulp/sdp/sdp_cma.c	optional sdp inet 	\
 ofed/drivers/infiniband/ulp/sdp/sdp_tx.c	optional sdp inet 	\
 	compile-with "${OFED_C} -I$S/ofed/drivers/infiniband/ulp/sdp/ ${NO_WUNUSED_BUT_SET_VARIABLE}"
 
+dev/irdma/icrdma.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_cm.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_ctrl.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_hmc.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_hw.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/icrdma_hw.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/fbsd_kcompat.c	optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_kcompat.c	optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_pble.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_puda.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_uda.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_uk.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_utils.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_verbs.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+dev/irdma/irdma_ws.c		optional irdma ice inet inet6 pci ofed \
+	compile-with "${OFED_C} -I$S/dev/ice/"
+
 dev/mthca/mthca_allocator.c		optional mthca pci ofed \
 	compile-with "${OFED_C}"
 dev/mthca/mthca_av.c			optional mthca pci ofed \
@@ -5093,6 +5134,7 @@ security/audit/bsm_socket_type.c	optional audit
 security/audit/bsm_token.c	optional audit
 security/mac/mac_audit.c	optional mac audit
 security/mac/mac_cred.c		optional mac
+security/mac/mac_kdb.c		optional mac
 security/mac/mac_framework.c	optional mac
 security/mac/mac_inet.c		optional mac inet | mac inet6
 security/mac/mac_inet6.c	optional mac inet6
@@ -5112,6 +5154,7 @@ security/mac/mac_sysv_sem.c	optional mac
 security/mac/mac_sysv_shm.c	optional mac
 security/mac/mac_vfs.c		optional mac
 security/mac_biba/mac_biba.c	optional mac_biba
+security/mac_ddb/mac_ddb.c	optional mac_ddb
 security/mac_bsdextended/mac_bsdextended.c	optional mac_bsdextended
 security/mac_bsdextended/ugidfw_system.c	optional mac_bsdextended
 security/mac_bsdextended/ugidfw_vnode.c		optional mac_bsdextended
@@ -5157,7 +5200,6 @@ ufs/ufs/ufs_lookup.c		optional ffs
 ufs/ufs/ufs_quota.c		optional ffs
 ufs/ufs/ufs_vfsops.c		optional ffs
 ufs/ufs/ufs_vnops.c		optional ffs
-vm/default_pager.c		standard
 vm/device_pager.c		standard
 vm/phys_pager.c			standard
 vm/redzone.c			optional DEBUG_REDZONE

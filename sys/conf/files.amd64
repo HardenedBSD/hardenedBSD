@@ -173,6 +173,12 @@ dev/ice/ice_fw_logging.c	optional	ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"
 dev/ice/ice_fwlog.c		optional	ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"
+dev/ice/ice_rdma.c		optional	ice pci \
+	compile-with "${NORMAL_C} -I$S/dev/ice"
+dev/ice/irdma_if.m		optional	ice pci \
+	compile-with "${NORMAL_M} -I$S/dev/ice"
+dev/ice/irdma_di_if.m		optional	ice pci \
+	compile-with "${NORMAL_M} -I$S/dev/ice"
 ice_ddp.c			optional ice_ddp	\
 	compile-with	"${AWK} -f $S/tools/fw_stub.awk ice_ddp.fw:ice_ddp:0x01031b00 -mice_ddp -c${.TARGET}"	\
 	no-ctfconvert no-implicit-rule before-depend local	\
@@ -399,6 +405,11 @@ x86/x86/mptable.c		optional	mptable
 x86/x86/mptable_pci.c		optional	mptable pci
 x86/x86/msi.c			optional	pci
 x86/xen/pv.c			optional	xenhvm
+
+contrib/openzfs/module/icp/asm-x86_64/blake3/blake3_avx2.S      optional zfs compile-with "${ZFS_S}"
+contrib/openzfs/module/icp/asm-x86_64/blake3/blake3_avx512.S    optional zfs compile-with "${ZFS_S}"
+contrib/openzfs/module/icp/asm-x86_64/blake3/blake3_sse2.S      optional zfs compile-with "${ZFS_S}"
+contrib/openzfs/module/icp/asm-x86_64/blake3/blake3_sse41.S     optional zfs compile-with "${ZFS_S}"
 
 contrib/openzfs/module/zcommon/zfs_fletcher_avx512.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/zcommon/zfs_fletcher_intel.c		optional zfs compile-with "${ZFS_C}"

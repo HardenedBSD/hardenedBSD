@@ -35,14 +35,13 @@
 #define	_LIBZFS_H extern __attribute__((visibility("default")))
 
 #include <assert.h>
+#include <libshare.h>
 #include <libnvpair.h>
 #include <sys/mnttab.h>
 #include <sys/param.h>
 #include <sys/types.h>
-#include <sys/varargs.h>
 #include <sys/fs/zfs.h>
 #include <sys/avl.h>
-#include <ucred.h>
 #include <libzfs_core.h>
 
 #ifdef	__cplusplus
@@ -151,6 +150,7 @@ typedef enum zfs_error {
 	EZFS_EXPORT_IN_PROGRESS,	/* currently exporting the pool */
 	EZFS_REBUILDING,	/* resilvering (sequential reconstrution) */
 	EZFS_VDEV_NOTSUP,	/* ops not supported for this type of vdev */
+	EZFS_NOT_USER_NAMESPACE,	/* a file is not a user namespace */
 	EZFS_UNKNOWN
 } zfs_error_t;
 
@@ -423,9 +423,9 @@ typedef enum {
 	ZPOOL_STATUS_OK
 } zpool_status_t;
 
-_LIBZFS_H zpool_status_t zpool_get_status(zpool_handle_t *, char **,
+_LIBZFS_H zpool_status_t zpool_get_status(zpool_handle_t *, const char **,
     zpool_errata_t *);
-_LIBZFS_H zpool_status_t zpool_import_status(nvlist_t *, char **,
+_LIBZFS_H zpool_status_t zpool_import_status(nvlist_t *, const char **,
     zpool_errata_t *);
 
 /*
@@ -870,45 +870,34 @@ _LIBZFS_H int zfs_unmountall(zfs_handle_t *, int);
 _LIBZFS_H int zfs_mount_delegation_check(void);
 
 #if defined(__linux__) || defined(__APPLE__)
-_LIBZFS_H int zfs_parse_mount_options(char *mntopts, unsigned long *mntflags,
-    unsigned long *zfsflags, int sloppy, char *badopt, char *mtabopt);
+_LIBZFS_H int zfs_parse_mount_options(const char *mntopts,
+    unsigned long *mntflags, unsigned long *zfsflags, int sloppy, char *badopt,
+    char *mtabopt);
 _LIBZFS_H void zfs_adjust_mount_options(zfs_handle_t *zhp, const char *mntpoint,
     char *mntopts, char *mtabopt);
 #endif
 
 /*
  * Share support functions.
+ *
+ * enum sa_protocol * lists are terminated with SA_NO_PROTOCOL,
+ * NULL means "all/any known to this libzfs".
  */
-_LIBZFS_H boolean_t zfs_is_shared(zfs_handle_t *);
-_LIBZFS_H int zfs_share(zfs_handle_t *);
-_LIBZFS_H int zfs_unshare(zfs_handle_t *);
+#define	SA_NO_PROTOCOL -1
 
-/*
- * Protocol-specific share support functions.
- */
-_LIBZFS_H boolean_t zfs_is_shared_nfs(zfs_handle_t *, char **);
-_LIBZFS_H boolean_t zfs_is_shared_smb(zfs_handle_t *, char **);
-_LIBZFS_H int zfs_share_nfs(zfs_handle_t *);
-_LIBZFS_H int zfs_share_smb(zfs_handle_t *);
-_LIBZFS_H int zfs_shareall(zfs_handle_t *);
-_LIBZFS_H int zfs_unshare_nfs(zfs_handle_t *, const char *);
-_LIBZFS_H int zfs_unshare_smb(zfs_handle_t *, const char *);
-_LIBZFS_H int zfs_unshareall_nfs(zfs_handle_t *);
-_LIBZFS_H int zfs_unshareall_smb(zfs_handle_t *);
-_LIBZFS_H int zfs_unshareall_bypath(zfs_handle_t *, const char *);
-_LIBZFS_H int zfs_unshareall_bytype(zfs_handle_t *, const char *, const char *);
-_LIBZFS_H int zfs_unshareall(zfs_handle_t *);
-_LIBZFS_H int zfs_deleg_share_nfs(libzfs_handle_t *, char *, char *, char *,
-    void *, void *, int, zfs_share_op_t);
-_LIBZFS_H void zfs_commit_nfs_shares(void);
-_LIBZFS_H void zfs_commit_smb_shares(void);
-_LIBZFS_H void zfs_commit_all_shares(void);
-_LIBZFS_H void zfs_commit_shares(const char *);
+_LIBZFS_H boolean_t zfs_is_shared(zfs_handle_t *zhp, char **where,
+    const enum sa_protocol *proto);
+_LIBZFS_H int zfs_share(zfs_handle_t *zhp, const enum sa_protocol *proto);
+_LIBZFS_H int zfs_unshare(zfs_handle_t *zhp, const char *mountpoint,
+    const enum sa_protocol *proto);
+_LIBZFS_H int zfs_unshareall(zfs_handle_t *zhp,
+    const enum sa_protocol *proto);
+_LIBZFS_H void zfs_commit_shares(const enum sa_protocol *proto);
 
 _LIBZFS_H int zfs_nicestrtonum(libzfs_handle_t *, const char *, uint64_t *);
 
 /*
- * Utility functions to run an _LIBZFS_Hal process.
+ * Utility functions to run an external process.
  */
 #define	STDOUT_VERBOSE	0x01
 #define	STDERR_VERBOSE	0x02
@@ -922,13 +911,13 @@ _LIBZFS_H int libzfs_run_process_get_stdout_nopath(const char *, char *[],
 
 _LIBZFS_H void libzfs_free_str_array(char **, int);
 
-_LIBZFS_H int libzfs_envvar_is_set(char *);
+_LIBZFS_H boolean_t libzfs_envvar_is_set(const char *);
 
 /*
  * Utility functions for zfs version
  */
-_LIBZFS_H void zfs_version_userland(char *, int);
-_LIBZFS_H int zfs_version_kernel(char *, int);
+_LIBZFS_H const char *zfs_version_userland(void);
+_LIBZFS_H char *zfs_version_kernel(void);
 _LIBZFS_H int zfs_version_print(void);
 
 /*
@@ -991,6 +980,15 @@ _LIBZFS_H int zpool_nextboot(libzfs_handle_t *, uint64_t, uint64_t,
     const char *);
 
 #endif /* __FreeBSD__ */
+
+#ifdef __linux__
+
+/*
+ * Add or delete the given filesystem to/from the given user namespace.
+ */
+_LIBZFS_H int zfs_userns(zfs_handle_t *zhp, const char *nspath, int attach);
+
+#endif
 
 #ifdef	__cplusplus
 }

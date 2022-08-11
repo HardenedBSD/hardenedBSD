@@ -30,6 +30,7 @@
  */
 
 #include <sys/zfs_context.h>
+#include <sys/zfs_chksum.h>
 #include <sys/spa_impl.h>
 #include <sys/zio.h>
 #include <sys/zio_checksum.h>
@@ -461,7 +462,7 @@ spa_config_lock_destroy(spa_t *spa)
 }
 
 int
-spa_config_tryenter(spa_t *spa, int locks, void *tag, krw_t rw)
+spa_config_tryenter(spa_t *spa, int locks, const void *tag, krw_t rw)
 {
 	for (int i = 0; i < SCL_LOCKS; i++) {
 		spa_config_lock_t *scl = &spa->spa_config_lock[i];
@@ -876,7 +877,7 @@ spa_next(spa_t *prev)
  * have the namespace lock held.
  */
 void
-spa_open_ref(spa_t *spa, void *tag)
+spa_open_ref(spa_t *spa, const void *tag)
 {
 	ASSERT(zfs_refcount_count(&spa->spa_refcount) >= spa->spa_minref ||
 	    MUTEX_HELD(&spa_namespace_lock));
@@ -888,7 +889,7 @@ spa_open_ref(spa_t *spa, void *tag)
  * have the namespace lock held.
  */
 void
-spa_close(spa_t *spa, void *tag)
+spa_close(spa_t *spa, const void *tag)
 {
 	ASSERT(zfs_refcount_count(&spa->spa_refcount) > spa->spa_minref ||
 	    MUTEX_HELD(&spa_namespace_lock));
@@ -904,7 +905,7 @@ spa_close(spa_t *spa, void *tag)
  * so the asserts in spa_close() do not apply.
  */
 void
-spa_async_close(spa_t *spa, void *tag)
+spa_async_close(spa_t *spa, const void *tag)
 {
 	(void) zfs_refcount_remove(&spa->spa_refcount, tag);
 }
@@ -1214,7 +1215,8 @@ spa_vdev_config_enter(spa_t *spa)
  * of multiple transactions without releasing the spa_namespace_lock.
  */
 void
-spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error, char *tag)
+spa_vdev_config_exit(spa_t *spa, vdev_t *vd, uint64_t txg, int error,
+    const char *tag)
 {
 	ASSERT(MUTEX_HELD(&spa_namespace_lock));
 
@@ -1512,8 +1514,8 @@ void
 snprintf_blkptr(char *buf, size_t buflen, const blkptr_t *bp)
 {
 	char type[256];
-	char *checksum = NULL;
-	char *compress = NULL;
+	const char *checksum = NULL;
+	const char *compress = NULL;
 
 	if (bp != NULL) {
 		if (BP_GET_TYPE(bp) & DMU_OT_NEWTYPE) {
@@ -2417,6 +2419,7 @@ spa_init(spa_mode_t mode)
 	vdev_raidz_math_init();
 	vdev_file_init();
 	zfs_prop_init();
+	chksum_init();
 	zpool_prop_init();
 	zpool_feature_init();
 	spa_config_load();
@@ -2438,6 +2441,7 @@ spa_fini(void)
 	vdev_cache_stat_fini();
 	vdev_mirror_stat_fini();
 	vdev_raidz_math_fini();
+	chksum_fini();
 	zil_fini();
 	dmu_fini();
 	zio_fini();

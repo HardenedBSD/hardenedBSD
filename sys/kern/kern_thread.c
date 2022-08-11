@@ -96,11 +96,11 @@ __FBSDID("$FreeBSD$");
 #ifdef __amd64__
 _Static_assert(offsetof(struct thread, td_flags) == 0x108,
     "struct thread KBI td_flags");
-_Static_assert(offsetof(struct thread, td_pflags) == 0x110,
+_Static_assert(offsetof(struct thread, td_pflags) == 0x114,
     "struct thread KBI td_pflags");
-_Static_assert(offsetof(struct thread, td_frame) == 0x4a8,
+_Static_assert(offsetof(struct thread, td_frame) == 0x4b0,
     "struct thread KBI td_frame");
-_Static_assert(offsetof(struct thread, td_emuldata) == 0x6b0,
+_Static_assert(offsetof(struct thread, td_emuldata) == 0x6c0,
     "struct thread KBI td_emuldata");
 _Static_assert(offsetof(struct proc, p_flag) == 0xb8,
     "struct proc KBI p_flag");
@@ -108,7 +108,7 @@ _Static_assert(offsetof(struct proc, p_pid) == 0xc4,
     "struct proc KBI p_pid");
 _Static_assert(offsetof(struct proc, p_filemon) == 0x3c8,
     "struct proc KBI p_filemon");
-_Static_assert(offsetof(struct proc, p_comm) == 0x3e0,
+_Static_assert(offsetof(struct proc, p_comm) == 0x3e4,
     "struct proc KBI p_comm");
 _Static_assert(offsetof(struct proc, p_emuldata) == 0x4c8,
     "struct proc KBI p_emuldata");
@@ -116,11 +116,11 @@ _Static_assert(offsetof(struct proc, p_emuldata) == 0x4c8,
 #ifdef __i386__
 _Static_assert(offsetof(struct thread, td_flags) == 0x9c,
     "struct thread KBI td_flags");
-_Static_assert(offsetof(struct thread, td_pflags) == 0xa4,
+_Static_assert(offsetof(struct thread, td_pflags) == 0xa8,
     "struct thread KBI td_pflags");
-_Static_assert(offsetof(struct thread, td_frame) == 0x308,
+_Static_assert(offsetof(struct thread, td_frame) == 0x30c,
     "struct thread KBI td_frame");
-_Static_assert(offsetof(struct thread, td_emuldata) == 0x34c,
+_Static_assert(offsetof(struct thread, td_emuldata) == 0x350,
     "struct thread KBI td_emuldata");
 _Static_assert(offsetof(struct proc, p_flag) == 0x6c,
     "struct proc KBI p_flag");
@@ -128,9 +128,9 @@ _Static_assert(offsetof(struct proc, p_pid) == 0x78,
     "struct proc KBI p_pid");
 _Static_assert(offsetof(struct proc, p_filemon) == 0x270,
     "struct proc KBI p_filemon");
-_Static_assert(offsetof(struct proc, p_comm) == 0x284,
+_Static_assert(offsetof(struct proc, p_comm) == 0x288,
     "struct proc KBI p_comm");
-_Static_assert(offsetof(struct proc, p_emuldata) == 0x310,
+_Static_assert(offsetof(struct proc, p_emuldata) == 0x314,
     "struct proc KBI p_emuldata");
 #endif
 #endif /* PAX */
@@ -416,8 +416,7 @@ thread_dtor(void *mem, int size, void *arg)
 #endif
 	/* Free all OSD associated to this thread. */
 	osd_thread_exit(td);
-	td_softdep_cleanup(td);
-	MPASS(td->td_su == NULL);
+	ast_kclear(td);
 	seltdfini(td);
 }
 
@@ -489,6 +488,21 @@ proc_linkup(struct proc *p, struct thread *td)
 	thread_link(td, p);
 }
 
+static void
+ast_suspend(struct thread *td, int tda __unused)
+{
+	struct proc *p;
+
+	p = td->td_proc;
+	/*
+	 * We need to check to see if we have to exit or wait due to a
+	 * single threading requirement or some other STOP condition.
+	 */
+	PROC_LOCK(p);
+	thread_suspend_check(0);
+	PROC_UNLOCK(p);
+}
+
 extern int max_threads_per_proc;
 
 /*
@@ -554,6 +568,7 @@ threadinit(void)
 	callout_init(&thread_reap_callout, 1);
 	callout_reset(&thread_reap_callout, 5 * hz,
 	    thread_reap_callout_cb, NULL);
+	ast_register(TDA_SUSPEND, ASTR_ASTF_REQUIRED, 0, ast_suspend);
 }
 
 /*
@@ -1154,24 +1169,20 @@ restart:
 		 * ALLPROC suspend tries to avoid spurious EINTR for
 		 * threads sleeping interruptable, by suspending the
 		 * thread directly, similarly to sig_suspend_threads().
-		 * Since such sleep is not performed at the user
-		 * boundary, TDF_BOUNDARY flag is not set, and TDF_ALLPROCSUSP
-		 * is used to avoid immediate un-suspend.
+		 * Since such sleep is not neccessary performed at the user
+		 * boundary, TDF_ALLPROCSUSP is used to avoid immediate
+		 * un-suspend.
 		 */
-		if (TD_IS_SUSPENDED(td2) && (td2->td_flags & (TDF_BOUNDARY |
-		    TDF_ALLPROCSUSP)) == 0) {
+		if (TD_IS_SUSPENDED(td2) && (td2->td_flags &
+		    TDF_ALLPROCSUSP) == 0) {
 			wakeup_swapper |= thread_unsuspend_one(td2, p, false);
 			thread_lock(td2);
 			goto restart;
 		}
 		if (TD_CAN_ABORT(td2)) {
-			if ((td2->td_flags & TDF_SBDRY) == 0) {
-				thread_suspend_one(td2);
-				td2->td_flags |= TDF_ALLPROCSUSP;
-			} else {
-				wakeup_swapper |= sleepq_abort(td2, ERESTART);
-				return (wakeup_swapper);
-			}
+			td2->td_flags |= TDF_ALLPROCSUSP;
+			wakeup_swapper |= sleepq_abort(td2, ERESTART);
+			return (wakeup_swapper);
 		}
 		break;
 	default:
@@ -1217,10 +1228,18 @@ thread_single(struct proc *p, int mode)
 	mtx_assert(&Giant, MA_NOTOWNED);
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 
-	if ((p->p_flag & P_HADTHREADS) == 0 && mode != SINGLE_ALLPROC)
+	/*
+	 * Is someone already single threading?
+	 * Or may be singlethreading is not needed at all.
+	 */
+	if (mode == SINGLE_ALLPROC) {
+		while ((p->p_flag & P_STOPPED_SINGLE) != 0) {
+			if ((p->p_flag2 & P2_WEXIT) != 0)
+				return (1);
+			msleep(&p->p_flag, &p->p_mtx, PCATCH, "thrsgl", 0);
+		}
+	} else if ((p->p_flag & P_HADTHREADS) == 0)
 		return (0);
-
-	/* Is someone already single threading? */
 	if (p->p_singlethread != NULL && p->p_singlethread != td)
 		return (1);
 
@@ -1234,8 +1253,12 @@ thread_single(struct proc *p, int mode)
 		else
 			p->p_flag &= ~P_SINGLE_BOUNDARY;
 	}
-	if (mode == SINGLE_ALLPROC)
+	if (mode == SINGLE_ALLPROC) {
 		p->p_flag |= P_TOTAL_STOP;
+		thread_lock(td);
+		td->td_flags |= TDF_DOING_SA;
+		thread_unlock(td);
+	}
 	p->p_flag |= P_STOPPED_SINGLE;
 	PROC_SLOCK(p);
 	p->p_singlethread = td;
@@ -1248,11 +1271,11 @@ thread_single(struct proc *p, int mode)
 			if (td2 == td)
 				continue;
 			thread_lock(td2);
-			td2->td_flags |= TDF_ASTPENDING | TDF_NEEDSUSPCHK;
+			ast_sched_locked(td2, TDA_SUSPEND);
 			if (TD_IS_INHIBITED(td2)) {
 				wakeup_swapper |= weed_inhib(mode, td2, p);
 #ifdef SMP
-			} else if (TD_IS_RUNNING(td2) && td != td2) {
+			} else if (TD_IS_RUNNING(td2)) {
 				forward_signal(td2);
 				thread_unlock(td2);
 #endif
@@ -1322,6 +1345,11 @@ stopme:
 		}
 	}
 	PROC_SUNLOCK(p);
+	if (mode == SINGLE_ALLPROC) {
+		thread_lock(td);
+		td->td_flags &= ~TDF_DOING_SA;
+		thread_unlock(td);
+	}
 	return (0);
 }
 
@@ -1489,10 +1517,10 @@ thread_check_susp(struct thread *td, bool sleep)
 	int error;
 
 	/*
-	 * The check for TDF_NEEDSUSPCHK is racy, but it is enough to
+	 * The check for TDA_SUSPEND is racy, but it is enough to
 	 * eventually break the lockstep loop.
 	 */
-	if ((td->td_flags & TDF_NEEDSUSPCHK) == 0)
+	if (!td_ast_pending(td, TDA_SUSPEND))
 		return (0);
 	error = 0;
 	p = td->td_proc;
@@ -1523,7 +1551,7 @@ thread_suspend_switch(struct thread *td, struct proc *p)
 	}
 	PROC_UNLOCK(p);
 	thread_lock(td);
-	td->td_flags &= ~TDF_NEEDSUSPCHK;
+	ast_unsched_locked(td, TDA_SUSPEND);
 	TD_SET_SUSPENDED(td);
 	sched_sleep(td, 0);
 	PROC_SUNLOCK(p);
@@ -1544,7 +1572,7 @@ thread_suspend_one(struct thread *td)
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
 	KASSERT(!TD_IS_SUSPENDED(td), ("already suspended"));
 	p->p_suspcount++;
-	td->td_flags &= ~TDF_NEEDSUSPCHK;
+	ast_unsched_locked(td, TDA_SUSPEND);
 	TD_SET_SUSPENDED(td);
 	sched_sleep(td, 0);
 }
@@ -1608,7 +1636,8 @@ thread_unsuspend(struct proc *p)
 	if (!P_SHOULDSTOP(p)) {
                 FOREACH_THREAD_IN_PROC(p, td) {
 			thread_lock(td);
-			if (TD_IS_SUSPENDED(td)) {
+			if (TD_IS_SUSPENDED(td) && (td->td_flags &
+			    TDF_DOING_SA) == 0) {
 				wakeup_swapper |= thread_unsuspend_one(td, p,
 				    true);
 			} else
@@ -1669,7 +1698,7 @@ thread_single_end(struct proc *p, int mode)
 			thread_lock(td);
 			if (TD_IS_SUSPENDED(td)) {
 				wakeup_swapper |= thread_unsuspend_one(td, p,
-				    mode == SINGLE_BOUNDARY);
+				    true);
 			} else
 				thread_unlock(td);
 		}
@@ -1679,6 +1708,7 @@ thread_single_end(struct proc *p, int mode)
 	PROC_SUNLOCK(p);
 	if (wakeup_swapper)
 		kick_proc0();
+	wakeup(&p->p_flag);
 }
 
 /*

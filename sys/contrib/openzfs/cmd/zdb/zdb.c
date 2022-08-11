@@ -102,7 +102,7 @@
 #define	ZDB_MAP_OBJECT_ID(obj) (obj)
 #endif
 
-static char *
+static const char *
 zdb_ot_name(dmu_object_type_t type)
 {
 	if (type < DMU_OT_NUMTYPES)
@@ -2922,7 +2922,7 @@ dsl_deadlist_entry_dump(void *arg, dsl_deadlist_entry_t *dle)
 }
 
 static void
-dump_blkptr_list(dsl_deadlist_t *dl, char *name)
+dump_blkptr_list(dsl_deadlist_t *dl, const char *name)
 {
 	char bytes[32];
 	char comp[32];
@@ -2963,7 +2963,7 @@ dump_blkptr_list(dsl_deadlist_t *dl, char *name)
 	if (dump_opt['d'] < 4)
 		return;
 
-	(void) printf("\n");
+	(void) putchar('\n');
 
 	dsl_deadlist_iterate(dl, dsl_deadlist_entry_dump, NULL);
 }
@@ -3024,7 +3024,7 @@ static objset_t *sa_os = NULL;
 static sa_attr_type_t *sa_attr_table = NULL;
 
 static int
-open_objset(const char *path, void *tag, objset_t **osp)
+open_objset(const char *path, const void *tag, objset_t **osp)
 {
 	int err;
 	uint64_t sa_attrs = 0;
@@ -3068,7 +3068,7 @@ open_objset(const char *path, void *tag, objset_t **osp)
 }
 
 static void
-close_objset(objset_t *os, void *tag)
+close_objset(objset_t *os, const void *tag)
 {
 	VERIFY3P(os, ==, sa_os);
 	if (os->os_sa != NULL)
@@ -3098,9 +3098,8 @@ static void
 print_idstr(uint64_t id, const char *id_type)
 {
 	if (FUID_INDEX(id)) {
-		char *domain;
-
-		domain = zfs_fuid_idx_domain(&idx_tree, FUID_INDEX(id));
+		const char *domain =
+		    zfs_fuid_idx_domain(&idx_tree, FUID_INDEX(id));
 		(void) printf("\t%s     %llx [%s-%d]\n", id_type,
 		    (u_longlong_t)id, domain, (int)FUID_RID(id));
 	} else {
@@ -3194,13 +3193,18 @@ dump_znode_symlink(sa_handle_t *hdl)
 {
 	int sa_symlink_size = 0;
 	char linktarget[MAXPATHLEN];
-	linktarget[0] = '\0';
 	int error;
 
 	error = sa_size(hdl, sa_attr_table[ZPL_SYMLINK], &sa_symlink_size);
 	if (error || sa_symlink_size == 0) {
 		return;
 	}
+	if (sa_symlink_size >= sizeof (linktarget)) {
+		(void) printf("symlink size %d is too large\n",
+		    sa_symlink_size);
+		return;
+	}
+	linktarget[sa_symlink_size] = '\0';
 	if (sa_lookup(hdl, sa_attr_table[ZPL_SYMLINK],
 	    &linktarget, sa_symlink_size) == 0)
 		(void) printf("\ttarget	%s\n", linktarget);
@@ -3638,7 +3642,7 @@ count_ds_mos_objects(dsl_dataset_t *ds)
 	}
 }
 
-static const char *objset_types[DMU_OST_NUMTYPES] = {
+static const char *const objset_types[DMU_OST_NUMTYPES] = {
 	"NONE", "META", "ZPL", "ZVOL", "OTHER", "ANY" };
 
 /*
@@ -3648,7 +3652,7 @@ static const char *objset_types[DMU_OST_NUMTYPES] = {
  * pointer to point to a descriptive error message.
  */
 static int
-parse_object_range(char *range, zopt_object_range_t *zor, char **msg)
+parse_object_range(char *range, zopt_object_range_t *zor, const char **msg)
 {
 	uint64_t flags = 0;
 	char *p, *s, *dup, *flagstr, *tmp = NULL;
@@ -3926,7 +3930,7 @@ dump_uberblock(uberblock_t *ub, const char *header, const char *footer)
 	(void) printf("\ttxg = %llu\n", (u_longlong_t)ub->ub_txg);
 	(void) printf("\tguid_sum = %llu\n", (u_longlong_t)ub->ub_guid_sum);
 	(void) printf("\ttimestamp = %llu UTC = %s",
-	    (u_longlong_t)ub->ub_timestamp, asctime(localtime(&timestamp)));
+	    (u_longlong_t)ub->ub_timestamp, ctime(&timestamp));
 
 	(void) printf("\tmmp_magic = %016llx\n",
 	    (u_longlong_t)ub->ub_mmp_magic);
@@ -4231,13 +4235,13 @@ first_label(cksum_record_t *rec)
 }
 
 static void
-print_label_numbers(char *prefix, cksum_record_t *rec)
+print_label_numbers(const char *prefix, const cksum_record_t *rec)
 {
-	printf("%s", prefix);
+	fputs(prefix, stdout);
 	for (int i = 0; i < VDEV_LABELS; i++)
 		if (rec->labels[i] == B_TRUE)
 			printf("%d ", i);
-	printf("\n");
+	putchar('\n');
 }
 
 #define	MAX_UBERBLOCK_COUNT (VDEV_UBERBLOCK_RING >> UBERBLOCK_SHIFT)
@@ -5121,7 +5125,7 @@ same_metaslab(spa_t *spa, uint64_t vdev, uint64_t off1, uint64_t off2)
  * Used to simplify reporting of the histogram data.
  */
 typedef struct one_histo {
-	char *name;
+	const char *name;
 	uint64_t *count;
 	uint64_t *len;
 	uint64_t cumulative;
@@ -8088,32 +8092,33 @@ zdb_read_block(char *thing, spa_t *spa)
 	vdev_t *vd;
 	abd_t *pabd;
 	void *lbuf, *buf;
-	char *s, *p, *dup, *vdev, *flagstr, *sizes, *tmp = NULL;
+	char *s, *p, *dup, *flagstr, *sizes, *tmp = NULL;
+	const char *vdev, *errmsg = NULL;
 	int i, error;
 	boolean_t borrowed = B_FALSE, found = B_FALSE;
 
 	dup = strdup(thing);
 	s = strtok_r(dup, ":", &tmp);
-	vdev = s ? s : "";
+	vdev = s ?: "";
 	s = strtok_r(NULL, ":", &tmp);
 	offset = strtoull(s ? s : "", NULL, 16);
 	sizes = strtok_r(NULL, ":", &tmp);
 	s = strtok_r(NULL, ":", &tmp);
-	flagstr = strdup(s ? s : "");
+	flagstr = strdup(s ?: "");
 
-	s = NULL;
-	tmp = NULL;
 	if (!zdb_parse_block_sizes(sizes, &lsize, &psize))
-		s = "invalid size(s)";
+		errmsg = "invalid size(s)";
 	if (!IS_P2ALIGNED(psize, DEV_BSIZE) || !IS_P2ALIGNED(lsize, DEV_BSIZE))
-		s = "size must be a multiple of sector size";
+		errmsg = "size must be a multiple of sector size";
 	if (!IS_P2ALIGNED(offset, DEV_BSIZE))
-		s = "offset must be a multiple of sector size";
-	if (s) {
-		(void) printf("Invalid block specifier: %s  - %s\n", thing, s);
+		errmsg = "offset must be a multiple of sector size";
+	if (errmsg) {
+		(void) printf("Invalid block specifier: %s  - %s\n",
+		    thing, errmsg);
 		goto done;
 	}
 
+	tmp = NULL;
 	for (s = strtok_r(flagstr, ":", &tmp);
 	    s != NULL;
 	    s = strtok_r(NULL, ":", &tmp)) {
@@ -8405,7 +8410,6 @@ int
 main(int argc, char **argv)
 {
 	int c;
-	struct rlimit rl = { 1024, 1024 };
 	spa_t *spa = NULL;
 	objset_t *os = NULL;
 	int dump_all = 1;
@@ -8423,9 +8427,6 @@ main(int argc, char **argv)
 	char *spa_config_path_env, *objset_str;
 	boolean_t target_is_spa = B_TRUE, dataset_lookup = B_FALSE;
 	nvlist_t *cfg = NULL;
-
-	(void) setrlimit(RLIMIT_NOFILE, &rl);
-	(void) enable_extended_FILE_stdio(-1, -1);
 
 	dprintf_setup(&argc, argv);
 
@@ -8929,13 +8930,13 @@ retry_lookup:
 			    sizeof (zopt_object_range_t));
 			for (unsigned i = 0; i < zopt_object_args; i++) {
 				int err;
-				char *msg = NULL;
+				const char *msg = NULL;
 
 				err = parse_object_range(argv[i],
 				    &zopt_object_ranges[i], &msg);
 				if (err != 0)
 					fatal("Bad object or range: '%s': %s\n",
-					    argv[i], msg ? msg : "");
+					    argv[i], msg ?: "");
 			}
 		} else if (argc > 0 && dump_opt['m']) {
 			zopt_metaslab_args = argc;

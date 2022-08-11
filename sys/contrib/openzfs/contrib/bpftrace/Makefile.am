@@ -1,7 +1,3 @@
-include $(top_srcdir)/config/Shellcheck.am
+dist_noinst_DATA += %D%/taskqlatency.bt %D%/zfs-trace.sh
 
-EXTRA_DIST = \
-	taskqlatency.bt \
-	zfs-trace.sh
-
-SHELLCHECKSCRIPTS = zfs-trace.sh
+SHELLCHECKSCRIPTS += %D%/zfs-trace.sh

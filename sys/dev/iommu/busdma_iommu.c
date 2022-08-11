@@ -458,6 +458,7 @@ iommu_bus_dmamap_create(bus_dma_tag_t dmat, int flags, bus_dmamap_t *mapp)
 			return (ENOMEM);
 		}
 	}
+	IOMMU_DMAMAP_INIT(map);
 	TAILQ_INIT(&map->map_entries);
 	map->tag = tag;
 	map->locked = true;
@@ -473,18 +474,16 @@ iommu_bus_dmamap_destroy(bus_dma_tag_t dmat, bus_dmamap_t map1)
 {
 	struct bus_dma_tag_iommu *tag;
 	struct bus_dmamap_iommu *map;
-	struct iommu_domain *domain;
 
 	tag = (struct bus_dma_tag_iommu *)dmat;
 	map = (struct bus_dmamap_iommu *)map1;
 	if (map != NULL) {
-		domain = tag->ctx->domain;
-		IOMMU_DOMAIN_LOCK(domain);
+		IOMMU_DMAMAP_LOCK(map);
 		if (!TAILQ_EMPTY(&map->map_entries)) {
-			IOMMU_DOMAIN_UNLOCK(domain);
+			IOMMU_DMAMAP_UNLOCK(map);
 			return (EBUSY);
 		}
-		IOMMU_DOMAIN_UNLOCK(domain);
+		IOMMU_DMAMAP_DESTROY(map);
 		free(map, M_IOMMU_DMAMAP);
 	}
 	tag->map_count--;
@@ -559,20 +558,21 @@ static int
 iommu_bus_dmamap_load_something1(struct bus_dma_tag_iommu *tag,
     struct bus_dmamap_iommu *map, vm_page_t *ma, int offset, bus_size_t buflen,
     int flags, bus_dma_segment_t *segs, int *segp,
-    struct iommu_map_entries_tailq *unroll_list)
+    struct iommu_map_entries_tailq *entries)
 {
 	struct iommu_ctx *ctx;
 	struct iommu_domain *domain;
 	struct iommu_map_entry *entry;
-	iommu_gaddr_t size;
 	bus_size_t buflen1;
-	int error, idx, gas_flags, seg;
+	int error, e_flags, idx, gas_flags, seg;
 
 	KASSERT(offset < IOMMU_PAGE_SIZE, ("offset %d", offset));
 	if (segs == NULL)
 		segs = tag->segments;
 	ctx = tag->ctx;
 	domain = ctx->domain;
+	e_flags = IOMMU_MAP_ENTRY_READ |
+	    ((flags & BUS_DMA_NOWRITE) == 0 ? IOMMU_MAP_ENTRY_WRITE : 0);
 	seg = *segp;
 	error = 0;
 	idx = 0;
@@ -584,7 +584,6 @@ iommu_bus_dmamap_load_something1(struct bus_dma_tag_iommu *tag,
 		}
 		buflen1 = buflen > tag->common.maxsegsz ?
 		    tag->common.maxsegsz : buflen;
-		size = round_page(offset + buflen1);
 
 		/*
 		 * (Too) optimistically allow split if there are more
@@ -594,30 +593,13 @@ iommu_bus_dmamap_load_something1(struct bus_dma_tag_iommu *tag,
 		if (seg + 1 < tag->common.nsegments)
 			gas_flags |= IOMMU_MF_CANSPLIT;
 
-		error = iommu_map(domain, &tag->common, size, offset,
-		    IOMMU_MAP_ENTRY_READ |
-		    ((flags & BUS_DMA_NOWRITE) == 0 ? IOMMU_MAP_ENTRY_WRITE : 0),
-		    gas_flags, ma + idx, &entry);
+		error = iommu_gas_map(domain, &tag->common, buflen1,
+		    offset, e_flags, gas_flags, ma + idx, &entry);
 		if (error != 0)
 			break;
-		if ((gas_flags & IOMMU_MF_CANSPLIT) != 0) {
-			KASSERT(size >= entry->end - entry->start,
-			    ("split increased entry size %jx %jx %jx",
-			    (uintmax_t)size, (uintmax_t)entry->start,
-			    (uintmax_t)entry->end));
-			size = entry->end - entry->start;
-			if (buflen1 > size)
-				buflen1 = size;
-		} else {
-			KASSERT(entry->end - entry->start == size,
-			    ("no split allowed %jx %jx %jx",
-			    (uintmax_t)size, (uintmax_t)entry->start,
-			    (uintmax_t)entry->end));
-		}
-		if (offset + buflen1 > size)
-			buflen1 = size - offset;
-		if (buflen1 > tag->common.maxsegsz)
-			buflen1 = tag->common.maxsegsz;
+		/* Update buflen1 in case buffer split. */
+		if (buflen1 > entry->end - entry->start - offset)
+			buflen1 = entry->end - entry->start - offset;
 
 		KASSERT(vm_addr_align_ok(entry->start + offset,
 		    tag->common.alignment),
@@ -642,16 +624,14 @@ iommu_bus_dmamap_load_something1(struct bus_dma_tag_iommu *tag,
 		    (uintmax_t)entry->start, (uintmax_t)entry->end,
 		    (uintmax_t)buflen1, (uintmax_t)tag->common.maxsegsz));
 
-		IOMMU_DOMAIN_LOCK(domain);
-		TAILQ_INSERT_TAIL(&map->map_entries, entry, dmamap_link);
-		entry->flags |= IOMMU_MAP_ENTRY_MAP;
-		IOMMU_DOMAIN_UNLOCK(domain);
-		TAILQ_INSERT_TAIL(unroll_list, entry, unroll_link);
+		KASSERT((entry->flags & IOMMU_MAP_ENTRY_MAP) != 0,
+		    ("entry %p missing IOMMU_MAP_ENTRY_MAP", entry));
+		TAILQ_INSERT_TAIL(entries, entry, dmamap_link);
 
 		segs[seg].ds_addr = entry->start + offset;
 		segs[seg].ds_len = buflen1;
 
-		idx += OFF_TO_IDX(trunc_page(offset + buflen1));
+		idx += OFF_TO_IDX(offset + buflen1);
 		offset += buflen1;
 		offset &= IOMMU_PAGE_MASK;
 		buflen -= buflen1;
@@ -668,37 +648,28 @@ iommu_bus_dmamap_load_something(struct bus_dma_tag_iommu *tag,
 {
 	struct iommu_ctx *ctx;
 	struct iommu_domain *domain;
-	struct iommu_map_entry *entry, *entry1;
-	struct iommu_map_entries_tailq unroll_list;
+	struct iommu_map_entries_tailq entries;
 	int error;
 
 	ctx = tag->ctx;
 	domain = ctx->domain;
 	atomic_add_long(&ctx->loads, 1);
 
-	TAILQ_INIT(&unroll_list);
+	TAILQ_INIT(&entries);
 	error = iommu_bus_dmamap_load_something1(tag, map, ma, offset,
-	    buflen, flags, segs, segp, &unroll_list);
-	if (error != 0) {
+	    buflen, flags, segs, segp, &entries);
+	if (error == 0) {
+		IOMMU_DMAMAP_LOCK(map);
+		TAILQ_CONCAT(&map->map_entries, &entries, dmamap_link);
+		IOMMU_DMAMAP_UNLOCK(map);
+	} else if (!TAILQ_EMPTY(&entries)) {
 		/*
 		 * The busdma interface does not allow us to report
 		 * partial buffer load, so unfortunately we have to
 		 * revert all work done.
 		 */
 		IOMMU_DOMAIN_LOCK(domain);
-		TAILQ_FOREACH_SAFE(entry, &unroll_list, unroll_link,
-		    entry1) {
-			/*
-			 * No entries other than what we have created
-			 * during the failed run might have been
-			 * inserted there in between, since we own ctx
-			 * pglock.
-			 */
-			TAILQ_REMOVE(&map->map_entries, entry, dmamap_link);
-			TAILQ_REMOVE(&unroll_list, entry, unroll_link);
-			TAILQ_INSERT_TAIL(&domain->unload_entries, entry,
-			    dmamap_link);
-		}
+		TAILQ_CONCAT(&domain->unload_entries, &entries, dmamap_link);
 		IOMMU_DOMAIN_UNLOCK(domain);
 		taskqueue_enqueue(domain->iommu->delayed_taskqueue,
 		    &domain->unload_task);
@@ -889,9 +860,7 @@ iommu_bus_dmamap_unload(bus_dma_tag_t dmat, bus_dmamap_t map1)
 	struct bus_dmamap_iommu *map;
 	struct iommu_ctx *ctx;
 	struct iommu_domain *domain;
-#ifndef IOMMU_DOMAIN_UNLOAD_SLEEP
 	struct iommu_map_entries_tailq entries;
-#endif
 
 	tag = (struct bus_dma_tag_iommu *)dmat;
 	map = (struct bus_dmamap_iommu *)map1;
@@ -899,17 +868,17 @@ iommu_bus_dmamap_unload(bus_dma_tag_t dmat, bus_dmamap_t map1)
 	domain = ctx->domain;
 	atomic_add_long(&ctx->unloads, 1);
 
+	TAILQ_INIT(&entries);
+	IOMMU_DMAMAP_LOCK(map);
+	TAILQ_CONCAT(&entries, &map->map_entries, dmamap_link);
+	IOMMU_DMAMAP_UNLOCK(map);
 #if defined(IOMMU_DOMAIN_UNLOAD_SLEEP)
 	IOMMU_DOMAIN_LOCK(domain);
-	TAILQ_CONCAT(&domain->unload_entries, &map->map_entries, dmamap_link);
+	TAILQ_CONCAT(&domain->unload_entries, &entries, dmamap_link);
 	IOMMU_DOMAIN_UNLOCK(domain);
 	taskqueue_enqueue(domain->iommu->delayed_taskqueue,
 	    &domain->unload_task);
 #else
-	TAILQ_INIT(&entries);
-	IOMMU_DOMAIN_LOCK(domain);
-	TAILQ_CONCAT(&entries, &map->map_entries, dmamap_link);
-	IOMMU_DOMAIN_UNLOCK(domain);
 	THREAD_NO_SLEEPING();
 	iommu_domain_unload(domain, &entries, false);
 	THREAD_SLEEPING_OK();
@@ -1063,7 +1032,7 @@ bus_dma_iommu_load_ident(bus_dma_tag_t dmat, bus_dmamap_t map1,
 	map = (struct bus_dmamap_iommu *)map1;
 	waitok = (flags & BUS_DMA_NOWAIT) != 0;
 
-	entry = iommu_map_alloc_entry(domain, waitok ? 0 : IOMMU_PGF_WAITOK);
+	entry = iommu_gas_alloc_entry(domain, waitok ? 0 : IOMMU_PGF_WAITOK);
 	if (entry == NULL)
 		return (ENOMEM);
 	entry->start = start;
@@ -1071,23 +1040,22 @@ bus_dma_iommu_load_ident(bus_dma_tag_t dmat, bus_dmamap_t map1,
 	ma = malloc(sizeof(vm_page_t) * atop(length), M_TEMP, waitok ?
 	    M_WAITOK : M_NOWAIT);
 	if (ma == NULL) {
-		iommu_map_free_entry(domain, entry);
+		iommu_gas_free_entry(entry);
 		return (ENOMEM);
 	}
 	for (i = 0; i < atop(length); i++) {
 		ma[i] = vm_page_getfake(entry->start + PAGE_SIZE * i,
 		    VM_MEMATTR_DEFAULT);
 	}
-	error = iommu_map_region(domain, entry, IOMMU_MAP_ENTRY_READ |
-	    ((flags & BUS_DMA_NOWRITE) ? 0 : IOMMU_MAP_ENTRY_WRITE),
-	    waitok ? IOMMU_MF_CANWAIT : 0, ma);
+	error = iommu_gas_map_region(domain, entry, IOMMU_MAP_ENTRY_READ |
+	    ((flags & BUS_DMA_NOWRITE) ? 0 : IOMMU_MAP_ENTRY_WRITE) |
+	    IOMMU_MAP_ENTRY_MAP, waitok ? IOMMU_MF_CANWAIT : 0, ma);
 	if (error == 0) {
-		IOMMU_DOMAIN_LOCK(domain);
+		IOMMU_DMAMAP_LOCK(map);
 		TAILQ_INSERT_TAIL(&map->map_entries, entry, dmamap_link);
-		entry->flags |= IOMMU_MAP_ENTRY_MAP;
-		IOMMU_DOMAIN_UNLOCK(domain);
+		IOMMU_DMAMAP_UNLOCK(map);
 	} else {
-		iommu_domain_unload_entry(entry, true);
+		iommu_gas_free_entry(entry);
 	}
 	for (i = 0; i < atop(length); i++)
 		vm_page_putfake(ma[i]);

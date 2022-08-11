@@ -161,11 +161,6 @@ struct l_newstat {
 #define	LINUX_SA_NOMASK		0x40000000
 #define	LINUX_SA_ONESHOT	0x80000000
 
-/* sigprocmask actions */
-#define	LINUX_SIG_BLOCK		0
-#define	LINUX_SIG_UNBLOCK	1
-#define	LINUX_SIG_SETMASK	2
-
 /* sigaltstack */
 #define	LINUX_MINSIGSTKSZ	2048
 
@@ -324,6 +319,7 @@ struct linux_pt_regset {
 	l_ulong gs;
 };
 
+#ifdef _KERNEL
 struct reg;
 struct syscall_info;
 
@@ -335,5 +331,6 @@ void	linux_ptrace_get_syscall_info_machdep(const struct reg *reg,
 	    struct syscall_info *si);
 int	linux_ptrace_getregs_machdep(struct thread *td, pid_t pid,
 	    struct linux_pt_regset *l_regset);
+#endif /* _KERNEL */
 
 #endif /* !_AMD64_LINUX_H_ */

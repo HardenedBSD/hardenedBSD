@@ -97,8 +97,8 @@ _LIBZUTIL_H int zfs_append_partition(char *path, size_t max_len);
 _LIBZUTIL_H int zfs_resolve_shortname(const char *name, char *path,
     size_t pathlen);
 
-_LIBZUTIL_H char *zfs_strip_partition(char *);
-_LIBZUTIL_H char *zfs_strip_path(char *);
+_LIBZUTIL_H char *zfs_strip_partition(const char *);
+_LIBZUTIL_H const char *zfs_strip_path(const char *);
 
 _LIBZUTIL_H int zfs_strcmp_pathname(const char *, const char *, int);
 
@@ -155,9 +155,9 @@ struct zfs_cmd;
 #define	ANSI_RESET	"\033[0m"
 #define	ANSI_BOLD	"\033[1m"
 
-_LIBZUTIL_H void color_start(char *color);
+_LIBZUTIL_H void color_start(const char *color);
 _LIBZUTIL_H void color_end(void);
-_LIBZUTIL_H int printf_color(char *color, char *format, ...);
+_LIBZUTIL_H int printf_color(const char *color, const char *format, ...);
 
 _LIBZUTIL_H const char *zfs_basename(const char *path);
 _LIBZUTIL_H ssize_t zfs_dirnamelen(const char *path);

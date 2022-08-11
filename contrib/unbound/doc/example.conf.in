@@ -1,7 +1,7 @@
 #
 # Example configuration file.
 #
-# See unbound.conf(5) man page, version 1.15.0.
+# See unbound.conf(5) man page, version 1.16.2.
 #
 # this is a comment.
 
@@ -54,6 +54,10 @@ server:
 	# enable this feature to copy the source address of queries to reply.
 	# Socket options are not supported on all platforms. experimental.
 	# interface-automatic: no
+
+	# instead of the default port, open additional ports separated by
+	# spaces when interface-automatic is enabled, by listing them here.
+	# interface-automatic-ports: ""
 
 	# port to answer queries from
 	# port: 53
@@ -164,7 +168,8 @@ server:
 	# perform connect for UDP sockets to mitigate ICMP side channel.
 	# udp-connect: yes
 
-	# The number of retries when a non-positive response is received.
+	# The number of retries, per upstream nameserver in a delegation, when
+	# a throwaway response (also timeouts) is received.
 	# outbound-msg-retry: 5
 
 	# msec for waiting for an unknown server to reply.  Increase if you
@@ -197,6 +202,9 @@ server:
 
 	# minimum wait time for responses, increase if uplink is long. In msec.
 	# infra-cache-min-rtt: 50
+
+	# maximum wait time for responses. In msec.
+	# infra-cache-max-rtt: 120000
 
 	# enable to make server probe down hosts more frequently.
 	# infra-keep-probing: no
@@ -811,6 +819,8 @@ server:
 
 	# Add system certs to the cert bundle, from the Windows Cert Store
 	# tls-win-cert: no
+	# and on other systems, the default openssl certificates
+	# tls-system-cert: no
 
 	# Pad queries over TLS upstreams
 	# pad-queries: yes
@@ -896,6 +906,14 @@ server:
 	# fast-server-permil: 0
 	# the number of servers that will be used in the fast server selection.
 	# fast-server-num: 3
+
+	# Enable to attach Extended DNS Error codes (RFC8914) to responses.
+	# ede: no
+
+	# Enable to attach an Extended DNS Error (RFC8914) Code 3 - Stale
+	# Answer as EDNS0 option to expired responses.
+	# Note that the ede option above needs to be enabled for this to work.
+	# ede-serve-expired: no
 
 	# Specific options for ipsecmod. Unbound needs to be configured with
 	# --enable-ipsecmod for these to take effect.
@@ -1031,8 +1049,8 @@ remote-control:
 # has a copy of the root for local usage.  The second serves example.org
 # authoritatively.  zonefile: reads from file (and writes to it if you also
 # download it), primary: fetches with AXFR and IXFR, or url to zonefile.
-# With allow-notify: you can give additional (apart from primaries) sources of
-# notifies.
+# With allow-notify: you can give additional (apart from primaries and urls)
+# sources of notifies.
 # auth-zone:
 #	name: "."
 #	primary: 199.9.14.201         # b.root-servers.net

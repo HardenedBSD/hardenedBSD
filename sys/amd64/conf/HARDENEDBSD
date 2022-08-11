@@ -1,50 +1,7 @@
 #
-# HARDENEDBSD -- Generic kernel configuration file for FreeBSD/amd64
-#
-# For more information on this file, please read the config(5) manual page,
-# and/or the handbook section on Kernel Configuration Files:
-#
-#    https://www.FreeBSD.org/doc/en_US.ISO8859-1/books/handbook/kernelconfig-config.html
-#
-# The handbook is also available locally in /usr/share/doc/handbook
-# if you've installed the doc distribution, otherwise always see the
-# FreeBSD World Wide Web server (https://www.FreeBSD.org/) for the
-# latest information.
-#
-# An exhaustive list of options and more detailed explanations of the
-# device lines is also present in the ../../conf/NOTES and NOTES files.
-# If you are in doubt as to the purpose or necessity of a line, check first
-# in NOTES.
-#
-# $FreeBSD$
+# HARDENEDBSD -- Main HardenedBSD kernel configuration
 
 include GENERIC
+include HARDENEDBSD-CORE
 
-ident		HARDENEDBSD-CURRENT
-
-# GENERIC overrides
-
-nooptions 	RACCT_DEFAULT_TO_DISABLED # Set kern.racct.enable=0 by default
-nooptions	COMPAT_FREEBSD4
-nooptions	COMPAT_FREEBSD5
-nooptions	COMPAT_FREEBSD6
-nooptions	COMPAT_FREEBSD7
-nooptions	COMPAT_FREEBSD9
-nooptions	COMPAT_FREEBSD10
-nooptions	COMPAT_FREEBSD32
-nooptions	QUEUE_MACRO_DEBUG_TRASH
-nooptions	INCLUDE_CONFIG_FILE # reduce kernel infoleaks
-
-# HardenedBSD hardening options
-options 	HARDEN_KLD		# Harden the kernel module interface
-options 	PAX			# PaX framework
-options 	PAX_CONTROL_ACL		# PaX MAC framework, required for secadm
-options 	PAX_CONTROL_ACL_OVERRIDE_SUPPORT # Allow to override hbsdcontrol settings with ACLs
-options 	PAX_CONTROL_EXTATTR	# extattr based control framework for hbsdcontrol
-options 	PAX_JAIL_SUPPORT	# Allow to override PAX settings per jail
-options 	PAX_SYSCTLS		# sysctls for run-time options
-options 	PAX_ASLR		# Address Space Layout Randomization
-options 	PAX_NOEXEC		# Remove WX pages from user-space and enforce W^X
-options 	PAX_HARDENING		# Various hardening options
-options 	PAX_SEGVGUARD		# prevent brute-force attacks
-options 	HBSD_DEBUG
+ident		HARDENEDBSD

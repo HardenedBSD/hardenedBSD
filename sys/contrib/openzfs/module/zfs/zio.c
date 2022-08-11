@@ -166,15 +166,6 @@ zio_init(void)
 		cflags = (zio_exclude_metadata || size > zio_buf_debug_limit) ?
 		    KMC_NODEBUG : 0;
 
-#if defined(_ILP32) && defined(_KERNEL)
-		/*
-		 * Cache size limited to 1M on 32-bit platforms until ARC
-		 * buffers no longer require virtual address space.
-		 */
-		if (size > zfs_max_recordsize)
-			break;
-#endif
-
 		while (!ISP2(p2))
 			p2 &= p2 - 1;
 
@@ -971,14 +962,12 @@ zfs_blkptr_verify(spa_t *spa, const blkptr_t *bp, boolean_t config_held,
 		    "blkptr at %p has invalid TYPE %llu",
 		    bp, (longlong_t)BP_GET_TYPE(bp));
 	}
-	if (BP_GET_CHECKSUM(bp) >= ZIO_CHECKSUM_FUNCTIONS ||
-	    BP_GET_CHECKSUM(bp) <= ZIO_CHECKSUM_ON) {
+	if (BP_GET_CHECKSUM(bp) >= ZIO_CHECKSUM_FUNCTIONS) {
 		errors += zfs_blkptr_verify_log(spa, bp, blk_verify,
 		    "blkptr at %p has invalid CHECKSUM %llu",
 		    bp, (longlong_t)BP_GET_CHECKSUM(bp));
 	}
-	if (BP_GET_COMPRESS(bp) >= ZIO_COMPRESS_FUNCTIONS ||
-	    BP_GET_COMPRESS(bp) <= ZIO_COMPRESS_ON) {
+	if (BP_GET_COMPRESS(bp) >= ZIO_COMPRESS_FUNCTIONS) {
 		errors += zfs_blkptr_verify_log(spa, bp, blk_verify,
 		    "blkptr at %p has invalid COMPRESS %llu",
 		    bp, (longlong_t)BP_GET_COMPRESS(bp));
@@ -2073,7 +2062,7 @@ zio_deadman_impl(zio_t *pio, int ziodepth)
  * using the zfs_dbgmsg() interface then post deadman event for the ZED.
  */
 void
-zio_deadman(zio_t *pio, char *tag)
+zio_deadman(zio_t *pio, const char *tag)
 {
 	spa_t *spa = pio->io_spa;
 	char *name = spa_name(spa);

@@ -543,7 +543,7 @@ nfscl_getstateid(vnode_t vp, u_int8_t *nfhp, int fhlen, u_int32_t mode,
 		stateidp->other[1] = 0;
 		stateidp->other[2] = 0;
 	}
-	if (vnode_vtype(vp) != VREG)
+	if (vp->v_type != VREG)
 		return (EISDIR);
 	np = VTONFS(vp);
 	nmp = VFSTONFS(vp->v_mount);
@@ -1468,6 +1468,12 @@ nfscl_checkwritelocked(vnode_t vp, struct flock *fl,
 	 */
 	dp = nfscl_finddeleg(clp, np->n_fhp->nfh_fh, np->n_fhp->nfh_len);
 	if (dp != NULL) {
+		/* No need to flush if it is a write delegation. */
+		if ((dp->nfsdl_flags & NFSCLDL_WRITE) != 0) {
+			nfscl_clrelease(clp);
+			NFSUNLOCKCLSTATE();
+			return (0);
+		}
 		LIST_FOREACH(lp, &dp->nfsdl_lock, nfsl_list) {
 			if (!NFSBCMP(lp->nfsl_owner, own,
 			    NFSV4CL_LOCKNAMELEN))
@@ -2087,10 +2093,10 @@ nfscl_umount(struct nfsmount *nmp, NFSPROC_T *p, struct nfscldeleghead *dhp)
 		nfscl_delegreturnall(clp, p, dhp);
 		cred = newnfs_getcred();
 		if (NFSHASNFSV4N(nmp)) {
-			(void)nfsrpc_destroysession(nmp, clp, cred, p);
-			(void)nfsrpc_destroyclient(nmp, clp, cred, p);
+			nfsrpc_destroysession(nmp, NULL, cred, p);
+			nfsrpc_destroyclient(nmp, clp, cred, p);
 		} else
-			(void)nfsrpc_setclient(nmp, clp, 0, NULL, cred, p);
+			nfsrpc_setclient(nmp, clp, 0, NULL, cred, p);
 		nfscl_cleanclient(clp);
 		nmp->nm_clp = NULL;
 		NFSFREECRED(cred);
@@ -2765,8 +2771,7 @@ nfscl_renewthread(struct nfsclclient *clp, NFSPROC_T *p)
 			error = nfsrpc_renew(clp, NULL, cred, p);
 			if (error == NFSERR_CBPATHDOWN)
 			    cbpathdown = 1;
-			else if (error == NFSERR_STALECLIENTID ||
-			    error == NFSERR_BADSESSION) {
+			else if (error == NFSERR_STALECLIENTID) {
 			    NFSLOCKCLSTATE();
 			    clp->nfsc_flags |= NFSCLFLAGS_RECOVER;
 			    NFSUNLOCKCLSTATE();
@@ -5803,7 +5808,7 @@ nfscl_dolayoutcommit(struct nfsmount *nmp, struct nfscllayout *lyp,
 			error = nfsrpc_layoutcommit(nmp, lyp->nfsly_fh,
 			    lyp->nfsly_fhlen, 0, flp->nfsfl_off, len,
 			    lyp->nfsly_lastbyte, &lyp->nfsly_stateid,
-			    layouttype, cred, p, NULL);
+			    layouttype, cred, p);
 			NFSCL_DEBUG(4, "layoutcommit err=%d\n", error);
 			if (error == NFSERR_NOTSUPP) {
 				/* If not supported, don't bother doing it. */

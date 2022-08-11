@@ -110,7 +110,12 @@ typedef enum zap_flags {
 	 * already randomly distributed.
 	 */
 	ZAP_FLAG_PRE_HASHED_KEY = 1 << 2,
+#if defined(__linux__) && defined(_KERNEL)
+} zfs_zap_flags_t;
+#define	zap_flags_t	zfs_zap_flags_t
+#else
 } zap_flags_t;
+#endif
 
 /*
  * Create a new zapobj with no attributes and return its object number.
@@ -134,7 +139,7 @@ uint64_t zap_create_flags_dnsize(objset_t *os, int normflags,
 uint64_t zap_create_hold(objset_t *os, int normflags, zap_flags_t flags,
     dmu_object_type_t ot, int leaf_blockshift, int indirect_blockshift,
     dmu_object_type_t bonustype, int bonuslen, int dnodesize,
-    dnode_t **allocated_dnode, void *tag, dmu_tx_t *tx);
+    dnode_t **allocated_dnode, const void *tag, dmu_tx_t *tx);
 
 uint64_t zap_create_link(objset_t *os, dmu_object_type_t ot,
     uint64_t parent_obj, const char *name, dmu_tx_t *tx);

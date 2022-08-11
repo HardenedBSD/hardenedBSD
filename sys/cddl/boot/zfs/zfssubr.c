@@ -30,11 +30,13 @@ __FBSDID("$FreeBSD$");
 
 static uint64_t zfs_crc64_table[256];
 
+#ifndef ASSERT3S	/* Proxy for all the assert defines */
 #define	ASSERT3S(x, y, z)	((void)0)
 #define	ASSERT3U(x, y, z)	((void)0)
 #define	ASSERT3P(x, y, z)	((void)0)
 #define	ASSERT0(x)		((void)0)
 #define	ASSERT(x)		((void)0)
+#endif
 
 #define	panic(...)	do {						\
 	printf(__VA_ARGS__);						\
@@ -102,6 +104,7 @@ typedef struct zio_checksum_info {
 #include "blkptr.c"
 
 #include "fletcher.c"
+#include "blake3_zfs.c"
 #include "sha256.c"
 #include "skein_zfs.c"
 
@@ -140,7 +143,11 @@ static zio_checksum_info_t zio_checksum_table[ZIO_CHECKSUM_FUNCTIONS] = {
 	    ZCHECKSUM_FLAG_SALTED | ZCHECKSUM_FLAG_NOPWRITE, "skein"},
 	/* no edonr for now */
 	{{NULL, NULL}, NULL, NULL, ZCHECKSUM_FLAG_METADATA |
-	    ZCHECKSUM_FLAG_SALTED | ZCHECKSUM_FLAG_NOPWRITE, "edonr"}
+	    ZCHECKSUM_FLAG_SALTED | ZCHECKSUM_FLAG_NOPWRITE, "edonr"},
+	{{zio_checksum_blake3_native,	zio_checksum_blake3_byteswap},
+	    zio_checksum_blake3_tmpl_init, zio_checksum_blake3_tmpl_free,
+	    ZCHECKSUM_FLAG_METADATA | ZCHECKSUM_FLAG_DEDUP |
+	    ZCHECKSUM_FLAG_SALTED | ZCHECKSUM_FLAG_NOPWRITE, "blake3"}
 };
 
 /*
@@ -163,6 +170,7 @@ typedef struct zio_compress_info {
 
 #include "lzjb.c"
 #include "zle.c"
+#include "gzip.c"
 
 /*
  * Compression vectors.
@@ -173,15 +181,15 @@ static zio_compress_info_t zio_compress_table[ZIO_COMPRESS_FUNCTIONS] = {
 	{NULL,			NULL,			0,	"uncompressed"},
 	{NULL,			lzjb_decompress,	0,	"lzjb"},
 	{NULL,			NULL,			0,	"empty"},
-	{NULL,			NULL,			1,	"gzip-1"},
-	{NULL,			NULL,			2,	"gzip-2"},
-	{NULL,			NULL,			3,	"gzip-3"},
-	{NULL,			NULL,			4,	"gzip-4"},
-	{NULL,			NULL,			5,	"gzip-5"},
-	{NULL,			NULL,			6,	"gzip-6"},
-	{NULL,			NULL,			7,	"gzip-7"},
-	{NULL,			NULL,			8,	"gzip-8"},
-	{NULL,			NULL,			9,	"gzip-9"},
+	{NULL,			gzip_decompress,	1,	"gzip-1"},
+	{NULL,			gzip_decompress,	2,	"gzip-2"},
+	{NULL,			gzip_decompress,	3,	"gzip-3"},
+	{NULL,			gzip_decompress,	4,	"gzip-4"},
+	{NULL,			gzip_decompress,	5,	"gzip-5"},
+	{NULL,			gzip_decompress,	6,	"gzip-6"},
+	{NULL,			gzip_decompress,	7,	"gzip-7"},
+	{NULL,			gzip_decompress,	8,	"gzip-8"},
+	{NULL,			gzip_decompress,	9,	"gzip-9"},
 	{NULL,			zle_decompress,		64,	"zle"},
 	{NULL,			lz4_decompress,		0,	"lz4"},
 #ifdef HAS_ZSTD_ZFS

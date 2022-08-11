@@ -329,7 +329,7 @@ cc_ack_received(struct tcpcb *tp, struct tcphdr *th, uint16_t nsegs,
 			/*
 			 * Compute goodput in bits per millisecond.
 			 */
-			gput = (((int64_t)(th->th_ack - tp->gput_seq)) << 3) /
+			gput = (((int64_t)SEQ_SUB(th->th_ack, tp->gput_seq)) << 3) /
 			    max(1, tcp_ts_getticks() - tp->gput_ts);
 			stats_voi_update_abs_u32(tp->t_stats, VOI_TCP_GPUT,
 			    gput);
@@ -838,8 +838,9 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 	 * PCB, be it a listening one or a synchronized one.  The packet
 	 * shall not modify its state.
 	 */
-	lookupflag = (thflags & (TH_ACK|TH_SYN)) == TH_SYN ?
-	    INPLOOKUP_RLOCKPCB : INPLOOKUP_WLOCKPCB;
+	lookupflag = INPLOOKUP_WILDCARD |
+	    ((thflags & (TH_ACK|TH_SYN)) == TH_SYN ?
+	    INPLOOKUP_RLOCKPCB : INPLOOKUP_WLOCKPCB);
 findpcb:
 #ifdef INET6
 	if (isipv6 && fwd_tag != NULL) {
@@ -862,13 +863,12 @@ findpcb:
 			inp = in6_pcblookup(&V_tcbinfo, &ip6->ip6_src,
 			    th->th_sport, &next_hop6->sin6_addr,
 			    next_hop6->sin6_port ? ntohs(next_hop6->sin6_port) :
-			    th->th_dport, INPLOOKUP_WILDCARD | lookupflag,
-			    m->m_pkthdr.rcvif);
+			    th->th_dport, lookupflag, m->m_pkthdr.rcvif);
 		}
 	} else if (isipv6) {
 		inp = in6_pcblookup_mbuf(&V_tcbinfo, &ip6->ip6_src,
-		    th->th_sport, &ip6->ip6_dst, th->th_dport,
-		    INPLOOKUP_WILDCARD | lookupflag, m->m_pkthdr.rcvif, m);
+		    th->th_sport, &ip6->ip6_dst, th->th_dport, lookupflag,
+		    m->m_pkthdr.rcvif, m);
 	}
 #endif /* INET6 */
 #if defined(INET6) && defined(INET)
@@ -894,13 +894,12 @@ findpcb:
 			inp = in_pcblookup(&V_tcbinfo, ip->ip_src,
 			    th->th_sport, next_hop->sin_addr,
 			    next_hop->sin_port ? ntohs(next_hop->sin_port) :
-			    th->th_dport, INPLOOKUP_WILDCARD | lookupflag,
-			    m->m_pkthdr.rcvif);
+			    th->th_dport, lookupflag, m->m_pkthdr.rcvif);
 		}
 	} else
 		inp = in_pcblookup_mbuf(&V_tcbinfo, ip->ip_src,
-		    th->th_sport, ip->ip_dst, th->th_dport,
-		    INPLOOKUP_WILDCARD | lookupflag, m->m_pkthdr.rcvif, m);
+		    th->th_sport, ip->ip_dst, th->th_dport, lookupflag,
+		    m->m_pkthdr.rcvif, m);
 #endif /* INET */
 
 	/*
@@ -909,6 +908,11 @@ findpcb:
 	 * XXX MRT Send RST using which routing table?
 	 */
 	if (inp == NULL) {
+		if (rstreason != 0) {
+			/* We came here after second (safety) lookup. */
+			MPASS((lookupflag & INPLOOKUP_WILDCARD) == 0);
+			goto dropwithreset;
+		}
 		/*
 		 * Log communication attempts to ports that are not
 		 * in use.
@@ -924,7 +928,7 @@ findpcb:
 		 * completely ignore the segment and drop it.
 		 */
 		if (((V_blackhole == 1 && (thflags & TH_SYN)) ||
-		    V_blackhole == 2) && (V_blackhole_local ||
+		    V_blackhole == 2) && (V_blackhole_local || (
 #ifdef INET6
 		    isipv6 ? !in6_localaddr(&ip6->ip6_src) :
 #endif
@@ -933,7 +937,7 @@ findpcb:
 #else
 		    true
 #endif
-		    ))
+		    )))
 			goto dropunlock;
 
 		rstreason = BANDLIM_RST_CLOSEDPORT;
@@ -1087,8 +1091,7 @@ findpcb:
 			 */
 			tcp_dooptions(&to, optp, optlen, 0);
 			/*
-			 * NB: syncache_expand() doesn't unlock
-			 * inp and tcpinfo locks.
+			 * NB: syncache_expand() doesn't unlock inp.
 			 */
 			rstreason = syncache_expand(&inc, &to, th, &so, m, port);
 			if (rstreason < 0) {
@@ -1101,13 +1104,26 @@ findpcb:
 				goto dropunlock;
 			} else if (rstreason == 0) {
 				/*
-				 * No syncache entry or ACK was not
-				 * for our SYN/ACK.  Send a RST.
+				 * No syncache entry, or ACK was not for our
+				 * SYN/ACK.  Do our protection against double
+				 * ACK.  If peer sent us 2 ACKs, then for the
+				 * first one syncache_expand() successfully
+				 * converted syncache entry into a socket,
+				 * while we were waiting on the inpcb lock.  We
+				 * don't want to sent RST for the second ACK,
+				 * so we perform second lookup without wildcard
+				 * match, hoping to find the new socket.  If
+				 * the ACK is stray indeed, rstreason would
+				 * hint the above code that the lookup was a
+				 * second attempt.
+				 *
 				 * NB: syncache did its own logging
 				 * of the failure cause.
 				 */
+				INP_WUNLOCK(inp);
 				rstreason = BANDLIM_RST_OPENPORT;
-				goto dropwithreset;
+				lookupflag &= ~INPLOOKUP_WILDCARD;
+				goto findpcb;
 			}
 tfo_socket_result:
 			if (so == NULL) {
@@ -1396,7 +1412,7 @@ tfo_socket_result:
 	 * to upgrade the lock, because calling convention for stacks is
 	 * write-lock on PCB.  If upgrade fails, drop the SYN.
 	 */
-	if (lookupflag == INPLOOKUP_RLOCKPCB && INP_TRY_UPGRADE(inp) == 0)
+	if ((lookupflag & INPLOOKUP_RLOCKPCB) && INP_TRY_UPGRADE(inp) == 0)
 		goto dropunlock;
 
 	tp->t_fb->tfb_tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen, iptos);
@@ -2320,8 +2336,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * If new data are received on a connection after the
 	 * user processes are gone, then RST the other end.
 	 */
-	if ((so->so_state & SS_NOFDREF) &&
-	    tp->t_state > TCPS_CLOSE_WAIT && tlen) {
+	if ((tp->t_flags & TF_CLOSED) && tlen) {
 		if ((s = tcp_log_addrs(inc, th, NULL, NULL))) {
 			log(LOG_DEBUG, "%s; %s: %s: Received %d bytes of data "
 			    "after socket was closed, "

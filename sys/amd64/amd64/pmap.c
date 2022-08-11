@@ -8277,7 +8277,10 @@ pmap_remove_pages(pmap_t pmap)
 	struct rwlock *lock;
 	int64_t bit;
 	uint64_t inuse, bitmask;
-	int allfree, field, freed, i, idx;
+	int allfree, field, i, idx;
+#ifdef PV_STATS
+	int freed;
+#endif
 	boolean_t superpage;
 	vm_paddr_t pa;
 
@@ -8311,7 +8314,9 @@ pmap_remove_pages(pmap_t pmap)
 	PMAP_LOCK(pmap);
 	TAILQ_FOREACH_SAFE(pc, &pmap->pm_pvchunk, pc_list, npc) {
 		allfree = 1;
+#ifdef PV_STATS
 		freed = 0;
+#endif
 		for (field = 0; field < _NPCM; field++) {
 			inuse = ~pc->pc_map[field] & pc_freemask[field];
 			while (inuse != 0) {
@@ -8432,7 +8437,9 @@ pmap_remove_pages(pmap_t pmap)
 					}
 				}
 				pmap_unuse_pt(pmap, pv->pv_va, ptepde, &free);
+#ifdef PV_STATS
 				freed++;
+#endif
 			}
 		}
 		PV_STAT(counter_u64_add(pv_entry_frees, freed));
@@ -10873,18 +10880,16 @@ pmap_pti_alloc_page(void)
 	vm_page_t m;
 
 	VM_OBJECT_ASSERT_WLOCKED(pti_obj);
-	m = vm_page_grab(pti_obj, pti_pg_idx++, VM_ALLOC_NOBUSY |
-	    VM_ALLOC_WIRED | VM_ALLOC_ZERO);
+	m = vm_page_grab(pti_obj, pti_pg_idx++, VM_ALLOC_WIRED | VM_ALLOC_ZERO);
 	return (m);
 }
 
 static bool
 pmap_pti_free_page(vm_page_t m)
 {
-
-	KASSERT(m->ref_count > 0, ("page %p not referenced", m));
 	if (!vm_page_unwire_noq(m))
 		return (false);
+	vm_page_xbusy_claim(m);
 	vm_page_free_zero(m);
 	return (true);
 }
@@ -10990,7 +10995,6 @@ pmap_pti_unwire_pde(void *pde, bool only_ref)
 
 	VM_OBJECT_ASSERT_WLOCKED(pti_obj);
 	m = PHYS_TO_VM_PAGE(DMAP_TO_PHYS((uintptr_t)pde));
-	MPASS(m->ref_count > 0);
 	MPASS(only_ref || m->ref_count > 1);
 	pmap_pti_free_page(m);
 }
@@ -11003,7 +11007,6 @@ pmap_pti_unwire_pte(void *pte, vm_offset_t va)
 
 	VM_OBJECT_ASSERT_WLOCKED(pti_obj);
 	m = PHYS_TO_VM_PAGE(DMAP_TO_PHYS((uintptr_t)pte));
-	MPASS(m->ref_count > 0);
 	if (pmap_pti_free_page(m)) {
 		pde = pmap_pti_pde(va);
 		MPASS((*pde & (X86_PG_PS | X86_PG_V)) == X86_PG_V);
@@ -11439,6 +11442,107 @@ pmap_pkru_clear(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 }
 
 #if defined(KASAN) || defined(KMSAN)
+
+/*
+ * Reserve enough memory to:
+ * 1) allocate PDP pages for the shadow map(s),
+ * 2) shadow one page of memory, so one PD page, one PT page, and one shadow
+ *    page per shadow map.
+ */
+#ifdef KASAN
+#define	SAN_EARLY_PAGES	(NKASANPML4E + 3)
+#else
+#define	SAN_EARLY_PAGES	(NKMSANSHADPML4E + NKMSANORIGPML4E + 2 * 3)
+#endif
+
+static uint64_t __nosanitizeaddress __nosanitizememory
+pmap_san_enter_early_alloc_4k(uint64_t pabase)
+{
+	static uint8_t data[PAGE_SIZE * SAN_EARLY_PAGES] __aligned(PAGE_SIZE);
+	static size_t offset = 0;
+	uint64_t pa;
+
+	if (offset == sizeof(data)) {
+		panic("%s: ran out of memory for the bootstrap shadow map",
+		    __func__);
+	}
+
+	pa = pabase + ((vm_offset_t)&data[offset] - KERNSTART);
+	offset += PAGE_SIZE;
+	return (pa);
+}
+
+/*
+ * Map a shadow page, before the kernel has bootstrapped its page tables.  This
+ * is currently only used to shadow the temporary boot stack set up by locore.
+ */
+static void __nosanitizeaddress __nosanitizememory
+pmap_san_enter_early(vm_offset_t va)
+{
+	static bool first = true;
+	pml4_entry_t *pml4e;
+	pdp_entry_t *pdpe;
+	pd_entry_t *pde;
+	pt_entry_t *pte;
+	uint64_t cr3, pa, base;
+	int i;
+
+	base = amd64_loadaddr();
+	cr3 = rcr3();
+
+	if (first) {
+		/*
+		 * If this the first call, we need to allocate new PML4Es for
+		 * the bootstrap shadow map(s).  We don't know how the PML4 page
+		 * was initialized by the boot loader, so we can't simply test
+		 * whether the shadow map's PML4Es are zero.
+		 */
+		first = false;
+#ifdef KASAN
+		for (i = 0; i < NKASANPML4E; i++) {
+			pa = pmap_san_enter_early_alloc_4k(base);
+
+			pml4e = (pml4_entry_t *)cr3 +
+			    pmap_pml4e_index(KASAN_MIN_ADDRESS + i * NBPML4);
+			*pml4e = (pml4_entry_t)(pa | X86_PG_RW | X86_PG_V);
+		}
+#else
+		for (i = 0; i < NKMSANORIGPML4E; i++) {
+			pa = pmap_san_enter_early_alloc_4k(base);
+
+			pml4e = (pml4_entry_t *)cr3 +
+			    pmap_pml4e_index(KMSAN_ORIG_MIN_ADDRESS +
+			    i * NBPML4);
+			*pml4e = (pml4_entry_t)(pa | X86_PG_RW | X86_PG_V);
+		}
+		for (i = 0; i < NKMSANSHADPML4E; i++) {
+			pa = pmap_san_enter_early_alloc_4k(base);
+
+			pml4e = (pml4_entry_t *)cr3 +
+			    pmap_pml4e_index(KMSAN_SHAD_MIN_ADDRESS +
+			    i * NBPML4);
+			*pml4e = (pml4_entry_t)(pa | X86_PG_RW | X86_PG_V);
+		}
+#endif
+	}
+	pml4e = (pml4_entry_t *)cr3 + pmap_pml4e_index(va);
+	pdpe = (pdp_entry_t *)(*pml4e & PG_FRAME) + pmap_pdpe_index(va);
+	if (*pdpe == 0) {
+		pa = pmap_san_enter_early_alloc_4k(base);
+		*pdpe = (pdp_entry_t)(pa | X86_PG_RW | X86_PG_V);
+	}
+	pde = (pd_entry_t *)(*pdpe & PG_FRAME) + pmap_pde_index(va);
+	if (*pde == 0) {
+		pa = pmap_san_enter_early_alloc_4k(base);
+		*pde = (pd_entry_t)(pa | X86_PG_RW | X86_PG_V);
+	}
+	pte = (pt_entry_t *)(*pde & PG_FRAME) + pmap_pte_index(va);
+	if (*pte != 0)
+		panic("%s: PTE for %#lx is already initialized", __func__, va);
+	pa = pmap_san_enter_early_alloc_4k(base);
+	*pte = (pt_entry_t)(pa | X86_PG_A | X86_PG_M | X86_PG_RW | X86_PG_V);
+}
+
 static vm_page_t
 pmap_san_enter_alloc_4k(void)
 {
@@ -11462,13 +11566,21 @@ pmap_san_enter_alloc_2m(void)
  * Grow a shadow map by at least one 4KB page at the specified address.  Use 2MB
  * pages when possible.
  */
-void
+void __nosanitizeaddress __nosanitizememory
 pmap_san_enter(vm_offset_t va)
 {
 	pdp_entry_t *pdpe;
 	pd_entry_t *pde;
 	pt_entry_t *pte;
 	vm_page_t m;
+
+	if (kernphys == 0) {
+		/*
+		 * We're creating a temporary shadow map for the boot stack.
+		 */
+		pmap_san_enter_early(va);
+		return;
+	}
 
 	mtx_assert(&kernel_map->system_mtx, MA_OWNED);
 

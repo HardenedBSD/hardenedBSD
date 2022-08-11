@@ -30,6 +30,8 @@
 # "panic: flush_pagedep_deps: MKDIR_PARENT" seen:
 # http://people.freebsd.org/~pho/stress/log/suj30.txt
 
+# Hang seen: https://people.freebsd.org/~pho/stress/log/log0337.txt
+
 [ `id -u ` -ne 0 ] && echo "Must be root!" && exit 1
 
 . ../default.cfg
@@ -44,9 +46,8 @@ mount | grep "on $mntpoint " | grep -q md$mdstart && umount $mntpoint
 mdconfig -l | grep -q md$mdstart &&  mdconfig -d -u $mdstart
 
 mdconfig -a -t swap -s 4g -u $mdstart
-bsdlabel -w md$mdstart auto
-newfs -j md${mdstart}$part > /dev/null
-mount /dev/md${mdstart}$part $mntpoint
+newfs -j md$mdstart > /dev/null
+mount /dev/md$mdstart $mntpoint
 chmod 777 $mntpoint
 
 for i in `jot 10`; do

@@ -71,6 +71,7 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in_kdtrace.h>
 #include <net/if_llatbl.h>
 #include <netinet/if_ether.h>
+#include <netinet6/in6_fib.h>
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -129,7 +130,7 @@ VNET_DEFINE(int, nd6_recalc_reachtm_interval) = ND6_RECALC_REACHTM_INTERVAL;
 
 int	(*send_sendso_input_hook)(struct mbuf *, struct ifnet *, int, int);
 
-static int nd6_is_new_addr_neighbor(const struct sockaddr_in6 *,
+static bool nd6_is_new_addr_neighbor(const struct sockaddr_in6 *,
 	struct ifnet *);
 static void nd6_setmtu0(struct ifnet *, struct nd_ifinfo *);
 static void nd6_slowtimo(void *);
@@ -138,7 +139,6 @@ static void nd6_free(struct llentry **, int);
 static void nd6_free_redirect(const struct llentry *);
 static void nd6_llinfo_timer(void *);
 static void nd6_llinfo_settimer_locked(struct llentry *, long);
-static void clear_llinfo_pqueue(struct llentry *);
 static int nd6_resolve_slow(struct ifnet *, int, int, struct mbuf *,
     const struct sockaddr_in6 *, u_char *, uint32_t *, struct llentry **);
 static int nd6_need_cache(struct ifnet *);
@@ -245,7 +245,7 @@ nd6_init(void)
 
 #ifdef VIMAGE
 void
-nd6_destroy()
+nd6_destroy(void)
 {
 
 	callout_drain(&V_nd6_slowtimo_ch);
@@ -804,18 +804,19 @@ nd6_llinfo_timer(void *arg)
 			/* Send NS to multicast address */
 			pdst = NULL;
 		} else {
-			struct mbuf *m = ln->la_hold;
-			if (m) {
-				struct mbuf *m0;
+			struct mbuf *m;
 
+			ICMP6STAT_ADD(icp6s_dropped, ln->la_numheld);
+
+			m = ln->la_hold;
+			if (m != NULL) {
 				/*
 				 * assuming every packet in la_hold has the
 				 * same IP header.  Send error after unlock.
 				 */
-				m0 = m->m_nextpkt;
+				ln->la_hold = m->m_nextpkt;
 				m->m_nextpkt = NULL;
-				ln->la_hold = m0;
-				clear_llinfo_pqueue(ln);
+				ln->la_numheld--;
 			}
 			nd6_free(&ln, 0);
 			if (m != NULL) {
@@ -1225,20 +1226,11 @@ nd6_alloc(const struct in6_addr *addr6, int flags, struct ifnet *ifp)
 }
 
 /*
- * Test whether a given IPv6 address is a neighbor or not, ignoring
- * the actual neighbor cache.  The neighbor cache is ignored in order
- * to not reenter the routing code from within itself.
+ * Test whether a given IPv6 address can be a neighbor.
  */
-static int
+static bool
 nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 {
-	struct nd_prefix *pr;
-	struct ifaddr *ifa;
-	struct rt_addrinfo info;
-	struct sockaddr_in6 rt_key;
-	const struct sockaddr *dst6;
-	uint64_t genid;
-	int error, fibnum;
 
 	/*
 	 * A link-local address is always a neighbor.
@@ -1262,89 +1254,51 @@ nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 		else
 			return (0);
 	}
+	/* Checking global unicast */
 
-	bzero(&rt_key, sizeof(rt_key));
-	bzero(&info, sizeof(info));
-	info.rti_info[RTAX_DST] = (struct sockaddr *)&rt_key;
+	/* If an address is directly reachable, it is a neigbor */
+	struct nhop_object *nh;
+	nh = fib6_lookup(ifp->if_fib, &addr->sin6_addr, 0, NHR_NONE, 0);
+	if (nh != NULL && nh->nh_aifp == ifp && (nh->nh_flags & NHF_GATEWAY) == 0)
+		return (true);
 
 	/*
-	 * If the address matches one of our addresses,
-	 * it should be a neighbor.
-	 * If the address matches one of our on-link prefixes, it should be a
-	 * neighbor.
+	 * Check prefixes with desired on-link state, as some may be not
+	 * installed in the routing table.
 	 */
+	bool matched = false;
+	struct nd_prefix *pr;
 	ND6_RLOCK();
-restart:
 	LIST_FOREACH(pr, &V_nd_prefix, ndpr_entry) {
 		if (pr->ndpr_ifp != ifp)
 			continue;
-
-		if ((pr->ndpr_stateflags & NDPRF_ONLINK) == 0) {
-			dst6 = (const struct sockaddr *)&pr->ndpr_prefix;
-
-			/*
-			 * We only need to check all FIBs if add_addr_allfibs
-			 * is unset. If set, checking any FIB will suffice.
-			 */
-			fibnum = V_rt_add_addr_allfibs ? rt_numfibs - 1 : 0;
-			for (; fibnum < rt_numfibs; fibnum++) {
-				genid = V_nd6_list_genid;
-				ND6_RUNLOCK();
-
-				/*
-				 * Restore length field before
-				 * retrying lookup
-				 */
-				rt_key.sin6_len = sizeof(rt_key);
-				error = rib_lookup_info(fibnum, dst6, 0, 0,
-						        &info);
-
-				ND6_RLOCK();
-				if (genid != V_nd6_list_genid)
-					goto restart;
-				if (error == 0)
-					break;
-			}
-			if (error != 0)
-				continue;
-
-			/*
-			 * This is the case where multiple interfaces
-			 * have the same prefix, but only one is installed 
-			 * into the routing table and that prefix entry
-			 * is not the one being examined here.
-			 */
-			if (!IN6_ARE_ADDR_EQUAL(&pr->ndpr_prefix.sin6_addr,
-			    &rt_key.sin6_addr))
-				continue;
-		}
-
+		if ((pr->ndpr_stateflags & NDPRF_ONLINK) == 0)
+			continue;
 		if (IN6_ARE_MASKED_ADDR_EQUAL(&pr->ndpr_prefix.sin6_addr,
 		    &addr->sin6_addr, &pr->ndpr_mask)) {
-			ND6_RUNLOCK();
-			return (1);
+			matched = true;
+			break;
 		}
 	}
 	ND6_RUNLOCK();
+	if (matched)
+		return (true);
 
 	/*
 	 * If the address is assigned on the node of the other side of
 	 * a p2p interface, the address should be a neighbor.
 	 */
 	if (ifp->if_flags & IFF_POINTOPOINT) {
-		struct epoch_tracker et;
+		struct ifaddr *ifa;
 
-		NET_EPOCH_ENTER(et);
 		CK_STAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 			if (ifa->ifa_addr->sa_family != addr->sin6_family)
 				continue;
 			if (ifa->ifa_dstaddr != NULL &&
 			    sa_equal(addr, ifa->ifa_dstaddr)) {
-				NET_EPOCH_EXIT(et);
-				return 1;
+				return (true);
 			}
 		}
-		NET_EPOCH_EXIT(et);
 	}
 
 	/*
@@ -1522,7 +1476,7 @@ nd6_free(struct llentry **lnp, int gc)
 
 		if (dr) {
 			/*
-			 * Unreachablity of a router might affect the default
+			 * Unreachability of a router might affect the default
 			 * router selection and on-link detection of advertised
 			 * prefixes.
 			 */
@@ -2199,6 +2153,7 @@ nd6_grab_holdchain(struct llentry *ln)
 
 	chain = ln->la_hold;
 	ln->la_hold = NULL;
+	ln->la_numheld = 0;
 
 	if (ln->ln_state == ND6_LLINFO_STALE) {
 		/*
@@ -2418,6 +2373,7 @@ nd6_resolve_slow(struct ifnet *ifp, int family, int flags, struct mbuf *m,
 	struct in6_addr *psrc, src;
 	int send_ns, ll_len;
 	char *lladdr;
+	size_t dropped;
 
 	NET_EPOCH_ASSERT();
 
@@ -2484,28 +2440,8 @@ nd6_resolve_slow(struct ifnet *ifp, int family, int flags, struct mbuf *m,
 	 * packet queue in the mbuf.  When it exceeds nd6_maxqueuelen,
 	 * the oldest packet in the queue will be removed.
 	 */
-
-	if (lle->la_hold != NULL) {
-		struct mbuf *m_hold;
-		int i;
-		
-		i = 0;
-		for (m_hold = lle->la_hold; m_hold; m_hold = m_hold->m_nextpkt){
-			i++;
-			if (m_hold->m_nextpkt == NULL) {
-				m_hold->m_nextpkt = m;
-				break;
-			}
-		}
-		while (i >= V_nd6_maxqueuelen) {
-			m_hold = lle->la_hold;
-			lle->la_hold = lle->la_hold->m_nextpkt;
-			m_freem(m_hold);
-			i--;
-		}
-	} else {
-		lle->la_hold = m;
-	}
+	dropped = lltable_append_entry_queue(lle, m, V_nd6_maxqueuelen);
+	ICMP6STAT_ADD(icp6s_dropped, dropped);
 
 	/*
 	 * If there has been no NS for the neighbor after entering the
@@ -2698,19 +2634,6 @@ nd6_rem_ifa_lle(struct in6_ifaddr *ia, int all)
 		lltable_prefix_free(AF_INET6, saddr, smask, LLE_STATIC);
 	else
 		lltable_delete_addr(LLTABLE6(ifp), LLE_IFADDR, saddr);
-}
-
-static void 
-clear_llinfo_pqueue(struct llentry *ln)
-{
-	struct mbuf *m_hold, *m_hold_next;
-
-	for (m_hold = ln->la_hold; m_hold; m_hold = m_hold_next) {
-		m_hold_next = m_hold->m_nextpkt;
-		m_freem(m_hold);
-	}
-
-	ln->la_hold = NULL;
 }
 
 static int

@@ -83,6 +83,7 @@
 #include <sys/zap.h>
 #include <sys/vfs.h>
 #include <sys/zpl.h>
+#include <linux/vfs_compat.h>
 
 enum xattr_permission {
 	XAPERM_DENY,
@@ -1000,7 +1001,7 @@ zpl_set_acl_impl(struct inode *ip, struct posix_acl *acl, int type)
 				 * the inode to write the Posix mode bits.
 				 */
 				if (ip->i_mode != mode) {
-					ip->i_mode = mode;
+					ip->i_mode = ITOZ(ip)->z_mode = mode;
 					ip->i_ctime = current_time(ip);
 					zfs_mark_inode_dirty(ip);
 				}
@@ -1147,7 +1148,7 @@ zpl_init_acl(struct inode *ip, struct inode *dir)
 		if (IS_ERR(acl))
 			return (PTR_ERR(acl));
 		if (!acl) {
-			ip->i_mode &= ~current_umask();
+			ITOZ(ip)->z_mode = (ip->i_mode &= ~current_umask());
 			ip->i_ctime = current_time(ip);
 			zfs_mark_inode_dirty(ip);
 			return (0);
@@ -1166,7 +1167,7 @@ zpl_init_acl(struct inode *ip, struct inode *dir)
 		mode = ip->i_mode;
 		error = __posix_acl_create(&acl, GFP_KERNEL, &mode);
 		if (error >= 0) {
-			ip->i_mode = mode;
+			ip->i_mode = ITOZ(ip)->z_mode = mode;
 			zfs_mark_inode_dirty(ip);
 			if (error > 0) {
 				error = zpl_set_acl_impl(ip, acl,
@@ -1495,7 +1496,9 @@ zpl_xattr_permission(xattr_filldir_t *xf, const char *name, int name_len)
 	return (perm);
 }
 
-#if !defined(HAVE_POSIX_ACL_RELEASE) || defined(HAVE_POSIX_ACL_RELEASE_GPL_ONLY)
+#if defined(CONFIG_FS_POSIX_ACL) && \
+	(!defined(HAVE_POSIX_ACL_RELEASE) || \
+		defined(HAVE_POSIX_ACL_RELEASE_GPL_ONLY))
 struct acl_rel_struct {
 	struct acl_rel_struct *next;
 	struct posix_acl *acl;

@@ -28,7 +28,7 @@
 .\"     @(#)recv.2	8.3 (Berkeley) 2/21/94
 .\" $FreeBSD$
 .\"
-.Dd August 19, 2018
+.Dd July 30, 2022
 .Dt RECV 2
 .Os
 .Sh NAME
@@ -163,6 +163,7 @@ one or more of the values:
 .Bl -column ".Dv MSG_CMSG_CLOEXEC" -offset indent
 .It Dv MSG_OOB Ta process out-of-band data
 .It Dv MSG_PEEK Ta peek at incoming message
+.It Dv MSG_TRUNC Ta return real packet or datagram length
 .It Dv MSG_WAITALL Ta wait for full request or error
 .It Dv MSG_DONTWAIT Ta do not block
 .It Dv MSG_CMSG_CLOEXEC Ta set received fds close-on-exec
@@ -184,6 +185,17 @@ flag causes the receive operation to return data
 from the beginning of the receive queue without removing that
 data from the queue.
 Thus, a subsequent receive call will return the same data.
+The
+.Dv MSG_TRUNC
+flag causes the receive operation to return the full length of the packet
+or datagram even if larger than provided buffer. The flag is supported
+on SOCK_DGRAM sockets for
+.Dv AF_INET
+,
+.Dv AF_INET6
+and
+.Dv AF_UNIX
+families.
 The
 .Dv MSG_WAITALL
 flag requests that the operation block until
@@ -332,7 +344,7 @@ and
 The argument
 .Fa s
 does not refer to a socket.
-.It Bq Er EMSGSIZE
+.It Bq Er EMFILE
 The
 .Fn recvmsg
 system call
@@ -340,9 +352,20 @@ was used to receive rights (file descriptors) that were in flight on the
 connection.
 However, the receiving program did not have enough free file
 descriptor slots to accept them.
-In this case the descriptors are
-closed, any pending data can be returned by another call to
+In this case the descriptors are closed, with pending data either discarded
+in the case of the unreliable datagram protocol or preserved in the case of a
+reliable protocol.
+The pending data can be retrieved with another call to
 .Fn recvmsg .
+.It Bq Er EMSGSIZE
+The
+.Fa msg_iovlen
+member of the
+.Fa msghdr
+structure pointed to by
+.Fa msg
+is less than or equal to 0, or is greater than
+.Va IOV_MAX .
 .It Bq Er EAGAIN
 The socket is marked non-blocking and the receive operation
 would block, or

@@ -57,6 +57,12 @@
 #define	MRS_REG(reg)							\
     __MRS_REG(reg##_op0, reg##_op1, reg##_CRn, reg##_CRm, reg##_op2)
 
+#define	__MRS_REG_ALT_NAME(op0, op1, crn, crm, op2)			\
+    S##op0##_##op1##_C##crn##_C##crm##_##op2
+#define	_MRS_REG_ALT_NAME(op0, op1, crn, crm, op2)			\
+    __MRS_REG_ALT_NAME(op0, op1, crn, crm, op2)
+#define	MRS_REG_ALT_NAME(reg)						\
+    _MRS_REG_ALT_NAME(reg##_op0, reg##_op1, reg##_CRn, reg##_CRm, reg##_op2)
 
 
 #define	READ_SPECIALREG(reg)						\
@@ -68,6 +74,32 @@
 	__asm __volatile("msr	" __STRING(reg) ", %0" : : "r"((uint64_t)_val))
 
 #define	UL(x)	UINT64_C(x)
+
+/* CCSIDR_EL1 - Cache Size ID Register */
+#define	CCSIDR_NumSets_MASK	0x0FFFE000
+#define	CCSIDR_NumSets64_MASK	0x00FFFFFF00000000
+#define	CCSIDR_NumSets_SHIFT	13
+#define	CCSIDR_NumSets64_SHIFT	32
+#define	CCSIDR_Assoc_MASK	0x00001FF8
+#define	CCSIDR_Assoc64_MASK	0x0000000000FFFFF8
+#define	CCSIDR_Assoc_SHIFT	3
+#define	CCSIDR_Assoc64_SHIFT	3
+#define	CCSIDR_LineSize_MASK	0x7
+#define	CCSIDR_NSETS(idr)						\
+	(((idr) & CCSIDR_NumSets_MASK) >> CCSIDR_NumSets_SHIFT)
+#define	CCSIDR_ASSOC(idr)						\
+	(((idr) & CCSIDR_Assoc_MASK) >> CCSIDR_Assoc_SHIFT)
+#define	CCSIDR_NSETS_64(idr)						\
+	(((idr) & CCSIDR_NumSets64_MASK) >> CCSIDR_NumSets64_SHIFT)
+#define	CCSIDR_ASSOC_64(idr)						\
+	(((idr) & CCSIDR_Assoc64_MASK) >> CCSIDR_Assoc64_SHIFT)
+
+/* CLIDR_EL1 - Cache level ID register */
+#define	CLIDR_CTYPE_MASK	0x7	/* Cache type mask bits */
+#define	CLIDR_CTYPE_IO		0x1	/* Instruction only */
+#define	CLIDR_CTYPE_DO		0x2	/* Data only */
+#define	CLIDR_CTYPE_ID		0x3	/* Split instruction and data */
+#define	CLIDR_CTYPE_UNIFIED	0x4	/* Unified */
 
 /* CNTHCTL_EL2 - Counter-timer Hypervisor Control register */
 #define	CNTHCTL_EVNTI_MASK	(0xf << 4) /* Bit to trigger event stream */
@@ -112,12 +144,21 @@
 #define	CNTPCT_EL0_op2		1
 
 /* CPACR_EL1 */
+#define	CPACR_ZEN_MASK		(0x3 << 16)
+#define	 CPACR_ZEN_TRAP_ALL1	(0x0 << 16) /* Traps from EL0 and EL1 */
+#define	 CPACR_ZEN_TRAP_EL0	(0x1 << 16) /* Traps from EL0 */
+#define	 CPACR_ZEN_TRAP_ALL2	(0x2 << 16) /* Traps from EL0 and EL1 */
+#define	 CPACR_ZEN_TRAP_NONE	(0x3 << 16) /* No traps */
 #define	CPACR_FPEN_MASK		(0x3 << 20)
 #define	 CPACR_FPEN_TRAP_ALL1	(0x0 << 20) /* Traps from EL0 and EL1 */
 #define	 CPACR_FPEN_TRAP_EL0	(0x1 << 20) /* Traps from EL0 */
 #define	 CPACR_FPEN_TRAP_ALL2	(0x2 << 20) /* Traps from EL0 and EL1 */
 #define	 CPACR_FPEN_TRAP_NONE	(0x3 << 20) /* No traps */
 #define	CPACR_TTA		(0x1 << 28)
+
+/* CSSELR_EL1 - Cache size selection register */
+#define	CSSELR_Level(i)		(i << 1)
+#define	CSSELR_InD		0x00000001
 
 /* CTR_EL0 - Cache Type Register */
 #define	CTR_RES1		(1 << 31)
@@ -265,6 +306,14 @@
 
 /* ESR_ELx */
 #define	ESR_ELx_ISS_MASK	0x01ffffff
+#define	 ISS_FP_TFV_SHIFT	23
+#define	 ISS_FP_TFV		(0x01 << ISS_FP_TFV_SHIFT)
+#define	 ISS_FP_IOF		0x01
+#define	 ISS_FP_DZF		0x02
+#define	 ISS_FP_OFF		0x04
+#define	 ISS_FP_UFF		0x08
+#define	 ISS_FP_IXF		0x10
+#define	 ISS_FP_IDF		0x80
 #define	 ISS_INSN_FnV		(0x01 << 10)
 #define	 ISS_INSN_EA		(0x01 << 9)
 #define	 ISS_INSN_S1PTW		(0x01 << 7)
@@ -349,6 +398,7 @@
 #define	 EXCP_SVC64		0x15	/* SVC trap for AArch64 */
 #define	 EXCP_HVC		0x16	/* HVC trap */
 #define	 EXCP_MSR		0x18	/* MSR/MRS trap */
+#define	 EXCP_SVE		0x19	/* SVE trap */
 #define	 EXCP_FPAC		0x1c	/* Faulting PAC trap */
 #define	 EXCP_INSN_ABORT_L	0x20	/* Instruction abort, from lower EL */
 #define	 EXCP_INSN_ABORT	0x21	/* Instruction abort, from same EL */ 
@@ -883,6 +933,7 @@
 #define	ID_AA64PFR0_GIC_VAL(x)		((x) & ID_AA64PFR0_GIC_MASK)
 #define	 ID_AA64PFR0_GIC_CPUIF_NONE	(UL(0x0) << ID_AA64PFR0_GIC_SHIFT)
 #define	 ID_AA64PFR0_GIC_CPUIF_EN	(UL(0x1) << ID_AA64PFR0_GIC_SHIFT)
+#define	 ID_AA64PFR0_GIC_CPUIF_4_1	(UL(0x3) << ID_AA64PFR0_GIC_SHIFT)
 #define	ID_AA64PFR0_RAS_SHIFT		28
 #define	ID_AA64PFR0_RAS_MASK		(UL(0xf) << ID_AA64PFR0_RAS_SHIFT)
 #define	ID_AA64PFR0_RAS_VAL(x)		((x) & ID_AA64PFR0_RAS_MASK)
@@ -955,6 +1006,62 @@
 #define	ID_AA64PFR1_RAS_frac_VAL(x)	((x) & ID_AA64PFR1_RAS_frac_MASK)
 #define	 ID_AA64PFR1_RAS_frac_V1	(UL(0x0) << ID_AA64PFR1_RAS_frac_SHIFT)
 #define	 ID_AA64PFR1_RAS_frac_V2	(UL(0x1) << ID_AA64PFR1_RAS_frac_SHIFT)
+
+/* ID_AA64ZFR0_EL1 */
+#define	ID_AA64ZFR0_EL1			MRS_REG(ID_AA64ZFR0_EL1)
+#define	ID_AA64ZFR0_EL1_REG		MRS_REG_ALT_NAME(ID_AA64ZFR0_EL1)
+#define	ID_AA64ZFR0_EL1_op0		3
+#define	ID_AA64ZFR0_EL1_op1		0
+#define	ID_AA64ZFR0_EL1_CRn		0
+#define	ID_AA64ZFR0_EL1_CRm		4
+#define	ID_AA64ZFR0_EL1_op2		4
+#define	ID_AA64ZFR0_SVEver_SHIFT	0
+#define	ID_AA64ZFR0_SVEver_MASK		(UL(0xf) << ID_AA64ZFR0_SVEver_SHIFT)
+#define	ID_AA64ZFR0_SVEver_VAL(x)	((x) & ID_AA64ZFR0_SVEver_MASK
+#define	ID_AA64ZFR0_SVEver_SVE1		(UL(0x0) << ID_AA64ZFR0_SVEver_SHIFT)
+#define	ID_AA64ZFR0_SVEver_SVE2		(UL(0x1) << ID_AA64ZFR0_SVEver_SHIFT)
+#define	ID_AA64ZFR0_AES_SHIFT		4
+#define	ID_AA64ZFR0_AES_MASK		(UL(0xf) << ID_AA64ZFR0_AES_SHIFT)
+#define	ID_AA64ZFR0_AES_VAL(x)		((x) & ID_AA64ZFR0_AES_MASK
+#define	ID_AA64ZFR0_AES_NONE		(UL(0x0) << ID_AA64ZFR0_AES_SHIFT)
+#define	ID_AA64ZFR0_AES_BASE		(UL(0x1) << ID_AA64ZFR0_AES_SHIFT)
+#define	ID_AA64ZFR0_AES_PMULL		(UL(0x2) << ID_AA64ZFR0_AES_SHIFT)
+#define	ID_AA64ZFR0_BitPerm_SHIFT	16
+#define	ID_AA64ZFR0_BitPerm_MASK	(UL(0xf) << ID_AA64ZFR0_BitPerm_SHIFT)
+#define	ID_AA64ZFR0_BitPerm_VAL(x)	((x) & ID_AA64ZFR0_BitPerm_MASK
+#define	ID_AA64ZFR0_BitPerm_NONE	(UL(0x0) << ID_AA64ZFR0_BitPerm_SHIFT)
+#define	ID_AA64ZFR0_BitPerm_IMPL	(UL(0x1) << ID_AA64ZFR0_BitPerm_SHIFT)
+#define	ID_AA64ZFR0_BF16_SHIFT		20
+#define	ID_AA64ZFR0_BF16_MASK		(UL(0xf) << ID_AA64ZFR0_BF16_SHIFT)
+#define	ID_AA64ZFR0_BF16_VAL(x)		((x) & ID_AA64ZFR0_BF16_MASK
+#define	ID_AA64ZFR0_BF16_NONE		(UL(0x0) << ID_AA64ZFR0_BF16_SHIFT)
+#define	ID_AA64ZFR0_BF16_BASE		(UL(0x1) << ID_AA64ZFR0_BF16_SHIFT)
+#define	ID_AA64ZFR0_BF16_EBF		(UL(0x1) << ID_AA64ZFR0_BF16_SHIFT)
+#define	ID_AA64ZFR0_SHA3_SHIFT		32
+#define	ID_AA64ZFR0_SHA3_MASK		(UL(0xf) << ID_AA64ZFR0_SHA3_SHIFT)
+#define	ID_AA64ZFR0_SHA3_VAL(x)		((x) & ID_AA64ZFR0_SHA3_MASK
+#define	ID_AA64ZFR0_SHA3_NONE		(UL(0x0) << ID_AA64ZFR0_SHA3_SHIFT)
+#define	ID_AA64ZFR0_SHA3_IMPL		(UL(0x1) << ID_AA64ZFR0_SHA3_SHIFT)
+#define	ID_AA64ZFR0_SM4_SHIFT		40
+#define	ID_AA64ZFR0_SM4_MASK		(UL(0xf) << ID_AA64ZFR0_SM4_SHIFT)
+#define	ID_AA64ZFR0_SM4_VAL(x)		((x) & ID_AA64ZFR0_SM4_MASK
+#define	ID_AA64ZFR0_SM4_NONE		(UL(0x0) << ID_AA64ZFR0_SM4_SHIFT)
+#define	ID_AA64ZFR0_SM4_IMPL		(UL(0x1) << ID_AA64ZFR0_SM4_SHIFT)
+#define	ID_AA64ZFR0_I8MM_SHIFT		44
+#define	ID_AA64ZFR0_I8MM_MASK		(UL(0xf) << ID_AA64ZFR0_I8MM_SHIFT)
+#define	ID_AA64ZFR0_I8MM_VAL(x)		((x) & ID_AA64ZFR0_I8MM_MASK
+#define	ID_AA64ZFR0_I8MM_NONE		(UL(0x0) << ID_AA64ZFR0_I8MM_SHIFT)
+#define	ID_AA64ZFR0_I8MM_IMPL		(UL(0x1) << ID_AA64ZFR0_I8MM_SHIFT)
+#define	ID_AA64ZFR0_F32MM_SHIFT		52
+#define	ID_AA64ZFR0_F32MM_MASK		(UL(0xf) << ID_AA64ZFR0_F32MM_SHIFT)
+#define	ID_AA64ZFR0_F32MM_VAL(x)	((x) & ID_AA64ZFR0_F32MM_MASK
+#define	ID_AA64ZFR0_F32MM_NONE		(UL(0x0) << ID_AA64ZFR0_F32MM_SHIFT)
+#define	ID_AA64ZFR0_F32MM_IMPL		(UL(0x1) << ID_AA64ZFR0_F32MM_SHIFT)
+#define	ID_AA64ZFR0_F64MM_SHIFT		56
+#define	ID_AA64ZFR0_F64MM_MASK		(UL(0xf) << ID_AA64ZFR0_F64MM_SHIFT)
+#define	ID_AA64ZFR0_F64MM_VAL(x)	((x) & ID_AA64ZFR0_F64MM_MASK
+#define	ID_AA64ZFR0_F64MM_NONE		(UL(0x0) << ID_AA64ZFR0_F64MM_SHIFT)
+#define	ID_AA64ZFR0_F64MM_IMPL		(UL(0x1) << ID_AA64ZFR0_F64MM_SHIFT)
 
 /* ID_ISAR5_EL1 */
 #define	ID_ISAR5_EL1			MRS_REG(ID_ISAR5_EL1)
@@ -1764,5 +1871,10 @@
 #define	TTBR_BADDR		0x0000fffffffffffeul
 #define	TTBR_CnP_SHIFT		0
 #define	TTBR_CnP		(1ul << TTBR_CnP_SHIFT)
+
+/* ZCR_EL1 - SVE Control Register */
+#define	ZCR_LEN_SHIFT		0
+#define	ZCR_LEN_MASK		(0xf << ZCR_LEN_SHIFT)
+#define	ZCR_LEN_BYTES(x)	((((x) & ZCR_LEN_MASK) + 1) * 16)
 
 #endif /* !_MACHINE_ARMREG_H_ */

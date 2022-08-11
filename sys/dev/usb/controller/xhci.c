@@ -581,7 +581,6 @@ xhci_init(struct xhci_softc *sc, device_t self, uint8_t dma32)
 		return (ENXIO);
 	}
 
-	sc->sc_noport = sc->sc_noport;
 	sc->sc_noslot = XHCI_HCS1_DEVSLOT_MAX(temp);
 
 	DPRINTF("Max slots: %u\n", sc->sc_noslot);
@@ -3392,7 +3391,8 @@ xhci_roothub_exec(struct usb_device *udev,
 			XWRITE4(sc, oper, port, v | XHCI_PS_PRC);
 			break;
 		case UHF_PORT_ENABLE:
-			XWRITE4(sc, oper, port, v | XHCI_PS_PED);
+			if ((sc->sc_quirks & XHCI_QUIRK_DISABLE_PORT_PED) == 0)
+				XWRITE4(sc, oper, port, v | XHCI_PS_PED);
 			break;
 		case UHF_PORT_POWER:
 			XWRITE4(sc, oper, port, v & ~XHCI_PS_PP);

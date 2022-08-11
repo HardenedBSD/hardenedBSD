@@ -23,7 +23,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 2, 2022
+.Dd June 30, 2022
 .Dt BHYVE_CONFIG 5
 .Os
 .Sh NAME
@@ -158,6 +158,52 @@ then
 .Xr bhyve 8
 will write all of its configuration variables to stdout and exit.
 No VM will be started.
+.It Va bios.vendor Ta string Ta BHYVE Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va bios.version Ta string Ta 14.0 Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va bios.release_date Ta string Ta 10/17/2021 Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.family_name Ta string Ta Virtual Machine Ta
+Family the computer belongs to.
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.manufacturer Ta string Ta FreeBSD Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.product_name Ta string Ta BHYVE Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.serial_number Ta string Ta None Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.sku Ta string Ta None Ta
+Stock keeping unit of the computer.
+It's also called product ID or purchase order number.
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va system.version Ta string Ta 1.0 Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.manufacturer Ta string Ta FreeBSD Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.product_name Ta string Ta BHYVE Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.version Ta string Ta 1.0 Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.serial_number Ta string Ta None Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.asset_tag Ta string Ta None Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va board.location Ta string Ta None Ta
+Describes the board's location within the chassis.
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va chassis.manufacturer Ta string Ta FreeBSD Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va chassis.version Ta string Ta 1.0 Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va chassis.serial_number Ta string Ta None Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va chassis.asset_tag Ta string Ta None Ta
+This value is used for the guest's System Management BIOS System Information structure.
+.It Va chassis.sku Ta string Ta None Ta
+Stock keeping unit of the chassis.
+It's also called product ID or purchase order number.
+This value is used for the guest's System Management BIOS System Information structure.
 .El
 .Ss x86-Specific Settings
 .Bl -column "x86.vmexit_on_pause" "integer" "Default"
@@ -290,16 +336,21 @@ The backend is responsible for passing packets between the device model
 and a desired destination.
 Configuring a backend requires setting the
 .Va backend
-variable to one of the following values:
-.Bl -tag
-.It tap Ns Va N
-Use the named
+variable.
+The type of a backend can either be set explicitly via the
+.Va type
+variable
+or it can be inferred from the value of
+.Va backend .
+.Pp
+The following types of backends are supported:
+.Bl -tag -width "netgraph"
+.It tap
+Use the
 .Xr tap 4
-interface as the backend.
-.It vmnet Ns Va N
-Use the named
-.Xr vmnet 4
-interface as the backend.
+interface named in
+.Va backend
+as the backend.
 .It netgraph
 Use a
 .Xr netgraph 4
@@ -322,14 +373,31 @@ The name of the source hook on the created
 .Xr ng_socket 4
 node.
 .El
-.It netmap: Ns Va interface
+.It netmap
 Use
 .Xr netmap 4
-on a network interface as the backend.
-.It vale Ns Va bridge : Ns Va port
-Use a port on a
+either on a network interface or a port on a
 .Xr vale 4
 bridge as the backend.
+The value of
+.Va backend
+is passed to
+.Xr nm_open
+to connect to a netmap port.
+.El
+.Pp
+If
+.Va type
+is not specified explicitly, then it is inferred from
+.Va backend
+based on the following patterns:
+.Bl -column -offset indent "valuebridge:port"
+.It Sy Pattern Ta Sy Type
+.It tap Ns Va N Ta tap
+.It vmnet Ns Va N Ta tap
+.It netgraph Ta netgraph
+.It netmap: Ns Va interface Ta netmap
+.It vale Ns Va bridge : Ns Va port Ta netmap
 .El
 .Ss UART Device Settings
 .Bl -column "Name" "Format" "Default"

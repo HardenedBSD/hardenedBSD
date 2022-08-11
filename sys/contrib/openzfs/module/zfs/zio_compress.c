@@ -49,7 +49,7 @@ unsigned long zio_decompress_fail_fraction = 0;
 /*
  * Compression vectors.
  */
-zio_compress_info_t zio_compress_table[ZIO_COMPRESS_FUNCTIONS] = {
+const zio_compress_info_t zio_compress_table[ZIO_COMPRESS_FUNCTIONS] = {
 	{"inherit",	0,	NULL,		NULL, NULL},
 	{"on",		0,	NULL,		NULL, NULL},
 	{"uncompressed", 0,	NULL,		NULL, NULL},
@@ -66,7 +66,7 @@ zio_compress_info_t zio_compress_table[ZIO_COMPRESS_FUNCTIONS] = {
 	{"gzip-9",	9,	gzip_compress,	gzip_decompress, NULL},
 	{"zle",		64,	zle_compress,	zle_decompress, NULL},
 	{"lz4",		0,	lz4_compress_zfs, lz4_decompress_zfs, NULL},
-	{"zstd",	ZIO_ZSTD_LEVEL_DEFAULT,	zfs_zstd_compress,
+	{"zstd",	ZIO_ZSTD_LEVEL_DEFAULT,	zfs_zstd_compress_wrap,
 	    zfs_zstd_decompress, zfs_zstd_decompress_level},
 };
 

@@ -93,6 +93,7 @@ __DEFAULT_YES_OPTIONS = \
     DIALOG \
     DICT \
     DMAGENT \
+    DTRACE \
     DYNAMICROOT \
     EE \
     EFI \
@@ -164,6 +165,7 @@ __DEFAULT_YES_OPTIONS = \
     QUOTAS \
     RADIUS_SUPPORT \
     RBOOTD \
+    RELRO \
     RESCUE \
     ROUTED \
     SENDMAIL \
@@ -403,9 +405,10 @@ MK_SOURCELESS_UCODE:= no
 .endif
 
 .if ${MK_CDDL} == "no"
-MK_ZFS:=	no
-MK_LOADER_ZFS:=	no
 MK_CTF:=	no
+MK_DTRACE:=	no
+MK_LOADER_ZFS:=	no
+MK_ZFS:=	no
 .endif
 
 .if ${MK_CRYPT} == "no"
@@ -426,6 +429,10 @@ MK_TESTS:=	no
 
 .if ${MK_DIALOG} == "no"
 MK_BSDINSTALL:=	no
+.endif
+
+.if ${MK_DTRACE} == "no"
+MK_CTF:=	no
 .endif
 
 .if ${MK_MAIL} == "no"

@@ -197,7 +197,7 @@ extern void	nd6_setmtu(struct ifnet *);
  *  - BRIDGE_RT_LOCK, for any change to bridge_rtnodes
  *  - BRIDGE_LOCK, for any other change
  *
- * The BRIDGE_LOCK is a sleepable lock, because it is held accross ioctl()
+ * The BRIDGE_LOCK is a sleepable lock, because it is held across ioctl()
  * calls to bridge member interfaces and these ioctl()s can sleep.
  * The BRIDGE_RT_LOCK is a non-sleepable mutex, because it is sometimes
  * required while we're in NET_EPOCH and then we're not allowed to sleep.
@@ -600,7 +600,7 @@ vnet_bridge_uninit(const void *unused __unused)
 	BRIDGE_LIST_LOCK_DESTROY();
 
 	/* Callbacks may use the UMA zone. */
-	epoch_drain_callbacks(net_epoch_preempt);
+	NET_EPOCH_DRAIN_CALLBACKS();
 
 	uma_zdestroy(V_bridge_rtnode_zone);
 }
@@ -1266,9 +1266,21 @@ bridge_ioctl_add(struct bridge_softc *sc, void *arg)
 	if (CK_LIST_EMPTY(&sc->sc_iflist))
 		sc->sc_ifp->if_mtu = ifs->if_mtu;
 	else if (sc->sc_ifp->if_mtu != ifs->if_mtu) {
-		if_printf(sc->sc_ifp, "invalid MTU: %u(%s) != %u\n",
-		    ifs->if_mtu, ifs->if_xname, sc->sc_ifp->if_mtu);
-		return (EINVAL);
+		struct ifreq ifr;
+
+		snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s",
+		    ifs->if_xname);
+		ifr.ifr_mtu = sc->sc_ifp->if_mtu;
+
+		error = (*ifs->if_ioctl)(ifs,
+		    SIOCSIFMTU, (caddr_t)&ifr);
+		if (error != 0) {
+			log(LOG_NOTICE, "%s: invalid MTU: %u for"
+			    " new member %s\n", sc->sc_ifp->if_xname,
+			    ifr.ifr_mtu,
+			    ifs->if_xname);
+			return (EINVAL);
+		}
 	}
 
 	bif = malloc(sizeof(*bif), M_DEVBUF, M_NOWAIT|M_ZERO);

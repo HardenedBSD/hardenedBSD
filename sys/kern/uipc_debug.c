@@ -158,10 +158,6 @@ db_print_sostate(short so_state)
 	int comma;
 
 	comma = 0;
-	if (so_state & SS_NOFDREF) {
-		db_printf("%sSS_NOFDREF", comma ? ", " : "");
-		comma = 1;
-	}
 	if (so_state & SS_ISCONNECTED) {
 		db_printf("%sSS_ISCONNECTED", comma ? ", " : "");
 		comma = 1;
@@ -184,10 +180,6 @@ db_print_sostate(short so_state)
 	}
 	if (so_state & SS_ISCONFIRMING) {
 		db_printf("%sSS_ISCONFIRMING", comma ? ", " : "");
-		comma = 1;
-	}
-	if (so_state & SS_PROTOREF) {
-		db_printf("%sSS_PROTOREF", comma ? ", " : "");
 		comma = 1;
 	}
 }
@@ -408,8 +400,6 @@ db_print_sockbuf(struct sockbuf *sb, const char *sockbufname, int indent)
 	db_printf("sb_mbmax: %u\n", sb->sb_mbmax);
 
 	db_print_indent(indent);
-	db_printf("sb_mcnt: %u   ", sb->sb_mcnt);
-	db_printf("sb_ccnt: %u   ", sb->sb_ccnt);
 	db_printf("sb_ctl: %u   ", sb->sb_ctl);
 	db_printf("sb_lowat: %d   ", sb->sb_lowat);
 	db_printf("sb_timeo: %jd\n", sb->sb_timeo);

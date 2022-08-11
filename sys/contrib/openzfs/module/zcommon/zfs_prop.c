@@ -84,6 +84,7 @@ zfs_prop_init(void)
 		{ "sha512",	ZIO_CHECKSUM_SHA512 },
 		{ "skein",	ZIO_CHECKSUM_SKEIN },
 		{ "edonr",	ZIO_CHECKSUM_EDONR },
+		{ "blake3",	ZIO_CHECKSUM_BLAKE3 },
 		{ NULL }
 	};
 
@@ -102,6 +103,9 @@ zfs_prop_init(void)
 				ZIO_CHECKSUM_SKEIN | ZIO_CHECKSUM_VERIFY },
 		{ "edonr,verify",
 				ZIO_CHECKSUM_EDONR | ZIO_CHECKSUM_VERIFY },
+		{ "blake3",	ZIO_CHECKSUM_BLAKE3 },
+		{ "blake3,verify",
+				ZIO_CHECKSUM_BLAKE3 | ZIO_CHECKSUM_VERIFY },
 		{ NULL }
 	};
 
@@ -394,12 +398,12 @@ zfs_prop_init(void)
 	    ZIO_CHECKSUM_DEFAULT, PROP_INHERIT, ZFS_TYPE_FILESYSTEM |
 	    ZFS_TYPE_VOLUME,
 	    "on | off | fletcher2 | fletcher4 | sha256 | sha512 | skein"
-	    " | edonr",
+	    " | edonr | blake3",
 	    "CHECKSUM", checksum_table, sfeatures);
 	zprop_register_index(ZFS_PROP_DEDUP, "dedup", ZIO_CHECKSUM_OFF,
 	    PROP_INHERIT, ZFS_TYPE_FILESYSTEM | ZFS_TYPE_VOLUME,
 	    "on | off | verify | sha256[,verify] | sha512[,verify] | "
-	    "skein[,verify] | edonr,verify",
+	    "skein[,verify] | edonr,verify | blake3[,verify]",
 	    "DEDUP", dedup_table, sfeatures);
 	zprop_register_index(ZFS_PROP_COMPRESSION, "compression",
 	    ZIO_COMPRESS_DEFAULT, PROP_INHERIT,
@@ -1006,7 +1010,10 @@ uint8_t **zfs_kfpu_fpregs;
 EXPORT_SYMBOL(zfs_kfpu_fpregs);
 #endif /* defined(HAVE_KERNEL_FPU_INTERNAL) */
 
-static int __init
+extern int __init zcommon_init(void);
+extern void zcommon_fini(void);
+
+int __init
 zcommon_init(void)
 {
 	int error = kfpu_init();
@@ -1018,22 +1025,19 @@ zcommon_init(void)
 	return (0);
 }
 
-static void __exit
+void
 zcommon_fini(void)
 {
 	fletcher_4_fini();
 	kfpu_fini();
 }
 
+#ifdef __FreeBSD__
 module_init_early(zcommon_init);
 module_exit(zcommon_fini);
-
 #endif
 
-ZFS_MODULE_DESCRIPTION("Generic ZFS support");
-ZFS_MODULE_AUTHOR(ZFS_META_AUTHOR);
-ZFS_MODULE_LICENSE(ZFS_META_LICENSE);
-ZFS_MODULE_VERSION(ZFS_META_VERSION "-" ZFS_META_RELEASE);
+#endif
 
 /* zfs dataset property functions */
 EXPORT_SYMBOL(zfs_userquota_prop_prefixes);

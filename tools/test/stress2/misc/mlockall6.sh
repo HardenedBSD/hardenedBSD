@@ -46,9 +46,8 @@ cd $odir
 mount | grep "on $mntpoint " | grep -q /dev/md && umount -f $mntpoint
 mdconfig -l | grep -q md$mdstart &&  mdconfig -d -u $mdstart
 mdconfig -a -t swap -s 512m -u $mdstart || exit 1
-bsdlabel -w md$mdstart auto
-newfs $newfs_flags -n md${mdstart}$part > /dev/null
-mount /dev/md${mdstart}$part $mntpoint || exit 1
+newfs $newfs_flags -n md$mdstart > /dev/null
+mount /dev/md$mdstart $mntpoint || exit 1
 
 daemon sh -c "(cd $odir/../testcases/swap; ./swap -t 20m -i 20 -l 100)" \
     > /dev/null 2>&1
@@ -141,7 +140,7 @@ test2(void)
 	for (i = 0; i < 100000 && share2[R2] == 0; i++)
 		touch();	/* while child is running */
 
-	if (waitpid(pid, &status, 0) == -1)
+	if (waitpid(pid, &status, 0) != pid)
 		err(1, "wait");
 
 	if (status != 0)
@@ -170,7 +169,7 @@ test(void)
 int
 main(void)
 {
-	pid_t pid;
+	pid_t pids[PARALLEL];
 	size_t len;
 	time_t start;
 	int i, s, status;
@@ -184,12 +183,13 @@ main(void)
 	s = 0;
 	while (s == 0 && (time(NULL) - start) < RUNTIME) {
 		for (i = 0; i < PARALLEL; i++) {
-			if ((pid = fork()) == 0)
+			if ((pids[i] = fork()) == 0)
 				test();
 		}
 		atomic_add_int(&share[R0], 1);	/* Start test() runs */
 		for (i = 0; i < PARALLEL; i++) {
-			waitpid(pid, &status, 0);
+			if (waitpid(pids[i], &status, 0) != pids[i])
+				err(1, "wait");
 			if (status != 0) {
 				fprintf(stderr, "FAIL: status = %d\n",
 				    status);

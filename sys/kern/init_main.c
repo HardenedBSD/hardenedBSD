@@ -418,7 +418,6 @@ null_set_fork_retval(struct thread *td __unused)
 struct sysentvec null_sysvec = {
 	.sv_size	= 0,
 	.sv_table	= NULL,
-	.sv_transtrap	= NULL,
 	.sv_fixup	= NULL,
 	.sv_sendsig	= NULL,
 	.sv_sigcode	= NULL,
@@ -905,7 +904,7 @@ db_show_print_syinit(struct sysinit *sip, bool ddb)
 #undef xprint
 }
 
-DB_SHOW_COMMAND(sysinit, db_show_sysinit)
+DB_SHOW_COMMAND_FLAGS(sysinit, db_show_sysinit, DB_CMD_MEMSAFE)
 {
 	struct sysinit **sipp;
 

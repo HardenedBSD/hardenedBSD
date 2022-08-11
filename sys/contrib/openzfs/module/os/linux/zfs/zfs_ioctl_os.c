@@ -37,6 +37,7 @@
  * Copyright 2017 RackTop Systems.
  * Copyright (c) 2017 Open-E, Inc. All Rights Reserved.
  * Copyright (c) 2019 Datto Inc.
+ * Copyright (c) 2021 Klara, Inc.
  */
 
 #include <sys/types.h>
@@ -58,6 +59,8 @@
 #include <sys/zvol.h>
 #include <sys/fm/util.h>
 #include <sys/dsl_crypt.h>
+#include <sys/crypto/icp.h>
+#include <sys/zstd/zstd.h>
 
 #include <sys/zfs_ioctl_impl.h>
 
@@ -148,6 +151,48 @@ out:
 
 }
 
+static int
+zfs_ioc_userns_attach(zfs_cmd_t *zc)
+{
+	int error;
+
+	if (zc == NULL)
+		return (SET_ERROR(EINVAL));
+
+	error = zone_dataset_attach(CRED(), zc->zc_name, zc->zc_cleanup_fd);
+
+	/*
+	 * Translate ENOTTY to ZFS_ERR_NOT_USER_NAMESPACE as we just arrived
+	 * back from the SPL layer, which does not know about ZFS_ERR_* errors.
+	 * See the comment at the user_ns_get() function in spl-zone.c for
+	 * details.
+	 */
+	if (error == ENOTTY)
+		error = ZFS_ERR_NOT_USER_NAMESPACE;
+
+	return (error);
+}
+
+static int
+zfs_ioc_userns_detach(zfs_cmd_t *zc)
+{
+	int error;
+
+	if (zc == NULL)
+		return (SET_ERROR(EINVAL));
+
+	error = zone_dataset_detach(CRED(), zc->zc_name, zc->zc_cleanup_fd);
+
+	/*
+	 * See the comment in zfs_ioc_userns_attach() for details on what is
+	 * going on here.
+	 */
+	if (error == ENOTTY)
+		error = ZFS_ERR_NOT_USER_NAMESPACE;
+
+	return (error);
+}
+
 uint64_t
 zfs_max_nvlist_src_size_os(void)
 {
@@ -166,6 +211,10 @@ zfs_ioctl_update_mount_cache(const char *dsname)
 void
 zfs_ioctl_init_os(void)
 {
+	zfs_ioctl_register_dataset_nolog(ZFS_IOC_USERNS_ATTACH,
+	    zfs_ioc_userns_attach, zfs_secpolicy_config, POOL_CHECK_NONE);
+	zfs_ioctl_register_dataset_nolog(ZFS_IOC_USERNS_DETACH,
+	    zfs_ioc_userns_detach, zfs_secpolicy_config, POOL_CHECK_NONE);
 }
 
 #ifdef CONFIG_COMPAT
@@ -233,8 +282,8 @@ zfsdev_detach(void)
 #define	ZFS_DEBUG_STR	""
 #endif
 
-static int __init
-openzfs_init(void)
+static int
+openzfs_init_os(void)
 {
 	int error;
 
@@ -259,8 +308,8 @@ openzfs_init(void)
 	return (0);
 }
 
-static void __exit
-openzfs_fini(void)
+static void
+openzfs_fini_os(void)
 {
 	zfs_sysfs_fini();
 	zfs_kmod_fini();
@@ -269,12 +318,59 @@ openzfs_fini(void)
 	    ZFS_META_VERSION, ZFS_META_RELEASE, ZFS_DEBUG_STR);
 }
 
+
+extern int __init zcommon_init(void);
+extern void zcommon_fini(void);
+
+static int __init
+openzfs_init(void)
+{
+	int err;
+	if ((err = zcommon_init()) != 0)
+		goto zcommon_failed;
+	if ((err = icp_init()) != 0)
+		goto icp_failed;
+	if ((err = zstd_init()) != 0)
+		goto zstd_failed;
+	if ((err = openzfs_init_os()) != 0)
+		goto openzfs_os_failed;
+	return (0);
+
+openzfs_os_failed:
+	zstd_fini();
+zstd_failed:
+	icp_fini();
+icp_failed:
+	zcommon_fini();
+zcommon_failed:
+	return (err);
+}
+
+static void __exit
+openzfs_fini(void)
+{
+	openzfs_fini_os();
+	zstd_fini();
+	icp_fini();
+	zcommon_fini();
+}
+
 #if defined(_KERNEL)
 module_init(openzfs_init);
 module_exit(openzfs_fini);
 #endif
 
-ZFS_MODULE_DESCRIPTION("ZFS");
-ZFS_MODULE_AUTHOR(ZFS_META_AUTHOR);
-ZFS_MODULE_LICENSE(ZFS_META_LICENSE);
-ZFS_MODULE_VERSION(ZFS_META_VERSION "-" ZFS_META_RELEASE);
+MODULE_ALIAS("zavl");
+MODULE_ALIAS("icp");
+MODULE_ALIAS("zlua");
+MODULE_ALIAS("znvpair");
+MODULE_ALIAS("zunicode");
+MODULE_ALIAS("zcommon");
+MODULE_ALIAS("zzstd");
+MODULE_DESCRIPTION("ZFS");
+MODULE_AUTHOR(ZFS_META_AUTHOR);
+MODULE_LICENSE("Lua: MIT");
+MODULE_LICENSE("zstd: Dual BSD/GPL");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE(ZFS_META_LICENSE);
+MODULE_VERSION(ZFS_META_VERSION "-" ZFS_META_RELEASE);

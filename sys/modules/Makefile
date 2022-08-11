@@ -144,6 +144,7 @@ SUBDIR=	\
 	${_ichwd} \
 	${_ice} \
 	${_ice_ddp} \
+	${_irdma} \
 	${_ida} \
 	if_bridge \
 	${_if_cgem} \
@@ -156,6 +157,7 @@ SUBDIR=	\
 	${_if_me} \
 	if_infiniband \
 	if_lagg \
+	if_ovpn \
 	${_if_stf} \
 	if_tuntap \
 	if_vlan \
@@ -214,20 +216,21 @@ SUBDIR=	\
 	linuxkpi_wlan \
 	${_lio} \
 	lpt \
-	mac_biba \
-	mac_bsdextended \
-	mac_ifoff \
-	mac_lomac \
-	mac_mls \
-	mac_none \
-	mac_ntpd \
-	mac_partition \
-	mac_pimd \
-	mac_portacl \
-	mac_priority \
-	mac_seeotheruids \
-	mac_stub \
-	mac_test \
+	${_mac_biba} \
+	${_mac_bsdextended} \
+	${_mac_ddb} \
+	${_mac_ifoff} \
+	${_mac_lomac} \
+	${_mac_mls} \
+	${_mac_none} \
+	${_mac_ntpd} \
+	${_mac_partition} \
+	${_mac_pimd} \
+	${_mac_portacl} \
+	${_mac_priority} \
+	${_mac_seeotheruids} \
+	${_mac_stub} \
+	${_mac_test} \
 	${_malo} \
 	${_mana} \
 	md \
@@ -305,6 +308,8 @@ SUBDIR=	\
 	pwm \
 	${_qat} \
 	${_qatfw} \
+	${_qat_c2xxx} \
+	${_qat_c2xxxfw} \
 	${_qlxge} \
 	${_qlxgb} \
 	${_qlxgbe} \
@@ -406,7 +411,7 @@ SUBDIR=	\
 _autofs=	autofs
 .endif
 
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+.if ${MK_DTRACE} != "no" || defined(ALL_MODULES)
 .if ${MACHINE_CPUARCH} != "arm" || ${MACHINE_ARCH:Marmv[67]*} != ""
 .if ${KERN_OPTS:MKDTRACE_HOOKS}
 SUBDIR+=	dtrace
@@ -537,6 +542,27 @@ _rtw88fw=	rtw88fw
 _vmware=	vmware
 .endif
 
+# MAC framework
+.if ${KERN_OPTS:MMAC} || defined(ALL_MODULES)
+_mac_biba=	mac_biba
+_mac_bsdextended= mac_bsdextended
+.if ${KERN_OPTS:MDDB} || defined(ALL_MODULES)
+_mac_ddb=	mac_ddb
+.endif
+_mac_ifoff=	mac_ifoff
+_mac_lomac=	mac_lomac
+_mac_mls=	mac_mls
+_mac_none=	mac_none
+_mac_ntpd=	mac_ntpd
+_mac_partition=	mac_partition
+_mac_pimd=	mac_pimd
+_mac_portacl=	mac_portacl
+_mac_priority=	mac_priority
+_mac_seeotheruids= mac_seeotheruids
+_mac_stub=	mac_stub
+_mac_test=	mac_test
+.endif
+
 .if ${MK_NETGRAPH} != "no" || defined(ALL_MODULES)
 _netgraph=	netgraph
 .endif
@@ -571,6 +597,11 @@ _cxgbe=		cxgbe
 _ice=		ice
 .if ${MK_SOURCELESS_UCODE} != "no"
 _ice_ddp=	ice_ddp
+.endif
+.if ${MK_OFED} != "no" || defined(ALL_MODULES)
+.if ${MK_INET_SUPPORT} != "no" && ${MK_INET6_SUPPORT} != "no"
+_irdma=		irdma
+.endif
 .endif
 .endif
 
@@ -648,6 +679,8 @@ _ntb=		ntb
 _ocs_fc=	ocs_fc
 _qat=		qat
 _qatfw=		qatfw
+_qat_c2xxx=	qat_c2xxx
+_qat_c2xxxfw=	qat_c2xxxfw
 .if ${MK_OFED} != "no" || defined(ALL_MODULES)
 _rdma=		rdma
 .endif

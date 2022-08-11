@@ -420,6 +420,7 @@ MAN=	aac.4 \
 	ow.4 \
 	ow_temp.4 \
 	owc.4 \
+	ovpn.4 \
 	${_padlock.4} \
 	pass.4 \
 	pca954x.4 \
@@ -453,7 +454,7 @@ MAN=	aac.4 \
 	pty.4 \
 	puc.4 \
 	pwmc.4 \
-	${_qat.4} \
+	${_qat_c2xxx.4} \
 	${_qlxge.4} \
 	${_qlxgb.4} \
 	${_qlxgbe.4} \
@@ -503,7 +504,6 @@ MAN=	aac.4 \
 	smbus.4 \
 	smp.4 \
 	smsc.4 \
-	snd_ad1816.4 \
 	snd_als4000.4 \
 	snd_atiixp.4 \
 	snd_cmi.4 \
@@ -514,16 +514,12 @@ MAN=	aac.4 \
 	snd_envy24.4 \
 	snd_envy24ht.4 \
 	snd_es137x.4 \
-	snd_ess.4 \
 	snd_fm801.4 \
-	snd_gusc.4 \
 	snd_hda.4 \
 	snd_hdspe.4 \
 	snd_ich.4 \
 	snd_maestro3.4 \
-	snd_mss.4 \
 	snd_neomagic.4 \
-	snd_sbc.4 \
 	snd_solo.4 \
 	snd_spicds.4 \
 	snd_t4dwave.4 \
@@ -743,8 +739,6 @@ MLINKS+=sk.4 if_sk.4
 MLINKS+=smp.4 SMP.4
 MLINKS+=smsc.4 if_smsc.4
 MLINKS+=snd_envy24.4 snd_ak452x.4
-MLINKS+=snd_sbc.4 snd_sb16.4 \
-	snd_sbc.4 snd_sb8.4
 MLINKS+=${_spkr.4} ${_speaker.4}
 MLINKS+=splash.4 screensaver.4
 MLINKS+=ste.4 if_ste.4
@@ -838,7 +832,7 @@ _nvme.4=	nvme.4
 _nvram.4=	nvram.4
 _padlock.4=	padlock.4
 _pchtherm.4=	pchtherm.4
-_qat.4=		qat.4
+_qat_c2xxx.4=	qat_c2xxx.4
 _rr232x.4=	rr232x.4
 _speaker.4=	speaker.4
 _spkr.4=	spkr.4

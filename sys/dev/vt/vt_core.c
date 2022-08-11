@@ -593,7 +593,8 @@ vt_window_switch(struct vt_window *vw)
 		 * switch to console mode when panicking, making sure the panic
 		 * is readable (even when a GUI was using ttyv0).
 		 */
-		if ((kdb_active || panicstr) && vd->vd_driver->vd_postswitch)
+		if ((kdb_active || KERNEL_PANICKED()) &&
+		    vd->vd_driver->vd_postswitch)
 			vd->vd_driver->vd_postswitch(vd);
 		VT_UNLOCK(vd);
 		return (0);
@@ -2125,7 +2126,7 @@ vt_mouse_terminput(struct vt_device *vd, int type, int x, int y, int event,
 }
 
 static void
-vt_mouse_paste()
+vt_mouse_paste(void)
 {
 	term_char_t *buf;
 	int i, len;
@@ -2134,7 +2135,7 @@ vt_mouse_paste()
 	buf = VD_PASTEBUF(main_vd);
 	len /= sizeof(term_char_t);
 	for (i = 0; i < len; i++) {
-		if (buf[i] == '\0')
+		if (TCHAR_CHARACTER(buf[i]) == '\0')
 			continue;
 		terminal_input_char(main_vd->vd_curwindow->vw_terminal,
 		    buf[i]);
@@ -2286,8 +2287,7 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 			VD_PASTEBUFSZ(vd) = len;
 		}
 		/* Request copy/paste buffer data, no more than `len' */
-		vtbuf_extract_marked(&vw->vw_buf, VD_PASTEBUF(vd),
-		    VD_PASTEBUFSZ(vd));
+		vtbuf_extract_marked(&vw->vw_buf, VD_PASTEBUF(vd), len);
 
 		VD_PASTEBUFLEN(vd) = len;
 

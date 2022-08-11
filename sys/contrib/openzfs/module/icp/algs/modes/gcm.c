@@ -806,7 +806,7 @@ static gcm_impl_ops_t *gcm_supp_impl[ARRAY_SIZE(gcm_all_impl)];
  * fallback to the fastest generic implementation.
  */
 const gcm_impl_ops_t *
-gcm_impl_get_ops()
+gcm_impl_get_ops(void)
 {
 	if (!kfpu_allowed())
 		return (&gcm_generic_impl);
@@ -907,7 +907,7 @@ gcm_impl_init(void)
 }
 
 static const struct {
-	char *name;
+	const char *name;
 	uint32_t sel;
 } gcm_impl_opts[] = {
 		{ "cycle",	IMPL_CYCLE },

@@ -72,6 +72,7 @@ arm64/arm64/pmap.c				standard
 arm64/arm64/ptrace_machdep.c			standard
 arm64/arm64/sigtramp.S				standard
 arm64/arm64/stack_machdep.c			optional ddb | stack
+arm64/arm64/support_ifunc.c			standard
 arm64/arm64/support.S				standard
 arm64/arm64/swtch.S				standard
 arm64/arm64/sys_machdep.c			standard
@@ -155,6 +156,9 @@ cddl/dev/dtrace/aarch64/dtrace_asm.S		optional dtrace compile-with "${DTRACE_S}"
 cddl/dev/dtrace/aarch64/dtrace_subr.c		optional dtrace compile-with "${DTRACE_C}"
 cddl/dev/fbt/aarch64/fbt_isa.c			optional dtrace_fbt | dtraceall compile-with "${FBT_C}"
 
+contrib/openzfs/module/icp/asm-aarch64/blake3/b3_aarch64_sse2.S		optional zfs compile-with "${ZFS_S:N-mgeneral-regs-only}"
+contrib/openzfs/module/icp/asm-aarch64/blake3/b3_aarch64_sse41.S	optional zfs compile-with "${ZFS_S:N-mgeneral-regs-only}"
+
 ##
 ## ASoC support
 ##
@@ -194,6 +198,10 @@ dev/gpio/qoriq_gpio.c				optional SOC_NXP_LS gpio fdt
 
 dev/hwpmc/hwpmc_arm64.c				optional hwpmc
 dev/hwpmc/hwpmc_arm64_md.c			optional hwpmc
+dev/hwpmc/hwpmc_cmn600.c			optional hwpmc
+arm64/arm64/cmn600.c				optional hwpmc
+dev/hwpmc/hwpmc_dmc620.c			optional hwpmc
+dev/hwpmc/pmu_dmc620.c				optional hwpmc
 
 dev/ice/if_ice_iflib.c				optional ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"
@@ -231,6 +239,12 @@ dev/ice/ice_fw_logging.c			optional ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"
 dev/ice/ice_fwlog.c				optional ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"
+dev/ice/ice_rdma.c				optional ice pci \
+	compile-with "${NORMAL_C} -I$S/dev/ice"
+dev/ice/irdma_if.m				optional ice pci \
+	compile-with "${NORMAL_M} -I$S/dev/ice"
+dev/ice/irdma_di_if.m				optional ice pci \
+	compile-with "${NORMAL_M} -I$S/dev/ice"
 ice_ddp.c					optional ice_ddp	\
 	compile-with	"${AWK} -f $S/tools/fw_stub.awk ice_ddp.fw:ice_ddp:0x01031b00 -mice_ddp -c${.TARGET}"	\
 	no-ctfconvert no-implicit-rule before-depend local	\
@@ -293,7 +307,7 @@ dev/uart/uart_dev_mu.c				optional uart uart_mu
 dev/uart/uart_dev_pl011.c			optional uart pl011
 
 dev/usb/controller/dwc_otg_hisi.c		optional dwcotg fdt soc_hisi_hi6220
-dev/usb/controller/dwc3.c			optional fdt dwc3
+dev/usb/controller/dwc3.c			optional xhci acpi dwc3 | xhci fdt dwc3
 dev/usb/controller/ehci_mv.c			optional ehci_mv fdt
 dev/usb/controller/generic_ehci.c		optional ehci
 dev/usb/controller/generic_ehci_acpi.c		optional ehci acpi
@@ -542,6 +556,7 @@ arm64/qoriq/qoriq_therm_if.m			optional pci fdt SOC_NXP_LS
 arm64/qoriq/clk/ls1028a_clkgen.c		optional clk SOC_NXP_LS
 arm64/qoriq/clk/ls1028a_flexspi_clk.c		optional clk SOC_NXP_LS
 arm64/qoriq/clk/ls1046a_clkgen.c		optional clk SOC_NXP_LS
+arm64/qoriq/clk/ls1088a_clkgen.c		optional clk SOC_NXP_LS
 arm64/qoriq/clk/lx2160a_clkgen.c		optional clk SOC_NXP_LS
 arm64/qoriq/clk/qoriq_clk_pll.c			optional clk SOC_NXP_LS
 arm64/qoriq/clk/qoriq_clkgen.c			optional clk SOC_NXP_LS

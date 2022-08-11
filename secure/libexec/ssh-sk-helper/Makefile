@@ -11,6 +11,8 @@ LIBADD=	ssh crypto z
 LIBADD+= fido2 cbor
 .endif
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 .include <bsd.prog.mk>
 
 .PATH:	${SSHDIR}

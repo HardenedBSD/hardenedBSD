@@ -113,6 +113,9 @@ extern char pmc_cpuid[PMC_CPUID_LEN];
 	__PMC_CPU(INTEL_ATOM_GOLDMONT, 0x9A,   "Intel Atom Goldmont")	\
 	__PMC_CPU(INTEL_ICELAKE, 0x9B,	"Intel Icelake")		\
 	__PMC_CPU(INTEL_ICELAKE_XEON, 0x9C,	"Intel Icelake Xeon")	\
+	__PMC_CPU(INTEL_ALDERLAKE, 0x9D,	"Intel Alderlake")	\
+	__PMC_CPU(INTEL_ATOM_GOLDMONT_P, 0x9E,	"Intel Atom Goldmont Plus")    \
+	__PMC_CPU(INTEL_ATOM_TREMONT, 0x9F,	"Intel Atom Tremont")    \
 	__PMC_CPU(INTEL_XSCALE,	0x100,	"Intel XScale")		\
 	__PMC_CPU(MIPS_24K,     0x200,  "MIPS 24K")		\
 	__PMC_CPU(MIPS_OCTEON,  0x201,  "Cavium Octeon")	\
@@ -168,7 +171,10 @@ enum pmc_cputype {
 	__PMC_CLASS(MIPS74K,	0x12,	"MIPS 74K")			\
 	__PMC_CLASS(E500,	0x13,	"Freescale e500 class")		\
 	__PMC_CLASS(BERI,	0x14,	"MIPS BERI")			\
-	__PMC_CLASS(POWER8,	0x15,	"IBM POWER8 class")
+	__PMC_CLASS(POWER8,	0x15,	"IBM POWER8 class")		\
+	__PMC_CLASS(DMC620_PMU_CD2, 0x16, "ARM DMC620 Memory Controller PMU CLKDIV2") \
+	__PMC_CLASS(DMC620_PMU_C, 0x17, "ARM DMC620 Memory Controller PMU CLK") \
+	__PMC_CLASS(CMN600_PMU, 0x18,	"Arm CoreLink CMN600 Coherent Mesh Network PMU")
 
 enum pmc_class {
 #undef  __PMC_CLASS
@@ -177,7 +183,7 @@ enum pmc_class {
 };
 
 #define	PMC_CLASS_FIRST	PMC_CLASS_TSC
-#define	PMC_CLASS_LAST	PMC_CLASS_POWER8
+#define	PMC_CLASS_LAST	PMC_CLASS_CMN600_PMU
 
 /*
  * A PMC can be in the following states:
@@ -305,7 +311,9 @@ enum pmc_disp {
 	__PMC_CAP(QUALIFIER,	8, "further qualify monitored events")	\
 	__PMC_CAP(PRECISE,	9, "perform precise sampling")		\
 	__PMC_CAP(TAGGING,	10, "tag upstream events")		\
-	__PMC_CAP(CASCADE,	11, "cascade counters")
+	__PMC_CAP(CASCADE,	11, "cascade counters")			\
+	__PMC_CAP(SYSWIDE,	12, "system wide counter")		\
+	__PMC_CAP(DOMWIDE,	13, "NUMA domain wide counter")
 
 enum pmc_caps
 {
@@ -315,7 +323,7 @@ enum pmc_caps
 };
 
 #define	PMC_CAP_FIRST		PMC_CAP_INTERRUPT
-#define	PMC_CAP_LAST		PMC_CAP_CASCADE
+#define	PMC_CAP_LAST		PMC_CAP_DOMWIDE
 
 /*
  * PMC Event Numbers
@@ -994,6 +1002,7 @@ struct pmc_cpu {
 struct pmc_binding {
 	int	pb_bound;	/* is bound? */
 	int	pb_cpu;		/* if so, to which CPU */
+	u_char	pb_priority;	/* Thread active priority. */
 };
 
 struct pmc_mdep;
@@ -1222,6 +1231,9 @@ int	pmc_save_kernel_callchain(uintptr_t *_cc, int _maxsamples,
     struct trapframe *_tf);
 int	pmc_save_user_callchain(uintptr_t *_cc, int _maxsamples,
     struct trapframe *_tf);
+void	pmc_restore_cpu_binding(struct pmc_binding *pb);
+void	pmc_save_cpu_binding(struct pmc_binding *pb);
+void	pmc_select_cpu(int cpu);
 struct pmc_mdep *pmc_mdep_alloc(int nclasses);
 void pmc_mdep_free(struct pmc_mdep *md);
 uint64_t pmc_rdtsc(void);

@@ -85,6 +85,11 @@ typedef struct {
 	l_suseconds_t	tv_usec;
 } l_timeval;
 
+typedef struct {
+	l_time64_t	tv_sec;
+	l_time64_t	tv_usec;
+} l_sock_timeval;
+
 #define	l_fd_set	fd_set
 
 /*
@@ -230,11 +235,6 @@ struct l_statfs64 {
 #define	LINUX_SA_INTERRUPT	0x20000000
 #define	LINUX_SA_NOMASK		0x40000000
 #define	LINUX_SA_ONESHOT	0x80000000
-
-/* sigprocmask actions */
-#define	LINUX_SIG_BLOCK		0
-#define	LINUX_SIG_UNBLOCK	1
-#define	LINUX_SIG_SETMASK	2
 
 /* sigaltstack */
 #define	LINUX_MINSIGSTKSZ	2048

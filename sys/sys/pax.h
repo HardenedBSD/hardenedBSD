@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2015 by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2022 by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,7 @@
 #ifndef	_SYS_PAX_H
 #define	_SYS_PAX_H
 
-#define	__HardenedBSD_version	1400002UL
+#define	__HardenedBSD_version	1400003UL
 
 #if defined(_KERNEL) || defined(_WANT_PRISON)
 typedef	uint32_t	pax_state_t;
@@ -55,6 +55,16 @@ struct hbsd_features {
 	} noexec;
 	struct hbsd_hardening {
 		pax_state_t	 procfs_harden;		/* (p) Harden procfs */
+		pax_state_t	 tpe;			/* (p) Trusted Path Execution */
+		/*
+		 * tpe_gid, tpe_all, tpe_negate, and tpe_root_owned are
+		 * unused, but planned.
+		 */
+		int		 tpe_gid;
+		int		 tpe_all;
+		int		 tpe_negate;
+		int		 tpe_root_owned;
+		pax_state_t	 harden_rtld;
 	} hardening;
 	struct hbsd_log {
 		pax_state_t	log;		/* (p) Per-jail logging status */
@@ -225,6 +235,9 @@ int pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts);
 #define	pax_hardening_init_prison(pr, opts)	({ 0; })
 #endif
 int pax_procfs_harden(struct thread *td);
+int pax_enforce_tpe(struct thread *, struct vnode *, const char *);
+pax_flag_t pax_hardening_setup_flags(struct image_params *, struct thread *,
+    pax_flag_t);
 
 bool pax_insecure_kmod(void);
 
@@ -244,6 +257,8 @@ bool pax_insecure_kmod(void);
 #define	PAX_NOTE_NODISALLOWMAP32BIT	0x00000800
 #define PAX_NOTE_PERMITKMOD	0x00001000
 #define PAX_NOTE_FORBIDKMOD	0x00002000
+#define PAX_NOTE_TPE		0x00004000
+#define PAX_NOTE_NOTPE		0x00008000
 
 #define	PAX_NOTE_RESERVED0	0x40000000
 #define	PAX_NOTE_PREFER_ACL	0x80000000
@@ -251,11 +266,11 @@ bool pax_insecure_kmod(void);
 #define PAX_NOTE_ALL_ENABLED	\
     (PAX_NOTE_PAGEEXEC | PAX_NOTE_MPROTECT | PAX_NOTE_SEGVGUARD | \
     PAX_NOTE_ASLR | PAX_NOTE_SHLIBRANDOM | PAX_NOTE_DISALLOWMAP32BIT | \
-    PAX_NOTE_PERMITKMOD)
+    PAX_NOTE_PERMITKMOD | PAX_NOTE_TPE)
 #define PAX_NOTE_ALL_DISABLED	\
     (PAX_NOTE_NOPAGEEXEC | PAX_NOTE_NOMPROTECT | \
     PAX_NOTE_NOSEGVGUARD | PAX_NOTE_NOASLR | PAX_NOTE_NOSHLIBRANDOM | \
-    PAX_NOTE_NODISALLOWMAP32BIT | PAX_NOTE_FORBIDKMOD)
+    PAX_NOTE_NODISALLOWMAP32BIT | PAX_NOTE_FORBIDKMOD | PAX_NOTE_NOTPE)
 #define PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED | PAX_NOTE_PREFER_ACL)
 
 #define	PAX_HARDENING_SHLIBRANDOM	0x00000100

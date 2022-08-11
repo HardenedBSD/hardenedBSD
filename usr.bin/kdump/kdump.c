@@ -90,6 +90,7 @@ __FBSDID("$FreeBSD$");
 #include <unistd.h>
 #include <vis.h>
 #include "ktrace.h"
+#include "kdump.h"
 
 #ifdef WITH_CASPER
 #include <libcasper.h>
@@ -102,6 +103,8 @@ int fetchprocinfo(struct ktr_header *, u_int *);
 u_int findabi(struct ktr_header *);
 int fread_tail(void *, int, int);
 void dumpheader(struct ktr_header *, u_int);
+void dumptimeval(struct ktr_header_v0 *kth);
+void dumptimespec(struct ktr_header *kth);
 void ktrsyscall(struct ktr_syscall *, u_int);
 void ktrsysret(struct ktr_sysret *, u_int);
 void ktrnamei(char *, int);
@@ -123,6 +126,8 @@ void ktrfaultend(struct ktr_faultend *);
 void ktrkevent(struct kevent *);
 void ktrstructarray(struct ktr_struct_array *, size_t);
 void ktrbitset(char *, struct bitset *, size_t);
+void ktrsyscall_freebsd(struct ktr_syscall *ktr, register_t **resip,
+    int *resnarg, char *resc, u_int sv_flags);
 void usage(void);
 
 #define	TIMESTAMP_NONE		0x0
@@ -130,45 +135,15 @@ void usage(void);
 #define	TIMESTAMP_ELAPSED	0x2
 #define	TIMESTAMP_RELATIVE	0x4
 
-static bool abiflag, decimal, fancy = true, resolv, suppressdata, syscallno,
-    tail, threads;
+bool decimal, fancy = true, resolv;
+static bool abiflag, suppressdata, syscallno, tail, threads, cpuflag;
 static int timestamp, maxdata;
 static const char *tracefile = DEF_TRACEFILE;
 static struct ktr_header ktr_header;
+static short version;
 
 #define TIME_FORMAT	"%b %e %T %Y"
 #define eqs(s1, s2)	(strcmp((s1), (s2)) == 0)
-
-#define	print_number64(first,i,n,c) do {				\
-	uint64_t __v;							\
-									\
-	if (quad_align && (((ptrdiff_t)((i) - (first))) & 1) == 1) {	\
-		(i)++;							\
-		(n)--;							\
-	}								\
-	if (quad_slots == 2)						\
-		__v = (uint64_t)(uint32_t)(i)[0] |			\
-		    ((uint64_t)(uint32_t)(i)[1]) << 32;			\
-	else								\
-		__v = (uint64_t)*(i);					\
-	if (decimal)							\
-		printf("%c%jd", (c), (intmax_t)__v);			\
-	else								\
-		printf("%c%#jx", (c), (uintmax_t)__v);			\
-	(i) += quad_slots;						\
-	(n) -= quad_slots;						\
-	(c) = ',';							\
-} while (0)
-
-#define print_number(i,n,c) do {					\
-	if (decimal)							\
-		printf("%c%jd", c, (intmax_t)*i);			\
-	else								\
-		printf("%c%#jx", c, (uintmax_t)(u_register_t)*i);	\
-	i++;								\
-	n--;								\
-	c = ',';							\
-} while (0)
 
 struct proc_info
 {
@@ -225,7 +200,7 @@ cappwdgrp_setup(cap_channel_t **cappwdp, cap_channel_t **capgrpp)
 }
 #endif	/* WITH_CASPER */
 
-static void
+void
 print_integer_arg(const char *(*decoder)(int), int value)
 {
 	const char *str;
@@ -242,7 +217,7 @@ print_integer_arg(const char *(*decoder)(int), int value)
 }
 
 /* Like print_integer_arg but unknown values are treated as valid. */
-static void
+void
 print_integer_arg_valid(const char *(*decoder)(int), int value)
 {
 	const char *str;
@@ -258,7 +233,7 @@ print_integer_arg_valid(const char *(*decoder)(int), int value)
 	}
 }
 
-static bool
+bool
 print_mask_arg_part(bool (*decoder)(FILE *, int, int *), int value, int *rem)
 {
 
@@ -266,7 +241,7 @@ print_mask_arg_part(bool (*decoder)(FILE *, int, int *), int value, int *rem)
 	return (decoder(stdout, value, rem));
 }
 
-static void
+void
 print_mask_arg(bool (*decoder)(FILE *, int, int *), int value)
 {
 	bool invalid;
@@ -278,7 +253,7 @@ print_mask_arg(bool (*decoder)(FILE *, int, int *), int value)
 		printf("<invalid>%u", rem);
 }
 
-static void
+void
 print_mask_arg0(bool (*decoder)(FILE *, int, int *), int value)
 {
 	bool invalid;
@@ -312,7 +287,7 @@ decode_fileflags(fflags_t value)
 		printf("<invalid>%u", rem);
 }
 
-static void
+void
 decode_filemode(int value)
 {
 	bool invalid;
@@ -329,7 +304,7 @@ decode_filemode(int value)
 		printf("<invalid>%u", rem);
 }
 
-static void
+void
 print_mask_arg32(bool (*decoder)(FILE *, uint32_t, uint32_t *), uint32_t value)
 {
 	bool invalid;
@@ -342,7 +317,7 @@ print_mask_arg32(bool (*decoder)(FILE *, uint32_t, uint32_t *), uint32_t value)
 		printf("<invalid>%u", rem);
 }
 
-static void
+void
 print_mask_argul(bool (*decoder)(FILE *, u_long, u_long *), u_long value)
 {
 	bool invalid;
@@ -373,13 +348,16 @@ main(int argc, char *argv[])
 
 	timestamp = TIMESTAMP_NONE;
 
-	while ((ch = getopt(argc,argv,"f:dElm:np:AHRrSsTt:")) != -1)
+	while ((ch = getopt(argc,argv,"f:cdElm:np:AHRrSsTt:")) != -1)
 		switch (ch) {
 		case 'A':
 			abiflag = true;
 			break;
 		case 'f':
 			tracefile = optarg;
+			break;
+		case 'c':
+			cpuflag = true;
 			break;
 		case 'd':
 			decimal = true;
@@ -462,6 +440,11 @@ main(int argc, char *argv[])
 	TAILQ_INIT(&trace_procs);
 	drop_logged = 0;
 	while (fread_tail(&ktr_header, sizeof(struct ktr_header), 1)) {
+		if (ktr_header.ktr_type & KTR_VERSIONED) {
+			ktr_header.ktr_type &= ~KTR_VERSIONED;
+			version = ktr_header.ktr_version;
+		} else
+			version = KTR_VERSION0;
 		if (ktr_header.ktr_type & KTR_DROP) {
 			ktr_header.ktr_type &= ~KTR_DROP;
 			if (!drop_logged && threads) {
@@ -487,6 +470,9 @@ main(int argc, char *argv[])
 				errx(1, "%s", strerror(ENOMEM));
 			size = ktrlen;
 		}
+		if (version == KTR_VERSION0 &&
+		    fseek(stdin, KTR_OFFSET_V0, SEEK_CUR) < 0)
+			errx(1, "%s", strerror(errno));
 		if (ktrlen && fread_tail(m, ktrlen, 1) == 0)
 			errx(1, "data too short");
 		if (fetchprocinfo(&ktr_header, (u_int *)m) != 0)
@@ -611,15 +597,80 @@ findabi(struct ktr_header *kth)
 }
 
 void
+dumptimeval(struct ktr_header_v0 *kth)
+{
+	static struct timeval prevtime, prevtime_e;
+	struct timeval temp;
+	const char *sign;
+
+	if (timestamp & TIMESTAMP_ABSOLUTE) {
+		printf("%jd.%06ld ", (intmax_t)kth->ktr_time.tv_sec,
+		    kth->ktr_time.tv_usec);
+	}
+	if (timestamp & TIMESTAMP_ELAPSED) {
+		if (prevtime_e.tv_sec == 0)
+			prevtime_e = kth->ktr_time;
+		timersub(&kth->ktr_time, &prevtime_e, &temp);
+		printf("%jd.%06ld ", (intmax_t)temp.tv_sec,
+		    temp.tv_usec);
+	}
+	if (timestamp & TIMESTAMP_RELATIVE) {
+		if (prevtime.tv_sec == 0)
+			prevtime = kth->ktr_time;
+		if (timercmp(&kth->ktr_time, &prevtime, <)) {
+			timersub(&prevtime, &kth->ktr_time, &temp);
+			sign = "-";
+		} else {
+			timersub(&kth->ktr_time, &prevtime, &temp);
+			sign = "";
+		}
+		prevtime = kth->ktr_time;
+		printf("%s%jd.%06ld ", sign, (intmax_t)temp.tv_sec,
+		    temp.tv_usec);
+	}
+}
+
+void
+dumptimespec(struct ktr_header *kth)
+{
+	static struct timespec prevtime, prevtime_e;
+	struct timespec temp;
+	const char *sign;
+
+	if (timestamp & TIMESTAMP_ABSOLUTE) {
+		printf("%jd.%09ld ", (intmax_t)kth->ktr_time.tv_sec,
+		    kth->ktr_time.tv_nsec);
+	}
+	if (timestamp & TIMESTAMP_ELAPSED) {
+		if (prevtime_e.tv_sec == 0)
+			prevtime_e = kth->ktr_time;
+		timespecsub(&kth->ktr_time, &prevtime_e, &temp);
+		printf("%jd.%09ld ", (intmax_t)temp.tv_sec,
+		    temp.tv_nsec);
+	}
+	if (timestamp & TIMESTAMP_RELATIVE) {
+		if (prevtime.tv_sec == 0)
+			prevtime = kth->ktr_time;
+		if (timespeccmp(&kth->ktr_time, &prevtime, <)) {
+			timespecsub(&prevtime, &kth->ktr_time, &temp);
+			sign = "-";
+		} else {
+			timespecsub(&kth->ktr_time, &prevtime, &temp);
+			sign = "";
+		}
+		prevtime = kth->ktr_time;
+		printf("%s%jd.%09ld ", sign, (intmax_t)temp.tv_sec,
+		    temp.tv_nsec);
+	}
+}
+
+void
 dumpheader(struct ktr_header *kth, u_int sv_flags)
 {
 	static char unknown[64];
-	static struct timeval prevtime, prevtime_e;
-	struct timeval temp;
 	const char *abi;
 	const char *arch;
 	const char *type;
-	const char *sign;
 
 	switch (kth->ktr_type) {
 	case KTR_SYSCALL:
@@ -680,32 +731,13 @@ dumpheader(struct ktr_header *kth, u_int sv_flags)
 		printf("%6jd %-8.*s ", (intmax_t)kth->ktr_pid, MAXCOMLEN,
 		    kth->ktr_comm);
         if (timestamp) {
-		if (timestamp & TIMESTAMP_ABSOLUTE) {
-			printf("%jd.%06ld ", (intmax_t)kth->ktr_time.tv_sec,
-			    kth->ktr_time.tv_usec);
-		}
-		if (timestamp & TIMESTAMP_ELAPSED) {
-			if (prevtime_e.tv_sec == 0)
-				prevtime_e = kth->ktr_time;
-			timersub(&kth->ktr_time, &prevtime_e, &temp);
-			printf("%jd.%06ld ", (intmax_t)temp.tv_sec,
-			    temp.tv_usec);
-		}
-		if (timestamp & TIMESTAMP_RELATIVE) {
-			if (prevtime.tv_sec == 0)
-				prevtime = kth->ktr_time;
-			if (timercmp(&kth->ktr_time, &prevtime, <)) {
-				timersub(&prevtime, &kth->ktr_time, &temp);
-				sign = "-";
-			} else {
-				timersub(&kth->ktr_time, &prevtime, &temp);
-				sign = "";
-			}
-			prevtime = kth->ktr_time;
-			printf("%s%jd.%06ld ", sign, (intmax_t)temp.tv_sec,
-			    temp.tv_usec);
-		}
+		if (version == KTR_VERSION0)
+			dumptimeval((struct ktr_header_v0 *)kth);
+		else
+			dumptimespec(kth);
 	}
+	if (cpuflag && version > KTR_VERSION0)
+		printf("%3d ", kth->ktr_cpu);
 	printf("%s  ", type);
 	if (abiflag != 0) {
 		switch (sv_flags & SV_ABI_MASK) {
@@ -798,17 +830,50 @@ void
 ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
 {
 	int narg = ktr->ktr_narg;
+	register_t *ip;
+
+	syscallname(ktr->ktr_code, sv_flags);
+	ip = &ktr->ktr_args[0];
+	if (narg) {
+		char c = '(';
+		if (fancy) {
+			switch (sv_flags & SV_ABI_MASK) {
+			case SV_ABI_FREEBSD:
+				ktrsyscall_freebsd(ktr, &ip, &narg, &c,
+				    sv_flags);
+				break;
+#ifdef SYSDECODE_HAVE_LINUX
+			case SV_ABI_LINUX:
+#ifdef __amd64__
+				if (sv_flags & SV_ILP32)
+					ktrsyscall_linux32(ktr, &ip,
+					    &narg, &c);
+				else
+#endif
+				ktrsyscall_linux(ktr, &ip, &narg, &c);
+				break;
+#endif /* SYSDECODE_HAVE_LINUX */
+			}
+		}
+		while (narg > 0)
+			print_number(ip, narg, c);
+		putchar(')');
+	}
+	putchar('\n');
+}
+
+void
+ktrsyscall_freebsd(struct ktr_syscall *ktr, register_t **resip,
+    int *resnarg, char *resc, u_int sv_flags)
+{
+	int narg = ktr->ktr_narg;
 	register_t *ip, *first;
 	intmax_t arg;
 	int quad_align, quad_slots;
 
-	syscallname(ktr->ktr_code, sv_flags);
 	ip = first = &ktr->ktr_args[0];
-	if (narg) {
-		char c = '(';
-		if (fancy &&
-		    (sv_flags == 0 ||
-		    (sv_flags & SV_ABI_MASK) == SV_ABI_FREEBSD)) {
+	char c = *resc;
+
 			quad_align = 0;
 			if (sv_flags & SV_ILP32) {
 #ifdef __powerpc__
@@ -1524,6 +1589,14 @@ ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
 				narg--;
 				c = ',';
 				break;
+			case SYS_getitimer:
+			case SYS_setitimer:
+				putchar('(');
+				print_integer_arg(sysdecode_itimer, *ip);
+				ip++;
+				narg--;
+				c = ',';
+				break;
 			}
 			switch (ktr->ktr_code) {
 			case SYS_chflagsat:
@@ -1540,13 +1613,9 @@ ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
 				narg--;
 				break;
 			}
-		}
-		while (narg > 0) {
-			print_number(ip, narg, c);
-		}
-		putchar(')');
-	}
-	putchar('\n');
+	*resc = c;
+	*resip = ip;
+	*resnarg = narg;
 }
 
 void
@@ -2055,7 +2124,10 @@ ktrstruct(char *buf, size_t buflen)
 		ktrbitset(name, set, datalen);
 		free(set);
 	} else {
-		printf("unknown structure\n");
+#ifdef SYSDECODE_HAVE_LINUX
+		if (ktrstruct_linux(name, data, datalen) == false)
+#endif
+			printf("unknown structure\n");
 	}
 	return;
 invalid:

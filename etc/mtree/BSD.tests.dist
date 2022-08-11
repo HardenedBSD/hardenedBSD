@@ -421,8 +421,12 @@
         atf
             atf-check
             ..
+            atf-pytest-wrapper
+            ..
             atf-sh
             ..
+        ..
+        rc
         ..
         rtld-elf
         ..
@@ -803,6 +807,10 @@
         mqueue
         ..
         net
+            if_ovpn
+            ..
+            routing
+            ..
         ..
         netgraph
         ..

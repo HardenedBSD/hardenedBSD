@@ -395,7 +395,7 @@ The command to remove the mirrored data
 The following command displays the detailed information for the pool
 .Ar data .
 This pool is comprised of a single raidz vdev where one of its devices
-increased its capacity by 10GB.
+increased its capacity by 10 GiB.
 In this example, the pool will not be able to utilize this extra capacity until
 all the devices under the raidz vdev have been expanded.
 .Bd -literal -compact -offset Ds
@@ -524,6 +524,20 @@ If
 .Sy ZPOOL_SCRIPTS_ENABLED
 is not set, it is assumed that the user is allowed to run
 .Nm zpool Cm status Ns / Ns Cm iostat Fl c .
+.\" Shared with zfs.8
+.It Sy ZFS_MODULE_TIMEOUT
+Time, in seconds, to wait for
+.Pa /dev/zfs
+to appear.
+Defaults to
+.Sy 10 ,
+max
+.Sy 600 Pq 10 minutes .
+If
+.Pf < Sy 0 ,
+wait forever; if
+.Sy 0 ,
+don't wait.
 .El
 .
 .Sh INTERFACE STABILITY

@@ -106,8 +106,18 @@ typedef struct pv_entry {
  * pv_entries are allocated in chunks per-process.  This avoids the
  * need to track per-pmap assignments.
  */
+#if PAGE_SIZE == PAGE_SIZE_4K
 #define	_NPCM	3
 #define	_NPCPV	168
+#define	_NPAD	0
+#elif PAGE_SIZE == PAGE_SIZE_16K
+#define	_NPCM	11
+#define	_NPCPV	677
+#define	_NPAD	1
+#else
+#error Unsupported page size
+#endif
+
 #define	PV_CHUNK_HEADER							\
 	pmap_t			pc_pmap;				\
 	TAILQ_ENTRY(pv_chunk)	pc_list;				\
@@ -121,6 +131,7 @@ struct pv_chunk_header {
 struct pv_chunk {
 	PV_CHUNK_HEADER
 	struct pv_entry		pc_pventry[_NPCPV];
+	uint64_t		pc_pad[_NPAD];
 };
 
 struct thread;
@@ -173,13 +184,13 @@ bool	pmap_klookup(vm_offset_t va, vm_paddr_t *pa);
 vm_paddr_t pmap_kextract(vm_offset_t va);
 void	pmap_kremove(vm_offset_t);
 void	pmap_kremove_device(vm_offset_t, vm_size_t);
-void	*pmap_mapdev_attr(vm_offset_t pa, vm_size_t size, vm_memattr_t ma);
+void	*pmap_mapdev_attr(vm_paddr_t pa, vm_size_t size, vm_memattr_t ma);
 bool	pmap_page_is_mapped(vm_page_t m);
 int	pmap_pinit_stage(pmap_t, enum pmap_stage, int);
 bool	pmap_ps_enabled(pmap_t pmap);
 uint64_t pmap_to_ttbr0(pmap_t pmap);
 
-void	*pmap_mapdev(vm_offset_t, vm_size_t);
+void	*pmap_mapdev(vm_paddr_t, vm_size_t);
 void	*pmap_mapbios(vm_paddr_t, vm_size_t);
 void	pmap_unmapdev(vm_offset_t, vm_size_t);
 void	pmap_unmapbios(vm_offset_t, vm_size_t);

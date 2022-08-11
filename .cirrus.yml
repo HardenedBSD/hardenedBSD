@@ -5,7 +5,7 @@ compute_engine_instance:
   # gcloud compute images list --project freebsd-org-cloud-dev --no-standard-images
   platform: freebsd
   image_project: freebsd-org-cloud-dev
-  image: freebsd-13-0-release-amd64
+  image: freebsd-13-1-release-amd64
   cpu: 8
   memory: 8G
   disk: 40
@@ -16,13 +16,13 @@ task:
     env:
       TARGET: amd64
       TARGET_ARCH: amd64
-      TOOLCHAIN_PKG: llvm13
+      TOOLCHAIN_PKG: llvm14
   - name: World and kernel arm64 build and boot smoke test
     trigger_type: manual
     env:
       TARGET: arm64
       TARGET_ARCH: aarch64
-      TOOLCHAIN_PKG: llvm13
+      TOOLCHAIN_PKG: llvm14
   - name: World and kernel gcc9 amd64 build and boot smoke test
     trigger_type: manual
     env:

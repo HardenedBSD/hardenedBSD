@@ -204,6 +204,9 @@ static void rtld_fill_dl_phdr_info(const Obj_Entry *obj,
 static uint32_t gnu_hash(const char *);
 static bool matched_symbol(SymLook *, const Obj_Entry *, Sym_Match_Result *,
     const unsigned long);
+#ifdef HARDENEDBSD
+static bool cache_harden_rtld(void);
+#endif
 
 void r_debug_state(struct r_debug *, struct link_map *) __noinline __exported;
 void _r_debug_postinit(struct link_map *) __noinline __exported;
@@ -242,6 +245,7 @@ static unsigned int obj_loads;	/* Number of loads of objects (gen count) */
 
 #ifdef HARDENEDBSD
 static Elf_Word pax_flags = 0;	/* PaX / HardenedBSD flags */
+static bool harden_rtld = true;
 #endif
 
 static Objlist list_global =	/* Objects dlopened with RTLD_GLOBAL */
@@ -326,6 +330,25 @@ const char *ld_standard_library_path = STANDARD_LIBRARY_PATH;
 const char *ld_env_prefix = LD_;
 
 static void (*rtld_exit_ptr)(void);
+
+#ifdef HARDENEDBSD
+static bool
+cache_harden_rtld(void)
+{
+    int err, res;
+    size_t sz;
+
+    sz = sizeof(int);
+    err = sysctlbyname("hardening.harden_rtld", &res, &sz, NULL, 0);
+    if (err == 0) {
+        harden_rtld = res;
+    } else {
+        harden_rtld = true;
+    }
+
+    return (harden_rtld);
+}
+#endif
 
 /*
  * Fill in a DoneList with an allocation large enough to hold all of
@@ -614,10 +637,18 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
         pax_flags = aux_info[AT_PAXFLAGS]->a_un.a_val;
         aux_info[AT_PAXFLAGS]->a_un.a_val = 0;
     }
+
+    cache_harden_rtld();
 #endif
 
     trust = !issetugid();
     direct_exec = false;
+
+#ifdef HARDENEDBSD
+    if (trust && harden_rtld) {
+	    trust = false;
+    }
+#endif
 
     md_abi_variant_hook(aux_info);
     rtld_init_env_vars(env);
@@ -771,6 +802,12 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 	ld_elf_hints_path != NULL || ld_loadfltr || !ld_dynamic_weak;
     ld_tracing = ld_get_env_var(LD_TRACE_LOADED_OBJECTS);
     ld_utrace = ld_get_env_var(LD_UTRACE);
+
+#ifdef HARDENEDBSD
+    if (harden_rtld) {
+        dangerous_ld_env = harden_rtld;
+    }
+#endif
 
     set_ld_elf_hints_path();
     if (ld_debug != NULL && *ld_debug != '\0')
@@ -1250,7 +1287,7 @@ origin_subst(Obj_Entry *obj, const char *real)
 	res = __DECONST(char *, real);
 	for (i = 0; i < (int)nitems(tokens); i++) {
 		res = origin_subst_one(tokens[i].pass_obj ? obj : NULL,
-		    res, tokens[i].kw, tokens[i].subst, i == 0);
+		    res, tokens[i].kw, tokens[i].subst, i != 0);
 	}
 	return (res);
 }
@@ -2727,6 +2764,12 @@ load_preload_objects(const char *penv, bool isfd)
 
 	if (penv == NULL)
 		return (0);
+
+#ifdef HARDENEDBSD
+	if (harden_rtld) {
+		return (0);
+	}
+#endif
 
 	p = psave = xstrdup(penv);
 	p += strspn(p, delim);
@@ -5132,6 +5175,12 @@ trace_loaded_objects(Obj_Entry *obj, bool show_preload)
 	const char *fmt1, *fmt2, *main_local;
 	const char *name, *path;
 	bool first_spurious, list_containers;
+
+#ifdef HARDENEDBSD
+	if (harden_rtld) {
+		return;
+	}
+#endif
 
 	trace_calc_fmts(&main_local, &fmt1, &fmt2);
 	list_containers = ld_get_env_var(LD_TRACE_LOADED_OBJECTS_ALL) != NULL;

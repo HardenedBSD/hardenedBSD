@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2015, by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2022, by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -313,6 +313,10 @@ pax_elf(struct thread *td, struct image_params *imgp)
 
 #ifdef PAX_SEGVGUARD
 	flags |= pax_segvguard_setup_flags(imgp, td, mode);
+#endif
+
+#ifdef PAX_HARDENING
+	flags |= pax_hardening_setup_flags(imgp, td, mode);
 #endif
 
 	CTR3(KTR_PAX, "%s : flags = %x mode = %x",

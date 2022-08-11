@@ -26,6 +26,9 @@
 #
 # $FreeBSD$
 
+BSDCFG_SHARE="/usr/share/bsdconfig"
+. $BSDCFG_SHARE/common.subr || exit 1
+
 TMP_FSTAB=${TMPDIR:-"/tmp"}/bsdinstall-tmp-fstab
 
 cat $PATH_FSTAB | awk -v BSDINSTALL_CHROOT=$BSDINSTALL_CHROOT '{
@@ -44,7 +47,7 @@ for i in $FILESYSTEMS; do
 	mkdir -p $i 2>/dev/null
 	MNTERROR=`mount -F $TMP_FSTAB $i 2>&1`
 	if [ $? -ne 0 ]; then
-		bsddialog --backtitle "HardenedBSD Installer" --title "Error" \
+		bsddialog --backtitle "$OSNAME Installer" --title "Error" \
 		    --msgbox "Error mounting partition $i:\n$MNTERROR" 0 0
 		exit 1
 	fi
@@ -53,3 +56,9 @@ done
 # User might want a shell and require devfs, so mount it
 mkdir $BSDINSTALL_CHROOT/dev 2>/dev/null
 mount -t devfs devfs $BSDINSTALL_CHROOT/dev
+
+# If installing from the DVD, mount packages where they'll be accessible
+if [ -d /packages ]; then
+	mkdir -p $BSDINSTALL_CHROOT/dist/packages
+	mount -t nullfs /packages $BSDINSTALL_CHROOT/dist/packages
+fi

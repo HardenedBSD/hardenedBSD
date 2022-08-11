@@ -49,7 +49,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/sleepqueue.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
-#include <sys/sysent.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/posix4.h>
@@ -108,6 +107,8 @@ static int	realtimer_delete(struct itimer *);
 static void	realtimer_clocktime(clockid_t, struct timespec *);
 static void	realtimer_expire(void *);
 static void	realtimer_expire_l(struct itimer *it, bool proc_locked);
+
+static void	realitexpire(void *arg);
 
 static int	register_posix_clock(int, const struct kclock *);
 static void	itimer_fire(struct itimer *it);
@@ -939,7 +940,7 @@ itimer_proc_continue(struct proc *p)
  * that here since we want to appear to be in sync with the clock
  * interrupt even when we're delayed.
  */
-void
+static void
 realitexpire(void *arg)
 {
 	struct proc *p;

@@ -39,6 +39,10 @@
  * $FreeBSD$
  */
 
+#if defined(__i386__)
+#include <i386/asmacros.h>
+#else /* !__i386__ */
+
 #ifndef _MACHINE_ASMACROS_H_
 #define _MACHINE_ASMACROS_H_
 
@@ -239,7 +243,7 @@ X\vec_name:
 
 #ifdef __STDC__
 #define ELFNOTE(name, type, desctype, descdata...) \
-.pushsection .note.name                 ;       \
+.pushsection .note.name, "a", @note     ;       \
   .align 4                              ;       \
   .long 2f - 1f         /* namesz */    ;       \
   .long 4f - 3f         /* descsz */    ;       \
@@ -251,7 +255,7 @@ X\vec_name:
 .popsection
 #else /* !__STDC__, i.e. -traditional */
 #define ELFNOTE(name, type, desctype, descdata) \
-.pushsection .note.name                 ;       \
+.pushsection .note.name, "a", @note     ;       \
   .align 4                              ;       \
   .long 2f - 1f         /* namesz */    ;       \
   .long 4f - 3f         /* descsz */    ;       \
@@ -264,3 +268,5 @@ X\vec_name:
 #endif /* __STDC__ */
 
 #endif /* !_MACHINE_ASMACROS_H_ */
+
+#endif /* __i386__ */

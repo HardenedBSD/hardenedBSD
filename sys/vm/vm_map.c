@@ -2829,12 +2829,8 @@ again:
 			continue;
 		}
 
-		if (obj->type != OBJT_DEFAULT &&
-		    (obj->flags & OBJ_SWAP) == 0)
-			continue;
 		VM_OBJECT_WLOCK(obj);
-		if (obj->type != OBJT_DEFAULT &&
-		    (obj->flags & OBJ_SWAP) == 0) {
+		if ((obj->flags & OBJ_SWAP) == 0) {
 			VM_OBJECT_WUNLOCK(obj);
 			continue;
 		}
@@ -4153,8 +4149,7 @@ vm_map_copy_entry(
 		 */
 		size = src_entry->end - src_entry->start;
 		if ((src_object = src_entry->object.vm_object) != NULL) {
-			if (src_object->type == OBJT_DEFAULT ||
-			    (src_object->flags & OBJ_SWAP) != 0) {
+			if ((src_object->flags & OBJ_SWAP) != 0) {
 				vm_map_copy_swap_object(src_entry, dst_entry,
 				    size, fork_charge);
 				/* May have split/collapsed, reload obj. */
@@ -5120,7 +5115,7 @@ RetryLookupLocked:
 		if (vm_map_lock_upgrade(map))
 			goto RetryLookup;
 		entry->object.vm_object = vm_object_allocate_anon(atop(size),
-		    NULL, entry->cred, entry->cred != NULL ? size : 0);
+		    NULL, entry->cred, size);
 		entry->offset = 0;
 		entry->cred = NULL;
 		vm_map_lock_downgrade(map);

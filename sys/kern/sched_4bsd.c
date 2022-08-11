@@ -307,7 +307,7 @@ maybe_resched(struct thread *td)
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
 	if (td->td_priority < curthread->td_priority)
-		curthread->td_flags |= TDF_NEEDRESCHED;
+		ast_sched_locked(curthread, TDA_SCHED);
 }
 
 /*
@@ -703,6 +703,10 @@ sched_rr_interval(void)
 	return (imax(1, (sched_slice * hz + realstathz / 2) / realstathz));
 }
 
+SCHED_STAT_DEFINE(ithread_demotions, "Interrupt thread priority demotions");
+SCHED_STAT_DEFINE(ithread_preemptions,
+    "Interrupt thread preemptions due to time-sharing");
+
 /*
  * We adjust the priority of the current process.  The priority of a
  * process gets worse as it accumulates CPU time.  The cpu usage
@@ -739,7 +743,22 @@ sched_clock_tick(struct thread *td)
 	 */
 	if (!TD_IS_IDLETHREAD(td) && --ts->ts_slice <= 0) {
 		ts->ts_slice = sched_slice;
-		td->td_flags |= TDF_NEEDRESCHED | TDF_SLICEEND;
+
+		/*
+		 * If an ithread uses a full quantum, demote its
+		 * priority and preempt it.
+		 */
+		if (PRI_BASE(td->td_pri_class) == PRI_ITHD) {
+			SCHED_STAT_INC(ithread_preemptions);
+			td->td_owepreempt = 1;
+			if (td->td_base_pri + RQ_PPQ < PRI_MAX_ITHD) {
+				SCHED_STAT_INC(ithread_demotions);
+				sched_prio(td, td->td_base_pri + RQ_PPQ);
+			}
+		} else {
+			td->td_flags |= TDF_SLICEEND;
+			ast_sched_locked(td, TDA_SCHED);
+		}
 	}
 
 	stat = DPCPU_PTR(idlestat);
@@ -925,6 +944,15 @@ sched_prio(struct thread *td, u_char prio)
 }
 
 void
+sched_ithread_prio(struct thread *td, u_char prio)
+{
+	THREAD_LOCK_ASSERT(td, MA_OWNED);
+	MPASS(td->td_pri_class == PRI_ITHD);
+	td->td_base_ithread_pri = prio;
+	sched_prio(td, prio);
+}
+
+void
 sched_user_prio(struct thread *td, u_char prio)
 {
 
@@ -945,7 +973,7 @@ sched_lend_user_prio(struct thread *td, u_char prio)
 	if (td->td_priority > td->td_user_pri)
 		sched_prio(td, td->td_user_pri);
 	else if (td->td_priority != td->td_user_pri)
-		td->td_flags |= TDF_NEEDRESCHED;
+		ast_sched_locked(td, TDA_SCHED);
 }
 
 /*
@@ -996,7 +1024,8 @@ sched_switch(struct thread *td, int flags)
 	td->td_lastcpu = td->td_oncpu;
 	preempted = (td->td_flags & TDF_SLICEEND) == 0 &&
 	    (flags & SW_PREEMPT) != 0;
-	td->td_flags &= ~(TDF_NEEDRESCHED | TDF_SLICEEND);
+	td->td_flags &= ~TDF_SLICEEND;
+	ast_unsched_locked(td, TDA_SCHED);
 	td->td_owepreempt = 0;
 	td->td_oncpu = NOCPU;
 
@@ -1125,6 +1154,15 @@ sched_wakeup(struct thread *td, int srqflags)
 	td->td_slptick = 0;
 	ts->ts_slptime = 0;
 	ts->ts_slice = sched_slice;
+
+	/*
+	 * When resuming an idle ithread, restore its base ithread
+	 * priority.
+	 */
+	if (PRI_BASE(td->td_pri_class) == PRI_ITHD &&
+	    td->td_base_pri != td->td_base_ithread_pri)
+		sched_prio(td, td->td_base_ithread_pri);
+
 	sched_add(td, srqflags);
 }
 
@@ -1244,7 +1282,7 @@ kick_other_cpu(int pri, int cpuid)
 	}
 #endif /* defined(IPI_PREEMPTION) && defined(PREEMPTION) */
 
-	pcpu->pc_curthread->td_flags |= TDF_NEEDRESCHED;
+	ast_sched_locked(pcpu->pc_curthread, TDA_SCHED);
 	ipi_cpu(cpuid, IPI_AST);
 	return;
 }
@@ -1808,7 +1846,7 @@ sched_affinity(struct thread *td)
 		if (THREAD_CAN_SCHED(td, td->td_oncpu))
 			return;
 
-		td->td_flags |= TDF_NEEDRESCHED;
+		ast_sched_locked(td, TDA_SCHED);
 		if (td != curthread)
 			ipi_cpu(cpu, IPI_AST);
 		break;

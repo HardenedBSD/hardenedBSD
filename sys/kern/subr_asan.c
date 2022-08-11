@@ -139,6 +139,12 @@ kasan_init(void)
 	kasan_enabled = true;
 }
 
+void
+kasan_init_early(vm_offset_t stack, size_t size)
+{
+	kasan_md_init_early(stack, size);
+}
+
 static inline const char *
 kasan_code_name(uint8_t code)
 {
@@ -387,7 +393,7 @@ kasan_shadow_check(unsigned long addr, size_t size, bool write,
 		return;
 	if (__predict_false(kasan_md_unsupported(addr)))
 		return;
-	if (__predict_false(panicstr != NULL))
+	if (KERNEL_PANICKED())
 		return;
 
 	if (__builtin_constant_p(size)) {

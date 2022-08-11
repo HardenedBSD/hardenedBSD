@@ -15,7 +15,7 @@ digraph src {
 #   foo [label="Foo Bar\nfoo@FreeBSD.org\n????/??/??"]
 #
 # ????/??/?? is the date when the commit bit was obtained, usually the one you
-# can find looking at svn logs for the svnadmin/conf/access file.
+# can find in git logs for the access file in the internal/admin branch.
 # Use YYYY/MM/DD format.
 #
 # For returned commit bits, the node definition will follow this example:
@@ -23,7 +23,7 @@ digraph src {
 #   foo [label="Foo Bar\nfoo@FreeBSD.org\n????/??/??\n????/??/??"]
 #
 # The first date is the same as for an active committer, the second date is
-# the date when the commit bit has been returned. Again, check svn logs.
+# the date when the commit bit has been returned. Again, check git logs.
 
 node [color=grey62, style=filled, bgcolor=black];
 
@@ -234,6 +234,7 @@ kaiw [label="Kai Wang\nkaiw@FreeBSD.org\n2007/09/26"]
 kaktus [label="Pawel Biernacki\nkaktus@FreeBSD.org\n2019/09/26"]
 kan [label="Alexander Kabaev\nkan@FreeBSD.org\n2002/07/21"]
 karels [label="Mike Karels\nkarels@FreeBSD.org\n2016/06/09"]
+kd [label="Kornel Dulęba\nkd@FreeBSD.org\n2022/06/22"]
 ken [label="Ken Merry\nken@FreeBSD.org\n1998/09/08"]
 kensmith [label="Ken Smith\nkensmith@FreeBSD.org\n2004/01/23"]
 kevans [label="Kyle Evans\nkevans@FreeBSD.org\n2017/06/20"]
@@ -522,6 +523,7 @@ eivind -> rwatson
 emaste -> achim
 emaste -> bwidawsk
 emaste -> dteske
+emaste -> kd
 emaste -> kevans
 emaste -> lwhsu
 emaste -> markj
@@ -766,6 +768,8 @@ murray -> delphij
 
 mux -> cognet
 mux -> dumbbell
+
+mw -> kd
 
 netchild -> ariff
 

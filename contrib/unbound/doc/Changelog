@@ -1,5 +1,252 @@
+1 August 2022: Wouter
+	- Fix the novel ghost domain issues CVE-2022-30698 and CVE-2022-30699.
+	- Tests for ghost domain fixes.
+
+19 July 2022: George
+	- Update documentation for 'outbound-msg-retry:'.
+
+19 July 2022: Wouter
+	- Merge #718: Introduce infra-cache-max-rtt option to config max
+	  retransmit timeout.
+
+15 July 2022: Wouter
+	- Merge PR 714: Avoid treat normal hosts as unresponsive servers.
+	  And fixup the lock code.
+	- iana portlist update.
+
+12 July 2022: George
+	- For windows crosscompile, fix setting the IPV6_MTU socket option
+	  equivalent (IPV6_USER_MTU); allows cross compiling with latest
+	  cross-compiler versions.
+
+12 July 2022: Wouter
+	- Fix dname count in sldns parse type descriptor for SVCB and HTTPS.
+
+11 July 2022: Wouter
+	- Fix verbose EDE error printout.
+
+4 July 2022: George
+	- Fix bug introduced in 'improve val_sigcrypt.c::algo_needs_missing for
+	  one loop pass'.
+	- Merge PR #668 from Cristian Rodríguez: Set IP_BIND_ADDRESS_NO_PORT on
+	  outbound tcp sockets.
+
+4 July 2022: Wouter
+	- Tag for 1.16.1rc1 release. This became 1.16.1 on 11 July 2022.
+	  The code repo continues with version 1.16.2 under development.
+
+3 July 2022: George
+	- Merge PR #671 from Petr Menšík: Disable ED25519 and ED448 in FIPS
+	  mode on openssl3.
+	- Merge PR #660 from Petr Menšík: Sha1 runtime insecure.
+	- For #660: formatting, less verbose logging, add EDE information.
+	- Fix for correct openssl error when adding windows CA certificates to
+	  the openssl trust store.
+	- Improve val_sigcrypt.c::algo_needs_missing for one loop pass.
+	- Reintroduce documentation and more EDE support for
+	  val_sigcrypt.c::dnskeyset_verify_rrset_sig.
+
+1 July 2022: George
+	- Merge PR #706: NXNS fallback.
+	- From #706: Cached NXDOMAIN does not increase the target nx
+	  responses.
+	- From #706: Don't generate parent side queries if we already
+	  have the lame records in cache.
+	- From #706: When a lame address is the best choice, don't try to
+	  generate target queries when the missing targets are all lame.
+
+29 June 2022: Wouter
+	- iana portlist update.
+	- Fix detection of libz on windows compile with static option.
+	- Fix compile warning for windows compile.
+
+29 June 2022: George
+	- Add debug option to the mini_tdir.sh test code.
+	- Fix #704: [FR] Statistics counter for number of outgoing UDP queries
+	  sent; introduces 'num.query.udpout' to the 'unbound-control stats'
+	  command.
+	- Fix to not count cached NXDOMAIN for MAX_TARGET_NX.
+	- Allow fallback to the parent side when MAX_TARGET_NX is reached.
+	  This will also allow MAX_TARGET_NX more NXDOMAINs.
+
+28 June 2022: George
+	- Show the output of the exact .rpl run that failed with 'make test'.
+	- Fix for cached 0 TTL records to not trigger prefetching when
+	  serve-expired-client-timeout is set.
+
+28 June 2022: Wouter
+	- Fix test program dohclient close to use portability routine.
+
+23 June 2022: Tom
+	- Clarify -v flag manpage entry (#705)
+
+22 June 2022: Philip
+	- Fix #663: use after free issue with edns options.
+
+21 June 2022: Philip
+	- Fix for loading locally stored zones that have lines with blanks or
+	  blanks and comments.
+
+20 June 2022: George
+	- Remove unused LDNS function check for GOST Engine unloading.
+
+14 June 2022: George
+	- Merge PR #688: Rpz url notify issue.
+	- Note in the unbound.conf text that NOTIFY is allowed from the url:
+	  addresses for auth and rpz zones.
+
+3 June 2022: George
+	- Fix for edns client subnet to respect not looking in its cache when
+	  instructed to do so (e.g., prefetch).
+
+3 June 2022: Wouter
+	- makedist.sh picks up 32bit libssp-0.dll when 32bit compile.
+
+27 May 2022: Wouter
+	- Fix #684: [FTBS] configure script error with libmnl on openSUSE 15.3 (and possibly other distributions)
+	- Version is set to 1.16.0 for release. Release tag 1.16.0rc1. This
+	  became release 1.16.0 on 2 June 2022. The source code branch
+	  continues with version 1.16.1 under development.
+
+20 May 2022: Wouter
+	- Fix to silence test for ede error output to the console from the
+	  test setup script.
+	- Fix ede test to not use default pidfile, and use local interface.
+	- Fix some lint type warnings.
+
+18 May 2022: George
+	- Fix typos in config_set_option for the 'num-threads' and
+	  'ede-serve-expired' options.
+
+15 May 2022: George
+	- Fix #678: [FR] modify behaviour of unbound-control rpz_enable zone,
+	  by updating unbound-control's documentation.
+
+12 May 2022: George
+	- Fix #417: prefetch and ECS causing cache corruption when used
+	  together.
+
+12 May 2022: Wouter
+	- Merge #677: Allow using system certificates not only on Windows,
+	  from pemensik.
+	- For #677: Added tls-system-cert to config parser and documentation.
+
+11 May 2022: Wouter
+	- Fix #673: DNS over TLS: error: SSL_handshake syscall: No route to
+	  host.
+
+10 May 2022: George
+	- Fix Python build in non-source directory; based on patch by
+	  Michael Tokarev.
+
+6 May 2022: Tom
+	- Merge PR #604: Add basic support for EDE (RFC8914).
+
+28 April 2022: Wouter
+	- Fix #670: SERVFAIL problems with unbound 1.15.0 running on
+	  OpenBSD 7.1.
+
+8 April 2022: Wouter
+	- Fix zonemd check to allow unsupported algorithms to load.
+	  If there are only unsupported algorithms, or unsupported schemes,
+	  and no failed or successful other ZONEMD records, or malformed
+	  or bad ZONEMD records, the unsupported records allow the zone load.
+	- Fix zonemd unsupported algo check.
+	- Fix zonemd unsupported algo check reason to not copy to next record,
+	  and check for success for debug printout.
+	- Fix zonemd unsupported algo check to print unsupported reason before
+	  zeroing it.
+	- Fix zonemd unsupported algo check to set reason to NULL before the
+	  check routine, but after malformed checks, to get the correct NULL
+	  output when the digest matches.
+
+25 March 2022: Wouter
+	- Fix spelling error in comment in sldns_str2wire_svcparam_key_lookup.
+
+23 March 2022: Wouter
+	- Fix #651: [FR] Better logging for refused queries.
+
+18 March 2022: George
+	- Merge PR #648 from eaglegai: fix -q doesn't work when use with
+	  'unbound-control stats_shm'.
+
+17 March 2022: Wouter
+	- Fix to describe auth-zone and other configuration at the local-zone
+	  configuration option, to allow for more broadly view of the options.
+
+16 March 2022: Wouter
+	- Fix to ensure uniform handling of spaces and tabs when parsing RRs.
+
+9 March 2022: Wouter
+	- Merge #644: Make `install-lib` make target install the pkg-config
+	  file.
+
+7 March 2022: Wouter
+	- Fix configure for python to use sysutils, because distutils is
+	  deprecated. It uses sysutils when available, distutils otherwise.
+
+3 March 2022: Wouter
+	- Fix #637: Integer Overflow in sldns_str2period function.
+	- Fix for #637: fix integer overflow checks in sldns_str2period.
+
+2 March 2022: George
+	- Merge PR #632 from scottrw93: Match cnames in ipset.
+	- Various fixes for #632: variable initialisation, convert the qinfo
+	  to str once, accept trailing dot in the local-zone ipset option.
+
+2 March 2022: Wouter
+	- Fix compile warnings for printf ll format on mingw compile.
+
+1 March 2022: Wouter
+	- Fix pythonmod for change in iter_dp_is_useless function prototype.
+
+28 February 2022: George
+	- Fix #630: Unify the RPZ log messages.
+	- Merge #623 from rex4539: Fix typos.
+
+28 February 2022: Wouter
+	- Fix #633: Document unix domain socket support for unbound-control.
+	- Fix for #633: updated fix with new text.
+	- Fix edns client subnet to add the option based on the option list,
+	  so that it is not state dependent, after the state fix of #605 for
+	  double EDNS options.
+	- Fix for edns client subnet option add fix in removal code, from review.
+
+25 February 2022: Wouter
+	- Fix to detect that no IPv6 support means that IPv6 addresses are
+	  useless for delegation point lookups.
+	- update Makefile dependencies.
+	- Fix check interface existence for support detection in remote lookup.
+
+18 February 2022: Wouter
+	- Fix that address not available is squelched from the logs for
+	  udp connect failures. It is visible on verbosity 4 and more.
+	- Merge #631 from mollyim: Replace OpenSSL's ERR_PACK with
+	  ERR_GET_REASON.
+
+16 February 2022: Wouter
+	- Fix for #628: fix rpz-passthru for qname trigger by localzone type.
+
+15 February 2022: Wouter
+	- Fix #628: A rpz-passthru action is not ending RPZ zone processing.
+
+11 February 2022: Wouter
+	- Fix #624: Unable to stop Unbound in Windows console (does not
+	  respond to CTRL+C command).
+	- Fix #618: enabling interface-automatic disables DNS-over-TLS.
+	  Adds the option to list interface-automatic-ports.
+	- Remove debug info from #618 fix.
+
+7 February 2022: Wouter
+	- Fix that TCP interface does not use TLS when TLS is also configured.
+
+4 February 2022: Wouter
+	- Fix #412: cache invalidation issue with CNAME+A.
+
 3 February 2022: Wouter
 	- Fix for #611: Integer overflow in sldns_wire2str_pkt_scan.
+	- Tag for 1.15.0rc1 created. That became 1.15.0 on 10 feb 2022.
+	  The repository continues with version 1.15.1.
 
 2 February 2022: George
 	- Merge PR #532 from Shchelk: Fix: buffer overflow bug.

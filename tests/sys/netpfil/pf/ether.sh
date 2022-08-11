@@ -419,6 +419,9 @@ dummynet_body()
 	pft_set_rules alcatraz \
 		"ether pass in dnpipe 1"
 
+	# Ensure things don't break if non-IP(v4/v6) traffic hits dummynet
+	arp -d 192.0.2.2
+
 	# single ping succeeds just fine
 	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
 
@@ -426,6 +429,13 @@ dummynet_body()
 	ping -i .1 -c 5 -s 1200 192.0.2.2
 
 	# We should now be hitting the limits and get this packet dropped.
+	atf_check -s exit:2 -o ignore ping -c 1 -s 1200 192.0.2.2
+
+	# We can now also dummynet outbound traffic!
+	pft_set_rules alcatraz \
+		"ether pass out dnpipe 1"
+
+	# We should still be hitting the limits and get this packet dropped.
 	atf_check -s exit:2 -o ignore ping -c 1 -s 1200 192.0.2.2
 }
 
@@ -546,6 +556,129 @@ ip_cleanup()
 	pft_cleanup
 }
 
+atf_test_case "tag" "cleanup"
+tag_head()
+{
+	atf_set descr 'Test setting tags'
+	atf_set require.user root
+}
+
+tag_body()
+{
+	pft_init
+
+	epair=$(vnet_mkepair)
+
+	vnet_mkjail alcatraz ${epair}b
+	ifconfig ${epair}a 192.0.2.1/24 up
+	jexec alcatraz ifconfig ${epair}b 192.0.2.2/24 up
+
+	# Sanity check
+	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
+
+	jexec alcatraz pfctl -e
+	pft_set_rules alcatraz \
+		"ether pass in tag foo" \
+		"block in tagged foo"
+
+	atf_check -s exit:2 -o ignore ping -c 1 192.0.2.2
+
+	pft_set_rules alcatraz \
+		"ether pass in tag bar" \
+		"block in tagged foo"
+
+	# Still passes when tagged differently
+	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
+}
+
+tag_cleanup()
+{
+	pft_cleanup
+}
+
+atf_test_case "match_tag" "cleanup"
+match_tag_head()
+{
+	atf_set descr 'Test matching tags'
+	atf_set require.user root
+}
+
+match_tag_body()
+{
+	pft_init
+
+	epair=$(vnet_mkepair)
+
+	vnet_mkjail alcatraz ${epair}b
+
+	ifconfig ${epair}a 192.0.2.1/24 up
+	jexec alcatraz ifconfig ${epair}b 192.0.2.2/24 up
+
+	# Sanity check
+	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
+
+	jexec alcatraz pfctl -e
+	pft_set_rules alcatraz \
+		"ether block out tagged foo" \
+		"pass in proto icmp tag foo"
+
+	atf_check -s exit:2 -o ignore ping -c 1 192.0.2.2
+
+	pft_set_rules alcatraz \
+		"ether block out tagged bar" \
+		"pass in proto icmp tag foo"
+
+	# Still passes when tagged differently
+	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
+}
+
+match_tag_cleanup()
+{
+	pft_cleanup
+}
+
+atf_test_case "short_pkt" "cleanup"
+short_pkt_head()
+{
+	atf_set descr 'Test overly short Ethernet packets'
+	atf_set require.user root
+}
+
+short_pkt_body()
+{
+	pft_init
+
+	epair=$(vnet_mkepair)
+	ifconfig ${epair}a 192.0.2.1/24 up
+
+	vnet_mkjail alcatraz ${epair}b
+	jexec alcatraz ifconfig ${epair}b 192.0.2.2/24 up
+
+	jexec alcatraz pfctl -e
+	pft_set_rules alcatraz \
+		"ether pass in" \
+		"ether pass out" \
+		"ether pass in l3 from 192.0.2.1"
+
+	# Sanity check
+	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.2
+
+	jexec alcatraz pfctl -se -v
+
+	# Try sending ever shorter ping requests
+	# BPF won't let us send anything shorter than an Ethernet header, but
+	# that's good enough for this test
+	$(atf_get_srcdir)/pft_ether.py \
+	    --sendif ${epair}a \
+	    --to 192.0.2.2 \
+	    --len 14-64
+}
+
+short_pkt_cleanup()
+{
+	pft_cleanup
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case "mac"
@@ -556,4 +689,7 @@ atf_init_test_cases()
 	atf_add_test_case "dummynet"
 	atf_add_test_case "anchor"
 	atf_add_test_case "ip"
+	atf_add_test_case "tag"
+	atf_add_test_case "match_tag"
+	atf_add_test_case "short_pkt"
 }

@@ -40,6 +40,10 @@ tests = ['alloc_class_001_pos', 'alloc_class_002_neg', 'alloc_class_003_pos',
     'alloc_class_013_pos']
 tags = ['functional', 'alloc_class']
 
+[tests/functional/append]
+tests = ['file_append', 'threadsappend_001_pos']
+tags = ['functional', 'append']
+
 [tests/functional/arc]
 tests = ['dbufstats_001_pos', 'dbufstats_002_pos', 'dbufstats_003_pos',
     'arcstats_runtime_tuning']
@@ -109,8 +113,8 @@ tests = ['tst.destroy_fs', 'tst.destroy_snap', 'tst.get_count_and_limit',
 tags = ['functional', 'channel_program', 'synctask_core']
 
 [tests/functional/checksum]
-tests = ['run_edonr_test', 'run_sha2_test', 'run_skein_test', 'filetest_001_pos',
-    'filetest_002_pos']
+tests = ['run_edonr_test', 'run_sha2_test', 'run_skein_test', 'run_blake3_test',
+    'filetest_001_pos', 'filetest_002_pos']
 tags = ['functional', 'checksum']
 
 [tests/functional/clean_mirror]
@@ -305,7 +309,7 @@ tags = ['functional', 'cli_root', 'zfs_unmount']
 [tests/functional/cli_root/zfs_unshare]
 tests = ['zfs_unshare_001_pos', 'zfs_unshare_002_pos', 'zfs_unshare_003_pos',
     'zfs_unshare_004_neg', 'zfs_unshare_005_neg', 'zfs_unshare_006_pos',
-    'zfs_unshare_007_pos']
+    'zfs_unshare_007_pos', 'zfs_unshare_008_pos']
 tags = ['functional', 'cli_root', 'zfs_unshare']
 
 [tests/functional/cli_root/zfs_upgrade]
@@ -488,6 +492,7 @@ tags = ['functional', 'cli_root', 'zpool_split']
 
 [tests/functional/cli_root/zpool_status]
 tests = ['zpool_status_001_pos', 'zpool_status_002_pos',
+    'zpool_status_003_pos', 'zpool_status_004_pos',
     'zpool_status_features_001_pos']
 tags = ['functional', 'cli_root', 'zpool_status']
 
@@ -640,7 +645,9 @@ tests = ['history_001_pos', 'history_002_pos', 'history_003_pos',
 tags = ['functional', 'history']
 
 [tests/functional/hkdf]
-tests = ['run_hkdf_test']
+pre =
+post =
+tests = ['hkdf_test']
 tags = ['functional', 'hkdf']
 
 [tests/functional/inheritance]
@@ -678,7 +685,7 @@ tests = ['migration_001_pos', 'migration_002_pos', 'migration_003_pos',
 tags = ['functional', 'migration']
 
 [tests/functional/mmap]
-tests = ['mmap_write_001_pos', 'mmap_read_001_pos', 'mmap_seek_001_pos']
+tests = ['mmap_write_001_pos', 'mmap_read_001_pos', 'mmap_seek_001_pos', 'mmap_sync_001_pos']
 tags = ['functional', 'mmap']
 
 [tests/functional/mount]
@@ -756,7 +763,8 @@ tags = ['functional', 'raidz']
 
 [tests/functional/redundancy]
 tests = ['redundancy_draid', 'redundancy_draid1', 'redundancy_draid2',
-    'redundancy_draid3', 'redundancy_draid_damaged', 'redundancy_draid_spare1',
+    'redundancy_draid3', 'redundancy_draid_damaged1',
+    'redundancy_draid_damaged2', 'redundancy_draid_spare1',
     'redundancy_draid_spare2', 'redundancy_draid_spare3', 'redundancy_mirror',
     'redundancy_raidz', 'redundancy_raidz1', 'redundancy_raidz2',
     'redundancy_raidz3', 'redundancy_stripe']
@@ -881,10 +889,6 @@ tests = ['suid_write_to_suid', 'suid_write_to_sgid', 'suid_write_to_suid_sgid',
     'suid_write_to_none', 'suid_write_zil_replay']
 tags = ['functional', 'suid']
 
-[tests/functional/threadsappend]
-tests = ['threadsappend_001_pos']
-tags = ['functional', 'threadsappend']
-
 [tests/functional/trim]
 tests = ['autotrim_integrity', 'autotrim_config', 'autotrim_trim_integrity',
     'trim_integrity', 'trim_config', 'trim_l2arc']
@@ -934,8 +938,12 @@ tags = ['functional', 'zvol', 'zvol_cli']
 
 [tests/functional/zvol/zvol_misc]
 tests = ['zvol_misc_002_pos', 'zvol_misc_hierarchy', 'zvol_misc_rename_inuse',
-    'zvol_misc_snapdev', 'zvol_misc_volmode', 'zvol_misc_zil']
+    'zvol_misc_snapdev', 'zvol_misc_trim', 'zvol_misc_volmode', 'zvol_misc_zil']
 tags = ['functional', 'zvol', 'zvol_misc']
+
+[tests/functional/zvol/zvol_stress]
+tests = ['zvol_stress']
+tags = ['functional', 'zvol', 'zvol_stress']
 
 [tests/functional/zvol/zvol_swap]
 tests = ['zvol_swap_001_pos', 'zvol_swap_002_pos', 'zvol_swap_004_pos']

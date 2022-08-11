@@ -6,8 +6,11 @@ SHLIBDIR?= /lib
 
 PACKAGE=	runtime
 SHLIB=	nv
-SHLIB_MAJOR= 0
+SHLIB_MAJOR= 1
 LIB=	nv
+
+VERSION_DEF=	${SRCTOP}/lib/libc/Versions.def
+VERSION_MAP=	${.CURDIR}/Version.map
 
 .PATH: ${SRCTOP}/sys/contrib/libnv ${SRCTOP}/sys/sys
 CFLAGS+=-I${.CURDIR}

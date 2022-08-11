@@ -153,6 +153,9 @@ zfs_znode_cache_constructor(void *buf, void *arg, int kmflags)
 	zp->z_xattr_cached = NULL;
 	zp->z_xattr_parent = 0;
 	zp->z_vnode = NULL;
+	zp->z_sync_writes_cnt = 0;
+	zp->z_async_writes_cnt = 0;
+
 	return (0);
 }
 
@@ -172,6 +175,9 @@ zfs_znode_cache_destructor(void *buf, void *arg)
 
 	ASSERT3P(zp->z_acl_cached, ==, NULL);
 	ASSERT3P(zp->z_xattr_cached, ==, NULL);
+
+	ASSERT0(atomic_load_32(&zp->z_sync_writes_cnt));
+	ASSERT0(atomic_load_32(&zp->z_async_writes_cnt));
 }
 
 
@@ -453,6 +459,8 @@ zfs_znode_alloc(zfsvfs_t *zfsvfs, dmu_buf_t *db, int blksz,
 	zp->z_blksz = blksz;
 	zp->z_seq = 0x7A4653;
 	zp->z_sync_cnt = 0;
+	zp->z_sync_writes_cnt = 0;
+	zp->z_async_writes_cnt = 0;
 #if __FreeBSD_version >= 1300139
 	atomic_store_ptr(&zp->z_cached_symlink, NULL);
 #endif
@@ -1811,7 +1819,7 @@ zfs_sa_setup(objset_t *osp, sa_attr_type_t **sa_table)
 
 static int
 zfs_grab_sa_handle(objset_t *osp, uint64_t obj, sa_handle_t **hdlp,
-    dmu_buf_t **db, void *tag)
+    dmu_buf_t **db, const void *tag)
 {
 	dmu_object_info_t doi;
 	int error;
@@ -1838,7 +1846,7 @@ zfs_grab_sa_handle(objset_t *osp, uint64_t obj, sa_handle_t **hdlp,
 }
 
 static void
-zfs_release_sa_handle(sa_handle_t *hdl, dmu_buf_t *db, void *tag)
+zfs_release_sa_handle(sa_handle_t *hdl, dmu_buf_t *db, const void *tag)
 {
 	sa_handle_destroy(hdl);
 	sa_buf_rele(db, tag);

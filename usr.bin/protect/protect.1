@@ -25,7 +25,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd April 12, 2022
+.Dd July 12, 2022
 .Dt PROTECT 1
 .Os
 .Sh NAME
@@ -37,7 +37,10 @@
 .Ar command
 .Nm
 .Op Fl cdi
-.Fl g Ar pgrp | Fl p Ar pid
+.Fl g Ar pgrp
+.Nm
+.Op Fl cdi
+.Fl p Ar pid
 .Sh DESCRIPTION
 The
 .Nm
@@ -46,7 +49,7 @@ The kernel does not kill protected processes when swap space is exhausted.
 Note that this protected state is not inherited by child processes by default.
 .Pp
 The options are:
-.Bl -tag -width XXXXXXXXXX
+.Bl -tag -width command
 .It Fl c
 Remove protection from the specified processes.
 .It Fl d
@@ -109,6 +112,24 @@ bit is set to 1.
 All children of this process will also be protected if
 .Nm PI
 bit is set to 1.
+.Sh DIAGNOSTICS
+.Bl -diag
+.It "protect: procctl: Operation not permitted"
+The
+.Nm
+command does not have the required permissions to protect selected processes.
+There are many reasons why this could be the case, e.g.:
+.Bl -dash
+.It
+.Nm
+is not executed by root.
+.It
+.Nm
+is executed inside a
+.Xr jail 8 ,
+which is not supported at the moment.
+.El
+.El
 .Sh SEE ALSO
 .Xr ps 1 ,
 .Xr procctl 2 ,

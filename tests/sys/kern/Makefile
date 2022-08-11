@@ -29,6 +29,9 @@ ATF_TESTS_C+=	reaper
 ATF_TESTS_C+=	sched_affinity
 ATF_TESTS_C+=	sigaltstack
 ATF_TESTS_C+=	sigwait
+ATF_TESTS_C+=	socket_accf
+ATF_TESTS_C+=	socket_msg_trunc
+TEST_METADATA.sigwait+=	is_exclusive="true"
 .if ${MACHINE_ARCH} != "i386" && ${MACHINE_ARCH:Mpowerpc*} == ""
 ATF_TESTS_C+=	subr_physmem_test
 .endif
@@ -36,7 +39,10 @@ PLAIN_TESTS_C+=	subr_unit_test
 ATF_TESTS_C+=	sysctl_kern_proc
 ATF_TESTS_C+=	sys_getrandom
 ATF_TESTS_C+=	unix_dgram
-ATF_TESTS_C+=	unix_passfd_test
+ATF_TESTS_C+=	unix_passfd_dgram
+TEST_METADATA.unix_passfd_dgram+=	is_exclusive="true"
+ATF_TESTS_C+=	unix_passfd_stream
+TEST_METADATA.unix_passfd_stream+=	is_exclusive="true"
 ATF_TESTS_C+=	unix_seqpacket_test
 TEST_METADATA.unix_seqpacket_test+=	timeout="15"
 ATF_TESTS_C+=	unix_socketpair_test

@@ -26,6 +26,9 @@
 #
 # $FreeBSD$
 
+BSDCFG_SHARE="/usr/share/bsdconfig"
+. $BSDCFG_SHARE/common.subr || exit 1
+
 : ${BSDDIALOG_OK=0}
 
 echo -n > $BSDINSTALL_TMPETC/rc.conf.hardening
@@ -49,7 +52,7 @@ if [ `sysctl -n security.bsd.unprivileged_proc_debug` -eq 0 ]; then
 fi
 
 exec 3>&1
-FEATURES=$( bsddialog --backtitle "HardenedBSD Installer" \
+FEATURES=$( bsddialog --backtitle "$OSNAME Installer" \
     --title "System Hardening" --nocancel --separate-output \
     --checklist "Choose system security hardening options:" \
     0 0 0 \
@@ -63,6 +66,7 @@ FEATURES=$( bsddialog --backtitle "HardenedBSD Installer" \
 	"7 disable_sendmail" "Disable Sendmail service" ${disable_sendmail:-off} \
 	"8 secure_console" "Enable console password prompt" ${secure_console:-off} \
 	"9 disable_ddtrace" "Disallow DTrace destructive-mode" ${disable_ddtrace:-off} \
+	"10 enable_firewall" "Enable a basic firewall (see: /etc/rc.conf)" ${enable_firewall:-off} \
 2>&1 1>&3 )
 retval=$?
 exec 3>&-
@@ -102,6 +106,16 @@ for feature in $FEATURES; do
 		;;
 	disable_ddtrace)
 		echo 'security.bsd.allow_destructive_dtrace=0' >> $BSDINSTALL_TMPBOOT/loader.conf.hardening
+		;;
+	enable_firewall)
+		cat >>$BSDINSTALL_TMPETC/rc.conf.hardening <<EOF
+firewall_enable="YES"
+firewall_type="workstation"
+#firewall_myservices="22/tcp"
+#firewall_allowservices="fc00::/7 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+firewall_quiet="YES"
+firewall_logdeny="YES"
+EOF
 		;;
 	esac
 done

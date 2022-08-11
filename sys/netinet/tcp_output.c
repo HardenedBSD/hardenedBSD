@@ -222,6 +222,7 @@ tcp_default_output(struct tcpcb *tp)
 	int tso, mtu;
 	struct tcpopt to;
 	struct udphdr *udp = NULL;
+	struct tcp_log_buffer *lgb;
 	unsigned int wanted_cookie = 0;
 	unsigned int dont_sendalot = 0;
 #if 0
@@ -328,13 +329,16 @@ again:
 				 */
 				p = NULL;
 				goto after_sack_rexmit;
-			} else
+			} else {
 				/* Can rexmit part of the current hole */
 				len = ((int32_t)ulmin(cwin,
-						   tp->snd_recover - p->rxmit));
-		} else
-			len = ((int32_t)ulmin(cwin, p->end - p->rxmit));
-		off = p->rxmit - tp->snd_una;
+				    SEQ_SUB(tp->snd_recover, p->rxmit)));
+			}
+		} else {
+			len = ((int32_t)ulmin(cwin,
+			    SEQ_SUB(p->end, p->rxmit)));
+		}
+		off = SEQ_SUB(p->rxmit, tp->snd_una);
 		KASSERT(off >= 0,("%s: sack block to the left of una : %d",
 		    __func__, off));
 		if (len > 0) {
@@ -1438,8 +1442,13 @@ send:
 	TCP_PROBE3(debug__output, tp, th, m);
 
 	/* We're getting ready to send; log now. */
-	TCP_LOG_EVENT(tp, th, &so->so_rcv, &so->so_snd, TCP_LOG_OUT, ERRNO_UNK,
-	    len, NULL, false);
+	/* XXXMT: We are not honoring verbose logging. */
+	if (tp->t_logstate != TCP_LOG_STATE_OFF)
+		lgb = tcp_log_event_(tp, th, &so->so_rcv, &so->so_snd,
+		    TCP_LOG_OUT, ERRNO_UNK, len, NULL, false, NULL, NULL, 0,
+		    NULL);
+	else
+		lgb = NULL;
 
 	/*
 	 * Fill in IP length and desired time to live and
@@ -1539,6 +1548,10 @@ send:
     }
 #endif /* INET */
 
+	if (lgb != NULL) {
+		lgb->tlb_errno = error;
+		lgb = NULL;
+	}
 out:
 	if (error == 0)
 		tcp_account_for_send(tp, len, (tp->snd_nxt != tp->snd_max), 0, hw_tls);
@@ -1652,10 +1665,6 @@ timer:
 		    tcp_clean_dsack_blocks(tp);
 	}
 	if (error) {
-		/* Record the error. */
-		TCP_LOG_EVENT(tp, NULL, &so->so_rcv, &so->so_snd, TCP_LOG_OUT,
-		    error, 0, NULL, false);
-
 		/*
 		 * We know that the packet was lost, so back out the
 		 * sequence number advance, if any.
@@ -1678,8 +1687,13 @@ timer:
 				tp->sackhint.sack_bytes_rexmit -= len;
 				KASSERT(tp->sackhint.sack_bytes_rexmit >= 0,
 				    ("sackhint bytes rtx >= 0"));
-			} else
+				KASSERT((flags & TH_FIN) == 0,
+				    ("error while FIN with SACK rxmit"));
+			} else {
 				tp->snd_nxt -= len;
+				if (flags & TH_FIN)
+					tp->snd_nxt--;
+			}
 		}
 		SOCKBUF_UNLOCK_ASSERT(&so->so_snd);	/* Check gotos. */
 		switch (error) {

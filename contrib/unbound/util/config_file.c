@@ -173,6 +173,7 @@ config_create(void)
 	cfg->infra_cache_slabs = 4;
 	cfg->infra_cache_numhosts = 10000;
 	cfg->infra_cache_min_rtt = 50;
+	cfg->infra_cache_max_rtt = 120000;
 	cfg->infra_keep_probing = 0;
 	cfg->delay_close = 0;
 	cfg->udp_connect = 1;
@@ -195,6 +196,7 @@ config_create(void)
 	cfg->use_systemd = 0;
 	cfg->do_daemonize = 1;
 	cfg->if_automatic = 0;
+	cfg->if_automatic_ports = NULL;
 	cfg->so_rcvbuf = 0;
 	cfg->so_sndbuf = 0;
 	cfg->so_reuseport = REUSEPORT_DEFAULT;
@@ -267,6 +269,7 @@ config_create(void)
 	cfg->serve_expired_ttl_reset = 0;
 	cfg->serve_expired_reply_ttl = 30;
 	cfg->serve_expired_client_timeout = 0;
+	cfg->ede_serve_expired = 0;
 	cfg->serve_original_ttl = 0;
 	cfg->zonemd_permissive_mode = 0;
 	cfg->add_holddown = 30*24*3600;
@@ -375,6 +378,7 @@ config_create(void)
 	cfg->ipset_name_v4 = NULL;
 	cfg->ipset_name_v6 = NULL;
 #endif
+	cfg->ede = 0;
 	return cfg;
 error_exit:
 	config_delete(cfg);
@@ -476,7 +480,7 @@ int config_set_option(struct config_file* cfg, const char* opt,
 		else if(atoi(val) == 0)
 			return 0;
 		else cfg->stat_interval = atoi(val);
-	} else if(strcmp(opt, "num_threads:") == 0) {
+	} else if(strcmp(opt, "num-threads:") == 0) {
 		/* not supported, library must have 1 thread in bgworker */
 		return 0;
 	} else if(strcmp(opt, "outgoing-port-permit:") == 0) {
@@ -543,6 +547,7 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_STR("ssl-cert-bundle:", tls_cert_bundle)
 	else S_STR("tls-cert-bundle:", tls_cert_bundle)
 	else S_YNO("tls-win-cert:", tls_win_cert)
+	else S_YNO("tls-system-cert:", tls_win_cert)
 	else S_STRLIST("additional-ssl-port:", tls_additional_port)
 	else S_STRLIST("additional-tls-port:", tls_additional_port)
 	else S_STRLIST("tls-additional-ports:", tls_additional_port)
@@ -559,6 +564,7 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_YNO("http-nodelay:", http_nodelay)
 	else S_YNO("http-notls-downstream:", http_notls_downstream)
 	else S_YNO("interface-automatic:", if_automatic)
+	else S_STR("interface-automatic-ports:", if_automatic_ports)
 	else S_YNO("use-systemd:", use_systemd)
 	else S_YNO("do-daemonize:", do_daemonize)
 	else S_NUMBER_NONZERO("port:", port)
@@ -590,8 +596,14 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else if(strcmp(opt, "cache-min-ttl:") == 0)
 	{ IS_NUMBER_OR_ZERO; cfg->min_ttl = atoi(val); MIN_TTL=(time_t)cfg->min_ttl;}
 	else if(strcmp(opt, "infra-cache-min-rtt:") == 0) {
-	    IS_NUMBER_OR_ZERO; cfg->infra_cache_min_rtt = atoi(val);
-	    RTT_MIN_TIMEOUT=cfg->infra_cache_min_rtt;
+	 	IS_NUMBER_OR_ZERO; cfg->infra_cache_min_rtt = atoi(val);
+		RTT_MIN_TIMEOUT=cfg->infra_cache_min_rtt;
+	}
+	else if(strcmp(opt, "infra-cache-max-rtt:") == 0) {
+		IS_NUMBER_OR_ZERO; cfg->infra_cache_max_rtt = atoi(val);
+		RTT_MAX_TIMEOUT=cfg->infra_cache_max_rtt;
+		USEFUL_SERVER_TOP_TIMEOUT = RTT_MAX_TIMEOUT;
+		BLACKLIST_PENALTY = USEFUL_SERVER_TOP_TIMEOUT*4;
 	}
 	else S_YNO("infra-keep-probing:", infra_keep_probing)
 	else S_NUMBER_OR_ZERO("infra-host-ttl:", host_ttl)
@@ -668,6 +680,8 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else if(strcmp(opt, "serve-expired-reply-ttl:") == 0)
 	{ IS_NUMBER_OR_ZERO; cfg->serve_expired_reply_ttl = atoi(val); SERVE_EXPIRED_REPLY_TTL=(time_t)cfg->serve_expired_reply_ttl;}
 	else S_NUMBER_OR_ZERO("serve-expired-client-timeout:", serve_expired_client_timeout)
+	else S_YNO("ede:", ede)	
+	else S_YNO("ede-serve-expired:", ede_serve_expired)
 	else S_YNO("serve-original-ttl:", serve_original_ttl)
 	else S_STR("val-nsec3-keysize-iterations:", val_nsec3_key_iterations)
 	else S_YNO("zonemd-permissive-mode:", zonemd_permissive_mode)
@@ -990,6 +1004,7 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_IFC(opt, "interface", num_ifs, ifs)
 	else O_IFC(opt, "outgoing-interface", num_out_ifs, out_ifs)
 	else O_YNO(opt, "interface-automatic", if_automatic)
+	else O_STR(opt, "interface-automatic-ports", if_automatic_ports)
 	else O_DEC(opt, "port", port)
 	else O_DEC(opt, "outgoing-range", outgoing_num_ports)
 	else O_DEC(opt, "outgoing-num-tcp", outgoing_num_tcp)
@@ -1018,6 +1033,7 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_DEC(opt, "infra-host-ttl", host_ttl)
 	else O_DEC(opt, "infra-cache-slabs", infra_cache_slabs)
 	else O_DEC(opt, "infra-cache-min-rtt", infra_cache_min_rtt)
+	else O_UNS(opt, "infra-cache-max-rtt", infra_cache_max_rtt)
 	else O_YNO(opt, "infra-keep-probing", infra_keep_probing)
 	else O_MEM(opt, "infra-cache-numhosts", infra_cache_numhosts)
 	else O_UNS(opt, "delay-close", delay_close)
@@ -1049,6 +1065,7 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_STR(opt, "ssl-cert-bundle", tls_cert_bundle)
 	else O_STR(opt, "tls-cert-bundle", tls_cert_bundle)
 	else O_YNO(opt, "tls-win-cert", tls_win_cert)
+	else O_YNO(opt, "tls-system-cert", tls_win_cert)
 	else O_LST(opt, "additional-ssl-port", tls_additional_port)
 	else O_LST(opt, "additional-tls-port", tls_additional_port)
 	else O_LST(opt, "tls-additional-ports", tls_additional_port)
@@ -1108,6 +1125,8 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_YNO(opt, "serve-expired-ttl-reset", serve_expired_ttl_reset)
 	else O_DEC(opt, "serve-expired-reply-ttl", serve_expired_reply_ttl)
 	else O_DEC(opt, "serve-expired-client-timeout", serve_expired_client_timeout)
+	else O_YNO(opt, "ede", ede)
+	else O_YNO(opt, "ede-serve-expired", ede_serve_expired)
 	else O_YNO(opt, "serve-original-ttl", serve_original_ttl)
 	else O_STR(opt, "val-nsec3-keysize-iterations",val_nsec3_key_iterations)
 	else O_YNO(opt, "zonemd-permissive-mode", zonemd_permissive_mode)
@@ -1534,6 +1553,7 @@ config_delete(struct config_file* cfg)
 	free(cfg->directory);
 	free(cfg->logfile);
 	free(cfg->pidfile);
+	free(cfg->if_automatic_ports);
 	free(cfg->target_fetch_policy);
 	free(cfg->ssl_service_key);
 	free(cfg->ssl_service_pem);
@@ -2210,11 +2230,14 @@ config_apply(struct config_file* config)
 	SERVE_ORIGINAL_TTL = config->serve_original_ttl;
 	MAX_NEG_TTL = (time_t)config->max_negative_ttl;
 	RTT_MIN_TIMEOUT = config->infra_cache_min_rtt;
+	RTT_MAX_TIMEOUT = config->infra_cache_max_rtt;
 	EDNS_ADVERTISED_SIZE = (uint16_t)config->edns_buffer_size;
 	MINIMAL_RESPONSES = config->minimal_responses;
 	RRSET_ROUNDROBIN = config->rrset_roundrobin;
 	LOG_TAG_QUERYREPLY = config->log_tag_queryreply;
 	UNKNOWN_SERVER_NICENESS = config->unknown_server_time_limit;
+	USEFUL_SERVER_TOP_TIMEOUT = RTT_MAX_TIMEOUT;
+	BLACKLIST_PENALTY = USEFUL_SERVER_TOP_TIMEOUT*4;
 	log_set_time_asc(config->log_time_ascii);
 	autr_permit_small_holddown = config->permit_small_holddown;
 	stream_wait_max = config->stream_wait_size;
@@ -2482,7 +2505,7 @@ char* cfg_ptr_reverse(char* str)
 	while(*ip_end && isspace((unsigned char)*ip_end))
 		ip_end++;
 	if(name>ip_end) {
-		snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), "%.*s", 
+		snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), "%.*s",
 			(int)(name-ip_end), ip_end);
 	}
 	snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), " PTR %s", name);
@@ -2552,126 +2575,6 @@ void w_config_adjust_directory(struct config_file* cfg)
 	}
 }
 #endif /* UB_ON_WINDOWS */
-
-void errinf(struct module_qstate* qstate, const char* str)
-{
-	struct config_strlist* p;
-	if((qstate->env->cfg->val_log_level < 2 && !qstate->env->cfg->log_servfail) || !str)
-		return;
-	p = (struct config_strlist*)regional_alloc(qstate->region, sizeof(*p));
-	if(!p) {
-		log_err("malloc failure in validator-error-info string");
-		return;
-	}
-	p->next = NULL;
-	p->str = regional_strdup(qstate->region, str);
-	if(!p->str) {
-		log_err("malloc failure in validator-error-info string");
-		return;
-	}
-	/* add at end */
-	if(qstate->errinf) {
-		struct config_strlist* q = qstate->errinf;
-		while(q->next) 
-			q = q->next;
-		q->next = p;
-	} else	qstate->errinf = p;
-}
-
-void errinf_origin(struct module_qstate* qstate, struct sock_list *origin)
-{
-	struct sock_list* p;
-	if(qstate->env->cfg->val_log_level < 2 && !qstate->env->cfg->log_servfail)
-		return;
-	for(p=origin; p; p=p->next) {
-		char buf[256];
-		if(p == origin)
-			snprintf(buf, sizeof(buf), "from ");
-		else	snprintf(buf, sizeof(buf), "and ");
-		if(p->len == 0)
-			snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), 
-				"cache");
-		else 
-			addr_to_str(&p->addr, p->len, buf+strlen(buf),
-				sizeof(buf)-strlen(buf));
-		errinf(qstate, buf);
-	}
-}
-
-char* errinf_to_str_bogus(struct module_qstate* qstate)
-{
-	char buf[20480];
-	char* p = buf;
-	size_t left = sizeof(buf);
-	struct config_strlist* s;
-	char dname[LDNS_MAX_DOMAINLEN+1];
-	char t[16], c[16];
-	sldns_wire2str_type_buf(qstate->qinfo.qtype, t, sizeof(t));
-	sldns_wire2str_class_buf(qstate->qinfo.qclass, c, sizeof(c));
-	dname_str(qstate->qinfo.qname, dname);
-	snprintf(p, left, "validation failure <%s %s %s>:", dname, t, c);
-	left -= strlen(p); p += strlen(p);
-	if(!qstate->errinf)
-		snprintf(p, left, " misc failure");
-	else for(s=qstate->errinf; s; s=s->next) {
-		snprintf(p, left, " %s", s->str);
-		left -= strlen(p); p += strlen(p);
-	}
-	p = strdup(buf);
-	if(!p)
-		log_err("malloc failure in errinf_to_str");
-	return p;
-}
-
-char* errinf_to_str_servfail(struct module_qstate* qstate)
-{
-	char buf[20480];
-	char* p = buf;
-	size_t left = sizeof(buf);
-	struct config_strlist* s;
-	char dname[LDNS_MAX_DOMAINLEN+1];
-	char t[16], c[16];
-	sldns_wire2str_type_buf(qstate->qinfo.qtype, t, sizeof(t));
-	sldns_wire2str_class_buf(qstate->qinfo.qclass, c, sizeof(c));
-	dname_str(qstate->qinfo.qname, dname);
-	snprintf(p, left, "SERVFAIL <%s %s %s>:", dname, t, c);
-	left -= strlen(p); p += strlen(p);
-	if(!qstate->errinf)
-		snprintf(p, left, " misc failure");
-	else for(s=qstate->errinf; s; s=s->next) {
-		snprintf(p, left, " %s", s->str);
-		left -= strlen(p); p += strlen(p);
-	}
-	p = strdup(buf);
-	if(!p)
-		log_err("malloc failure in errinf_to_str");
-	return p;
-}
-
-void errinf_rrset(struct module_qstate* qstate, struct ub_packed_rrset_key *rr)
-{
-	char buf[1024];
-	char dname[LDNS_MAX_DOMAINLEN+1];
-	char t[16], c[16];
-	if((qstate->env->cfg->val_log_level < 2 && !qstate->env->cfg->log_servfail) || !rr)
-		return;
-	sldns_wire2str_type_buf(ntohs(rr->rk.type), t, sizeof(t));
-	sldns_wire2str_class_buf(ntohs(rr->rk.rrset_class), c, sizeof(c));
-	dname_str(rr->rk.dname, dname);
-	snprintf(buf, sizeof(buf), "for <%s %s %s>", dname, t, c);
-	errinf(qstate, buf);
-}
-
-void errinf_dname(struct module_qstate* qstate, const char* str, uint8_t* dname)
-{
-	char b[1024];
-	char buf[LDNS_MAX_DOMAINLEN+1];
-	if((qstate->env->cfg->val_log_level < 2 && !qstate->env->cfg->log_servfail) || !str || !dname)
-		return;
-	dname_str(dname, buf);
-	snprintf(b, sizeof(b), "%s %s", str, buf);
-	errinf(qstate, b);
-}
 
 int options_remote_is_address(struct config_file* cfg)
 {

@@ -257,11 +257,13 @@ struct thread {
 #define	td_siglist	td_sigqueue.sq_signals
 	u_char		td_lend_user_pri; /* (t) Lend user pri. */
 	u_char		td_allocdomain;	/* (b) NUMA domain backing this struct thread. */
+	u_char		td_base_ithread_pri; /* (t) Base ithread pri */
 	struct kmsan_td	*td_kmsan;	/* (k) KMSAN state */
 
 /* Cleared during fork1() */
 #define	td_startzero td_flags
 	int		td_flags;	/* (t) TDF_* flags. */
+	int		td_ast;		/* (t) TDA_* indicators */
 	int		td_inhibitors;	/* (t) Why can not run. */
 	int		td_pflags;	/* (k) Private thread (TDP_*) flags. */
 	int		td_pflags2;	/* (k) Private thread (TDP2_*) flags. */
@@ -457,26 +459,53 @@ do {									\
 #define	TDF_KTH_SUSP	0x00000100 /* kthread is suspended */
 #define	TDF_ALLPROCSUSP	0x00000200 /* suspended by SINGLE_ALLPROC */
 #define	TDF_BOUNDARY	0x00000400 /* Thread suspended at user boundary */
-#define	TDF_ASTPENDING	0x00000800 /* Thread has some asynchronous events. */
-#define	TDF_KQTICKLED	0x00001000 /* AST drain kqueue taskqueue */
+#define	TDF_UNUSED1	0x00000800 /* Available */
+#define	TDF_UNUSED2	0x00001000 /* Available */
 #define	TDF_SBDRY	0x00002000 /* Stop only on usermode boundary. */
 #define	TDF_UPIBLOCKED	0x00004000 /* Thread blocked on user PI mutex. */
-#define	TDF_NEEDSUSPCHK	0x00008000 /* Thread may need to suspend. */
-#define	TDF_NEEDRESCHED	0x00010000 /* Thread needs to yield. */
-#define	TDF_NEEDSIGCHK	0x00020000 /* Thread may need signal delivery. */
+#define	TDF_UNUSED3	0x00008000 /* Available */
+#define	TDF_UNUSED4	0x00010000 /* Available */
+#define	TDF_UNUSED5	0x00020000 /* Available */
 #define	TDF_NOLOAD	0x00040000 /* Ignore during load avg calculations. */
 #define	TDF_SERESTART	0x00080000 /* ERESTART on stop attempts. */
 #define	TDF_THRWAKEUP	0x00100000 /* Libthr thread must not suspend itself. */
 #define	TDF_SEINTR	0x00200000 /* EINTR on stop attempts. */
 #define	TDF_SWAPINREQ	0x00400000 /* Swapin request due to wakeup. */
-#define	TDF_UNUSED23	0x00800000 /* --available-- */
+#define	TDF_DOING_SA	0x00800000 /* Doing SINGLE_ALLPROC, do not unsuspend me */
 #define	TDF_SCHED0	0x01000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED1	0x02000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED2	0x04000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED3	0x08000000 /* Reserved for scheduler private use */
-#define	TDF_ALRMPEND	0x10000000 /* Pending SIGVTALRM needs to be posted. */
-#define	TDF_PROFPEND	0x20000000 /* Pending SIGPROF needs to be posted. */
-#define	TDF_MACPEND	0x40000000 /* AST-based MAC event pending. */
+#define	TDF_UNUSED6	0x10000000 /* Available */
+#define	TDF_UNUSED7	0x20000000 /* Available */
+#define	TDF_UNUSED8	0x40000000 /* Available */
+#define	TDF_UNUSED9	0x80000000 /* Available */
+
+enum {
+	TDA_AST = 0,		/* Special: call all non-flagged AST handlers */
+	TDA_OWEUPC,
+	TDA_HWPMC,
+	TDA_VFORK,
+	TDA_ALRM,
+	TDA_PROF,
+	TDA_MAC,
+	TDA_SCHED,
+	TDA_UFS,
+	TDA_GEOM,
+	TDA_KQUEUE,
+	TDA_RACCT,
+	TDA_MOD1,		/* For third party use, before signals are */
+	TAD_MOD2,		/* processed .. */
+	TDA_SIG,
+	TDA_KTRACE,
+	TDA_SUSPEND,
+	TDA_SIGSUSPEND,
+	TDA_MOD3,		/* .. and after */
+	TAD_MOD4,
+	TDA_MAX,
+};
+#define	TDAI(tda)		(1U << (tda))
+#define	td_ast_pending(td, tda)	((td->td_ast & TDAI(tda)) != 0)
 
 /* Userland debug flags */
 #define	TDB_SUSPEND	0x00000001 /* Thread is suspended by debugger */
@@ -692,6 +721,8 @@ struct proc {
 	int		p_pendingexits; /* (c) Count of pending thread exits. */
 	struct filemon	*p_filemon;	/* (c) filemon-specific data. */
 	int		p_pdeathsig;	/* (c) Signal from parent on exit. */
+	int		p_singlethr;	/* (c) Count of threads doing
+					   external thread_single() */
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_magic
 
@@ -855,6 +886,9 @@ struct proc {
 #define	P2_NO_NEW_PRIVS		0x00008000	/* Ignore setuid */
 #define	P2_WXORX_DISABLE	0x00010000	/* WX mappings enabled */
 #define	P2_WXORX_ENABLE_EXEC	0x00020000	/* WXORX enabled after exec */
+#define	P2_WEXIT		0x00040000	/* exit just started, no
+						   external thread_single() is
+						   permitted */
 
 /* Flags protected by proctree_lock, kept in p_treeflags. */
 #define	P_TREE_ORPHANED		0x00000001	/* Reparented, on orphan list */
@@ -1113,7 +1147,23 @@ struct	fork_req {
 
 int	pget(pid_t pid, int flags, struct proc **pp);
 
+/* ast_register() flags */
+#define	ASTR_ASTF_REQUIRED	0x0001	/* td_ast TDAI(TDA_X) flag set is
+					   required for call */
+#define	ASTR_TDP		0x0002	/* td_pflags flag set is required */
+#define	ASTR_KCLEAR		0x0004	/* call me on ast_kclear() */
+#define	ASTR_UNCOND		0x0008	/* call me always */
+
 void	ast(struct trapframe *framep);
+void	ast_kclear(struct thread *td);
+void	ast_register(int ast, int ast_flags, int tdp,
+	    void (*f)(struct thread *td, int asts));
+void	ast_deregister(int tda);
+void	ast_sched_locked(struct thread *td, int tda);
+void	ast_sched_mask(struct thread *td, int ast);
+void	ast_sched(struct thread *td, int tda);
+void	ast_unsched_locked(struct thread *td, int tda);
+
 struct	thread *choosethread(void);
 int	cr_cansee(struct ucred *u1, struct ucred *u2);
 int	cr_canseesocket(struct ucred *cred, struct socket *so);
@@ -1126,7 +1176,6 @@ int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *pgrp,
 int	enterthispgrp(struct proc *p, struct pgrp *pgrp);
 void	faultin(struct proc *p);
 int	fork1(struct thread *, struct fork_req *);
-void	fork_rfppwait(struct thread *);
 void	fork_exit(void (*)(void *, struct trapframe *), void *,
 	    struct trapframe *);
 void	fork_return(struct thread *, struct trapframe *);
@@ -1163,6 +1212,7 @@ void	proc_linkup(struct proc *p, struct thread *td);
 struct proc *proc_realparent(struct proc *child);
 void	proc_reap(struct thread *td, struct proc *p, int *status, int options);
 void	proc_reparent(struct proc *child, struct proc *newparent, bool set_oppid);
+void	proc_set_p2_wexit(struct proc *p);
 void	proc_set_traced(struct proc *p, bool stop);
 void	proc_wkilled(struct proc *p);
 struct	pstats *pstats_alloc(void);
@@ -1240,7 +1290,7 @@ void	thread_unlink(struct thread *td);
 void	thread_unsuspend(struct proc *p);
 void	thread_wait(struct proc *p);
 
-void	stop_all_proc_block(void);
+bool	stop_all_proc_block(void);
 void	stop_all_proc_unblock(void);
 void	stop_all_proc(void);
 void	resume_all_proc(void);
@@ -1295,15 +1345,6 @@ td_get_sched(struct thread *td)
 {
 
 	return ((struct td_sched *)&td[1]);
-}
-
-extern void (*softdep_ast_cleanup)(struct thread *);
-static __inline void
-td_softdep_cleanup(struct thread *td)
-{
-
-	if (td->td_su != NULL && softdep_ast_cleanup != NULL)
-		softdep_ast_cleanup(td);
 }
 
 #define	PROC_ID_PID	0

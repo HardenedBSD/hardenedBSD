@@ -1104,7 +1104,7 @@ zfs_secpolicy_inherit_prop(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 	(void) innvl;
 	zfs_prop_t prop = zfs_name_to_prop(zc->zc_value);
 
-	if (prop == ZPROP_INVAL) {
+	if (prop == ZPROP_USERPROP) {
 		if (!zfs_prop_user(zc->zc_value))
 			return (SET_ERROR(EINVAL));
 		return (zfs_secpolicy_write_perms(zc->zc_name,
@@ -1397,7 +1397,8 @@ getzfsvfs(const char *dsname, zfsvfs_t **zfvp)
  * which prevents all inode ops from running.
  */
 static int
-zfsvfs_hold(const char *name, void *tag, zfsvfs_t **zfvp, boolean_t writer)
+zfsvfs_hold(const char *name, const void *tag, zfsvfs_t **zfvp,
+    boolean_t writer)
 {
 	int error = 0;
 
@@ -1422,7 +1423,7 @@ zfsvfs_hold(const char *name, void *tag, zfsvfs_t **zfvp, boolean_t writer)
 }
 
 static void
-zfsvfs_rele(zfsvfs_t *zfsvfs, void *tag)
+zfsvfs_rele(zfsvfs_t *zfsvfs, const void *tag)
 {
 	ZFS_TEARDOWN_EXIT(zfsvfs, tag);
 
@@ -2406,7 +2407,7 @@ zfs_prop_set_special(const char *dsname, zprop_source_t source,
 	const char *strval = NULL;
 	int err = -1;
 
-	if (prop == ZPROP_INVAL) {
+	if (prop == ZPROP_USERPROP) {
 		if (zfs_prop_userquota(propname))
 			return (zfs_prop_set_userquota(dsname, pair));
 		return (-1);
@@ -2577,7 +2578,7 @@ retry:
 			/* inherited properties are expected to be booleans */
 			if (nvpair_type(propval) != DATA_TYPE_BOOLEAN)
 				err = SET_ERROR(EINVAL);
-		} else if (err == 0 && prop == ZPROP_INVAL) {
+		} else if (err == 0 && prop == ZPROP_USERPROP) {
 			if (zfs_prop_user(propname)) {
 				if (nvpair_type(propval) != DATA_TYPE_STRING)
 					err = SET_ERROR(EINVAL);
@@ -2853,11 +2854,11 @@ zfs_ioc_inherit_prop(zfs_cmd_t *zc)
 		 * and reservation to the received or default values even though
 		 * they are not considered inheritable.
 		 */
-		if (prop != ZPROP_INVAL && !zfs_prop_inheritable(prop))
+		if (prop != ZPROP_USERPROP && !zfs_prop_inheritable(prop))
 			return (SET_ERROR(EINVAL));
 	}
 
-	if (prop == ZPROP_INVAL) {
+	if (prop == ZPROP_USERPROP) {
 		if (!zfs_prop_user(propname))
 			return (SET_ERROR(EINVAL));
 
@@ -4488,7 +4489,7 @@ zfs_check_settable(const char *dsname, nvpair_t *pair, cred_t *cr)
 	uint64_t intval, compval;
 	int err;
 
-	if (prop == ZPROP_INVAL) {
+	if (prop == ZPROP_USERPROP) {
 		if (zfs_prop_user(propname)) {
 			if ((err = zfs_secpolicy_write_perms(dsname,
 			    ZFS_DELEG_PERM_USERPROP, cr)))
@@ -5034,7 +5035,7 @@ zfs_ioc_recv_impl(char *tofs, char *tosnap, char *origin, nvlist_t *recvprops,
 				/* -x property */
 				const char *name = nvpair_name(nvp);
 				zfs_prop_t prop = zfs_name_to_prop(name);
-				if (prop != ZPROP_INVAL) {
+				if (prop != ZPROP_USERPROP) {
 					if (!zfs_prop_inheritable(prop))
 						continue;
 				} else if (!zfs_prop_user(name))
@@ -5670,7 +5671,7 @@ zfs_ioc_error_log(zfs_cmd_t *zc)
 {
 	spa_t *spa;
 	int error;
-	size_t count = (size_t)zc->zc_nvlist_dst_size;
+	uint64_t count = zc->zc_nvlist_dst_size;
 
 	if ((error = spa_open(zc->zc_name, &spa, FTAG)) != 0)
 		return (error);

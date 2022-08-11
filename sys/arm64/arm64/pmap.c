@@ -287,10 +287,6 @@ vm_paddr_t dmap_phys_base;	/* The start of the dmap region */
 vm_paddr_t dmap_phys_max;	/* The limit of the dmap region */
 vm_offset_t dmap_max_addr;	/* The virtual address limit of the dmap */
 
-/* This code assumes all L1 DMAP entries will be used */
-CTASSERT((DMAP_MIN_ADDRESS  & ~L0_OFFSET) == DMAP_MIN_ADDRESS);
-CTASSERT((DMAP_MAX_ADDRESS  & ~L0_OFFSET) == DMAP_MAX_ADDRESS);
-
 extern pt_entry_t pagetable_l0_ttbr1[];
 
 #define	PHYSMAP_SIZE	(2 * (VM_PHYSSEG_MAX - 1))
@@ -299,6 +295,15 @@ static u_int physmap_idx;
 
 static SYSCTL_NODE(_vm, OID_AUTO, pmap, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "VM/pmap parameters");
+
+#if PAGE_SIZE == PAGE_SIZE_4K
+#define	L1_BLOCKS_SUPPORTED	1
+#else
+/* TODO: Make this dynamic when we support FEAT_LPA2 (TCR_EL1.DS == 1) */
+#define	L1_BLOCKS_SUPPORTED	0
+#endif
+
+#define	PMAP_ASSERT_L1_BLOCKS_SUPPORTED	MPASS(L1_BLOCKS_SUPPORTED)
 
 /*
  * This ASID allocator uses a bit vector ("asid_set") to remember which ASIDs
@@ -572,6 +577,7 @@ pmap_pte(pmap_t pmap, vm_offset_t va, int *level)
 	}
 	desc = pmap_load(l1) & ATTR_DESCR_MASK;
 	if (desc == L1_BLOCK) {
+		PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 		*level = 1;
 		return (l1);
 	}
@@ -622,9 +628,11 @@ pmap_pte_exists(pmap_t pmap, vm_offset_t va, int level, const char *diag)
 	if (desc == L0_TABLE && level > 0) {
 		l1p = pmap_l0_to_l1(l0p, va);
 		desc = pmap_load(l1p) & ATTR_DESCR_MASK;
-		if (desc == L1_BLOCK && level == 1)
+		if (desc == L1_BLOCK && level == 1) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			return (l1p);
-		else if (desc == L1_TABLE && level > 1) {
+		}
+		if (desc == L1_TABLE && level > 1) {
 			l2p = pmap_l1_to_l2(l1p, va);
 			desc = pmap_load(l2p) & ATTR_DESCR_MASK;
 			if (desc == L2_BLOCK && level == 2)
@@ -674,6 +682,7 @@ pmap_get_tables(pmap_t pmap, vm_offset_t va, pd_entry_t **l0, pd_entry_t **l1,
 	*l1 = l1p;
 
 	if ((pmap_load(l1p) & ATTR_DESCR_MASK) == L1_BLOCK) {
+		PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 		*l2 = NULL;
 		*l3 = NULL;
 		return (true);
@@ -1014,27 +1023,34 @@ pmap_bootstrap_dmap(vm_offset_t kern_l1, vm_paddr_t min_pa,
 			pmap_bootstrap_dmap_l3_page(&state, i);
 		MPASS(state.pa <= physmap[i + 1]);
 
-		/* Create L2 mappings at the start of the region */
-		if ((state.pa & L1_OFFSET) != 0)
+		if (L1_BLOCKS_SUPPORTED) {
+			/* Create L2 mappings at the start of the region */
+			if ((state.pa & L1_OFFSET) != 0)
+				pmap_bootstrap_dmap_l2_block(&state, i);
+			MPASS(state.pa <= physmap[i + 1]);
+
+			/* Create the main L1 block mappings */
+			for (; state.va < DMAP_MAX_ADDRESS &&
+			    (physmap[i + 1] - state.pa) >= L1_SIZE;
+			    state.va += L1_SIZE, state.pa += L1_SIZE) {
+				/* Make sure there is a valid L1 table */
+				pmap_bootstrap_dmap_l0_table(&state);
+				MPASS((state.pa & L1_OFFSET) == 0);
+				pmap_store(&state.l1[pmap_l1_index(state.va)],
+				    state.pa | ATTR_DEFAULT | ATTR_S1_XN |
+				    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) |
+				    L1_BLOCK);
+			}
+			MPASS(state.pa <= physmap[i + 1]);
+
+			/* Create L2 mappings at the end of the region */
 			pmap_bootstrap_dmap_l2_block(&state, i);
-		MPASS(state.pa <= physmap[i + 1]);
-
-		/* Create the main L1 block mappings */
-		for (; state.va < DMAP_MAX_ADDRESS &&
-		    (physmap[i + 1] - state.pa) >= L1_SIZE;
-		    state.va += L1_SIZE, state.pa += L1_SIZE) {
-			/* Make sure there is a valid L1 table */
-			pmap_bootstrap_dmap_l0_table(&state);
-			MPASS((state.pa & L1_OFFSET) == 0);
-			pmap_store(&state.l1[pmap_l1_index(state.va)],
-			    state.pa | ATTR_DEFAULT | ATTR_S1_XN |
-			    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) |
-			    L1_BLOCK);
+		} else {
+			while (state.va < DMAP_MAX_ADDRESS &&
+			    (physmap[i + 1] - state.pa) >= L2_SIZE) {
+				pmap_bootstrap_dmap_l2_block(&state, i);
+			}
 		}
-		MPASS(state.pa <= physmap[i + 1]);
-
-		/* Create L2 mappings at the end of the region */
-		pmap_bootstrap_dmap_l2_block(&state, i);
 		MPASS(state.pa <= physmap[i + 1]);
 
 		/* Create L3 mappings at the end of the region */
@@ -1262,9 +1278,11 @@ pmap_init(void)
 		KASSERT(MAXPAGESIZES > 1 && pagesizes[1] == 0,
 		    ("pmap_init: can't assign to pagesizes[1]"));
 		pagesizes[1] = L2_SIZE;
-		KASSERT(MAXPAGESIZES > 2 && pagesizes[2] == 0,
-		    ("pmap_init: can't assign to pagesizes[2]"));
-		pagesizes[2] = L1_SIZE;
+		if (L1_BLOCKS_SUPPORTED) {
+			KASSERT(MAXPAGESIZES > 2 && pagesizes[2] == 0,
+			    ("pmap_init: can't assign to pagesizes[2]"));
+			pagesizes[2] = L1_SIZE;
+		}
 	}
 
 	/*
@@ -1484,6 +1502,7 @@ pmap_extract(pmap_t pmap, vm_offset_t va)
 		pa = tpte & ~ATTR_MASK;
 		switch(lvl) {
 		case 1:
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT((tpte & ATTR_DESCR_MASK) == L1_BLOCK,
 			    ("pmap_extract: Invalid L1 pte found: %lx",
 			    tpte & ATTR_DESCR_MASK));
@@ -1531,6 +1550,10 @@ pmap_extract_and_hold(pmap_t pmap, vm_offset_t va, vm_prot_t prot)
 
 		KASSERT(lvl > 0 && lvl <= 3,
 		    ("pmap_extract_and_hold: Invalid level %d", lvl));
+		/*
+		 * Check that the pte is either a L3 page, or a L1 or L2 block
+		 * entry. We can assume L1_BLOCK == L2_BLOCK.
+		 */
 		KASSERT((lvl == 3 && (tpte & ATTR_DESCR_MASK) == L3_PAGE) ||
 		    (lvl < 3 && (tpte & ATTR_DESCR_MASK) == L1_BLOCK),
 		    ("pmap_extract_and_hold: Invalid pte at L%d: %lx", lvl,
@@ -2427,8 +2450,13 @@ pmap_growkernel(vm_offset_t addr)
  ***************************************************/
 
 CTASSERT(sizeof(struct pv_chunk) == PAGE_SIZE);
+#if PAGE_SIZE == PAGE_SIZE_4K
 CTASSERT(_NPCM == 3);
 CTASSERT(_NPCPV == 168);
+#else
+CTASSERT(_NPCM == 11);
+CTASSERT(_NPCPV == 677);
+#endif
 
 static __inline struct pv_chunk *
 pv_to_chunk(pv_entry_t pv)
@@ -2439,11 +2467,30 @@ pv_to_chunk(pv_entry_t pv)
 
 #define PV_PMAP(pv) (pv_to_chunk(pv)->pc_pmap)
 
-#define	PC_FREE0	0xfffffffffffffffful
-#define	PC_FREE1	0xfffffffffffffffful
-#define	PC_FREE2	0x000000fffffffffful
+#define	PC_FREEN	0xfffffffffffffffful
+#if _NPCM == 3
+#define	PC_FREEL	0x000000fffffffffful
+#elif _NPCM == 11
+#define	PC_FREEL	0x0000001ffffffffful
+#endif
 
-static const uint64_t pc_freemask[_NPCM] = { PC_FREE0, PC_FREE1, PC_FREE2 };
+#if _NPCM == 3
+#define	PC_IS_FREE(pc)	((pc)->pc_map[0] == PC_FREEN &&			\
+    (pc)->pc_map[1] == PC_FREEN && (pc)->pc_map[2] == PC_FREEL)
+#else
+#define	PC_IS_FREE(pc)							\
+    (memcmp((pc)->pc_map, pc_freemask, sizeof(pc_freemask)) == 0)
+#endif
+
+static const uint64_t pc_freemask[] = { PC_FREEN, PC_FREEN,
+#if _NPCM > 3
+    PC_FREEN, PC_FREEN, PC_FREEN, PC_FREEN, PC_FREEN, PC_FREEN, PC_FREEN,
+    PC_FREEN,
+#endif
+    PC_FREEL
+};
+
+CTASSERT(nitems(pc_freemask) == _NPCM);
 
 #ifdef PV_STATS
 static int pc_chunk_count, pc_chunk_allocs, pc_chunk_frees, pc_chunk_tryfail;
@@ -2609,8 +2656,7 @@ reclaim_pv_chunk(pmap_t locked_pmap, struct rwlock **lockp)
 		PV_STAT(atomic_add_int(&pv_entry_spare, freed));
 		PV_STAT(atomic_subtract_long(&pv_entry_count, freed));
 		TAILQ_REMOVE(&pmap->pm_pvchunk, pc, pc_list);
-		if (pc->pc_map[0] == PC_FREE0 && pc->pc_map[1] == PC_FREE1 &&
-		    pc->pc_map[2] == PC_FREE2) {
+		if (PC_IS_FREE(pc)) {
 			PV_STAT(atomic_subtract_int(&pv_entry_spare, _NPCPV));
 			PV_STAT(atomic_subtract_int(&pc_chunk_count, 1));
 			PV_STAT(atomic_add_int(&pc_chunk_frees, 1));
@@ -2679,8 +2725,7 @@ free_pv_entry(pmap_t pmap, pv_entry_t pv)
 	field = idx / 64;
 	bit = idx % 64;
 	pc->pc_map[field] |= 1ul << bit;
-	if (pc->pc_map[0] != PC_FREE0 || pc->pc_map[1] != PC_FREE1 ||
-	    pc->pc_map[2] != PC_FREE2) {
+	if (!PC_IS_FREE(pc)) {
 		/* 98% of the time, pc is already at the head of the list. */
 		if (__predict_false(pc != TAILQ_FIRST(&pmap->pm_pvchunk))) {
 			TAILQ_REMOVE(&pmap->pm_pvchunk, pc, pc_list);
@@ -2768,9 +2813,8 @@ retry:
 	dump_add_page(m->phys_addr);
 	pc = (void *)PHYS_TO_DMAP(m->phys_addr);
 	pc->pc_pmap = pmap;
-	pc->pc_map[0] = PC_FREE0 & ~1ul;	/* preallocated bit 0 */
-	pc->pc_map[1] = PC_FREE1;
-	pc->pc_map[2] = PC_FREE2;
+	memcpy(pc->pc_map, pc_freemask, sizeof(pc_freemask));
+	pc->pc_map[0] &= ~1ul;		/* preallocated bit 0 */
 	mtx_lock(&pv_chunks_mutex);
 	TAILQ_INSERT_TAIL(&pv_chunks, pc, pc_lru);
 	mtx_unlock(&pv_chunks_mutex);
@@ -2830,9 +2874,7 @@ retry:
 		dump_add_page(m->phys_addr);
 		pc = (void *)PHYS_TO_DMAP(m->phys_addr);
 		pc->pc_pmap = pmap;
-		pc->pc_map[0] = PC_FREE0;
-		pc->pc_map[1] = PC_FREE1;
-		pc->pc_map[2] = PC_FREE2;
+		memcpy(pc->pc_map, pc_freemask, sizeof(pc_freemask));
 		TAILQ_INSERT_HEAD(&pmap->pm_pvchunk, pc, pc_list);
 		TAILQ_INSERT_TAIL(&new_tail, pc, pc_lru);
 		PV_STAT(atomic_add_int(&pv_entry_spare, _NPCPV));
@@ -3266,6 +3308,7 @@ pmap_remove(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		if (pmap_load(l1) == 0)
 			continue;
 		if ((pmap_load(l1) & ATTR_DESCR_MASK) == L1_BLOCK) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT(va_next <= eva,
 			    ("partial update of non-transparent 1G page "
 			    "l1 %#lx sva %#lx eva %#lx va_next %#lx",
@@ -3519,6 +3562,7 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 		if (pmap_load(l1) == 0)
 			continue;
 		if ((pmap_load(l1) & ATTR_DESCR_MASK) == L1_BLOCK) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT(va_next <= eva,
 			    ("partial update of non-transparent 1G page "
 			    "l1 %#lx sva %#lx eva %#lx va_next %#lx",
@@ -3849,9 +3893,10 @@ restart:
 				mp->ref_count++;
 			}
 		}
-		KASSERT((origpte & ATTR_DESCR_VALID) == 0 ||
-		    ((origpte & ATTR_DESCR_MASK) == L1_BLOCK &&
-		     (origpte & ~ATTR_MASK) == (newpte & ~ATTR_MASK)),
+		KASSERT((origpte & ~ATTR_MASK) == (newpte & ~ATTR_MASK) ||
+		    (L1_BLOCKS_SUPPORTED &&
+		    (origpte & ATTR_DESCR_MASK) == L1_BLOCK &&
+		    (origpte & ATTR_DESCR_VALID) == 0),
 		    ("va %#lx changing 1G phys page l1 %#lx newpte %#lx",
 		    va, origpte, newpte));
 		pmap_store(l1p, newpte);
@@ -3981,9 +4026,10 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 		KASSERT((m->oflags & VPO_UNMANAGED) != 0,
 		    ("managed largepage va %#lx flags %#x", va, flags));
 		new_l3 &= ~L3_PAGE;
-		if (psind == 2)
+		if (psind == 2) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			new_l3 |= L1_BLOCK;
-		else /* (psind == 1) */
+		} else /* (psind == 1) */
 			new_l3 |= L2_BLOCK;
 		rv = pmap_enter_largepage(pmap, va, new_l3, flags, psind);
 		goto out;
@@ -4661,6 +4707,7 @@ pmap_unwire(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 			continue;
 
 		if ((pmap_load(l1) & ATTR_DESCR_MASK) == L1_BLOCK) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT(va_next <= eva,
 			    ("partial update of non-transparent 1G page "
 			    "l1 %#lx sva %#lx eva %#lx va_next %#lx",
@@ -4773,6 +4820,7 @@ pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr, vm_size_t len,
 		if (pmap_load(l1) == 0)
 			continue;
 		if ((pmap_load(l1) & ATTR_DESCR_MASK) == L1_BLOCK) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT(va_next <= end_addr,
 			    ("partial update of non-transparent 1G page "
 			    "l1 %#lx addr %#lx end_addr %#lx va_next %#lx",
@@ -5731,6 +5779,7 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 		if (pmap_load(l1) == 0)
 			continue;
 		if ((pmap_load(l1) & ATTR_DESCR_MASK) == L1_BLOCK) {
+			PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 			KASSERT(va_next <= eva,
 			    ("partial update of non-transparent 1G page "
 			    "l1 %#lx sva %#lx eva %#lx va_next %#lx",
@@ -6244,6 +6293,7 @@ pmap_change_props_locked(vm_offset_t va, vm_size_t size, vm_prot_t prot,
 			default:
 				panic("Invalid DMAP table level: %d\n", lvl);
 			case 1:
+				PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 				if ((tmpva & L1_OFFSET) == 0 &&
 				    (base + size - tmpva) >= L1_SIZE) {
 					pte_size = L1_SIZE;
@@ -6319,6 +6369,7 @@ pmap_demote_l1(pmap_t pmap, pt_entry_t *l1, vm_offset_t va)
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	oldl1 = pmap_load(l1);
+	PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 	KASSERT((oldl1 & ATTR_DESCR_MASK) == L1_BLOCK,
 	    ("pmap_demote_l1: Demoting a non-block entry"));
 	KASSERT((va & L1_OFFSET) == 0,
@@ -6725,6 +6776,8 @@ out:
 	mtx_unlock_spin(&set->asid_set_mutex);
 }
 
+static uint64_t __read_mostly ttbr_flags;
+
 /*
  * Compute the value that should be stored in ttbr0 to activate the specified
  * pmap.  This value may change from time to time.
@@ -6732,10 +6785,70 @@ out:
 uint64_t
 pmap_to_ttbr0(pmap_t pmap)
 {
+	uint64_t ttbr;
 
-	return (ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie)) |
-	    pmap->pm_ttbr);
+	ttbr = pmap->pm_ttbr;
+	ttbr |= ASID_TO_OPERAND(COOKIE_TO_ASID(pmap->pm_cookie));
+	ttbr |= ttbr_flags;
+
+	return (ttbr);
 }
+
+static void
+pmap_set_cnp(void *arg)
+{
+	uint64_t ttbr0, ttbr1;
+	u_int cpuid;
+
+	cpuid = *(u_int *)arg;
+	if (cpuid == curcpu) {
+		/*
+		 * Set the flags while all CPUs are handling the
+		 * smp_rendezvous so will not call pmap_to_ttbr0. Any calls
+		 * to pmap_to_ttbr0 after this will have the CnP flag set.
+		 * The dsb after invalidating the TLB will act as a barrier
+		 * to ensure all CPUs can observe this change.
+		 */
+		ttbr_flags |= TTBR_CnP;
+	}
+
+	ttbr0 = READ_SPECIALREG(ttbr0_el1);
+	ttbr0 |= TTBR_CnP;
+
+	ttbr1 = READ_SPECIALREG(ttbr1_el1);
+	ttbr1 |= TTBR_CnP;
+
+	/* Update ttbr{0,1}_el1 with the CnP flag */
+	WRITE_SPECIALREG(ttbr0_el1, ttbr0);
+	WRITE_SPECIALREG(ttbr1_el1, ttbr1);
+	isb();
+	__asm __volatile("tlbi vmalle1is");
+	dsb(ish);
+	isb();
+}
+
+/*
+ * Defer enabling CnP until we have read the ID registers to know if it's
+ * supported on all CPUs.
+ */
+static void
+pmap_init_cnp(void *dummy __unused)
+{
+	uint64_t reg;
+	u_int cpuid;
+
+	if (!get_kernel_reg(ID_AA64MMFR2_EL1, &reg))
+		return;
+
+	if (ID_AA64MMFR2_CnP_VAL(reg) != ID_AA64MMFR2_CnP_NONE) {
+		if (bootverbose)
+			printf("Enabling CnP\n");
+		cpuid = curcpu;
+		smp_rendezvous(NULL, pmap_set_cnp, NULL, &cpuid);
+	}
+
+}
+SYSINIT(pmap_init_cnp, SI_SUB_SMP, SI_ORDER_ANY, pmap_init_cnp, NULL);
 
 static bool
 pmap_activate_int(pmap_t pmap)
@@ -7340,6 +7453,7 @@ sysctl_kmaps(SYSCTL_HANDLER_ARGS)
 				continue;
 			}
 			if ((l1e & ATTR_DESCR_MASK) == L1_BLOCK) {
+				PMAP_ASSERT_L1_BLOCKS_SUPPORTED;
 				sysctl_kmaps_check(sb, &range, sva, l0e, l1e,
 				    0, 0);
 				range.l1blocks++;

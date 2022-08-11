@@ -15,7 +15,7 @@ digraph ports {
 #   foo [label="Foo Bar\nfoo@FreeBSD.org\n????/??/??"]
 #
 # ????/??/?? is the date when the commit bit was obtained, usually the one you
-# can find looking at svn logs for the svnadmin/access file.
+# can find in git logs for the access file in the internal/admin branch.
 # Use YYYY/MM/DD format.
 #
 # For returned commit bits, the node definition will follow this example:
@@ -23,7 +23,7 @@ digraph ports {
 #   foo [label="Foo Bar\nfoo@FreeBSD.org\n????/??/??\n????/??/??"]
 #
 # The first date is the same as for an active committer, the second date is
-# the date when the commit bit has been returned. Again, check svn logs.
+# the date when the commit bit has been returned. Again, check git logs.
 
 node [color=grey62, style=filled, bgcolor=black];
 
@@ -299,6 +299,7 @@ yuri [label="Yuri Victorovich\nyuri@FreeBSD.org\n2017/10/30"]
 yzlin [label="Yi-Jheng Lin\nyzlin@FreeBSD.org\n2009/07/19"]
 zeising [label="Niclas Zeising\nzeising@FreeBSD.org\n2012/07/03"]
 zi [label="Ryan Steinmetz\nzi@FreeBSD.org\n2011/07/14"]
+zirias [label="Felix Palmen\nzirias@FreeBSD.org\n2022/08/02"]
 znerd [label="Ernst de Haan\nznerd@FreeBSD.org\n2001/11/15"]
 
 # Here are the mentor/mentee relationships.
@@ -785,6 +786,7 @@ tcberner -> rigoletto
 tcberner -> salvadore
 tcberner -> vishwin
 tcberner -> yuri
+tcberner -> zirias
 
 thierry -> jadawin
 thierry -> riggs

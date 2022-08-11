@@ -515,6 +515,8 @@ pf_free_eth_rule(struct pf_keth_rule *rule)
 
 	if (rule->tag)
 		tag_unref(&V_pf_tags, rule->tag);
+	if (rule->match_tag)
+		tag_unref(&V_pf_tags, rule->match_tag);
 #ifdef ALTQ
 	pf_qid_unref(rule->qid);
 #endif
@@ -1152,6 +1154,25 @@ out:
 }
 #endif /* ALTQ */
 
+static struct pf_krule_global *
+pf_rule_tree_alloc(int flags)
+{
+	struct pf_krule_global *tree;
+
+	tree = malloc(sizeof(struct pf_krule_global), M_TEMP, flags);
+	if (tree == NULL)
+		return (NULL);
+	RB_INIT(tree);
+	return (tree);
+}
+
+static void
+pf_rule_tree_free(struct pf_krule_global *tree)
+{
+
+	free(tree, M_TEMP);
+}
+
 static int
 pf_begin_rules(u_int32_t *ticket, int rs_num, const char *anchor)
 {
@@ -1163,16 +1184,15 @@ pf_begin_rules(u_int32_t *ticket, int rs_num, const char *anchor)
 
 	if (rs_num < 0 || rs_num >= PF_RULESET_MAX)
 		return (EINVAL);
-	tree = malloc(sizeof(struct pf_krule_global), M_TEMP, M_NOWAIT);
+	tree = pf_rule_tree_alloc(M_NOWAIT);
 	if (tree == NULL)
 		return (ENOMEM);
-	RB_INIT(tree);
 	rs = pf_find_or_create_kruleset(anchor);
 	if (rs == NULL) {
 		free(tree, M_TEMP);
 		return (EINVAL);
 	}
-	free(rs->rules[rs_num].inactive.tree, M_TEMP);
+	pf_rule_tree_free(rs->rules[rs_num].inactive.tree);
 	rs->rules[rs_num].inactive.tree = tree;
 
 	while ((rule = TAILQ_FIRST(rs->rules[rs_num].inactive.ptr)) != NULL) {
@@ -1771,6 +1791,7 @@ pf_krule_alloc(void)
 
 	rule = malloc(sizeof(struct pf_krule), M_PFRULE, M_WAITOK | M_ZERO);
 	mtx_init(&rule->rpool.mtx, "pf_krule_pool", NULL, MTX_DEF);
+	rule->timestamp = uma_zalloc_pcpu(pcpu_zone_4, M_WAITOK | M_ZERO);
 	return (rule);
 }
 
@@ -2134,7 +2155,6 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 	rule->states_cur = counter_u64_alloc(M_WAITOK);
 	rule->states_tot = counter_u64_alloc(M_WAITOK);
 	rule->src_nodes = counter_u64_alloc(M_WAITOK);
-	rule->timestamp = uma_zalloc_pcpu(pcpu_zone_4, M_WAITOK | M_ZERO);
 	rule->cuid = td->td_ucred->cr_ruid;
 	rule->cpid = td->td_proc ? td->td_proc->p_pid : 0;
 	TAILQ_INIT(&rule->rpool.list);
@@ -2704,7 +2724,7 @@ DIOCGETETHRULES_error:
 		if (nv->len > pf_ioctl_maxcount)
 			ERROUT(ENOMEM);
 
-		nvlpacked = malloc(nv->len, M_TEMP, M_WAITOK);
+		nvlpacked = malloc(nv->len, M_NVLIST, M_WAITOK);
 		if (nvlpacked == NULL)
 			ERROUT(ENOMEM);
 
@@ -2745,7 +2765,7 @@ DIOCGETETHRULES_error:
 
 		nvlist_destroy(nvl);
 		nvl = NULL;
-		free(nvlpacked, M_TEMP);
+		free(nvlpacked, M_NVLIST);
 		nvlpacked = NULL;
 
 		rule = TAILQ_FIRST(rs->active.rules);
@@ -2785,7 +2805,7 @@ DIOCGETETHRULES_error:
 
 #undef ERROUT
 DIOCGETETHRULE_error:
-		free(nvlpacked, M_TEMP);
+		free(nvlpacked, M_NVLIST);
 		nvlist_destroy(nvl);
 		break;
 	}
@@ -2801,7 +2821,10 @@ DIOCGETETHRULE_error:
 
 #define ERROUT(x)	ERROUT_IOCTL(DIOCADDETHRULE_error, x)
 
-		nvlpacked = malloc(nv->len, M_TEMP, M_WAITOK);
+		if (nv->len > pf_ioctl_maxcount)
+			ERROUT(ENOMEM);
+
+		nvlpacked = malloc(nv->len, M_NVLIST, M_WAITOK);
 		if (nvlpacked == NULL)
 			ERROUT(ENOMEM);
 
@@ -2873,6 +2896,10 @@ DIOCGETETHRULE_error:
 		if (rule->tagname[0])
 			if ((rule->tag = pf_tagname2tag(rule->tagname)) == 0)
 				error = EBUSY;
+		if (rule->match_tagname[0])
+			if ((rule->match_tag = pf_tagname2tag(
+			    rule->match_tagname)) == 0)
+				error = EBUSY;
 
 		if (error == 0 && rule->ipdst.addr.type == PF_ADDR_TABLE)
 			error = pf_eth_addr_setup(ruleset, &rule->ipdst.addr);
@@ -2904,7 +2931,7 @@ DIOCGETETHRULE_error:
 #undef ERROUT
 DIOCADDETHRULE_error:
 		nvlist_destroy(nvl);
-		free(nvlpacked, M_TEMP);
+		free(nvlpacked, M_NVLIST);
 		break;
 	}
 
@@ -3099,7 +3126,7 @@ DIOCGETETHRULESET_error:
 		if (nv->len > pf_ioctl_maxcount)
 			ERROUT(ENOMEM);
 
-		nvlpacked = malloc(nv->len, M_TEMP, M_WAITOK);
+		nvlpacked = malloc(nv->len, M_NVLIST, M_WAITOK);
 		error = copyin(nv->data, nvlpacked, nv->len);
 		if (error)
 			ERROUT(error);
@@ -3138,13 +3165,13 @@ DIOCGETETHRULESET_error:
 		    anchor_call, td);
 
 		nvlist_destroy(nvl);
-		free(nvlpacked, M_TEMP);
+		free(nvlpacked, M_NVLIST);
 		break;
 #undef ERROUT
 DIOCADDRULENV_error:
 		pf_krule_free(rule);
 		nvlist_destroy(nvl);
-		free(nvlpacked, M_TEMP);
+		free(nvlpacked, M_NVLIST);
 
 		break;
 	}
@@ -3412,7 +3439,7 @@ DIOCGETRULENV_error:
 			newrule = pf_krule_alloc();
 			error = pf_rule_to_krule(&pcr->rule, newrule);
 			if (error != 0) {
-				free(newrule, M_PFRULE);
+				pf_krule_free(newrule);
 				break;
 			}
 
@@ -3454,6 +3481,22 @@ DIOCGETRULENV_error:
 		rs_num = pf_get_ruleset_number(pcr->rule.action);
 		if (rs_num >= PF_RULESET_MAX)
 			ERROUT(EINVAL);
+
+		/*
+		 * XXXMJG: there is no guarantee that the ruleset was
+		 * created by the usual route of calling DIOCXBEGIN.
+		 * As a result it is possible the rule tree will not
+		 * be allocated yet. Hack around it by doing it here.
+		 * Note it is fine to let the tree persist in case of
+		 * error as it will be freed down the road on future
+		 * updates (if need be).
+		 */
+		if (ruleset->rules[rs_num].active.tree == NULL) {
+			ruleset->rules[rs_num].active.tree = pf_rule_tree_alloc(M_NOWAIT);
+			if (ruleset->rules[rs_num].active.tree == NULL) {
+				ERROUT(ENOMEM);
+			}
+		}
 
 		if (pcr->action == PF_CHANGE_GET_TICKET) {
 			pcr->ticket = ++ruleset->rules[rs_num].active.ticket;
@@ -5143,7 +5186,7 @@ DIOCCHANGEADDR_error:
 			break;
 		}
 		/* Ensure there's no more ethernet rules to clean up. */
-		epoch_drain_callbacks(net_epoch_preempt);
+		NET_EPOCH_DRAIN_CALLBACKS();
 		PF_RULES_WLOCK();
 		for (i = 0, ioe = ioes; i < io->size; i++, ioe++) {
 			ioe->anchor[sizeof(ioe->anchor) - 1] = '\0';
@@ -5541,6 +5584,8 @@ DIOCCHANGEADDR_error:
 			break;
 		}
 
+		io->pfiio_name[sizeof(io->pfiio_name) - 1] = '\0';
+
 		bufsiz = io->pfiio_size * sizeof(struct pfi_kif);
 		ifstore = mallocarray(io->pfiio_size, sizeof(struct pfi_kif),
 		    M_TEMP, M_WAITOK | M_ZERO);
@@ -5556,6 +5601,8 @@ DIOCCHANGEADDR_error:
 	case DIOCSETIFFLAG: {
 		struct pfioc_iface *io = (struct pfioc_iface *)addr;
 
+		io->pfiio_name[sizeof(io->pfiio_name) - 1] = '\0';
+
 		PF_RULES_WLOCK();
 		error = pfi_set_flags(io->pfiio_name, io->pfiio_flags);
 		PF_RULES_WUNLOCK();
@@ -5564,6 +5611,8 @@ DIOCCHANGEADDR_error:
 
 	case DIOCCLRIFFLAG: {
 		struct pfioc_iface *io = (struct pfioc_iface *)addr;
+
+		io->pfiio_name[sizeof(io->pfiio_name) - 1] = '\0';
 
 		PF_RULES_WLOCK();
 		error = pfi_clear_flags(io->pfiio_name, io->pfiio_flags);
@@ -5984,7 +6033,7 @@ pf_keepcounters(struct pfioc_nv *nv)
 	if (nv->len > pf_ioctl_maxcount)
 		ERROUT(ENOMEM);
 
-	nvlpacked = malloc(nv->len, M_TEMP, M_WAITOK);
+	nvlpacked = malloc(nv->len, M_NVLIST, M_WAITOK);
 	if (nvlpacked == NULL)
 		ERROUT(ENOMEM);
 
@@ -6003,7 +6052,7 @@ pf_keepcounters(struct pfioc_nv *nv)
 
 on_error:
 	nvlist_destroy(nvl);
-	free(nvlpacked, M_TEMP);
+	free(nvlpacked, M_NVLIST);
 	return (error);
 }
 

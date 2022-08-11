@@ -37,14 +37,14 @@
 #include <sys/feature_tests.h>
 #include_next <sys/types.h>
 #include <sys/types32.h>
-#include <sys/va_list.h>
+#include <stdarg.h>
 #include <sys/stdtypes.h>
 
 #ifndef HAVE_INTTYPES
 #include <inttypes.h>
 #endif /* HAVE_INTTYPES */
 
-typedef int		zoneid_t;
+typedef uint_t		zoneid_t;
 typedef int		projid_t;
 
 /*

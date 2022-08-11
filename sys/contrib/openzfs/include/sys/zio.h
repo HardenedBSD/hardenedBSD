@@ -89,6 +89,7 @@ enum zio_checksum {
 	ZIO_CHECKSUM_SHA512,
 	ZIO_CHECKSUM_SKEIN,
 	ZIO_CHECKSUM_EDONR,
+	ZIO_CHECKSUM_BLAKE3,
 	ZIO_CHECKSUM_FUNCTIONS
 };
 
@@ -283,6 +284,13 @@ extern const char *const zio_type_name[ZIO_TYPES];
  * Note: this structure is passed between userland and the kernel, and is
  * stored on disk (by virtue of being incorporated into other on-disk
  * structures, e.g. dsl_scan_phys_t).
+ *
+ * If the head_errlog feature is enabled a different on-disk format for error
+ * logs is used. This introduces the use of an error bookmark, a four-tuple
+ * <object, level, blkid, birth> that uniquely identifies any error block
+ * in the pool. The birth transaction group is used to track whether the block
+ * has been overwritten by newer data or added to a snapshot since its marking
+ * as an error.
  */
 struct zbookmark_phys {
 	uint64_t	zb_objset;
@@ -290,6 +298,13 @@ struct zbookmark_phys {
 	int64_t		zb_level;
 	uint64_t	zb_blkid;
 };
+
+typedef struct zbookmark_err_phys {
+	uint64_t	zb_object;
+	int64_t		zb_level;
+	uint64_t	zb_blkid;
+	uint64_t	zb_birth;
+} zbookmark_err_phys_t;
 
 #define	SET_BOOKMARK(zb, objset, object, level, blkid)  \
 {                                                       \
@@ -574,7 +589,7 @@ extern void zio_execute(void *zio);
 extern void zio_interrupt(void *zio);
 extern void zio_delay_init(zio_t *zio);
 extern void zio_delay_interrupt(zio_t *zio);
-extern void zio_deadman(zio_t *zio, char *tag);
+extern void zio_deadman(zio_t *zio, const char *tag);
 
 extern zio_t *zio_walk_parents(zio_t *cio, zio_link_t **);
 extern zio_t *zio_walk_children(zio_t *pio, zio_link_t **);
@@ -642,7 +657,8 @@ extern int zio_inject_fault(char *name, int flags, int *id,
 extern int zio_inject_list_next(int *id, char *name, size_t buflen,
     struct zinject_record *record);
 extern int zio_clear_fault(int id);
-extern void zio_handle_panic_injection(spa_t *spa, char *tag, uint64_t type);
+extern void zio_handle_panic_injection(spa_t *spa, const char *tag,
+    uint64_t type);
 extern int zio_handle_decrypt_injection(spa_t *spa, const zbookmark_phys_t *zb,
     uint64_t type, int error);
 extern int zio_handle_fault_injection(zio_t *zio, int error);

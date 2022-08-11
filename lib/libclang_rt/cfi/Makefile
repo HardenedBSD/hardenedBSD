@@ -42,4 +42,7 @@ CXXFLAGS+=	-flto
 LDFLAGS+=	-flto
 .endif
 
+FILESDIR=	${SANITIZER_SHAREDIR}
+FILES+=		cfi/cfi_ignorelist.txt
+
 .include <bsd.lib.mk>

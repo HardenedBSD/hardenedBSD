@@ -35,6 +35,7 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/limits.h>
 
 #ifndef _KERNEL
 #include <stdio.h>
@@ -50,6 +51,7 @@ uint32_t ffs_calc_sbhash(struct fs *);
 struct malloc_type;
 #define UFS_MALLOC(size, type, flags) malloc(size)
 #define UFS_FREE(ptr, type) free(ptr)
+#define maxphys MAXPHYS
 
 #else /* _KERNEL */
 #include <sys/systm.h>
@@ -123,8 +125,9 @@ ffs_update_dinode_ckhash(struct fs *fs, struct ufs2_dinode *dip)
  * the superblock and its associated data.
  */
 static off_t sblock_try[] = SBLOCKSEARCH;
-static int readsuper(void *, struct fs **, off_t, int, int,
+static int readsuper(void *, struct fs **, off_t, int,
 	int (*)(void *, off_t, void **, int));
+static int validate_sblock(struct fs *, int);
 
 /*
  * Read a superblock from the devfd device.
@@ -141,36 +144,42 @@ static int readsuper(void *, struct fs **, off_t, int, int,
  *     EIO: non-existent or truncated superblock.
  *     EIO: error reading summary information.
  *     ENOENT: no usable known superblock found.
- *     ENOSPC: failed to allocate space for the superblock.
+ *     ENOMEM: failed to allocate space for the superblock.
  *     EINVAL: The previous newfs operation on this volume did not complete.
  *         The administrator must complete newfs before using this volume.
  */
 int
-ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
+ffs_sbget(void *devfd, struct fs **fsp, off_t sblock, int flags,
     struct malloc_type *filltype,
     int (*readfunc)(void *devfd, off_t loc, void **bufp, int size))
 {
 	struct fs *fs;
 	struct fs_summary_info *fs_si;
-	int i, error, size, blks;
+	int i, error;
+	uint64_t size, blks;
 	uint8_t *space;
 	int32_t *lp;
 	char *buf;
 
 	fs = NULL;
 	*fsp = NULL;
-	if (altsblock >= 0) {
-		if ((error = readsuper(devfd, &fs, altsblock, 1, 0,
-		     readfunc)) != 0) {
+	if (sblock != UFS_STDSB) {
+		if ((error = readsuper(devfd, &fs, sblock,
+		    flags | UFS_ALTSBLK, readfunc)) != 0) {
 			if (fs != NULL)
 				UFS_FREE(fs, filltype);
 			return (error);
 		}
 	} else {
 		for (i = 0; sblock_try[i] != -1; i++) {
-			if ((error = readsuper(devfd, &fs, sblock_try[i], 0,
-			     altsblock, readfunc)) == 0)
+			if ((error = readsuper(devfd, &fs, sblock_try[i],
+			     flags, readfunc)) == 0) {
+				if ((flags & UFS_NOCSUM) != 0) {
+					*fsp = fs;
+					return (0);
+				}
 				break;
+			}
 			if (fs != NULL) {
 				UFS_FREE(fs, filltype);
 				fs = NULL;
@@ -190,17 +199,16 @@ ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
 	if (fs->fs_contigsumsize > 0)
 		size += fs->fs_ncg * sizeof(int32_t);
 	size += fs->fs_ncg * sizeof(u_int8_t);
-	/* When running in libufs or libsa, UFS_MALLOC may fail */
-	if ((fs_si = UFS_MALLOC(sizeof(*fs_si), filltype, M_WAITOK)) == NULL) {
+	if ((fs_si = UFS_MALLOC(sizeof(*fs_si), filltype, M_NOWAIT)) == NULL) {
 		UFS_FREE(fs, filltype);
-		return (ENOSPC);
+		return (ENOMEM);
 	}
 	bzero(fs_si, sizeof(*fs_si));
 	fs->fs_si = fs_si;
-	if ((space = UFS_MALLOC(size, filltype, M_WAITOK)) == NULL) {
+	if ((space = UFS_MALLOC(size, filltype, M_NOWAIT)) == NULL) {
 		UFS_FREE(fs->fs_si, filltype);
 		UFS_FREE(fs, filltype);
-		return (ENOSPC);
+		return (ENOMEM);
 	}
 	fs->fs_csp = (struct csum *)space;
 	for (i = 0; i < blks; i += fs->fs_frag) {
@@ -240,8 +248,8 @@ ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
  * Return zero on success or an errno on failure.
  */
 static int
-readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int isaltsblk,
-    int chkhash, int (*readfunc)(void *devfd, off_t loc, void **bufp, int size))
+readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int flags,
+    int (*readfunc)(void *devfd, off_t loc, void **bufp, int size))
 {
 	struct fs *fs;
 	int error, res;
@@ -253,16 +261,18 @@ readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int isaltsblk,
 	fs = *fsp;
 	if (fs->fs_magic == FS_BAD_MAGIC)
 		return (EINVAL);
-	if (!(((fs->fs_magic == FS_UFS1_MAGIC && (isaltsblk ||
-	      sblockloc <= SBLOCK_UFS1)) ||
-	     (fs->fs_magic == FS_UFS2_MAGIC && (isaltsblk ||
-	      sblockloc == fs->fs_sblockloc))) &&
-	    fs->fs_ncg >= 1 &&
-	    fs->fs_bsize >= MINBSIZE &&
-	    fs->fs_bsize <= MAXBSIZE &&
-	    fs->fs_bsize >= roundup(sizeof(struct fs), DEV_BSIZE) &&
-	    fs->fs_sbsize <= SBLOCKSIZE))
+	/*
+	 * For UFS1 with a 65536 block size, the first backup superblock
+	 * is at the same location as the UFS2 superblock. Since SBLOCK_UFS2
+	 * is the first location checked, the first backup is the superblock
+	 * that will be accessed. Here we fail the lookup so that we can
+	 * retry with the correct location for the UFS1 superblock.
+	 */
+	if (fs->fs_magic == FS_UFS1_MAGIC && (flags & UFS_ALTSBLK) == 0 &&
+	    fs->fs_bsize == SBLOCK_UFS2 && sblockloc == SBLOCK_UFS2)
 		return (ENOENT);
+	if ((error = validate_sblock(fs, flags)) > 0)
+		return (error);
 	/*
 	 * If the filesystem has been run on a kernel without
 	 * metadata check hashes, disable them.
@@ -276,15 +286,16 @@ readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int isaltsblk,
 	fs->fs_metackhash &= CK_SUPPORTED;
 	fs->fs_flags &= FS_SUPPORTED;
 	if (fs->fs_ckhash != (ckhash = ffs_calc_sbhash(fs))) {
-		if (chkhash == STDSB_NOMSG)
-			return (EINTEGRITY);
-		if (chkhash == STDSB_NOHASHFAIL_NOMSG)
+		if ((flags & (UFS_NOMSG | UFS_NOHASHFAIL)) ==
+		    (UFS_NOMSG | UFS_NOHASHFAIL))
 			return (0);
+		if ((flags & UFS_NOMSG) != 0)
+			return (EINTEGRITY);
 #ifdef _KERNEL
 		res = uprintf("Superblock check-hash failed: recorded "
 		    "check-hash 0x%x != computed check-hash 0x%x%s\n",
 		    fs->fs_ckhash, ckhash,
-		    chkhash == STDSB_NOHASHFAIL ? " (Ignored)" : "");
+		    (flags & UFS_NOHASHFAIL) != 0 ? " (Ignored)" : "");
 #else
 		res = 0;
 #endif
@@ -296,18 +307,223 @@ readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int isaltsblk,
 			printf("Superblock check-hash failed: recorded "
 			    "check-hash 0x%x != computed check-hash "
 			    "0x%x%s\n", fs->fs_ckhash, ckhash,
-			    chkhash == STDSB_NOHASHFAIL ?
-			    " (Ignored)" : "");
-		if (chkhash == STDSB)
-			return (EINTEGRITY);
-		/* chkhash == STDSB_NOHASHFAIL */
-		return (0);
+			    (flags & UFS_NOHASHFAIL) ? " (Ignored)" : "");
+		if ((flags & UFS_NOHASHFAIL) != 0)
+			return (0);
+		return (EINTEGRITY);
 	}
 	/* Have to set for old filesystems that predate this field */
 	fs->fs_sblockactualloc = sblockloc;
 	/* Not yet any summary information */
 	fs->fs_si = NULL;
 	return (0);
+}
+
+/*
+ * Verify the filesystem values.
+ */
+#define ILOG2(num)	(fls(num) - 1)
+#define MPRINT		if (prtmsg) printf
+#define FCHK(lhs, op, rhs, fmt)						\
+	if (lhs op rhs) {						\
+		MPRINT("UFS%d superblock failed: %s (" #fmt ") %s %s ("	\
+		    #fmt ")\n", fs->fs_magic == FS_UFS1_MAGIC ? 1 : 2,	\
+		    #lhs, (intmax_t)lhs, #op, #rhs, (intmax_t)rhs);	\
+		if (error == 0)						\
+			error = ENOENT;					\
+	}
+#define WCHK(lhs, op, rhs, fmt)						\
+	if (lhs op rhs) {						\
+		MPRINT("UFS%d superblock failed: %s (" #fmt ") %s %s ("	\
+		    #fmt ")%s\n", fs->fs_magic == FS_UFS1_MAGIC ? 1 : 2,\
+		    #lhs, (intmax_t)lhs, #op, #rhs, (intmax_t)rhs, wmsg);\
+		if (error == 0)						\
+			error = warnerr;				\
+	}
+#define FCHK2(lhs1, op1, rhs1, lhs2, op2, rhs2, fmt)			\
+	if (lhs1 op1 rhs1 && lhs2 op2 rhs2) {				\
+		MPRINT("UFS%d superblock failed: %s (" #fmt ") %s %s ("	\
+		    #fmt ") && %s (" #fmt ") %s %s (" #fmt ")\n",	\
+		    fs->fs_magic == FS_UFS1_MAGIC ? 1 : 2, #lhs1,	\
+		    (intmax_t)lhs1, #op1, #rhs1, (intmax_t)rhs1, #lhs2,	\
+		    (intmax_t)lhs2, #op2, #rhs2, (intmax_t)rhs2);	\
+		if (error == 0)						\
+			error = ENOENT;					\
+	}
+#define WCHK2(lhs1, op1, rhs1, lhs2, op2, rhs2, fmt)			\
+	if (lhs1 op1 rhs1 && lhs2 op2 rhs2) {				\
+		MPRINT("UFS%d superblock failed: %s (" #fmt ") %s %s ("	\
+		    #fmt ") && %s (" #fmt ") %s %s (" #fmt ")%s\n",	\
+		    fs->fs_magic == FS_UFS1_MAGIC ? 1 : 2, #lhs1,	\
+		    (intmax_t)lhs1, #op1, #rhs1, (intmax_t)rhs1, #lhs2,	\
+		    (intmax_t)lhs2, #op2, #rhs2, (intmax_t)rhs2, wmsg);	\
+		if (error == 0)						\
+			error = warnerr;				\
+	}
+
+static int
+validate_sblock(struct fs *fs, int flags)
+{
+	u_long i, sectorsize;
+	u_int64_t maxfilesize, sizepb;
+	int error, prtmsg, warnerr;
+	char *wmsg;
+
+	error = 0;
+	sectorsize = dbtob(1);
+	prtmsg = ((flags & UFS_NOMSG) == 0);
+	warnerr = (flags & UFS_NOWARNFAIL) == UFS_NOWARNFAIL ? 0 : ENOENT;
+	wmsg = warnerr ? "" : " (Ignored)";
+	if (fs->fs_magic == FS_UFS2_MAGIC) {
+		if ((flags & UFS_ALTSBLK) == 0)
+			FCHK2(fs->fs_sblockactualloc, !=, SBLOCK_UFS2,
+			    fs->fs_sblockactualloc, !=, 0, %jd);
+		FCHK(fs->fs_sblockloc, !=, SBLOCK_UFS2, %#jx);
+		FCHK(fs->fs_maxsymlinklen, !=, ((UFS_NDADDR + UFS_NIADDR) *
+			sizeof(ufs2_daddr_t)), %jd);
+		FCHK(fs->fs_nindir, !=, fs->fs_bsize / sizeof(ufs2_daddr_t),
+		    %jd);
+		FCHK(fs->fs_inopb, !=,
+		    fs->fs_bsize / sizeof(struct ufs2_dinode), %jd);
+	} else if (fs->fs_magic == FS_UFS1_MAGIC) {
+		if ((flags & UFS_ALTSBLK) == 0)
+			FCHK(fs->fs_sblockactualloc, >, SBLOCK_UFS1, %jd);
+		FCHK(fs->fs_sblockloc, <, 0, %jd);
+		FCHK(fs->fs_sblockloc, >, SBLOCK_UFS1, %jd);
+		FCHK(fs->fs_nindir, !=, fs->fs_bsize / sizeof(ufs1_daddr_t),
+		    %jd);
+		FCHK(fs->fs_inopb, !=,
+		    fs->fs_bsize / sizeof(struct ufs1_dinode), %jd);
+		FCHK(fs->fs_maxsymlinklen, !=, ((UFS_NDADDR + UFS_NIADDR) *
+			sizeof(ufs1_daddr_t)), %jd);
+		WCHK(fs->fs_old_inodefmt, !=, FS_44INODEFMT, %jd);
+		WCHK(fs->fs_old_rotdelay, !=, 0, %jd);
+		WCHK(fs->fs_old_rps, !=, 60, %jd);
+		WCHK(fs->fs_old_nspf, !=, fs->fs_fsize / sectorsize, %jd);
+		WCHK(fs->fs_old_cpg, !=, 1, %jd);
+		WCHK(fs->fs_old_interleave, !=, 1, %jd);
+		WCHK(fs->fs_old_trackskew, !=, 0, %jd);
+		WCHK(fs->fs_old_cpc, !=, 0, %jd);
+		WCHK(fs->fs_old_postblformat, !=, 1, %jd);
+		WCHK(fs->fs_old_nrpos, !=, 1, %jd);
+		WCHK(fs->fs_old_spc, !=, fs->fs_fpg * fs->fs_old_nspf, %jd);
+		WCHK(fs->fs_old_nsect, !=, fs->fs_old_spc, %jd);
+		WCHK(fs->fs_old_npsect, !=, fs->fs_old_spc, %jd);
+		FCHK(fs->fs_old_ncyl, !=, fs->fs_ncg, %jd);
+	} else {
+		/* Bad magic number, so assume not a superblock */
+		return (ENOENT);
+	}
+	FCHK(fs->fs_bsize, <, MINBSIZE, %jd);
+	FCHK(fs->fs_bsize, >, MAXBSIZE, %jd);
+	FCHK(fs->fs_bsize, <, roundup(sizeof(struct fs), DEV_BSIZE), %jd);
+	FCHK(powerof2(fs->fs_bsize), ==, 0, %jd);
+	FCHK(fs->fs_frag, <, 1, %jd);
+	FCHK(fs->fs_frag, >, MAXFRAG, %jd);
+	FCHK(fs->fs_frag, !=, numfrags(fs, fs->fs_bsize), %jd);
+	FCHK(fs->fs_fsize, <, sectorsize, %jd);
+	FCHK(fs->fs_fsize * fs->fs_frag, !=, fs->fs_bsize, %jd);
+	FCHK(powerof2(fs->fs_fsize), ==, 0, %jd);
+	FCHK(fs->fs_fpg, <, 3 * fs->fs_frag, %jd);
+	FCHK(fs->fs_ncg, <, 1, %jd);
+	FCHK(fs->fs_ipg, <, 1, %jd);
+	FCHK(fs->fs_ipg * fs->fs_ncg, >, (((int64_t)(1)) << 32) - INOPB(fs),
+	    %jd);
+	FCHK(fs->fs_sbsize, >, SBLOCKSIZE, %jd);
+	FCHK(fs->fs_maxbsize, <, fs->fs_bsize, %jd);
+	FCHK(powerof2(fs->fs_maxbsize), ==, 0, %jd);
+	FCHK(fs->fs_maxbsize, >, FS_MAXCONTIG * fs->fs_bsize, %jd);
+	FCHK(fs->fs_bmask, !=, ~(fs->fs_bsize - 1), %#jx);
+	FCHK(fs->fs_fmask, !=, ~(fs->fs_fsize - 1), %#jx);
+	FCHK(fs->fs_qbmask, !=, ~fs->fs_bmask, %#jx);
+	FCHK(fs->fs_qfmask, !=, ~fs->fs_fmask, %#jx);
+	FCHK(fs->fs_bshift, !=, ILOG2(fs->fs_bsize), %jd);
+	FCHK(fs->fs_fshift, !=, ILOG2(fs->fs_fsize), %jd);
+	FCHK(fs->fs_fragshift, !=, ILOG2(fs->fs_frag), %jd);
+	FCHK(fs->fs_fsbtodb, !=, ILOG2(fs->fs_fsize / sectorsize), %jd);
+	FCHK(fs->fs_old_cgoffset, <, 0, %jd);
+	FCHK2(fs->fs_old_cgoffset, >, 0, ~fs->fs_old_cgmask, <, 0, %jd);
+	FCHK(fs->fs_old_cgoffset * (~fs->fs_old_cgmask), >, fs->fs_fpg, %jd);
+	FCHK(fs->fs_sblkno, !=, roundup(
+	    howmany(fs->fs_sblockloc + SBLOCKSIZE, fs->fs_fsize),
+	    fs->fs_frag), %jd);
+	FCHK(fs->fs_cblkno, !=, fs->fs_sblkno +
+	    roundup(howmany(SBLOCKSIZE, fs->fs_fsize), fs->fs_frag), %jd);
+	FCHK(fs->fs_iblkno, !=, fs->fs_cblkno + fs->fs_frag, %jd);
+	FCHK(fs->fs_dblkno, !=, fs->fs_iblkno + fs->fs_ipg / INOPF(fs), %jd);
+	FCHK(fs->fs_cgsize, >, fs->fs_bsize, %jd);
+	/*
+	 * This test is valid, however older versions of growfs failed
+	 * to correctly update fs_dsize so will fail this test. Thus we
+	 * exclude it from the requirements.
+	 */
+#ifdef notdef
+	WCHK(fs->fs_dsize, !=, fs->fs_size - fs->fs_sblkno -
+		fs->fs_ncg * (fs->fs_dblkno - fs->fs_sblkno) -
+		howmany(fs->fs_cssize, fs->fs_fsize), %jd);
+#endif
+	WCHK(fs->fs_metaspace, <, 0, %jd);
+	WCHK(fs->fs_metaspace, >, fs->fs_fpg / 2, %jd);
+	WCHK(fs->fs_minfree, >, 99, %jd%%);
+	maxfilesize = fs->fs_bsize * UFS_NDADDR - 1;
+	for (sizepb = fs->fs_bsize, i = 0; i < UFS_NIADDR; i++) {
+		sizepb *= NINDIR(fs);
+		maxfilesize += sizepb;
+	}
+	WCHK(fs->fs_maxfilesize, !=, maxfilesize, %jd);
+	/*
+	 * These values have a tight interaction with each other that
+	 * makes it hard to tightly bound them. So we can only check
+	 * that they are within a broader possible range.
+	 *
+	 * The size cannot always be accurately determined, but ensure
+	 * that it is consistent with the number of cylinder groups (fs_ncg)
+	 * and the number of fragments per cylinder group (fs_fpg). Ensure
+	 * that the summary information size is correct and that it starts
+	 * and ends in the data area of the same cylinder group.
+	 */
+	FCHK(fs->fs_size, <, 8 * fs->fs_frag, %jd);
+	WCHK(fs->fs_size, <=, (fs->fs_ncg - 1) * fs->fs_fpg, %jd);
+	WCHK(fs->fs_size, >, fs->fs_ncg * fs->fs_fpg, %jd);
+	/*
+	 * If we are not requested to read in the csum data stop here
+	 * as the correctness of the remaining values is only important
+	 * to bound the space needed to be allocated to hold the csum data.
+	 */
+	if ((flags & UFS_NOCSUM) != 0)
+		return (error);
+	FCHK(fs->fs_csaddr, <, 0, %jd);
+	FCHK(fs->fs_cssize, !=,
+	    fragroundup(fs, fs->fs_ncg * sizeof(struct csum)), %jd);
+	FCHK(dtog(fs, fs->fs_csaddr), >, fs->fs_ncg, %jd);
+	FCHK(fs->fs_csaddr, <, cgdmin(fs, dtog(fs, fs->fs_csaddr)), %jd);
+	FCHK(dtog(fs, fs->fs_csaddr + howmany(fs->fs_cssize, fs->fs_fsize)), >,
+	    dtog(fs, fs->fs_csaddr), %jd);
+	/*
+	 * With file system clustering it is possible to allocate
+	 * many contiguous blocks. The kernel variable maxphys defines
+	 * the maximum transfer size permitted by the controller and/or
+	 * buffering. The fs_maxcontig parameter controls the maximum
+	 * number of blocks that the filesystem will read or write
+	 * in a single transfer. It is calculated when the filesystem
+	 * is created as maxphys / fs_bsize. The loader uses a maxphys
+	 * of 128K even when running on a system that supports larger
+	 * values. If the filesystem was built on a system that supports
+	 * a larger maxphys (1M is typical) it will have configured
+	 * fs_maxcontig for that larger system. So we bound the upper
+	 * allowable limit for fs_maxconfig to be able to at least 
+	 * work with a 1M maxphys on the smallest block size filesystem:
+	 * 1M / 4096 == 256. There is no harm in allowing the mounting of
+	 * filesystems that make larger than maxphys I/O requests because
+	 * those (mostly 32-bit machines) can (very slowly) handle I/O
+	 * requests that exceed maxphys.
+	 */
+	WCHK(fs->fs_maxcontig, <, 0, %jd);
+	WCHK(fs->fs_maxcontig, >, MAX(256, maxphys / fs->fs_bsize), %jd);
+	WCHK2(fs->fs_maxcontig, ==, 0, fs->fs_contigsumsize, !=, 0, %jd);
+	WCHK2(fs->fs_maxcontig, >, 1, fs->fs_contigsumsize, !=,
+	    MIN(fs->fs_maxcontig, FS_MAXCONTIG), %jd);
+	return (error);
 }
 
 /*

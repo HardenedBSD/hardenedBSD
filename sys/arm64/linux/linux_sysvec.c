@@ -124,7 +124,6 @@ static int	linux_on_exec_vmspace(struct proc *p,
 LIN_SDT_PROVIDER_DECLARE(LINUX_DTRACE);
 
 /* DTrace probes */
-LIN_SDT_PROBE_DEFINE2(sysvec, linux_translate_traps, todo, "int", "int");
 LIN_SDT_PROBE_DEFINE0(sysvec, linux_exec_setregs, todo);
 LIN_SDT_PROBE_DEFINE0(sysvec, linux_copyout_auxargs, todo);
 LIN_SDT_PROBE_DEFINE0(sysvec, linux_elf_fixup, todo);
@@ -132,15 +131,6 @@ LIN_SDT_PROBE_DEFINE0(sysvec, linux_elf_fixup, todo);
 LINUX_VDSO_SYM_CHAR(linux_platform);
 LINUX_VDSO_SYM_INTPTR(kern_timekeep_base);
 LINUX_VDSO_SYM_INTPTR(linux_vdso_sigcode);
-
-/* LINUXTODO: do we have traps to translate? */
-static int
-linux_translate_traps(int signal, int trap_code)
-{
-
-	LIN_SDT_PROBE2(sysvec, linux_translate_traps, todo, signal, trap_code);
-	return (signal);
-}
 
 static int
 linux_fetch_syscall_args(struct thread *td)
@@ -443,7 +433,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	ucontext_t uc;
 	uint8_t *scr;
 	struct sigacts *psp;
-	int onstack, sig;
+	int onstack, sig, issiginfo;
 
 	td = curthread;
 	p = td->td_proc;
@@ -455,6 +445,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	tf = td->td_frame;
 	onstack = sigonstack(tf->tf_sp);
+	issiginfo = SIGISMEMBER(psp->ps_siginfo, sig);
 
 	CTR4(KTR_SIG, "sendsig: td=%p (%s) catcher=%p sig=%d", td, p->p_comm,
 	    catcher, sig);
@@ -541,8 +532,13 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	free(frame, M_LINUX);
 
 	tf->tf_x[0]= sig;
-	tf->tf_x[1] = (register_t)&fp->sf.sf_si;
-	tf->tf_x[2] = (register_t)&fp->sf.sf_uc;
+	if (issiginfo) {
+		tf->tf_x[1] = (register_t)&fp->sf.sf_si;
+		tf->tf_x[2] = (register_t)&fp->sf.sf_uc;
+	} else {
+		tf->tf_x[1] = 0;
+		tf->tf_x[2] = 0;
+	}
 	tf->tf_x[8] = (register_t)catcher;
 	tf->tf_sp = (register_t)fp;
 	tf->tf_elr = (register_t)linux_vdso_sigcode;
@@ -557,7 +553,6 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 struct sysentvec elf_linux_sysvec = {
 	.sv_size	= LINUX_SYS_MAXSYSCALL,
 	.sv_table	= linux_sysent,
-	.sv_transtrap	= linux_translate_traps,
 	.sv_fixup	= linux_elf_fixup,
 	.sv_sendsig	= linux_rt_sendsig,
 	.sv_sigcode	= &_binary_linux_vdso_so_o_start,

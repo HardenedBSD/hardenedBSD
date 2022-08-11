@@ -246,8 +246,7 @@ proc_dtor(void *mem, int size, void *arg)
 #endif
 		/* Free all OSD associated to this thread. */
 		osd_thread_exit(td);
-		td_softdep_cleanup(td);
-		MPASS(td->td_su == NULL);
+		ast_kclear(td);
 
 		/* Make sure all thread destructors are executed */
 		EVENTHANDLER_DIRECT_INVOKE(thread_dtor, td);
@@ -997,7 +996,7 @@ db_print_pgrp_one(struct pgrp *pgrp, struct proc *p)
 	    p->p_pptr == NULL ? 0 : isjobproc(p->p_pptr, pgrp));
 }
 
-DB_SHOW_COMMAND(pgrpdump, pgrpdump)
+DB_SHOW_COMMAND_FLAGS(pgrpdump, pgrpdump, DB_CMD_MEMSAFE)
 {
 	struct pgrp *pgrp;
 	struct proc *p;
@@ -3321,10 +3320,10 @@ static SYSCTL_NODE(_kern_proc, KERN_PROC_SIGFASTBLK, sigfastblk, CTLFLAG_RD |
 static struct sx stop_all_proc_blocker;
 SX_SYSINIT(stop_all_proc_blocker, &stop_all_proc_blocker, "sapblk");
 
-void
+bool
 stop_all_proc_block(void)
 {
-	sx_xlock(&stop_all_proc_blocker);
+	return (sx_xlock_sig(&stop_all_proc_blocker) == 0);
 }
 
 void
@@ -3348,7 +3347,8 @@ stop_all_proc(void)
 	int r, gen;
 	bool restart, seen_stopped, seen_exiting, stopped_some;
 
-	stop_all_proc_block();
+	if (!stop_all_proc_block())
+		return;
 
 	cp = curproc;
 allproc_loop:
@@ -3368,7 +3368,7 @@ allproc_loop:
 			PROC_UNLOCK(p);
 			continue;
 		}
-		if ((p->p_flag & P_WEXIT) != 0) {
+		if ((p->p_flag2 & P2_WEXIT) != 0) {
 			seen_exiting = true;
 			PROC_UNLOCK(p);
 			continue;

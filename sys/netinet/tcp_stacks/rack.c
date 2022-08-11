@@ -310,8 +310,8 @@ static int32_t rack_gp_per_bw_mul_down = 4;	/* 4% */
 static int32_t rack_gp_rtt_maxmul = 3;		/* 3 x maxmin */
 static int32_t rack_gp_rtt_minmul = 1;		/* minrtt + (minrtt/mindiv) is lower rtt */
 static int32_t rack_gp_rtt_mindiv = 4;		/* minrtt + (minrtt * minmul/mindiv) is lower rtt */
-static int32_t rack_gp_decrease_per = 20;	/* 20% decrease in multipler */
-static int32_t rack_gp_increase_per = 2;	/* 2% increase in multipler */
+static int32_t rack_gp_decrease_per = 20;	/* 20% decrease in multiplier */
+static int32_t rack_gp_increase_per = 2;	/* 2% increase in multiplier */
 static int32_t rack_per_lower_bound = 50;	/* Don't allow to drop below this multiplier */
 static int32_t rack_per_upper_bound_ss = 0;	/* Don't allow SS to grow above this */
 static int32_t rack_per_upper_bound_ca = 0;	/* Don't allow CA to grow above this */
@@ -1107,7 +1107,7 @@ rack_init_sysctls(void)
 	    SYSCTL_CHILDREN(rack_timely),
 	    OID_AUTO, "rtt_max_mul", CTLFLAG_RW,
 	    &rack_gp_rtt_maxmul, 3,
-	    "Rack timely multipler of lowest rtt for rtt_max");
+	    "Rack timely multiplier of lowest rtt for rtt_max");
 	SYSCTL_ADD_S32(&rack_sysctl_ctx,
 	    SYSCTL_CHILDREN(rack_timely),
 	    OID_AUTO, "rtt_min_div", CTLFLAG_RW,
@@ -1137,12 +1137,12 @@ rack_init_sysctls(void)
 	    SYSCTL_CHILDREN(rack_timely),
 	    OID_AUTO, "upperboundss", CTLFLAG_RW,
 	    &rack_per_upper_bound_ss, 0,
-	    "Rack timely higest percentage we allow GP multiplier in SS to raise to (0 is no upperbound)");
+	    "Rack timely highest percentage we allow GP multiplier in SS to raise to (0 is no upperbound)");
 	SYSCTL_ADD_S32(&rack_sysctl_ctx,
 	    SYSCTL_CHILDREN(rack_timely),
 	    OID_AUTO, "upperboundca", CTLFLAG_RW,
 	    &rack_per_upper_bound_ca, 0,
-	    "Rack timely higest percentage we allow GP multiplier to CA raise to (0 is no upperbound)");
+	    "Rack timely highest percentage we allow GP multiplier to CA raise to (0 is no upperbound)");
 	SYSCTL_ADD_S32(&rack_sysctl_ctx,
 	    SYSCTL_CHILDREN(rack_timely),
 	    OID_AUTO, "dynamicgp", CTLFLAG_RW,
@@ -3110,7 +3110,7 @@ rack_bw_can_be_raised(struct tcp_rack *rack, uint64_t cur_bw, uint64_t last_bw_e
 	 * rate to push us faster there is no sense of
 	 * increasing.
 	 *
-	 * We first caculate our actual pacing rate (ss or ca multipler
+	 * We first caculate our actual pacing rate (ss or ca multiplier
 	 * times our cur_bw).
 	 *
 	 * Then we take the last measured rate and multipy by our
@@ -3863,7 +3863,7 @@ rack_update_multiplier(struct tcp_rack *rack, int32_t timely_says, uint64_t last
 	    (rack->use_fixed_rate) ||
 	    (rack->in_probe_rtt) ||
 	    (rack->rc_always_pace == 0)) {
-		/* No dynamic GP multipler in play */
+		/* No dynamic GP multiplier in play */
 		return;
 	}
 	losses = rack->r_ctl.rc_loss_count - rack->r_ctl.rc_loss_at_start;
@@ -4030,7 +4030,7 @@ rack_make_timely_judgement(struct tcp_rack *rack, uint32_t rtt, int32_t rtt_diff
 	log_rtt_a_diff |= (uint32_t)rtt_diff;
 	if (rtt >= (get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) *
 		    rack_gp_rtt_maxmul)) {
-		/* Reduce the b/w multipler */
+		/* Reduce the b/w multiplier */
 		timely_says = 2;
 		log_mult = get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) * rack_gp_rtt_maxmul;
 		log_mult <<= 32;
@@ -4041,7 +4041,7 @@ rack_make_timely_judgement(struct tcp_rack *rack, uint32_t rtt, int32_t rtt_diff
 	} else if (rtt <= (get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) +
 			   ((get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) * rack_gp_rtt_minmul) /
 			    max(rack_gp_rtt_mindiv , 1)))) {
-		/* Increase the b/w multipler */
+		/* Increase the b/w multiplier */
 		log_mult = get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) +
 			((get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt) * rack_gp_rtt_minmul) /
 			 max(rack_gp_rtt_mindiv , 1));
@@ -4068,13 +4068,13 @@ rack_make_timely_judgement(struct tcp_rack *rack, uint32_t rtt, int32_t rtt_diff
 		if (rtt_diff <= 0) {
 			/*
 			 * Rttdiff is less than zero, increase the
-			 * b/w multipler (its 0 or negative)
+			 * b/w multiplier (its 0 or negative)
 			 */
 			timely_says = 0;
 			rack_log_timely(rack,  timely_says, log_mult,
 					get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt), log_rtt_a_diff, __LINE__, 6);
 		} else {
-			/* Reduce the b/w multipler */
+			/* Reduce the b/w multiplier */
 			timely_says = 1;
 			rack_log_timely(rack,  timely_says, log_mult,
 					get_filter_value_small(&rack->r_ctl.rc_gp_min_rtt), log_rtt_a_diff, __LINE__, 7);
@@ -4282,7 +4282,7 @@ rack_do_goodput_measurement(struct tcpcb *tp, struct tcp_rack *rack,
 		addpart = rack->r_ctl.num_measurements;
 		rack->r_ctl.num_measurements++;
 		if (rack->r_ctl.num_measurements >= RACK_REQ_AVG) {
-			/* We have collected enought to move forward */
+			/* We have collected enough to move forward */
 			rack->r_ctl.gp_bw /= (uint64_t)rack->r_ctl.num_measurements;
 		}
 		did_add = 3;
@@ -9854,7 +9854,7 @@ rack_check_bottom_drag(struct tcpcb *tp,
 		 *
 		 * This means we need to boost the b/w in
 		 * addition to any earlier boosting of
-		 * the multipler.
+		 * the multiplier.
 		 */
 		rack->rc_dragged_bottom = 1;
 		rack_validate_multipliers_at_or_above100(rack);
@@ -11855,10 +11855,9 @@ rack_do_fin_wait_1(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * If new data are received on a connection after the user processes
 	 * are gone, then RST the other end.
 	 */
-	if ((so->so_state & SS_NOFDREF) && tlen) {
-		if (rack_check_data_after_close(m, tp, &tlen, th, so))
-			return (1);
-	}
+	if ((tp->t_flags & TF_CLOSED) && tlen &&
+	    rack_check_data_after_close(m, tp, &tlen, th, so))
+		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -11983,10 +11982,9 @@ rack_do_closing(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * If new data are received on a connection after the user processes
 	 * are gone, then RST the other end.
 	 */
-	if ((so->so_state & SS_NOFDREF) && tlen) {
-		if (rack_check_data_after_close(m, tp, &tlen, th, so))
-			return (1);
-	}
+	if ((tp->t_flags & TF_CLOSED) && tlen &&
+	    rack_check_data_after_close(m, tp, &tlen, th, so))
+		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -12097,10 +12095,9 @@ rack_do_lastack(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * If new data are received on a connection after the user processes
 	 * are gone, then RST the other end.
 	 */
-	if ((so->so_state & SS_NOFDREF) && tlen) {
-		if (rack_check_data_after_close(m, tp, &tlen, th, so))
-			return (1);
-	}
+	if ((tp->t_flags & TF_CLOSED) && tlen &&
+	    rack_check_data_after_close(m, tp, &tlen, th, so))
+		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -12212,11 +12209,9 @@ rack_do_fin_wait_2(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * If new data are received on a connection after the user processes
 	 * are gone, then RST the other end.
 	 */
-	if ((so->so_state & SS_NOFDREF) &&
-	    tlen) {
-		if (rack_check_data_after_close(m, tp, &tlen, th, so))
-			return (1);
-	}
+	if ((tp->t_flags & TF_CLOSED) && tlen &&
+	    rack_check_data_after_close(m, tp, &tlen, th, so))
+		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -12613,19 +12608,13 @@ rack_init(struct tcpcb *tp)
 		rsm->r_tim_lastsent[0] = rack_to_usec_ts(&rack->r_ctl.act_rcv_time);
 		rsm->r_rtr_cnt = 1;
 		rsm->r_rtr_bytes = 0;
-		if (tp->t_flags & TF_SENTFIN) {
-			rsm->r_end = tp->snd_max - 1;
+		if (tp->t_flags & TF_SENTFIN)
 			rsm->r_flags |= RACK_HAS_FIN;
-		} else {
-			rsm->r_end = tp->snd_max;
-		}
-		if (tp->snd_una == tp->iss) {
-			/* The data space is one beyond snd_una */
+		if ((tp->snd_una == tp->iss) &&
+		    !TCPS_HAVEESTABLISHED(tp->t_state))
 			rsm->r_flags |= RACK_HAS_SYN;
-			rsm->r_start = tp->iss;
-			rsm->r_end = rsm->r_start + (tp->snd_max - tp->snd_una);
-		} else
-			rsm->r_start = tp->snd_una;
+		rsm->r_start = tp->snd_una;
+		rsm->r_end = tp->snd_max;
 		rsm->r_dupack = 0;
 		if (rack->rc_inp->inp_socket->so_snd.sb_mb != NULL) {
 			rsm->m = sbsndmbuf(&rack->rc_inp->inp_socket->so_snd, 0, &rsm->soff);

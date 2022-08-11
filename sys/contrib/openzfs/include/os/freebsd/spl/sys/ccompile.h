@@ -42,9 +42,6 @@ extern "C" {
 #endif
 
 #define	EXPORT_SYMBOL(x)
-#define	MODULE_AUTHOR(s)
-#define	MODULE_DESCRIPTION(s)
-#define	MODULE_LICENSE(s)
 #define	module_param(a, b, c)
 #define	module_param_call(a, b, c, d, e)
 #define	module_param_named(a, b, c, d)
@@ -77,8 +74,10 @@ extern "C" {
 
 #ifndef LOCORE
 #ifndef HAVE_RPC_TYPES
+#ifndef _KERNEL
 typedef int bool_t;
 typedef int enum_t;
+#endif
 #endif
 #endif
 

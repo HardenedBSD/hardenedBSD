@@ -47,10 +47,7 @@
 #define	hashState384(x)	((x)->pipe->p512)
 #define	hashState512(x)	((x)->pipe->p512)
 
-/* shift and rotate shortcuts */
-#define	shl(x, n)	((x) << n)
-#define	shr(x, n)	((x) >> n)
-
+/* rotate shortcuts */
 #define	rotl32(x, n)	(((x) << (n)) | ((x) >> (32 - (n))))
 #define	rotr32(x, n)	(((x) >> (n)) | ((x) << (32 - (n))))
 
@@ -494,7 +491,7 @@ EdonRInit(EdonRState *state, size_t hashbitlen)
 		state->hashbitlen = 512;
 		state->bits_processed = 0;
 		state->unprocessed_bits = 0;
-		memcpy(hashState224(state)->DoublePipe, i512p2,
+		memcpy(hashState512(state)->DoublePipe, i512p2,
 		    sizeof (i512p2));
 		break;
 	}

@@ -41,7 +41,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stropts.h>
 #include <pthread.h>
 #include <sys/zfs_ioctl.h>
 #include <libzfs.h>
@@ -602,11 +601,10 @@ get_snapshot_names(differ_info_t *di, const char *fromsnap,
 
 		di->isclone = B_TRUE;
 		di->fromsnap = zfs_strdup(hdl, fromsnap);
-		if (tsnlen) {
+		if (tsnlen)
 			di->tosnap = zfs_strdup(hdl, tosnap);
-		} else {
+		else
 			return (make_temp_snapshot(di));
-		}
 	} else {
 		int dslen = fdslen ? fdslen : tdslen;
 
@@ -711,7 +709,7 @@ zfs_show_diffs(zfs_handle_t *zhp, int outfd, const char *fromsnap,
     const char *tosnap, int flags)
 {
 	zfs_cmd_t zc = {"\0"};
-	char errbuf[1024];
+	char errbuf[ERRBUFLEN];
 	differ_info_t di = { 0 };
 	pthread_t tid;
 	int pipefd[2];

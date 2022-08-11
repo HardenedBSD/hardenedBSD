@@ -164,7 +164,8 @@ static const zio_taskq_info_t zio_taskqs[ZIO_TYPES][ZIO_TASKQ_TYPES] = {
 static void spa_sync_version(void *arg, dmu_tx_t *tx);
 static void spa_sync_props(void *arg, dmu_tx_t *tx);
 static boolean_t spa_has_active_shared_spare(spa_t *spa);
-static int spa_load_impl(spa_t *spa, spa_import_type_t type, char **ereport);
+static int spa_load_impl(spa_t *spa, spa_import_type_t type,
+    const char **ereport);
 static void spa_vdev_resilver_done(spa_t *spa);
 
 static uint_t	zio_taskq_batch_pct = 80;	  /* 1 thread per cpu in pset */
@@ -277,7 +278,7 @@ static int zfs_livelist_condense_new_alloc = 0;
  * Add a (source=src, propname=propval) list to an nvlist.
  */
 static void
-spa_prop_add_list(nvlist_t *nvl, zpool_prop_t prop, char *strval,
+spa_prop_add_list(nvlist_t *nvl, zpool_prop_t prop, const char *strval,
     uint64_t intval, zprop_source_t src)
 {
 	const char *propname = zpool_prop_to_name(prop);
@@ -2310,9 +2311,6 @@ spa_load_verify_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 
 	(void) zilog, (void) dnp;
 
-	if (zb->zb_level == ZB_DNODE_LEVEL || BP_IS_HOLE(bp) ||
-	    BP_IS_EMBEDDED(bp) || BP_IS_REDACTED(bp))
-		return (0);
 	/*
 	 * Note: normally this routine will not be called if
 	 * spa_load_verify_metadata is not set.  However, it may be useful
@@ -2320,6 +2318,22 @@ spa_load_verify_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 	 */
 	if (!spa_load_verify_metadata)
 		return (0);
+
+	/*
+	 * Sanity check the block pointer in order to detect obvious damage
+	 * before using the contents in subsequent checks or in zio_read().
+	 * When damaged consider it to be a metadata error since we cannot
+	 * trust the BP_GET_TYPE and BP_GET_LEVEL values.
+	 */
+	if (!zfs_blkptr_verify(spa, bp, B_FALSE, BLK_VERIFY_LOG)) {
+		atomic_inc_64(&sle->sle_meta_count);
+		return (0);
+	}
+
+	if (zb->zb_level == ZB_DNODE_LEVEL || BP_IS_HOLE(bp) ||
+	    BP_IS_EMBEDDED(bp) || BP_IS_REDACTED(bp))
+		return (0);
+
 	if (!BP_IS_METADATA(bp) &&
 	    (!spa_load_verify_data || !sle->sle_verify_data))
 		return (0);
@@ -2961,7 +2975,7 @@ spa_try_repair(spa_t *spa, nvlist_t *config)
 static int
 spa_load(spa_t *spa, spa_load_state_t state, spa_import_type_t type)
 {
-	char *ereport = FM_EREPORT_ZFS_POOL;
+	const char *ereport = FM_EREPORT_ZFS_POOL;
 	int error;
 
 	spa->spa_load_state = state;
@@ -3278,7 +3292,7 @@ out:
 	 * ZPOOL_CONFIG_MMP_HOSTID   - hostid from the active pool
 	 */
 	if (error == EREMOTEIO) {
-		char *hostname = "<unknown>";
+		const char *hostname = "<unknown>";
 		uint64_t hostid = 0;
 
 		if (mmp_label) {
@@ -4195,6 +4209,7 @@ spa_ld_get_props(spa_t *spa)
 		spa->spa_avz_action = AVZ_ACTION_INITIALIZE;
 		ASSERT0(vdev_count_verify_zaps(spa->spa_root_vdev));
 	} else if (error != 0) {
+		nvlist_free(mos_config);
 		return (spa_vdev_err(rvd, VDEV_AUX_CORRUPT_DATA, EIO));
 	} else if (!nvlist_exists(mos_config, ZPOOL_CONFIG_HAS_PER_VDEV_ZAPS)) {
 		/*
@@ -4355,7 +4370,7 @@ spa_ld_load_vdev_metadata(spa_t *spa)
 
 	error = spa_ld_log_spacemaps(spa);
 	if (error != 0) {
-		spa_load_failed(spa, "spa_ld_log_sm_data failed [error=%d]",
+		spa_load_failed(spa, "spa_ld_log_spacemaps failed [error=%d]",
 		    error);
 		return (spa_vdev_err(rvd, VDEV_AUX_CORRUPT_DATA, error));
 	}
@@ -4386,7 +4401,7 @@ spa_ld_load_dedup_tables(spa_t *spa)
 }
 
 static int
-spa_ld_verify_logs(spa_t *spa, spa_import_type_t type, char **ereport)
+spa_ld_verify_logs(spa_t *spa, spa_import_type_t type, const char **ereport)
 {
 	vdev_t *rvd = spa->spa_root_vdev;
 
@@ -4753,7 +4768,7 @@ spa_ld_mos_with_trusted_config(spa_t *spa, spa_import_type_t type,
  * config stored in the MOS.
  */
 static int
-spa_load_impl(spa_t *spa, spa_import_type_t type, char **ereport)
+spa_load_impl(spa_t *spa, spa_import_type_t type, const char **ereport)
 {
 	int error = 0;
 	boolean_t missing_feat_write = B_FALSE;
@@ -5144,8 +5159,8 @@ spa_load_best(spa_t *spa, spa_load_state_t state, uint64_t max_request,
  * ambiguous state.
  */
 static int
-spa_open_common(const char *pool, spa_t **spapp, void *tag, nvlist_t *nvpolicy,
-    nvlist_t **config)
+spa_open_common(const char *pool, spa_t **spapp, const void *tag,
+    nvlist_t *nvpolicy, nvlist_t **config)
 {
 	spa_t *spa;
 	spa_load_state_t state = SPA_LOAD_OPEN;
@@ -5261,14 +5276,14 @@ spa_open_common(const char *pool, spa_t **spapp, void *tag, nvlist_t *nvpolicy,
 }
 
 int
-spa_open_rewind(const char *name, spa_t **spapp, void *tag, nvlist_t *policy,
-    nvlist_t **config)
+spa_open_rewind(const char *name, spa_t **spapp, const void *tag,
+    nvlist_t *policy, nvlist_t **config)
 {
 	return (spa_open_common(name, spapp, tag, policy, config));
 }
 
 int
-spa_open(const char *name, spa_t **spapp, void *tag)
+spa_open(const char *name, spa_t **spapp, const void *tag)
 {
 	return (spa_open_common(name, spapp, tag, NULL, NULL));
 }
@@ -7494,7 +7509,7 @@ spa_vdev_trim(spa_t *spa, nvlist_t *nv, uint64_t cmd_type, uint64_t rate,
  * Split a set of devices from their mirrors, and create a new pool from them.
  */
 int
-spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
+spa_vdev_split_mirror(spa_t *spa, const char *newname, nvlist_t *config,
     nvlist_t *props, boolean_t exp)
 {
 	int error = 0;

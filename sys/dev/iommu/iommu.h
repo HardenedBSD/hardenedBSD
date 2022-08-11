@@ -56,10 +56,11 @@ struct iommu_map_entry {
 	iommu_gaddr_t free_down;	/* Max free space below the
 					   current R/B tree node */
 	u_int flags;
-	TAILQ_ENTRY(iommu_map_entry) dmamap_link; /* Link for dmamap entries */
+	union {
+		TAILQ_ENTRY(iommu_map_entry) dmamap_link; /* DMA map entries */
+		struct iommu_map_entry *tlb_flush_next;
+	};
 	RB_ENTRY(iommu_map_entry) rb_entry;	 /* Links for domain entries */
-	TAILQ_ENTRY(iommu_map_entry) unroll_link; /* Link for unroll after
-						    dmamap_load failure */
 	struct iommu_domain *domain;
 	struct iommu_qi_genseq gseq;
 };
@@ -153,7 +154,8 @@ void iommu_free_ctx_locked(struct iommu_unit *iommu, struct iommu_ctx *ctx);
 struct iommu_ctx *iommu_get_ctx(struct iommu_unit *, device_t dev,
     uint16_t rid, bool id_mapped, bool rmrr_init);
 struct iommu_unit *iommu_find(device_t dev, bool verbose);
-void iommu_domain_unload_entry(struct iommu_map_entry *entry, bool free);
+void iommu_domain_unload_entry(struct iommu_map_entry *entry, bool free,
+    bool cansleep);
 void iommu_domain_unload(struct iommu_domain *domain,
     struct iommu_map_entries_tailq *entries, bool cansleep);
 
@@ -162,28 +164,17 @@ struct iommu_ctx *iommu_instantiate_ctx(struct iommu_unit *iommu,
 device_t iommu_get_requester(device_t dev, uint16_t *rid);
 int iommu_init_busdma(struct iommu_unit *unit);
 void iommu_fini_busdma(struct iommu_unit *unit);
-struct iommu_map_entry *iommu_map_alloc_entry(struct iommu_domain *iodom,
-    u_int flags);
-void iommu_map_free_entry(struct iommu_domain *, struct iommu_map_entry *);
-int iommu_map(struct iommu_domain *iodom,
-    const struct bus_dma_tag_common *common, iommu_gaddr_t size, int offset,
-    u_int eflags, u_int flags, vm_page_t *ma, struct iommu_map_entry **res);
-int iommu_map_region(struct iommu_domain *domain,
-    struct iommu_map_entry *entry, u_int eflags, u_int flags, vm_page_t *ma);
 
 void iommu_gas_init_domain(struct iommu_domain *domain);
 void iommu_gas_fini_domain(struct iommu_domain *domain);
 struct iommu_map_entry *iommu_gas_alloc_entry(struct iommu_domain *domain,
     u_int flags);
-void iommu_gas_free_entry(struct iommu_domain *domain,
-    struct iommu_map_entry *entry);
-void iommu_gas_free_space(struct iommu_domain *domain,
-    struct iommu_map_entry *entry);
+void iommu_gas_free_entry(struct iommu_map_entry *entry);
+void iommu_gas_free_space(struct iommu_map_entry *entry);
 int iommu_gas_map(struct iommu_domain *domain,
     const struct bus_dma_tag_common *common, iommu_gaddr_t size, int offset,
     u_int eflags, u_int flags, vm_page_t *ma, struct iommu_map_entry **res);
-void iommu_gas_free_region(struct iommu_domain *domain,
-    struct iommu_map_entry *entry);
+void iommu_gas_free_region(struct iommu_map_entry *entry);
 int iommu_gas_map_region(struct iommu_domain *domain,
     struct iommu_map_entry *entry, u_int eflags, u_int flags, vm_page_t *ma);
 int iommu_gas_reserve_region(struct iommu_domain *domain, iommu_gaddr_t start,

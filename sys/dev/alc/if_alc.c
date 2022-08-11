@@ -1493,10 +1493,11 @@ alc_attach(device_t dev)
 			sc->alc_dma_wr_burst = 3;
 		/*
 		 * Force maximum payload size to 128 bytes for
-		 * E2200/E2400/E2500.
+		 * E2200/E2400/E2500/AR8162/AR8171/AR8172.
 		 * Otherwise it triggers DMA write error.
 		 */
-		if ((sc->alc_flags & ALC_FLAG_E2X00) != 0)
+		if ((sc->alc_flags &
+		    (ALC_FLAG_E2X00 | ALC_FLAG_AR816X_FAMILY)) != 0)
 			sc->alc_dma_wr_burst = 0;
 		alc_init_pcie(sc);
 	}
@@ -3437,7 +3438,6 @@ alc_txeof(struct alc_softc *sc)
 	struct ifnet *ifp;
 	struct alc_txdesc *txd;
 	uint32_t cons, prod;
-	int prog;
 
 	ALC_LOCK_ASSERT(sc);
 
@@ -3466,11 +3466,9 @@ alc_txeof(struct alc_softc *sc)
 	 * Go through our Tx list and free mbufs for those
 	 * frames which have been transmitted.
 	 */
-	for (prog = 0; cons != prod; prog++,
-	    ALC_DESC_INC(cons, ALC_TX_RING_CNT)) {
+	for (; cons != prod; ALC_DESC_INC(cons, ALC_TX_RING_CNT)) {
 		if (sc->alc_cdata.alc_tx_cnt <= 0)
 			break;
-		prog++;
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 		sc->alc_cdata.alc_tx_cnt--;
 		txd = &sc->alc_cdata.alc_txdesc[cons];

@@ -59,6 +59,7 @@
 #include <asm/atomic.h>
 #include <linux/device.h>
 #include <linux/pci_ids.h>
+#include <linux/pm.h>
 
 struct pci_device_id {
 	uint32_t	vendor;
@@ -129,6 +130,7 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 #define	PCI_EXP_DEVCAP2		PCIER_DEVICE_CAP2		/* Device Capabilities 2 */
 #define	PCI_EXP_DEVCTL2		PCIER_DEVICE_CTL2		/* Device Control 2 */
 #define	PCI_EXP_DEVCTL2_LTR_EN	PCIEM_CTL2_LTR_ENABLE
+#define	PCI_EXP_DEVCTL2_COMP_TMOUT_DIS	PCIEM_CTL2_COMP_TIMO_DISABLE
 #define	PCI_EXP_LNKCAP2		PCIER_LINK_CAP2			/* Link Capabilities 2 */
 #define	PCI_EXP_LNKCTL2		PCIER_LINK_CTL2			/* Link Control 2 */
 #define	PCI_EXP_LNKSTA2		PCIER_LINK_STA2			/* Link Status 2 */
@@ -1141,6 +1143,22 @@ pcie_capability_write_word(struct pci_dev *dev, int pos, u16 val)
 	return pci_write_config_word(dev, pci_pcie_cap(dev) + pos, val);
 }
 
+static inline int
+pcie_capability_set_word(struct pci_dev *dev, int pos, uint16_t val)
+{
+	int error;
+	uint16_t v;
+
+	error = pcie_capability_read_word(dev, pos, &v);
+	if (error != 0)
+		return (error);
+
+	v |= val;
+
+	error = pcie_capability_write_word(dev, pos, v);
+	return (error);
+}
+
 static inline int pcie_get_minimum_link(struct pci_dev *dev,
     enum pci_bus_speed *speed, enum pcie_link_width *width)
 {
@@ -1494,6 +1512,36 @@ static inline void
 linuxkpi_pcim_want_to_use_bus_functions(struct pci_dev *pdev)
 {
 	pdev->want_iomap_res = true;
+}
+
+static inline bool
+pci_is_thunderbolt_attached(struct pci_dev *pdev)
+{
+
+	return (false);
+}
+
+static inline void *
+pci_platform_rom(struct pci_dev *pdev, size_t *size)
+{
+
+	return (NULL);
+}
+
+static inline void
+pci_ignore_hotplug(struct pci_dev *pdev)
+{
+}
+
+static inline int
+pcie_get_readrq(struct pci_dev *dev)
+{
+	u16 ctl;
+
+	if (pcie_capability_read_word(dev, PCI_EXP_DEVCTL, &ctl))
+		return (-EINVAL);
+
+	return (128 << ((ctl & PCI_EXP_DEVCTL_READRQ) >> 12));
 }
 
 #endif	/* _LINUXKPI_LINUX_PCI_H_ */

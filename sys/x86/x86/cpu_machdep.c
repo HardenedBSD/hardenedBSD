@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_mp_watchdog.h"
 #include "opt_pax.h"
 #include "opt_platform.h"
+#include "opt_sched.h"
 #ifdef __i386__
 #include "opt_apic.h"
 #endif
@@ -508,8 +509,6 @@ cpu_reset(void)
 				/* NOTREACHED */
 			}
 		}
-
-		DELAY(1000000);
 	}
 #endif
 	cpu_reset_real();
@@ -533,32 +532,25 @@ static int	idle_mwait = 1;		/* Use MONITOR/MWAIT for short idle. */
 SYSCTL_INT(_machdep, OID_AUTO, idle_mwait, CTLFLAG_RWTUN, &idle_mwait,
     0, "Use MONITOR/MWAIT for short idle");
 
-static void
-cpu_idle_acpi(sbintime_t sbt)
+static bool
+cpu_idle_enter(int *statep, int newstate)
 {
-	int *state;
+	KASSERT(atomic_load_int(statep) == STATE_RUNNING,
+	    ("%s: state %d", __func__, atomic_load_int(statep)));
 
-	state = &PCPU_PTR(monitorbuf)->idle_state;
-	atomic_store_int(state, STATE_SLEEPING);
-
-	/* See comments in cpu_idle_hlt(). */
-	disable_intr();
-	if (sched_runnable())
-		enable_intr();
-	else if (cpu_idle_hook)
-		cpu_idle_hook(sbt);
-	else
-		acpi_cpu_c1();
-	atomic_store_int(state, STATE_RUNNING);
-}
-
-static void
-cpu_idle_hlt(sbintime_t sbt)
-{
-	int *state;
-
-	state = &PCPU_PTR(monitorbuf)->idle_state;
-	atomic_store_int(state, STATE_SLEEPING);
+	/*
+	 * A fence is needed to prevent reordering of the load in
+	 * sched_runnable() with this store to the idle state word.  Without it,
+	 * cpu_idle_wakeup() can observe the state as STATE_RUNNING after having
+	 * added load to the queue, and elide an IPI.  Then, sched_runnable()
+	 * can observe tdq_load == 0, so the CPU ends up idling with pending
+	 * work.  tdq_notify() similarly ensures that a prior update to tdq_load
+	 * is visible before calling cpu_idle_wakeup().
+	 */
+	atomic_store_int(statep, newstate);
+#if defined(SCHED_ULE) && defined(SMP)
+	atomic_thread_fence_seq_cst();
+#endif
 
 	/*
 	 * Since we may be in a critical section from cpu_idle(), if
@@ -577,11 +569,46 @@ cpu_idle_hlt(sbintime_t sbt)
 	 * interrupt.
 	 */
 	disable_intr();
-	if (sched_runnable())
+	if (sched_runnable()) {
 		enable_intr();
-	else
+		atomic_store_int(statep, STATE_RUNNING);
+		return (false);
+	} else {
+		return (true);
+	}
+}
+
+static void
+cpu_idle_exit(int *statep)
+{
+	atomic_store_int(statep, STATE_RUNNING);
+}
+
+static void
+cpu_idle_acpi(sbintime_t sbt)
+{
+	int *state;
+
+	state = &PCPU_PTR(monitorbuf)->idle_state;
+	if (cpu_idle_enter(state, STATE_SLEEPING)) {
+		if (cpu_idle_hook)
+			cpu_idle_hook(sbt);
+		else
+			acpi_cpu_c1();
+		cpu_idle_exit(state);
+	}
+}
+
+static void
+cpu_idle_hlt(sbintime_t sbt)
+{
+	int *state;
+
+	state = &PCPU_PTR(monitorbuf)->idle_state;
+	if (cpu_idle_enter(state, STATE_SLEEPING)) {
 		acpi_cpu_c1();
-	atomic_store_int(state, STATE_RUNNING);
+		atomic_store_int(state, STATE_RUNNING);
+	}
 }
 
 static void
@@ -590,22 +617,14 @@ cpu_idle_mwait(sbintime_t sbt)
 	int *state;
 
 	state = &PCPU_PTR(monitorbuf)->idle_state;
-	atomic_store_int(state, STATE_MWAIT);
-
-	/* See comments in cpu_idle_hlt(). */
-	disable_intr();
-	if (sched_runnable()) {
-		atomic_store_int(state, STATE_RUNNING);
-		enable_intr();
-		return;
+	if (cpu_idle_enter(state, STATE_MWAIT)) {
+		cpu_monitor(state, 0, 0);
+		if (atomic_load_int(state) == STATE_MWAIT)
+			__asm __volatile("sti; mwait" : : "a" (MWAIT_C1), "c" (0));
+		else
+			enable_intr();
+		cpu_idle_exit(state);
 	}
-
-	cpu_monitor(state, 0, 0);
-	if (atomic_load_int(state) == STATE_MWAIT)
-		__asm __volatile("sti; mwait" : : "a" (MWAIT_C1), "c" (0));
-	else
-		enable_intr();
-	atomic_store_int(state, STATE_RUNNING);
 }
 
 static void
@@ -637,8 +656,7 @@ cpu_idle(int busy)
 	uint64_t msr;
 	sbintime_t sbt = -1;
 
-	CTR2(KTR_SPARE2, "cpu_idle(%d) at %d",
-	    busy, curcpu);
+	CTR1(KTR_SPARE2, "cpu_idle(%d)", busy);
 #ifdef MP_WATCHDOG
 	ap_watchdog(PCPU_GET(cpuid));
 #endif
@@ -674,8 +692,7 @@ cpu_idle(int busy)
 		critical_exit();
 	}
 out:
-	CTR2(KTR_SPARE2, "cpu_idle(%d) at %d done",
-	    busy, curcpu);
+	CTR1(KTR_SPARE2, "cpu_idle(%d) done", busy);
 }
 
 static int cpu_idle_apl31_workaround;
@@ -811,7 +828,8 @@ cpu_idle_tun(void *unused __unused)
 		mwait_cpustop_broken = true;
 	}
 
-	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_id == 0x506c9) {
+	if (cpu_vendor_id == CPU_VENDOR_INTEL &&
+	    (cpu_id == 0x506c9 || cpu_id == 0x506ca)) {
 		/*
 		 * Apollo Lake errata APL31 (public errata APL30).
 		 * Stores to the armed address range may not trigger
