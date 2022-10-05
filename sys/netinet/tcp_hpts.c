@@ -1109,9 +1109,7 @@ tcp_hptsi(struct tcp_hpts_entry *hpts, int from_callout)
 	struct tcpcb *tp;
 	struct inpcb *inp;
 	struct timeval tv;
-	uint64_t total_slots_processed = 0;
 	int32_t slots_to_run, i, error;
-	int32_t paced_cnt = 0;
 	int32_t loop_cnt = 0;
 	int32_t did_prefetch = 0;
 	int32_t prefetch_ninp = 0;
@@ -1258,8 +1256,6 @@ again:
 				/* Record the new position */
 				orig_exit_slot = runningslot;
 			}
-			total_slots_processed++;
-			paced_cnt++;
 
 			INP_WLOCK(inp);
 			if (inp->inp_hpts_cpu_set == 0) {
@@ -1345,7 +1341,7 @@ again:
 				 * goes off and sees the mis-match. We
 				 * simply correct it here and the CPU will
 				 * switch to the new hpts nextime the tcb
-				 * gets added to the the hpts (not this one)
+				 * gets added to the hpts (not this one)
 				 * :-)
 				 */
 				tcp_set_hpts(inp);
@@ -1380,7 +1376,7 @@ again:
 				 * than the previous inp) and there no
 				 * assurance that ninp was not pulled while
 				 * we were processing inp and freed. If this
-				 * occured it could mean that either:
+				 * occurred it could mean that either:
 				 *
 				 * a) Its NULL (which is fine we won't go
 				 * here) <or> b) Its valid (which is cool we
@@ -1591,7 +1587,7 @@ out_with_mtx:
 }
 
 static struct tcp_hpts_entry *
-tcp_choose_hpts_to_run()
+tcp_choose_hpts_to_run(void)
 {
 	int i, oldest_idx, start, end;
 	uint32_t cts, time_since_ran, calc;

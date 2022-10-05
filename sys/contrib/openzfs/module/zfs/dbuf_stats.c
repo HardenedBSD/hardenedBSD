@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -137,7 +137,7 @@ dbuf_stats_hash_table_data(char *buf, size_t size, void *data)
 	if (size)
 		buf[0] = 0;
 
-	rw_enter(DBUF_HASH_RWLOCK(h, dsh->idx), RW_READER);
+	mutex_enter(DBUF_HASH_MUTEX(h, dsh->idx));
 	for (db = h->hash_table[dsh->idx]; db != NULL; db = db->db_hash_next) {
 		/*
 		 * Returning ENOMEM will cause the data and header functions
@@ -158,7 +158,7 @@ dbuf_stats_hash_table_data(char *buf, size_t size, void *data)
 
 		mutex_exit(&db->db_mtx);
 	}
-	rw_exit(DBUF_HASH_RWLOCK(h, dsh->idx));
+	mutex_exit(DBUF_HASH_MUTEX(h, dsh->idx));
 
 	return (error);
 }

@@ -282,6 +282,7 @@ this packetization may cause significant delays.
 The boolean option
 .Dv TCP_NODELAY
 defeats this algorithm.
+
 .It Dv TCP_MAXSEG
 By default, a sender- and
 .No receiver- Ns Tn TCP
@@ -291,6 +292,17 @@ The
 .Dv TCP_MAXSEG
 option allows the user to determine the result of this negotiation,
 and to reduce it if desired.
+.It Dv TCP_MAXUNACKTIME
+This
+.Xr setsockopt 2
+option accepts an argument of
+.Vt "u_int"
+to set the per-socket interval, in seconds, in which the connection must
+make progress. Progress is defined by at least 1 byte being acknowledged within
+the set time period. If a connection fails to make progress, then the
+.Tn TCP
+stack will terminate the connection with a reset. Note that the default
+value for this is zero which indicates no progress checks should be made.
 .It Dv TCP_NOOPT
 .Tn TCP
 usually sends a number of options in each packet, corresponding to
@@ -495,6 +507,13 @@ Outgoing connections will request ECN.
 Allow incoming connections to request ECN.
 Outgoing connections will not request ECN.
 (default)
+.It 3
+Negotiate on incoming connection for Accurate ECN, ECN, or no ECN.
+Outgoing connections will request Accurate ECN and fall back to
+ECN depending on the capabilities of the server.
+.It 4
+Negotiate on incoming connection for Accurate ECN, ECN, or no ECN.
+Outgoing connections will not request ECN.
 .El
 .It Va ecn.maxretries
 Number of retries (SYN or SYN/ACK retransmits) before disabling ECN on a
@@ -873,7 +892,18 @@ minimum, which gives us an effective minimum of 200ms (similar to
 The initial value is used before an RTT measurement has been performed.
 .It Va rfc1323
 Implement the window scaling and timestamp options of RFC 1323/RFC 7323
-(default is true).
+(default is 1).
+Settings:
+.Bl -tag -compact
+.It 0
+Disable window scaling and timestamp option.
+.It 1
+Enable window scaling and timestamp option.
+.It 2
+Enable only window scaling.
+.It 3
+Enable only timestamp option.
+.El
 .It Va rfc3042
 Enable the Limited Transmit algorithm as described in RFC 3042.
 It helps avoid timeouts on lossy links and also when the congestion window

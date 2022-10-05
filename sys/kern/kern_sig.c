@@ -371,14 +371,13 @@ sigqueue_start(void)
 }
 
 ksiginfo_t *
-ksiginfo_alloc(int wait)
+ksiginfo_alloc(int mwait)
 {
-	int flags;
+	MPASS(mwait == M_WAITOK || mwait == M_NOWAIT);
 
-	flags = M_ZERO | (wait ? M_WAITOK : M_NOWAIT);
-	if (ksiginfo_zone != NULL)
-		return ((ksiginfo_t *)uma_zalloc(ksiginfo_zone, flags));
-	return (NULL);
+	if (ksiginfo_zone == NULL)
+		return (NULL);
+	return (uma_zalloc(ksiginfo_zone, mwait | M_ZERO));
 }
 
 void
@@ -387,14 +386,14 @@ ksiginfo_free(ksiginfo_t *ksi)
 	uma_zfree(ksiginfo_zone, ksi);
 }
 
-static __inline int
+static __inline bool
 ksiginfo_tryfree(ksiginfo_t *ksi)
 {
-	if (!(ksi->ksi_flags & KSI_EXT)) {
+	if ((ksi->ksi_flags & KSI_EXT) == 0) {
 		uma_zfree(ksiginfo_zone, ksi);
-		return (1);
+		return (true);
 	}
-	return (0);
+	return (false);
 }
 
 void
@@ -519,7 +518,7 @@ sigqueue_add(sigqueue_t *sq, int signo, ksiginfo_t *si)
 	if (p != NULL && p->p_pendingcnt >= max_pending_per_proc) {
 		signal_overflow++;
 		ret = EAGAIN;
-	} else if ((ksi = ksiginfo_alloc(0)) == NULL) {
+	} else if ((ksi = ksiginfo_alloc(M_NOWAIT)) == NULL) {
 		signal_alloc_fail++;
 		ret = EAGAIN;
 	} else {
@@ -1783,24 +1782,44 @@ struct killpg1_ctx {
 };
 
 static void
-killpg1_sendsig(struct proc *p, bool notself, struct killpg1_ctx *arg)
+killpg1_sendsig_locked(struct proc *p, struct killpg1_ctx *arg)
 {
 	int err;
 
-	if (p->p_pid <= 1 || (p->p_flag & P_SYSTEM) != 0 ||
-	    (notself && p == arg->td->td_proc) || p->p_state == PRS_NEW)
-		return;
-	PROC_LOCK(p);
 	err = p_cansignal(arg->td, p, arg->sig);
 	if (err == 0 && arg->sig != 0)
 		pksignal(p, arg->sig, arg->ksi);
-	PROC_UNLOCK(p);
 	if (err != ESRCH)
 		arg->found = true;
 	if (err == 0)
 		arg->sent = true;
 	else if (arg->ret == 0 && err != ESRCH && err != EPERM)
 		arg->ret = err;
+}
+
+static void
+killpg1_sendsig(struct proc *p, bool notself, struct killpg1_ctx *arg)
+{
+
+	if (p->p_pid <= 1 || (p->p_flag & P_SYSTEM) != 0 ||
+	    (notself && p == arg->td->td_proc) || p->p_state == PRS_NEW)
+		return;
+
+	PROC_LOCK(p);
+	killpg1_sendsig_locked(p, arg);
+	PROC_UNLOCK(p);
+}
+
+static void
+kill_processes_prison_cb(struct proc *p, void *arg)
+{
+	struct killpg1_ctx *ctx = arg;
+
+	if (p->p_pid <= 1 || (p->p_flag & P_SYSTEM) != 0 ||
+	    (p == ctx->td->td_proc) || p->p_state == PRS_NEW)
+		return;
+
+	killpg1_sendsig_locked(p, ctx);
 }
 
 /*
@@ -1824,11 +1843,8 @@ killpg1(struct thread *td, int sig, int pgid, int all, ksiginfo_t *ksi)
 		/*
 		 * broadcast
 		 */
-		sx_slock(&allproc_lock);
-		FOREACH_PROC_IN_SYSTEM(p) {
-			killpg1_sendsig(p, true, &arg);
-		}
-		sx_sunlock(&allproc_lock);
+		prison_proc_iterate(td->td_ucred->cr_prison,
+		    kill_processes_prison_cb, &arg);
 	} else {
 		sx_slock(&proctree_lock);
 		if (pgid == 0) {
@@ -2271,7 +2287,7 @@ tdsendsignal(struct proc *p, struct thread *td, int sig, ksiginfo_t *ksi)
 	 * IEEE Std 1003.1-2001: return success when killing a zombie.
 	 */
 	if (p->p_state == PRS_ZOMBIE) {
-		if (ksi && (ksi->ksi_flags & KSI_INS))
+		if (ksi != NULL && (ksi->ksi_flags & KSI_INS) != 0)
 			ksiginfo_tryfree(ksi);
 		return (ret);
 	}
@@ -2301,7 +2317,7 @@ tdsendsignal(struct proc *p, struct thread *td, int sig, ksiginfo_t *ksi)
 			SDT_PROBE3(proc, , , signal__discard, td, p, sig);
 
 			mtx_unlock(&ps->ps_mtx);
-			if (ksi && (ksi->ksi_flags & KSI_INS))
+			if (ksi != NULL && (ksi->ksi_flags & KSI_INS) != 0)
 				ksiginfo_tryfree(ksi);
 			return (ret);
 		} else {
@@ -2334,7 +2350,7 @@ tdsendsignal(struct proc *p, struct thread *td, int sig, ksiginfo_t *ksi)
 		if ((prop & SIGPROP_TTYSTOP) != 0 &&
 		    (p->p_pgrp->pg_flags & PGRP_ORPHANED) != 0 &&
 		    action == SIG_DFL) {
-			if (ksi && (ksi->ksi_flags & KSI_INS))
+			if (ksi != NULL && (ksi->ksi_flags & KSI_INS) != 0)
 				ksiginfo_tryfree(ksi);
 			return (ret);
 		}

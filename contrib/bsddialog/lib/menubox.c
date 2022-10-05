@@ -36,7 +36,6 @@
 #include "bsddialog_theme.h"
 #include "lib_util.h"
 
-#define DEPTH       2
 #define MIN_HEIGHT  VBORDERS + 6 /* 2 buttons 1 text 3 menu */
 
 enum menumode {
@@ -177,9 +176,10 @@ getfastprev(int menurows, struct privateitem *pritems, int abs)
 
 static int
 getnextshortcut(struct bsddialog_conf *conf, int npritems,
-    struct privateitem *pritems, int abs, int key)
+    struct privateitem *pritems, int abs, wint_t key)
 {
-	int i, ch, next;
+	int i, next;
+	wchar_t wch;
 
 	next = -1;
 	for (i = 0; i < npritems; i++) {
@@ -187,11 +187,11 @@ getnextshortcut(struct bsddialog_conf *conf, int npritems,
 			continue;
 
 		if (conf->menu.no_name)
-			ch = pritems[i].item->desc[0];
+			mbtowc(&wch, pritems[i].item->desc, MB_CUR_MAX);
 		else
-			ch = pritems[i].item->name[0];
+			mbtowc(&wch, pritems[i].item->name, MB_CUR_MAX);
 
-		if (ch == key) {
+		if (wch == (wchar_t)key) {
 			if (i > abs)
 				return (i);
 
@@ -236,12 +236,12 @@ drawseparators(struct bsddialog_conf *conf, WINDOW *pad, int linelen,
 		}
 		name = pritems[i].item->name;
 		desc = pritems[i].item->desc;
-		labellen = strlen(name) + strlen(desc) + 1;
+		labellen = strcols(name) + strcols(desc) + 1;
 		wmove(pad, i, labellen < linelen ? linelen/2 - labellen/2 : 0);
 		wattron(pad, t.menu.namesepcolor);
 		waddstr(pad, name);
 		wattroff(pad, t.menu.namesepcolor);
-		if (strlen(name) > 0 && strlen(desc) > 0)
+		if (strcols(name) > 0 && strcols(desc) > 0)
 			waddch(pad, ' ');
 		wattron(pad, t.menu.descsepcolor);
 		waddstr(pad, desc);
@@ -254,7 +254,7 @@ drawitem(struct bsddialog_conf *conf, WINDOW *pad, int y,
     struct lineposition pos, struct privateitem *pritem, bool focus)
 {
 	int colordesc, colorname, colorshortcut;
-	const char *shortcut;
+	wchar_t shortcut;
 	struct bsddialog_menuitem *item;
 
 	item = pritem->item;
@@ -276,7 +276,7 @@ drawitem(struct bsddialog_conf *conf, WINDOW *pad, int y,
 	colorname = focus ? t.menu.f_namecolor : t.menu.namecolor;
 	if (conf->menu.no_name == false) {
 		wattron(pad, colorname);
-		mvwaddstr(pad, y, pos.xname + item->depth * DEPTH, item->name);
+		mvwaddstr(pad, y, pos.xname + item->depth, item->name);
 		wattroff(pad, colorname);
 	}
 
@@ -289,8 +289,7 @@ drawitem(struct bsddialog_conf *conf, WINDOW *pad, int y,
 	if (conf->menu.no_desc == false) {
 		wattron(pad, colordesc);
 		if (conf->menu.no_name)
-			mvwaddstr(pad, y, pos.xname + item->depth * DEPTH,
-			    item->desc);
+			mvwaddstr(pad, y, pos.xname + item->depth, item->desc);
 		else
 			mvwaddstr(pad, y, pos.xdesc, item->desc);
 		wattroff(pad, colordesc);
@@ -303,21 +302,44 @@ drawitem(struct bsddialog_conf *conf, WINDOW *pad, int y,
 		wattron(pad, colorshortcut);
 
 		if (conf->menu.no_name)
-			shortcut = item->desc;
+			mbtowc(&shortcut, item->desc, MB_CUR_MAX);
 		else
-			shortcut = item->name;
-		wmove(pad, y, pos.xname + item->depth * DEPTH);
-		if (shortcut != NULL && shortcut[0] != '\0')
-			waddch(pad, shortcut[0]);
-	wattroff(pad, colorshortcut);
+			mbtowc(&shortcut, item->name, MB_CUR_MAX);
+		mvwaddwch(pad, y, pos.xname + item->depth, shortcut);
+		wattroff(pad, colorshortcut);
 	}
 
 	/* bottom description */
 	move(SCREENLINES - 1, 2);
 	clrtoeol();
 	if (item->bottomdesc != NULL && focus) {
+		attron(t.menu.bottomdesccolor);
 		addstr(item->bottomdesc);
+		attroff(t.menu.bottomdesccolor);
 		refresh();
+	}
+}
+
+/* the caller has to call prefresh(menupad, ymenupad, 0, ys, xs, ye, xe); */
+static void
+update_menuwin(struct bsddialog_conf *conf, WINDOW *menuwin, int h, int w,
+    int totnitems, unsigned int menurows, int ymenupad)
+{
+	draw_borders(conf, menuwin, h, w, LOWERED);
+
+	if (totnitems > (int)menurows) {
+		wattron(menuwin, t.dialog.arrowcolor);
+		if (ymenupad > 0)
+			mvwhline(menuwin, 0, 2,
+			    conf->ascii_lines ? '^' : ACS_UARROW, 3);
+
+		if ((ymenupad + (int)menurows) < totnitems)
+			mvwhline(menuwin, h-1, 2,
+			    conf->ascii_lines ? 'v' : ACS_DARROW, 3);
+
+		mvwprintw(menuwin, h-1, w-6, "%3d%%",
+		    100 * (ymenupad + menurows) / totnitems);
+		wattroff(menuwin, t.dialog.arrowcolor);
 	}
 }
 
@@ -338,36 +360,37 @@ menu_autosize(struct bsddialog_conf *conf, int rows, int cols, int *h, int *w,
 	} else
 		notext += *menurows;
 
-	/* cols autosize, rows autosize, rows fullscreen, menu particularity */
-	if (cols == BSDDIALOG_AUTOSIZE || rows <= BSDDIALOG_AUTOSIZE) {
-		if (text_size(conf, rows, cols, text, &bs, notext, linelen + 4,
-		    &htext, &wtext) != 0)
-			return (BSDDIALOG_ERROR);
-	}
+	if (text_size(conf, rows, cols, text, &bs, notext, linelen + 4, &htext,
+	    &wtext) != 0)
+		return (BSDDIALOG_ERROR);
 
 	if (cols == BSDDIALOG_AUTOSIZE)
 		*w = widget_min_width(conf, wtext, linelen + 4, &bs);
 
 	if (rows == BSDDIALOG_AUTOSIZE) {
-		if (*menurows == 0) {
+		if (*menurows == BSDDIALOG_AUTOSIZE) {
 			menusize = widget_max_height(conf) - HBORDERS -
 			     2 /*buttons*/ - htext;
 			menusize = MIN(menusize, nitems + 2);
 			*menurows = menusize - 2 < 0 ? 0 : menusize - 2;
-		}
-		else /* h autosize with fixed menurows */
+		} else /* h autosize with fixed menurows */
 			menusize = *menurows + 2;
 
 		*h = widget_min_height(conf, htext, menusize, true);
-		/*
-		 * avoid menurows overflow and
-		 * with rows=AUTOSIZE menurows!=0 becomes max-menurows
-		 */
-		*menurows = MIN(*h - 6 - htext, (int)*menurows);
-	} else {
-		if (*menurows == 0)
-			*menurows = MIN(*h-6-htext, nitems);
+	} else { /* fixed rows */
+		if (*menurows == BSDDIALOG_AUTOSIZE) {
+			if (*h - 6 - htext <= 0)
+				*menurows = 0; /* menu_checksize() will check */
+			else
+				*menurows = MIN(*h-6-htext, nitems);
+		}
 	}
+
+	/* avoid menurows overflow and menurows becomes at most menurows */
+	if (*h - 6 - htext <= 0)
+		*menurows = 0; /* menu_checksize() will check */
+	else
+		*menurows = MIN(*h - 6 - htext, (int)*menurows);
 
 	return (0);
 }
@@ -380,8 +403,7 @@ menu_checksize(int rows, int cols, const char *text, int menurows, int nitems,
 
 	mincols = VBORDERS;
 	/* buttons */
-	mincols += buttons_width(bs);
-
+	mincols += buttons_min_width(bs);
 	/*
 	 * linelen check, comment to allow some hidden col otherwise portconfig
 	 * could not show big menus like www/apache24
@@ -392,11 +414,11 @@ menu_checksize(int rows, int cols, const char *text, int menurows, int nitems,
 		RETURN_ERROR("Few cols, width < size buttons or "
 		    "name + descripion of the items");
 
-	textrow = text != NULL && strlen(text) > 0 ? 1 : 0;
+	textrow = text != NULL && text[0] != '\0' ? 1 : 0;
 
 	if (nitems > 0 && menurows == 0)
-		RETURN_ERROR("items > 0 but menurows == 0, probably terminal "
-		    "too small");
+		RETURN_ERROR("items > 0 but menurows == 0, if menurows = 0 "
+		    "terminal too small");
 
 	menusize = nitems > 0 ? 3 : 0;
 	if (rows < 2  + 2 + menusize + textrow)
@@ -405,37 +427,15 @@ menu_checksize(int rows, int cols, const char *text, int menurows, int nitems,
 	return (0);
 }
 
-/* the caller has to call prefresh(menupad, ymenupad, 0, ys, xs, ye, xe); */
-static void
-update_menuwin(struct bsddialog_conf *conf, WINDOW *menuwin, int h, int w,
-    int totnitems, unsigned int menurows, int ymenupad)
-{
-	draw_borders(conf, menuwin, h, w, LOWERED);
-
-	if (totnitems > (int)menurows) {
-		wattron(menuwin, t.dialog.arrowcolor);
-
-		if (ymenupad > 0)
-			mvwprintw(menuwin, 0, 2, "^^^");
-
-		if ((ymenupad + (int)menurows) < totnitems)
-			mvwprintw(menuwin, h-1, 2, "vvv");
-
-		wattroff(menuwin, t.dialog.arrowcolor);
-
-		mvwprintw(menuwin, h-1, w-10, "%3d%%",
-		    100 * (ymenupad + menurows) / totnitems);
-	}
-}
-
 static int
 do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
     unsigned int menurows, enum menumode mode, unsigned int ngroups,
     struct bsddialog_menugroup *groups, int *focuslist, int *focusitem)
 {
 	bool loop, onetrue, movefocus, automenurows, shortcut_butts;
-	int i, j, y, x, h, w, output, input;
+	int i, j, y, x, h, w, retval;
 	int ymenupad, ys, ye, xs, xe, abs, next, totnitems;
+	wint_t input;
 	WINDOW  *shadow, *widget, *textpad, *menuwin, *menupad;
 	struct buttons bs;
 	struct lineposition pos = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -458,19 +458,18 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 
 			if (groups[i].type == BSDDIALOG_SEPARATOR) {
 				pos.maxsepstr = MAX(pos.maxsepstr,
-				    strlen(item->name) + strlen(item->desc));
+				    strcols(item->name) + strcols(item->desc));
 				continue;
 			}
 
-			pos.maxprefix = MAX(pos.maxprefix,strlen(item->prefix));
+			pos.maxprefix = MAX(pos.maxprefix,strcols(item->prefix));
 			pos.maxdepth  = MAX(pos.maxdepth, item->depth);
-			pos.maxname   = MAX(pos.maxname, strlen(item->name));
-			pos.maxdesc   = MAX(pos.maxdesc, strlen(item->desc));
+			pos.maxname   = MAX(pos.maxname, strcols(item->name));
+			pos.maxdesc   = MAX(pos.maxdesc, strcols(item->desc));
 		}
 	}
 	pos.maxname = conf->menu.no_name ? 0 : pos.maxname;
 	pos.maxdesc = conf->menu.no_desc ? 0 : pos.maxdesc;
-	pos.maxdepth = DEPTH * pos.maxdepth;
 
 	pos.xselector = pos.maxprefix + (pos.maxprefix != 0 ? 1 : 0);
 	pos.xname = pos.xselector + pos.selectorlen +
@@ -478,7 +477,6 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 	pos.xdesc = pos.maxdepth + pos.xname + pos.maxname;
 	pos.xdesc += (pos.maxname != 0 ? 1 : 0);
 	pos.line = MAX(pos.maxsepstr + 3, pos.xdesc + pos.maxdesc);
-
 
 	get_buttons(conf, &bs, BUTTON_OK_LABEL, BUTTON_CANCEL_LABEL);
 
@@ -498,11 +496,11 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 
 	doupdate();
 
-	prefresh(textpad, 0, 0, y + 1, x + 1 + TEXTHMARGIN,
-	    y + h - menurows, x + 1 + w - TEXTHMARGIN);
+	prefresh(textpad, 0, 0, y + 1, x + 1 + TEXTHMARGIN, y + h - menurows,
+	    x + 1 + w - TEXTHMARGIN);
 
 	menuwin = new_boxed_window(conf, y + h - 5 - menurows, x + 2,
-	    menurows+2, w-4, LOWERED);
+	    menurows + 2, w - 4, LOWERED);
 
 	menupad = newpad(totnitems, pos.line);
 	wbkgd(menupad, t.dialog.color);
@@ -562,22 +560,23 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 	movefocus = false;
 	loop = true;
 	while (loop) {
-		input = getch();
+		if (get_wch(&input) == ERR)
+			continue;
 		switch(input) {
 		case KEY_ENTER:
 		case 10: /* Enter */
-			output = bs.value[bs.curr];
+			retval = bs.value[bs.curr];
 			if (abs >= 0 && pritems[abs].type == MENUMODE)
 				pritems[abs].on = true;
-			set_on_output(conf, output, ngroups, groups, pritems);
+			set_on_output(conf, retval, ngroups, groups, pritems);
 			loop = false;
 			break;
 		case 27: /* Esc */
 			if (conf->key.enable_esc) {
-				output = BSDDIALOG_ESC;
+				retval = BSDDIALOG_ESC;
 				if (abs >= 0 && pritems[abs].type == MENUMODE)
 					pritems[abs].on = true;
-				set_on_output(conf, output, ngroups, groups,
+				set_on_output(conf, retval, ngroups, groups,
 				    pritems);
 				loop = false;
 			}
@@ -691,11 +690,15 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 			movefocus = next != abs;
 			break;
 		case ' ': /* Space */
-			if (pritems[abs].type == MENUMODE)
-				break;
-			else if (pritems[abs].type == CHECKLISTMODE)
+			if (pritems[abs].type == MENUMODE) {
+				retval = bs.value[bs.curr];
+				pritems[abs].on = true;
+				set_on_output(conf, retval, ngroups, groups,
+				    pritems);
+				loop = false;
+			} else if (pritems[abs].type == CHECKLISTMODE) {
 				pritems[abs].on = !pritems[abs].on;
-			else { /* RADIOLISTMODE */
+			} else { /* RADIOLISTMODE */
 				for (i = abs - pritems[abs].index;
 				    i < totnitems &&
 				    pritems[i].group == pritems[abs].group;
@@ -714,10 +717,10 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 		default:
 			if (shortcut_butts) {
 				if (shortcut_buttons(input, &bs)) {
-					output = bs.value[bs.curr];
+					retval = bs.value[bs.curr];
 					if (pritems[abs].type == MENUMODE)
 						pritems[abs].on = true;
-					set_on_output(conf, output, ngroups,
+					set_on_output(conf, retval, ngroups,
 					    groups, pritems);
 					loop = false;
 				}
@@ -728,7 +731,7 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 			next = getnextshortcut(conf, totnitems, pritems, abs,
 			    input);
 			movefocus = next != abs;
-		}
+		} /* end switch handler */
 
 		if (movefocus) {
 			drawitem(conf, menupad, abs, pos, &pritems[abs], false);
@@ -744,7 +747,7 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 			prefresh(menupad, ymenupad, 0, ys, xs, ye, xe);
 			movefocus = false;
 		}
-	}
+	} /* end while handler */
 
 	if (focuslist != NULL)
 		*focuslist = abs < 0 ? -1 : pritems[abs].group;
@@ -756,7 +759,7 @@ do_mixedlist(struct bsddialog_conf *conf, const char *text, int rows, int cols,
 	end_dialog(conf, shadow, widget, textpad);
 	free(pritems);
 
-	return (output);
+	return (retval);
 }
 
 /* API */
@@ -765,12 +768,12 @@ bsddialog_mixedlist(struct bsddialog_conf *conf, const char *text, int rows,
     int cols, unsigned int menurows, unsigned int ngroups,
     struct bsddialog_menugroup *groups, int *focuslist, int *focusitem)
 {
-	int output;
+	int retval;
 
-	output = do_mixedlist(conf, text, rows, cols, menurows, MIXEDLISTMODE,
+	retval = do_mixedlist(conf, text, rows, cols, menurows, MIXEDLISTMODE,
 	    ngroups, groups, focuslist, focusitem);
 
-	return (output);
+	return (retval);
 }
 
 int
@@ -778,14 +781,14 @@ bsddialog_checklist(struct bsddialog_conf *conf, const char *text, int rows,
     int cols, unsigned int menurows, unsigned int nitems,
     struct bsddialog_menuitem *items, int *focusitem)
 {
-	int output, focuslist = 0;
+	int retval, focuslist = 0;
 	struct bsddialog_menugroup group = {
 	    BSDDIALOG_CHECKLIST /* unused */, nitems, items};
 
-	output = do_mixedlist(conf, text, rows, cols, menurows, CHECKLISTMODE,
+	retval = do_mixedlist(conf, text, rows, cols, menurows, CHECKLISTMODE,
 	    1, &group, &focuslist, focusitem);
 
-	return (output);
+	return (retval);
 }
 
 int
@@ -793,14 +796,14 @@ bsddialog_menu(struct bsddialog_conf *conf, const char *text, int rows,
     int cols, unsigned int menurows, unsigned int nitems,
     struct bsddialog_menuitem *items, int *focusitem)
 {
-	int output, focuslist = 0;
+	int retval, focuslist = 0;
 	struct bsddialog_menugroup group = {
 	    BSDDIALOG_CHECKLIST /* unused */, nitems, items};
 
-	output = do_mixedlist(conf, text, rows, cols, menurows, MENUMODE, 1,
+	retval = do_mixedlist(conf, text, rows, cols, menurows, MENUMODE, 1,
 	    &group, &focuslist, focusitem);
 
-	return (output);
+	return (retval);
 }
 
 int
@@ -808,12 +811,12 @@ bsddialog_radiolist(struct bsddialog_conf *conf, const char *text, int rows,
     int cols, unsigned int menurows, unsigned int nitems,
     struct bsddialog_menuitem *items, int *focusitem)
 {
-	int output, focuslist = 0;
+	int retval, focuslist = 0;
 	struct bsddialog_menugroup group = {
 	    BSDDIALOG_RADIOLIST /* unused */, nitems, items};
 
-	output = do_mixedlist(conf, text, rows, cols, menurows, RADIOLISTMODE,
+	retval = do_mixedlist(conf, text, rows, cols, menurows, RADIOLISTMODE,
 	    1, &group, &focuslist, focusitem);
 
-	return (output);
+	return (retval);
 }

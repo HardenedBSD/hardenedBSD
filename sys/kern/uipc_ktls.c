@@ -1631,8 +1631,10 @@ ktls_reset_receive_tag(void *context, int pending)
 	}
 
 	SOCKBUF_LOCK(&so->so_rcv);
-	m_snd_tag_rele(tls->snd_tag);
+	mst = tls->snd_tag;
 	tls->snd_tag = NULL;
+	if (mst != NULL)
+		m_snd_tag_rele(mst);
 
 	ifp = tls->rx_ifp;
 	if_ref(ifp);
@@ -2366,7 +2368,7 @@ ktls_decrypt(struct socket *so)
 			counter_u64_add(ktls_offload_corrupted_records, 1);
 
 			CURVNET_SET(so->so_vnet);
-			so->so_proto->pr_usrreqs->pru_abort(so);
+			so->so_proto->pr_abort(so);
 			so->so_error = error;
 			CURVNET_RESTORE();
 			goto deref;
@@ -2890,9 +2892,9 @@ ktls_encrypt(struct ktls_wq *wq, struct mbuf *top)
 
 	CURVNET_SET(so->so_vnet);
 	if (error == 0) {
-		(void)(*so->so_proto->pr_usrreqs->pru_ready)(so, top, npages);
+		(void)so->so_proto->pr_ready(so, top, npages);
 	} else {
-		so->so_proto->pr_usrreqs->pru_abort(so);
+		so->so_proto->pr_abort(so);
 		so->so_error = EIO;
 		mb_free_notready(top, total_pages);
 	}
@@ -2934,9 +2936,9 @@ ktls_encrypt_cb(struct ktls_ocf_encrypt_state *state, int error)
 	npages = m->m_epg_nrdy;
 
 	if (error == 0) {
-		(void)(*so->so_proto->pr_usrreqs->pru_ready)(so, m, npages);
+		(void)so->so_proto->pr_ready(so, m, npages);
 	} else {
-		so->so_proto->pr_usrreqs->pru_abort(so);
+		so->so_proto->pr_abort(so);
 		so->so_error = EIO;
 		mb_free_notready(m, npages);
 	}
@@ -3001,7 +3003,7 @@ ktls_encrypt_async(struct ktls_wq *wq, struct mbuf *top)
 
 	CURVNET_SET(so->so_vnet);
 	if (error != 0) {
-		so->so_proto->pr_usrreqs->pru_abort(so);
+		so->so_proto->pr_abort(so);
 		so->so_error = EIO;
 		mb_free_notready(m, total_pages - npages);
 	}

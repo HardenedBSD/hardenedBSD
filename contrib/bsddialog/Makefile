@@ -4,18 +4,18 @@
 # Written in 2021 by Alfonso Sabato Siciliano
 
 OUTPUT=  bsddialog
-SOURCES= bsddialog.c
+SOURCES= bsddialog.c util_theme.c
 OBJECTS= ${SOURCES:.c=.o}
 LIBPATH= ${.CURDIR}/lib
 LIBBSDDIALOG= ${LIBPATH}/libbsddialog.so
 
-CFLAGS+= -I${LIBPATH} -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter
+CFLAGS+= -I${LIBPATH} -std=gnu99 -Wall -Wextra -Werror
 # `make -DDEBUG`
 .if defined(DEBUG)
 CFLAGS= -g -Wall -I${LIBPATH}
 LIBDEBUG= -DDEBUG
 .endif
-LDFLAGS+= -Wl,-rpath=${LIBPATH} -L${LIBPATH} -lbsddialog
+LDFLAGS+= -ltinfow -Wl,-rpath=${LIBPATH} -L${LIBPATH} -lbsddialog
 
 BINDIR= /usr/local/bin
 MAN= ${OUTPUT}.1

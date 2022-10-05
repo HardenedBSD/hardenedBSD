@@ -324,6 +324,8 @@ SE_DIRS+=	sound
 SE_SOUND= \
 	basic.c \
 	ossinit.h \
+	ossmidi.h \
+	midi.c \
 	README
 
 SE_DIRS+=	sunrpc

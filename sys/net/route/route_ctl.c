@@ -82,9 +82,11 @@ static int change_route_byinfo(struct rib_head *rnh, struct rtentry *rt,
 
 static int add_route_flags(struct rib_head *rnh, struct rtentry *rt,
     struct route_nhop_data *rnd_add, int op_flags, struct rib_cmd_info *rc);
+#ifdef ROUTE_MPATH
 static int add_route_flags_mpath(struct rib_head *rnh, struct rtentry *rt,
     struct route_nhop_data *rnd_add, struct route_nhop_data *rnd_orig,
     int op_flags, struct rib_cmd_info *rc);
+#endif
 
 static int add_route(struct rib_head *rnh, struct rtentry *rt,
     struct route_nhop_data *rnd, struct rib_cmd_info *rc);
@@ -132,7 +134,7 @@ uint8_t mpath_entropy_key[MPATH_ENTROPY_KEY_LEN] = {
 #if defined(INET) && defined(INET6)
 FEATURE(ipv4_rfc5549_support, "Route IPv4 packets via IPv6 nexthops");
 #define V_rib_route_ipv6_nexthop VNET(rib_route_ipv6_nexthop)
-VNET_DEFINE(u_int, rib_route_ipv6_nexthop) = 1;
+VNET_DEFINE_STATIC(u_int, rib_route_ipv6_nexthop) = 1;
 SYSCTL_UINT(_net_route, OID_AUTO, ipv6_nexthop, CTLFLAG_RW | CTLFLAG_VNET,
     &VNET_NAME(rib_route_ipv6_nexthop), 0, "Enable IPv4 route via IPv6 Next Hop address");
 #endif
@@ -155,16 +157,10 @@ get_rnh(uint32_t fibnum, const struct rt_addrinfo *info)
 }
 
 #if defined(INET) && defined(INET6)
-static bool
-rib_can_ipv6_nexthop_address(struct rib_head *rh)
+bool
+rib_can_4o6_nhop(void)
 {
-	int result;
-
-	CURVNET_SET(rh->rib_vnet);
-	result = !!V_rib_route_ipv6_nexthop;
-	CURVNET_RESTORE();
-
-	return (result);
+	return (!!V_rib_route_ipv6_nexthop);
 }
 #endif
 
@@ -288,13 +284,28 @@ match_nhop_gw(const struct nhop_object *nh, const struct sockaddr *gw)
 	return (false);
 }
 
+/*
+ * Matches all nexthop with given @gw.
+ * Can be used as rib_filter_f callback.
+ */
+int
+rib_match_gw(const struct rtentry *rt, const struct nhop_object *nh, void *gw_sa)
+{
+	const struct sockaddr *gw = (const struct sockaddr *)gw_sa;
+
+	return (match_nhop_gw(nh, gw));
+}
+
 struct gw_filter_data {
 	const struct sockaddr *gw;
 	int count;
 };
 
+/*
+ * Matches first occurence of the gateway provided in @gwd
+ */
 static int
-gw_filter_func(const struct rtentry *rt, const struct nhop_object *nh, void *_data)
+match_gw_one(const struct rtentry *rt, const struct nhop_object *nh, void *_data)
 {
 	struct gw_filter_data *gwd = (struct gw_filter_data *)_data;
 
@@ -383,17 +394,22 @@ static bool
 fill_pxmask_family(int family, int plen, struct sockaddr *_dst,
     struct sockaddr **pmask)
 {
+	if (plen == -1) {
+		*pmask = NULL;
+		return (true);
+	}
+
 	switch (family) {
 #ifdef INET
 	case AF_INET:
 		{
-			struct sockaddr_in *mask = (struct sockaddr_in *)pmask;
+			struct sockaddr_in *mask = (struct sockaddr_in *)(*pmask);
 			struct sockaddr_in *dst= (struct sockaddr_in *)_dst;
 
 			memset(mask, 0, sizeof(*mask));
 			mask->sin_family = family;
 			mask->sin_len = sizeof(*mask);
-			if (plen == 32 || plen == -1)
+			if (plen == 32)
 				*pmask = NULL;
 			else if (plen > 32 || plen < 0)
 				return (false);
@@ -412,13 +428,13 @@ fill_pxmask_family(int family, int plen, struct sockaddr *_dst,
 #ifdef INET6
 	case AF_INET6:
 		{
-			struct sockaddr_in6 *mask = (struct sockaddr_in6 *)pmask;
+			struct sockaddr_in6 *mask = (struct sockaddr_in6 *)(*pmask);
 			struct sockaddr_in6 *dst = (struct sockaddr_in6 *)_dst;
 
 			memset(mask, 0, sizeof(*mask));
 			mask->sin6_family = family;
 			mask->sin6_len = sizeof(*mask);
-			if (plen == 128 || plen == -1)
+			if (plen == 128)
 				*pmask = NULL;
 			else if (plen > 128 || plen < 0)
 				return (false);
@@ -447,12 +463,12 @@ fill_pxmask_family(int family, int plen, struct sockaddr *_dst,
  * Returns 0 on success.
  */
 int
-rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
     struct route_nhop_data *rnd, int op_flags, struct rib_cmd_info *rc)
 {
 	union sockaddr_union mask_storage;
 	struct sockaddr *netmask = &mask_storage.sa;
-	struct rtentry *rt;
+	struct rtentry *rt = NULL;
 
 	NET_EPOCH_ASSERT();
 
@@ -469,14 +485,10 @@ rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
 	}
 
 	if (op_flags & RTM_F_CREATE) {
-		if ((rt = rt_alloc(rnh, dst, netmask)) == NULL)
+		if ((rt = rt_alloc(rnh, dst, netmask)) == NULL) {
+			FIB_RH_LOG(LOG_INFO, rnh, "rtentry allocation failed");
 			return (ENOMEM);
-	} else {
-		struct route_nhop_data rnd_tmp;
-
-		rt = lookup_prefix_bysa(rnh, dst, netmask, &rnd_tmp);
-		if (rt == NULL)
-			return (ESRCH);
+		}
 	}
 
 	return (add_route_flags(rnh, rt, rnd, op_flags, rc));
@@ -496,12 +508,12 @@ rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
  * Returns 0 on success.
  */
 int
-rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, int plen,
     const struct sockaddr *gw, int op_flags, struct rib_cmd_info *rc)
 {
 	struct gw_filter_data gwd = { .gw = gw };
 
-	return (rib_del_route_px(fibnum, dst, plen, gw_filter_func, &gwd, op_flags, rc));
+	return (rib_del_route_px(fibnum, dst, plen, match_gw_one, &gwd, op_flags, rc));
 }
 
 /*
@@ -519,7 +531,7 @@ rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
  * Returns 0 on success.
  */
 int
-rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
     rib_filter_f_t *filter_func, void *filter_arg, int op_flags,
     struct rib_cmd_info *rc)
 {
@@ -580,6 +592,73 @@ rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
 }
 
 /*
+ * Tries to copy route @rt from one rtable to the rtable specified by @dst_rh.
+ * @rt: route to copy.
+ * @rnd_src: nhop and weight. Multipath routes are not supported
+ * @rh_dst: target rtable.
+ * @rc: operation result storage
+ *
+ * Return 0 on success.
+ */
+int
+rib_copy_route(struct rtentry *rt, const struct route_nhop_data *rnd_src,
+    struct rib_head *rh_dst, struct rib_cmd_info *rc)
+{
+	struct nhop_object __diagused *nh_src = rnd_src->rnd_nhop;
+	int error;
+
+	MPASS((nh_src->nh_flags & NHF_MULTIPATH) == 0);
+
+	IF_DEBUG_LEVEL(LOG_DEBUG2) {
+		char nhbuf[NHOP_PRINT_BUFSIZE], rtbuf[NHOP_PRINT_BUFSIZE];
+		nhop_print_buf_any(nh_src, nhbuf, sizeof(nhbuf));
+		rt_print_buf(rt, rtbuf, sizeof(rtbuf));
+		FIB_RH_LOG(LOG_DEBUG2, rh_dst, "copying %s -> %s from fib %u",
+		    rtbuf, nhbuf, nhop_get_fibnum(nh_src));
+	}
+	struct nhop_object *nh = nhop_alloc(rh_dst->rib_fibnum, rh_dst->rib_family);
+	if (nh == NULL) {
+		FIB_RH_LOG(LOG_INFO, rh_dst, "unable to allocate new nexthop");
+		return (ENOMEM);
+	}
+	nhop_copy(nh, rnd_src->rnd_nhop);
+	nhop_set_origin(nh, nhop_get_origin(rnd_src->rnd_nhop));
+	nhop_set_fibnum(nh, rh_dst->rib_fibnum);
+	nh = nhop_get_nhop_internal(rh_dst, nh, &error);
+	if (error != 0) {
+		FIB_RH_LOG(LOG_INFO, rh_dst,
+		    "unable to finalize new nexthop: error %d", error);
+		return (ENOMEM);
+	}
+
+	struct rtentry *rt_new = rt_alloc(rh_dst, rt_key(rt), rt_mask(rt));
+	if (rt_new == NULL) {
+		FIB_RH_LOG(LOG_INFO, rh_dst, "unable to create new rtentry");
+		nhop_free(nh);
+		return (ENOMEM);
+	}
+
+	struct route_nhop_data rnd = {
+		.rnd_nhop = nh,
+		.rnd_weight = rnd_src->rnd_weight
+	};
+	int op_flags = RTM_F_CREATE | (NH_IS_PINNED(nh) ? RTM_F_FORCE : 0);
+	error = add_route_flags(rh_dst, rt_new, &rnd, op_flags, rc);
+
+	if (error != 0) {
+		IF_DEBUG_LEVEL(LOG_DEBUG2) {
+			char buf[NHOP_PRINT_BUFSIZE];
+			rt_print_buf(rt_new, buf, sizeof(buf));
+			FIB_RH_LOG(LOG_DEBUG, rh_dst,
+			    "Unable to add route %s: error %d", buf, error);
+		}
+		nhop_free(nh);
+		rt_free_immediate(rt_new);
+	}
+	return (error);
+}
+
+/*
  * Adds route defined by @info into the kernel table specified by @fibnum and
  * sa_family in @info->rti_info[RTAX_DST].
  *
@@ -619,30 +698,6 @@ rib_add_route(uint32_t fibnum, struct rt_addrinfo *info,
 	return (error);
 }
 
-/*
- * Checks if @dst and @gateway is valid combination.
- *
- * Returns true if is valid, false otherwise.
- */
-static bool
-check_gateway(struct rib_head *rnh, struct sockaddr *dst,
-    struct sockaddr *gateway)
-{
-	if (dst->sa_family == gateway->sa_family)
-		return (true);
-	else if (gateway->sa_family == AF_UNSPEC)
-		return (true);
-	else if (gateway->sa_family == AF_LINK)
-		return (true);
-#if defined(INET) && defined(INET6)
-	else if (dst->sa_family == AF_INET && gateway->sa_family == AF_INET6 &&
-		rib_can_ipv6_nexthop_address(rnh))
-		return (true);
-#endif
-	else
-		return (false);
-}
-
 static int
 add_route_byinfo(struct rib_head *rnh, struct rt_addrinfo *info,
     struct rib_cmd_info *rc)
@@ -661,7 +716,7 @@ add_route_byinfo(struct rib_head *rnh, struct rt_addrinfo *info,
 		FIB_RH_LOG(LOG_DEBUG, rnh, "error: RTF_GATEWAY set with empty gw");
 		return (EINVAL);
 	}
-	if (dst && gateway && !check_gateway(rnh, dst, gateway)) {
+	if (dst && gateway && !nhop_check_gateway(dst->sa_family, gateway->sa_family)) {
 		FIB_RH_LOG(LOG_DEBUG, rnh,
 		    "error: invalid dst/gateway family combination (%d, %d)",
 		    dst->sa_family, gateway->sa_family);
@@ -720,7 +775,7 @@ add_route_flags(struct rib_head *rnh, struct rtentry *rt, struct route_nhop_data
 		if (op_flags & RTM_F_CREATE)
 			error = add_route(rnh, rt, rnd_add, rc);
 		else
-			error = ENOENT; // no entry but creation was not required
+			error = ESRCH; /* no entry but creation was not required */
 		RIB_WUNLOCK(rnh);
 		if (error != 0)
 			goto out;
@@ -755,7 +810,7 @@ add_route_flags(struct rib_head *rnh, struct rtentry *rt, struct route_nhop_data
 	    nhop_can_multipath(rnd_orig.rnd_nhop)) {
 
 		for (int i = 0; i < RIB_MAX_RETRIES; i++) {
-			error = add_route_flags_mpath(rnh, rt, rnd_add, &rnd_orig,
+			error = add_route_flags_mpath(rnh, rt_orig, rnd_add, &rnd_orig,
 			    op_flags, rc);
 			if (error != EAGAIN)
 				break;
@@ -783,6 +838,7 @@ out:
 	return (error);
 }
 
+#ifdef ROUTE_MPATH
 static int
 add_route_flags_mpath(struct rib_head *rnh, struct rtentry *rt,
     struct route_nhop_data *rnd_add, struct route_nhop_data *rnd_orig,
@@ -826,6 +882,7 @@ add_route_flags_mpath(struct rib_head *rnh, struct rtentry *rt,
 
 	return (0);
 }
+#endif
 
 /*
  * Removes route defined by @info from the kernel table specified by @fibnum and
@@ -871,7 +928,7 @@ rib_del_route(uint32_t fibnum, struct rt_addrinfo *info, struct rib_cmd_info *rc
 		filter_func = info->rti_filter;
 		filter_arg = info->rti_filterdata;
 	} else if (gwd.gw != NULL) {
-		filter_func = gw_filter_func;
+		filter_func = match_gw_one;
 		filter_arg = &gwd;
 	}
 
@@ -1082,7 +1139,7 @@ change_mpath_route(struct rib_head *rnh, struct rtentry *rt,
 	wn_new[found_idx].nh = nh_new;
 	wn_new[found_idx].weight = get_info_weight(info, wn[found_idx].weight);
 
-	error = nhgrp_get_group(rnh, wn_new, num_nhops, &rnd_new.rnd_nhgrp);
+	error = nhgrp_get_group(rnh, wn_new, num_nhops, 0, &rnd_new.rnd_nhgrp);
 	nhop_free(nh_new);
 	free(wn_new, M_TEMP);
 
@@ -1240,15 +1297,13 @@ change_route_conditional(struct rib_head *rnh, struct rtentry *rt,
 	struct rtentry *rt_new;
 	int error = 0;
 
-#if DEBUG_MAX_LEVEL >= LOG_DEBUG2
-	{
+	IF_DEBUG_LEVEL(LOG_DEBUG2) {
 		char buf_old[NHOP_PRINT_BUFSIZE], buf_new[NHOP_PRINT_BUFSIZE];
 		nhop_print_buf_any(rnd_orig->rnd_nhop, buf_old, NHOP_PRINT_BUFSIZE);
 		nhop_print_buf_any(rnd_new->rnd_nhop, buf_new, NHOP_PRINT_BUFSIZE);
 		FIB_LOG(LOG_DEBUG2, rnh->rib_fibnum, rnh->rib_family,
 		    "trying change %s -> %s", buf_old, buf_new);
 	}
-#endif
 	RIB_WLOCK(rnh);
 
 	struct route_nhop_data rnd;
@@ -1493,3 +1548,4 @@ rib_print_family(int family)
 	}
 	return ("unknown");
 }
+

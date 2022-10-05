@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_platform.h"
+
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
@@ -115,7 +117,20 @@ rk8xx_poweroff(void *arg, int howto)
 	device_printf(sc->dev, "Powering off...\n");
 	error = rk8xx_read(sc->dev, sc->dev_ctrl.dev_ctrl_reg, &val, 1);
 	if (error == 0) {
-		val |= sc->dev_ctrl.pwr_off_mask;
+		if (howto & RB_POWEROFF)
+			val |= sc->dev_ctrl.pwr_off_mask;
+		else if (howto & RB_POWERCYCLE) {
+			if (sc->type == RK809 || sc->type == RK817) {
+				if (bootverbose) {
+					device_printf(sc->dev,
+					    "Powercycle PMIC\n");
+				}
+				val |= sc->dev_ctrl.pwr_rst_mask;;
+			} else {
+				/* Poweroff PMIC that can't powercycle */
+				val |= sc->dev_ctrl.pwr_off_mask;
+			}
+		}
 		error = rk8xx_write(sc->dev, sc->dev_ctrl.dev_ctrl_reg,
 		    &val, 1);
 

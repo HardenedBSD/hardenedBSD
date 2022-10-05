@@ -277,8 +277,10 @@ trap(struct trapframe *frame)
 		 */
 		if (TRAPF_USERMODE(frame)) {
 			uprintf(
-			    "pid %ld (%s): trap %d with interrupts disabled\n",
-			    (long)curproc->p_pid, curthread->td_name, type);
+			    "pid %ld (%s): trap %d (%s) "
+			    "with interrupts disabled\n",
+			    (long)curproc->p_pid, curthread->td_name, type,
+			    trap_msg[type]);
 		} else {
 			switch (type) {
 			case T_NMI:
@@ -626,11 +628,11 @@ trap(struct trapframe *frame)
 	ksi.ksi_trapno = type;
 	ksi.ksi_addr = (void *)addr;
 	if (uprintf_signal) {
-		uprintf("pid %d comm %s: signal %d err %lx code %d type %d "
-		    "addr 0x%lx rsp 0x%lx rip 0x%lx "
+		uprintf("pid %d comm %s: signal %d err %#lx code %d type %d "
+		    "addr %#lx rsp %#lx rip %#lx rax %#lx"
 		    "<%02x %02x %02x %02x %02x %02x %02x %02x>\n",
 		    p->p_pid, p->p_comm, signo, frame->tf_err, ucode, type,
-		    addr, frame->tf_rsp, frame->tf_rip,
+		    addr, frame->tf_rsp, frame->tf_rip, frame->tf_rax,
 		    fubyte((void *)(frame->tf_rip + 0)),
 		    fubyte((void *)(frame->tf_rip + 1)),
 		    fubyte((void *)(frame->tf_rip + 2)),
@@ -928,6 +930,17 @@ trap_fatal(struct trapframe *frame, vm_offset_t eva)
 	printf("IOPL = %ld\n", (frame->tf_rflags & PSL_IOPL) >> 12);
 	printf("current process		= %d (%s)\n",
 	    curproc->p_pid, curthread->td_name);
+
+	printf("rdi: %16lx rsi: %16lx rdx: %16lx\n", frame->tf_rdi,
+	    frame->tf_rsi, frame->tf_rdx);
+	printf("rcx: %16lx  r8: %16lx  r9: %16lx\n", frame->tf_rcx,
+	    frame->tf_r8, frame->tf_r9);
+	printf("rax: %16lx rbx: %16lx rbp: %16lx\n", frame->tf_rax,
+	    frame->tf_rbx, frame->tf_rbp);
+	printf("r10: %16lx r11: %16lx r12: %16lx\n", frame->tf_r10,
+	    frame->tf_r11, frame->tf_r12);
+	printf("r13: %16lx r14: %16lx r15: %16lx\n", frame->tf_r13,
+	    frame->tf_r14, frame->tf_r15);
 
 #ifdef KDB
 	if (debugger_on_trap) {

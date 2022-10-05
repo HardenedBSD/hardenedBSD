@@ -80,13 +80,8 @@ __FBSDID("$FreeBSD$");
 #include "tom/t4_tom.h"
 #include "tom/t4_tls.h"
 
-static struct protosw *tcp_protosw;
 static struct protosw toe_protosw;
-static struct pr_usrreqs toe_usrreqs;
-
-static struct protosw *tcp6_protosw;
 static struct protosw toe6_protosw;
-static struct pr_usrreqs toe6_usrreqs;
 
 /* Module ops */
 static int t4_tom_mod_load(void);
@@ -269,9 +264,9 @@ void
 restore_so_proto(struct socket *so, bool v6)
 {
 	if (v6)
-		so->so_proto = tcp6_protosw;
+		so->so_proto = &tcp6_protosw;
 	else
-		so->so_proto = tcp_protosw;
+		so->so_proto = &tcp_protosw;
 }
 
 /* This is _not_ the normal way to "unoffload" a socket. */
@@ -479,7 +474,8 @@ send_get_tcb(struct adapter *sc, u_int tid)
 	struct cpl_get_tcb *cpl;
 	struct wrq_cookie cookie;
 
-	MPASS(tid < sc->tids.ntids);
+	MPASS(tid >= sc->tids.tid_base);
+	MPASS(tid - sc->tids.tid_base < sc->tids.ntids);
 
 	cpl = start_wrq_wr(&sc->sge.ctrlq[0], howmany(sizeof(*cpl), 16),
 	    &cookie);
@@ -532,7 +528,8 @@ add_tid_to_history(struct adapter *sc, u_int tid)
 	struct tom_data *td = sc->tom_softc;
 	int rc;
 
-	MPASS(tid < sc->tids.ntids);
+	MPASS(tid >= sc->tids.tid_base);
+	MPASS(tid - sc->tids.tid_base < sc->tids.ntids);
 
 	if (td->tcb_history == NULL)
 		return (ENXIO);
@@ -582,7 +579,8 @@ lookup_tcb_histent(struct adapter *sc, u_int tid, bool addrem)
 	struct tcb_histent *te;
 	struct tom_data *td = sc->tom_softc;
 
-	MPASS(tid < sc->tids.ntids);
+	MPASS(tid >= sc->tids.tid_base);
+	MPASS(tid - sc->tids.tid_base < sc->tids.ntids);
 
 	if (td->tcb_history == NULL)
 		return (NULL);
@@ -774,7 +772,8 @@ read_tcb_using_memwin(struct adapter *sc, u_int tid, uint64_t *buf)
 	uint32_t addr;
 	u_char *tcb, tmp;
 
-	MPASS(tid < sc->tids.ntids);
+	MPASS(tid >= sc->tids.tid_base);
+	MPASS(tid - sc->tids.tid_base < sc->tids.ntids);
 
 	addr = t4_read_reg(sc, A_TP_CMM_TCB_BASE) + tid * TCB_SIZE;
 	rc = read_via_memwin(sc, 2, addr, (uint32_t *)buf, TCB_SIZE);
@@ -2024,21 +2023,11 @@ t4_tom_mod_load(void)
 	t4_ddp_mod_load();
 	t4_tls_mod_load();
 
-	tcp_protosw = pffindproto(PF_INET, IPPROTO_TCP, SOCK_STREAM);
-	if (tcp_protosw == NULL)
-		return (ENOPROTOOPT);
-	bcopy(tcp_protosw, &toe_protosw, sizeof(toe_protosw));
-	bcopy(tcp_protosw->pr_usrreqs, &toe_usrreqs, sizeof(toe_usrreqs));
-	toe_usrreqs.pru_aio_queue = t4_aio_queue_tom;
-	toe_protosw.pr_usrreqs = &toe_usrreqs;
+	bcopy(&tcp_protosw, &toe_protosw, sizeof(toe_protosw));
+	toe_protosw.pr_aio_queue = t4_aio_queue_tom;
 
-	tcp6_protosw = pffindproto(PF_INET6, IPPROTO_TCP, SOCK_STREAM);
-	if (tcp6_protosw == NULL)
-		return (ENOPROTOOPT);
-	bcopy(tcp6_protosw, &toe6_protosw, sizeof(toe6_protosw));
-	bcopy(tcp6_protosw->pr_usrreqs, &toe6_usrreqs, sizeof(toe6_usrreqs));
-	toe6_usrreqs.pru_aio_queue = t4_aio_queue_tom;
-	toe6_protosw.pr_usrreqs = &toe6_usrreqs;
+	bcopy(&tcp6_protosw, &toe6_protosw, sizeof(toe6_protosw));
+	toe6_protosw.pr_aio_queue = t4_aio_queue_tom;
 
 	return (t4_register_uld(&tom_uld_info));
 }

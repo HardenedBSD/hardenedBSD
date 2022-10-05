@@ -51,7 +51,7 @@ extern int linuxkpi_debug_80211;
 #ifndef	D80211_IMPROVE
 #define	D80211_IMPROVE		0x2
 #endif
-#define	TODO()		if (linuxkpi_debug_80211 & D80211_TODO)		\
+#define	TODO(...)		if (linuxkpi_debug_80211 & D80211_TODO)	\
     printf("%s:%d: XXX LKPI80211 TODO\n", __func__, __LINE__)
 #define	IMPROVE(...)	if (linuxkpi_debug_80211 & D80211_IMPROVE)	\
     printf("%s:%d: XXX LKPI80211 IMPROVE\n", __func__, __LINE__)
@@ -76,6 +76,7 @@ enum cfg80211_rate_info_flags {
 	RATE_INFO_FLAGS_MCS		= BIT(1),
 	RATE_INFO_FLAGS_VHT_MCS		= BIT(2),
 	RATE_INFO_FLAGS_HE_MCS		= BIT(3),
+	/* Max 8 bits as used in struct rate_info. */
 };
 
 extern const uint8_t rfc1042_header[6];
@@ -129,23 +130,16 @@ struct linuxkpi_ieee80211_channel {
 	int	orig_mpwr;
 };
 
-enum ieee80211_vht_mcs_support {
-	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_7,
-	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_8,
-	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_9,
-};
-
 struct cfg80211_bitrate_mask {
 	/* TODO FIXME */
-	/* This is so weird but nothing else works out...*/
 	struct {
-		uint64_t			legacy;		/* XXX? */
+		uint32_t			legacy;
 		uint8_t				ht_mcs[IEEE80211_HT_MCS_MASK_LEN];
-		uint16_t			vht_mcs[16];	/* XXX? */
-		uint16_t			he_mcs[16];	/* XXX? */
+		uint16_t			vht_mcs[8];
+		uint16_t			he_mcs[8];
 		enum nl80211_txrate_gi		gi;
 		enum nl80211_he_gi		he_gi;
-		uint8_t				he_ltf;
+		uint8_t				he_ltf;		/* XXX enum? */
 	} control[NUM_NL80211_BANDS];
 };
 
@@ -160,8 +154,14 @@ enum rate_info_bw {
 };
 
 struct rate_info {
-	/* TODO FIXME */
-	int	bw, flags, he_dcm, he_gi, he_ru_alloc, legacy, mcs, nss;
+	uint8_t					flags;			/* enum cfg80211_rate_info_flags */
+	uint8_t					bw;
+	uint16_t				legacy;
+	uint8_t					mcs;
+	uint8_t					nss;
+	uint8_t					he_dcm;
+	uint8_t					he_gi;
+	uint8_t					he_ru_alloc;
 };
 
 struct ieee80211_rate {
@@ -229,9 +229,9 @@ struct ieee80211_sta_ht_cap {
 
 struct ieee80211_sta_vht_cap {
 		/* TODO FIXME */
-	bool			vht_supported;
-	uint32_t		cap;
-	struct vht_mcs		vht_mcs;
+	bool				vht_supported;
+	uint32_t			cap;
+	struct ieee80211_vht_mcs_info	vht_mcs;
 };
 
 enum ieee80211_vht_opmode {
@@ -520,33 +520,6 @@ struct cfg80211_pmksa {
 	const uint8_t			*pmkid;
 };
 
-struct cfg80211_wowlan_nd_match {
-	/* XXX TODO */
-	struct cfg80211_ssid		ssid;
-	int				n_channels;
-	uint32_t			channels[0];	/* freq! = ieee80211_channel_to_frequency() */
-};
-
-struct cfg80211_wowlan_nd_info {
-	/* XXX TODO */
-	int				n_matches;
-	struct cfg80211_wowlan_nd_match	*matches[0];
-};
-
-enum wiphy_wowlan_support_flags {
-	WIPHY_WOWLAN_DISCONNECT,
-	WIPHY_WOWLAN_GTK_REKEY_FAILURE,
-	WIPHY_WOWLAN_MAGIC_PKT,
-	WIPHY_WOWLAN_SUPPORTS_GTK_REKEY,
-	WIPHY_WOWLAN_NET_DETECT,
-};
-
-struct wiphy_wowlan_support {
-	/* XXX TODO */
-	enum wiphy_wowlan_support_flags		flags;
-	int	max_nd_match_sets, max_pkt_offset, n_patterns, pattern_max_len, pattern_min_len;
-};
-
 struct station_del_parameters {
 	/* XXX TODO */
 	const uint8_t				*mac;
@@ -603,6 +576,7 @@ struct mac_address {
 struct ieee80211_reg_rule {
 	/* TODO FIXME */
 	uint32_t	flags;
+	int	dfs_cac_ms;
 	struct freq_range {
 		int	start_freq_khz;
 		int	end_freq_khz;
@@ -814,6 +788,12 @@ struct cfg80211_he_bss_color {
 
 struct ieee80211_he_obss_pd {
 	bool					enable;
+	uint8_t					min_offset;
+	uint8_t					max_offset;
+	uint8_t					non_srg_max_offset;
+	uint8_t					bss_color_bitmap;
+	uint8_t					partial_bssid_bitmap;
+	uint8_t					sr_ctrl;
 };
 
 struct ieee80211_sta_he_6ghz_capa {
@@ -853,9 +833,56 @@ struct cfg80211_pkt_pattern {
 	int					pkt_offset;
 };
 
+struct cfg80211_wowlan_nd_match {
+	/* XXX TODO */
+	struct cfg80211_ssid		ssid;
+	int				n_channels;
+	uint32_t			channels[0];	/* freq! = ieee80211_channel_to_frequency() */
+};
+
+struct cfg80211_wowlan_nd_info {
+	/* XXX TODO */
+	int				n_matches;
+	struct cfg80211_wowlan_nd_match	*matches[0];
+};
+
+enum wiphy_wowlan_support_flags {
+	WIPHY_WOWLAN_DISCONNECT,
+	WIPHY_WOWLAN_GTK_REKEY_FAILURE,
+	WIPHY_WOWLAN_MAGIC_PKT,
+	WIPHY_WOWLAN_SUPPORTS_GTK_REKEY,
+	WIPHY_WOWLAN_NET_DETECT,
+};
+
+struct wiphy_wowlan_support {
+	/* XXX TODO */
+	enum wiphy_wowlan_support_flags		flags;
+	int	max_nd_match_sets, max_pkt_offset, n_patterns, pattern_max_len, pattern_min_len;
+};
+
+struct cfg80211_wowlan_wakeup {
+	/* XXX TODO */
+	uint16_t				pattern_idx;
+	bool					disconnect;
+	bool					eap_identity_req;
+	bool					four_way_handshake;
+	bool					gtk_rekey_failure;
+	bool					magic_pkt;
+	bool					rfkill_release;
+	bool					tcp_connlost;
+	bool					tcp_nomoretokens;
+	bool					tcp_match;
+	bool					packet_80211;
+	struct cfg80211_wowlan_nd_info		*net_detect;
+	uint8_t					*packet;
+	uint16_t				packet_len;
+	uint16_t				packet_present_len;
+};
+
 struct cfg80211_wowlan {
 	/* XXX TODO */
 	int	disconnect, gtk_rekey_failure, magic_pkt;
+	int	eap_identity_req, four_way_handshake, rfkill_release, tcp, any;
 	int					n_patterns;
 	struct cfg80211_sched_scan_request	*nd_config;
 	struct cfg80211_pkt_pattern		*patterns;
@@ -863,7 +890,9 @@ struct cfg80211_wowlan {
 
 struct cfg80211_gtk_rekey_data {
 	/* XXX TODO */
-	int     kck, kek, replay_ctr;
+	const uint8_t				*kck, *kek, *replay_ctr;
+	uint32_t				akm;
+	uint8_t					kck_len, kek_len;
 };
 
 struct cfg80211_tid_cfg {
@@ -972,6 +1001,7 @@ struct wiphy {
 	uint32_t				flags;
 	struct ieee80211_supported_band		*bands[NUM_NL80211_BANDS];
 	uint8_t					perm_addr[ETH_ALEN];
+	uint16_t				max_scan_ie_len;
 
 	/* XXX TODO */
 	const struct cfg80211_pmsr_capabilities	*pmsr_capa;
@@ -994,7 +1024,7 @@ struct wiphy {
 
 	int	available_antennas_rx, available_antennas_tx;
 	int	features, hw_version;
-	int	interface_modes, max_match_sets, max_remain_on_channel_duration, max_scan_ie_len, max_scan_ssids, max_sched_scan_ie_len, max_sched_scan_plan_interval, max_sched_scan_plan_iterations, max_sched_scan_plans, max_sched_scan_reqs, max_sched_scan_ssids;
+	int	interface_modes, max_match_sets, max_remain_on_channel_duration, max_scan_ssids, max_sched_scan_ie_len, max_sched_scan_plan_interval, max_sched_scan_plan_iterations, max_sched_scan_plans, max_sched_scan_reqs, max_sched_scan_ssids;
 	int	num_iftype_ext_capab;
 	int	max_ap_assoc_sta, probe_resp_offload, software_iftypes;
 	int     bss_select_support, max_num_pmkids, retry_long, retry_short, signal_type;
@@ -1224,6 +1254,7 @@ cfg80211_chandef_create(struct cfg80211_chan_def *chandef,
 		chandef->center_freq1 = chan->center_freq;
 		break;
 	default:
+		IMPROVE("Also depends on our manual settings");
 		if (chan->flags & IEEE80211_CHAN_NO_HT40)
 			chandef->width = NL80211_CHAN_WIDTH_20;
 		else if (chan->flags & IEEE80211_CHAN_NO_80MHZ)
@@ -1346,7 +1377,7 @@ freq_reg_info(struct wiphy *wiphy, uint32_t center_freq)
 
 static __inline struct cfg80211_bss *
 cfg80211_get_bss(struct wiphy *wiphy, struct linuxkpi_ieee80211_channel *chan,
-    uint8_t *bssid, void *p, int x, uint32_t f1, uint32_t f2)
+    const uint8_t *bssid, void *p, int x, uint32_t f1, uint32_t f2)
 {
 	TODO();
 	return (NULL);
@@ -1700,19 +1731,8 @@ cfg80211_chandef_valid(const struct cfg80211_chan_def *chandef)
 #ifndef LINUXKPI_NET80211
 #define	ieee80211_channel		linuxkpi_ieee80211_channel
 #define	ieee80211_regdomain		linuxkpi_ieee80211_regdomain
-/* net80211::IEEE80211_VHT_MCS_SUPPORT_0_n() conflicts */
-#if defined(IEEE80211_VHT_MCS_SUPPORT_0_7)
-#undef	IEEE80211_VHT_MCS_SUPPORT_0_7
 #endif
-#if defined(IEEE80211_VHT_MCS_SUPPORT_0_8)
-#undef	IEEE80211_VHT_MCS_SUPPORT_0_8
-#endif
-#if defined(IEEE80211_VHT_MCS_SUPPORT_0_9)
-#undef	IEEE80211_VHT_MCS_SUPPORT_0_9
-#endif
-#define	IEEE80211_VHT_MCS_SUPPORT_0_7	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_7
-#define	IEEE80211_VHT_MCS_SUPPORT_0_8	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_8
-#define	IEEE80211_VHT_MCS_SUPPORT_0_9	LKPI_IEEE80211_VHT_MCS_SUPPORT_0_9
-#endif
+
+#include <net/mac80211.h>
 
 #endif	/* _LINUXKPI_NET_CFG80211_H */

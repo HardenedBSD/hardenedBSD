@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -1142,7 +1142,7 @@ dnode_free_interior_slots(dnode_t *dn)
 
 	while (!dnode_slots_tryenter(children, idx, slots)) {
 		DNODE_STAT_BUMP(dnode_free_interior_lock_retry);
-		cond_resched();
+		kpreempt(KPREEMPT_SYNC);
 	}
 
 	dnode_set_slots(children, idx, slots, DN_SLOT_FREE);
@@ -1423,7 +1423,7 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag, int slots,
 			dnode_slots_rele(dnc, idx, slots);
 			while (!dnode_slots_tryenter(dnc, idx, slots)) {
 				DNODE_STAT_BUMP(dnode_hold_alloc_lock_retry);
-				cond_resched();
+				kpreempt(KPREEMPT_SYNC);
 			}
 
 			/*
@@ -1478,7 +1478,7 @@ dnode_hold_impl(objset_t *os, uint64_t object, int flag, int slots,
 		dnode_slots_rele(dnc, idx, slots);
 		while (!dnode_slots_tryenter(dnc, idx, slots)) {
 			DNODE_STAT_BUMP(dnode_hold_free_lock_retry);
-			cond_resched();
+			kpreempt(KPREEMPT_SYNC);
 		}
 
 		if (!dnode_check_slots_free(dnc, idx, slots)) {

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -1694,16 +1694,6 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 	    blkptr_copy, os->os_phys_buf, dmu_os_is_l2cacheable(os),
 	    &zp, dmu_objset_write_ready, NULL, NULL, dmu_objset_write_done,
 	    os, ZIO_PRIORITY_ASYNC_WRITE, ZIO_FLAG_MUSTSUCCEED, &zb);
-
-	/*
-	 * In the codepath dsl_dataset_sync()->dmu_objset_sync() we cannot
-	 * rely on the zio above completing and calling back
-	 * dmu_objset_write_done()->dsl_dataset_block_born() before
-	 * dsl_dataset_sync() actually activates feature flags near its end.
-	 * Decide here if any features need to be activated, before
-	 * dsl_dataset_sync() completes its run.
-	 */
-	dsl_dataset_feature_set_activation(blkptr_copy, os->os_dsl_dataset);
 
 	/*
 	 * Sync special dnodes - the parent IO for the sync is the root block

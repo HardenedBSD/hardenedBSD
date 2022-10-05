@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2020 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2022 by Delphix. All rights reserved.
  * Copyright Joyent, Inc.
  * Copyright (c) 2013 Steven Hartland. All rights reserved.
  * Copyright (c) 2016, Intel Corporation.
@@ -151,6 +151,8 @@ typedef enum zfs_error {
 	EZFS_REBUILDING,	/* resilvering (sequential reconstrution) */
 	EZFS_VDEV_NOTSUP,	/* ops not supported for this type of vdev */
 	EZFS_NOT_USER_NAMESPACE,	/* a file is not a user namespace */
+	EZFS_CKSUM,		/* insufficient replicas */
+	EZFS_RESUME_EXISTS,	/* Resume on existing dataset without force */
 	EZFS_UNKNOWN
 } zfs_error_t;
 
@@ -308,6 +310,7 @@ _LIBZFS_H int zpool_vdev_indirect_size(zpool_handle_t *, const char *,
     uint64_t *);
 _LIBZFS_H int zpool_vdev_split(zpool_handle_t *, char *, nvlist_t **,
     nvlist_t *, splitflags_t);
+_LIBZFS_H int zpool_vdev_remove_wanted(zpool_handle_t *, const char *);
 
 _LIBZFS_H int zpool_vdev_fault(zpool_handle_t *, uint64_t, vdev_aux_t);
 _LIBZFS_H int zpool_vdev_degrade(zpool_handle_t *, uint64_t, vdev_aux_t);
@@ -475,7 +478,6 @@ _LIBZFS_H void zpool_obj_to_path_ds(zpool_handle_t *, uint64_t, uint64_t,
 _LIBZFS_H void zpool_obj_to_path(zpool_handle_t *, uint64_t, uint64_t, char *,
     size_t);
 _LIBZFS_H int zfs_ioctl(libzfs_handle_t *, int, struct zfs_cmd *);
-_LIBZFS_H int zpool_get_physpath(zpool_handle_t *, char *, size_t);
 _LIBZFS_H void zpool_explain_recover(libzfs_handle_t *, const char *, int,
     nvlist_t *);
 _LIBZFS_H int zpool_checkpoint(zpool_handle_t *);
@@ -829,6 +831,9 @@ typedef struct recvflags {
 
 	/* force unmount while recv snapshot (private) */
 	boolean_t forceunmount;
+
+	/* use this recv to check (and heal if needed) an existing snapshot */
+	boolean_t heal;
 } recvflags_t;
 
 _LIBZFS_H int zfs_receive(libzfs_handle_t *, const char *, nvlist_t *,
@@ -893,6 +898,7 @@ _LIBZFS_H int zfs_unshare(zfs_handle_t *zhp, const char *mountpoint,
 _LIBZFS_H int zfs_unshareall(zfs_handle_t *zhp,
     const enum sa_protocol *proto);
 _LIBZFS_H void zfs_commit_shares(const enum sa_protocol *proto);
+_LIBZFS_H void zfs_truncate_shares(const enum sa_protocol *proto);
 
 _LIBZFS_H int zfs_nicestrtonum(libzfs_handle_t *, const char *, uint64_t *);
 

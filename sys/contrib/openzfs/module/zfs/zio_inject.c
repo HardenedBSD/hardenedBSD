@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -887,7 +887,7 @@ zio_inject_list_next(int *id, char *name, size_t buflen,
 	if (handler) {
 		*record = handler->zi_record;
 		*id = handler->zi_id;
-		(void) strncpy(name, spa_name(handler->zi_spa), buflen);
+		(void) strlcpy(name, spa_name(handler->zi_spa), buflen);
 		ret = 0;
 	} else {
 		ret = SET_ERROR(ENOENT);

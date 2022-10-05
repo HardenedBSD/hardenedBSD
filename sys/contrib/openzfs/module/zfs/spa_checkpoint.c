@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -347,7 +347,7 @@ spa_checkpoint_discard_thread_sync(void *arg, dmu_tx_t *tx)
 		if (error != 0) {
 			zfs_panic_recover("zfs: error %lld was returned "
 			    "while incrementally destroying the checkpoint "
-			    "space map of vdev %u\n",
+			    "space map of vdev %llu\n",
 			    (longlong_t)error, vd->vdev_id);
 		}
 		ASSERT0(words_after);

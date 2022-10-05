@@ -705,6 +705,14 @@ MLINKS+=bus_space.9 bus_space_alloc.9 \
 	bus_space.9 bus_space_copy_region_stream_8.9 \
 	bus_space.9 bus_space_free.9 \
 	bus_space.9 bus_space_map.9 \
+	bus_space.9 bus_space_peek_1.9 \
+	bus_space.9 bus_space_peek_2.9 \
+	bus_space.9 bus_space_peek_4.9 \
+	bus_space.9 bus_space_peek_8.9 \
+	bus_space.9 bus_space_poke_1.9 \
+	bus_space.9 bus_space_poke_2.9 \
+	bus_space.9 bus_space_poke_4.9 \
+	bus_space.9 bus_space_poke_8.9 \
 	bus_space.9 bus_space_read_1.9 \
 	bus_space.9 bus_space_read_2.9 \
 	bus_space.9 bus_space_read_4.9 \
@@ -1022,13 +1030,10 @@ MLINKS+=dnv.9 dnvlist.9 \
 	dnv.9 dnvlist_take_number.9 \
 	dnv.9 dnvlist_take_nvlist.9 \
 	dnv.9 dnvlist_take_string.9
-MLINKS+=domain.9 DOMAIN_SET.9 \
+MLINKS+=domain.9 protosw.9 \
 	domain.9 domain_add.9 \
-	domain.9 domain_init.9 \
-	domain.9 pfctlinput.9 \
-	domain.9 pffinddomain.9 \
-	domain.9 pffindproto.9 \
-	domain.9 pffindtype.9
+	domain.9 protosw_register.9 \
+	domain.9 protosw_unregister.9
 MLINKS+=drbr.9 drbr_free.9 \
 	drbr.9 drbr_enqueue.9 \
 	drbr.9 drbr_dequeue.9 \
@@ -1366,7 +1371,6 @@ MLINKS+=kqueue.9 knlist_add.9 \
 	kqueue.9 knlist_empty.9 \
 	kqueue.9 knlist_init.9 \
 	kqueue.9 knlist_init_mtx.9 \
-	kqueue.9 knlist_init_rw_reader.9 \
 	kqueue.9 knlist_remove.9 \
 	kqueue.9 knlist_remove_inevent.9 \
 	kqueue.9 knote_fdclose.9 \
@@ -1463,6 +1467,7 @@ MLINKS+=\
 	mbuf.9 MGET.9 \
 	mbuf.9 m_get.9 \
 	mbuf.9 m_get2.9 \
+	mbuf.9 m_get3.9 \
 	mbuf.9 m_getjcl.9 \
 	mbuf.9 m_getcl.9 \
 	mbuf.9 MGETHDR.9 \

@@ -29,7 +29,7 @@
 #define _NETINET_TCP_RACK_H_
 
 #define RACK_ACKED	    0x000001/* The remote endpoint acked this */
-#define RACK_TO_REXT	    0x000002/* A timeout occured on this sendmap entry */
+#define RACK_TO_REXT	    0x000002/* A timeout occurred on this sendmap entry */
 #define RACK_DEFERRED	    0x000004/* We can't use this for RTT calc - not used */
 #define RACK_OVERMAX	    0x000008/* We have more retran's then we can fit */
 #define RACK_SACK_PASSED    0x000010/* A sack was done above this block */
@@ -275,7 +275,7 @@ struct rack_opts_stats {
  * non-zero, the default is 4 for continuous tracing.
  * You also set in the number of connections you want
  * have get BB logs in net.inet.tcp.<stack>.tp.count.
- * 
+ *
  * Count will decrement every time BB logging is assigned
  * to a connection that hit your tracepoint.
  *
@@ -291,6 +291,7 @@ struct rack_opts_stats {
 #define RACK_TP_HWENOBUF	0x00000001	/* When we are doing hardware pacing and hit enobufs */
 #define RACK_TP_ENOBUF		0x00000002	/* When we hit enobufs with software pacing */
 #define RACK_TP_COLLAPSED_WND	0x00000003	/* When a peer to collapses its rwnd on us */
+#define RACK_TP_COLLAPSED_RXT	0x00000004	/* When we actually retransmit a collapsed window rsm */
 
 #define MIN_GP_WIN 6	/* We need at least 6 MSS in a GP measurement */
 #ifdef _KERNEL
@@ -472,6 +473,8 @@ struct rack_control {
 	uint32_t roundends;		/* acked value above which round ends */
 	uint32_t num_dsack;		/* Count of dsack's seen  (1 per window)*/
 	uint32_t forced_ack_ts;
+ 	uint32_t last_collapse_point;	/* Last point peer collapsed too */
+	uint32_t high_collapse_point;
 	uint32_t rc_lower_rtt_us_cts;	/* Time our GP rtt was last lowered */
 	uint32_t rc_time_probertt_entered;
 	uint32_t rc_time_probertt_starts;
@@ -487,7 +490,7 @@ struct rack_control {
 	uint32_t retran_during_recovery;
 	uint32_t rc_gp_lowrtt;			/* Lowest rtt seen during GPUT measurement */
 	uint32_t rc_gp_high_rwnd;		/* Highest rwnd seen during GPUT measurement */
-	uint32_t rc_snd_max_at_rto;	/* For non-sack when the RTO occured what was snd-max */
+	uint32_t rc_snd_max_at_rto;	/* For non-sack when the RTO occurred what was snd-max */
 	uint32_t rc_out_at_rto;
 	int32_t rc_scw_index;
 	uint32_t rc_tlp_threshold;	/* Socket option value Lock(a) */
@@ -546,7 +549,16 @@ struct tcp_rack {
 	struct inpcb *rc_inp;	/* The inpcb Lock(a) */
 	uint8_t rc_free_cnt;	/* Number of free entries on the rc_free list
 				 * Lock(a) */
-	uint8_t client_bufferlvl;	/* 0 - 5 normaly, less than or at 2 means its real low */
+	uint8_t client_bufferlvl : 3, /* Expected range [0,5]: 0=unset, 1=low/empty */
+		rack_deferred_inited : 1,
+	        /* ******************************************************************** */
+	        /* Note for details of next two fields see rack_init_retransmit_rate()  */
+	        /* ******************************************************************** */
+		full_size_rxt: 1,
+		shape_rxt_to_pacing_min : 1,
+	        /* ******************************************************************** */
+		rc_ack_required: 1,
+		spare : 1;
 	uint8_t no_prr_addback : 1,
 		gp_ready : 1,
 		defer_options: 1,
@@ -647,7 +659,9 @@ struct tcp_rack {
 		r_late : 1,
 		r_wanted_output: 1,
 		r_rr_config : 2,
-		rc_avail_bit : 3;
+		r_persist_lt_bw_off : 1,
+ 		r_collapse_point_valid : 1,
+		rc_avail_bit : 2;
 	uint16_t rc_init_win : 8,
 		rc_gp_rtt_set : 1,
 		rc_gp_dyn_mul : 1,

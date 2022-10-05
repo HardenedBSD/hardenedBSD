@@ -130,16 +130,62 @@ IDTVEC(prot)
 	jmp	irettraps
 IDTVEC(page)
 	testl	$PSL_VM, TF_EFLAGS-TF_ERR(%esp)
-	jnz	1f
+	jnz	upf
 	testb	$SEL_RPL_MASK, TF_CS-TF_ERR(%esp)
-	jnz	1f
+	jnz	upf
 	cmpl	$PMAP_TRM_MIN_ADDRESS, TF_EIP-TF_ERR(%esp)
-	jb	1f
-	movl	%ebx, %cr3
+	jb	upf
+
+	/*
+	 * This is a handshake between copyout_fast.s and page fault
+	 * handler.  We check for page fault occuring at the special
+	 * places in the copyout fast path, where page fault can
+	 * legitimately happen while accessing either user space or
+	 * kernel pageable memory, and return control to *%edx.
+	 * We switch to the idleptd page table from a user page table,
+	 * if needed.
+	 */
+	pushl	%eax
+	movl	TF_EIP-TF_ERR+4(%esp), %eax
+	addl	$1f, %eax
+	call	5f
+1:	cmpl	$pf_x1, %eax
+	je	2f
+	cmpl	$pf_x2, %eax
+	je	2f
+	cmpl	$pf_x3, %eax
+	je	2f
+	cmpl	$pf_x4, %eax
+	je	2f
+	cmpl	$pf_x5, %eax
+	je	2f
+	cmpl	$pf_x6, %eax
+	je	2f
+	cmpl	$pf_x7, %eax
+	je	2f
+	cmpl	$pf_x8, %eax
+	je	2f
+	cmpl	$pf_y1, %eax
+	je	4f
+	cmpl	$pf_y2, %eax
+	je	4f
+	jmp	upf_eax
+2:	movl	$tramp_idleptd, %eax
+	subl	$3f, %eax
+	call	6f
+3:	movl	(%eax), %eax
+	movl	%eax, %cr3
+4:	popl	%eax
 	movl	%edx, TF_EIP-TF_ERR(%esp)
 	addl	$4, %esp
 	iret
-1:	pushl	$T_PAGEFLT
+5:	subl	(%esp), %eax
+	retl
+6:	addl	(%esp), %eax
+	retl
+
+upf_eax:popl	%eax
+upf:	pushl	$T_PAGEFLT
 	jmp	alltraps
 IDTVEC(rsvd_pti)
 IDTVEC(rsvd)
@@ -205,27 +251,25 @@ irettraps:
 	leal	(doreti_iret - 1b)(%ebx), %edx
 	cmpl	%edx, TF_EIP(%esp)
 	jne	2f
-	movl	$(2 * TF_SZ - TF_EIP), %ecx
-	jmp	6f
+	/* -8 because exception did not switch ring */
+	movl	$(2 * TF_SZ - TF_EIP - 8), %ecx
+	jmp	5f
 2:	leal	(doreti_popl_ds - 1b)(%ebx), %edx
 	cmpl	%edx, TF_EIP(%esp)
 	jne	3f
-	movl	$(2 * TF_SZ - TF_DS), %ecx
-	jmp	6f
+	movl	$(2 * TF_SZ - TF_DS - 8), %ecx
+	jmp	5f
 3:	leal	(doreti_popl_es - 1b)(%ebx), %edx
 	cmpl	%edx, TF_EIP(%esp)
 	jne	4f
-	movl	$(2 * TF_SZ - TF_ES), %ecx
-	jmp	6f
+	movl	$(2 * TF_SZ - TF_ES - 8), %ecx
+	jmp	5f
 4:	leal	(doreti_popl_fs - 1b)(%ebx), %edx
 	cmpl	%edx, TF_EIP(%esp)
-	jne	5f
-	movl	$(2 * TF_SZ - TF_FS), %ecx
-	jmp	6f
-	/* kernel mode, normal */
-5:	jmp	calltrap
-6:	cmpl	$PMAP_TRM_MIN_ADDRESS, %esp	/* trampoline stack ? */
-	jb	5b	/* if not, no need to change stacks */
+	jne	calltrap
+	movl	$(2 * TF_SZ - TF_FS - 8), %ecx
+5:	cmpl	$PMAP_TRM_MIN_ADDRESS, %esp	/* trampoline stack ? */
+	jb	calltrap	  /* if not, no need to change stacks */
 	movl	(tramp_idleptd - 1b)(%ebx), %eax
 	movl	%eax, %cr3
 	movl	PCPU(KESP0), %edx
@@ -234,6 +278,7 @@ irettraps:
 	movl	%esp, %esi
 	rep; movsb
 	movl	%edx, %esp
+	/* kernel mode, normal */
 	jmp	calltrap
 
 /*
@@ -493,22 +538,21 @@ doreti_exit:
 	je	doreti_iret_nmi
 	cmpl	$T_TRCTRAP, TF_TRAPNO(%esp)
 	je	doreti_iret_nmi
-	movl	$TF_SZ, %ecx
 	testl	$PSL_VM,TF_EFLAGS(%esp)
-	jz	1f			/* PCB_VM86CALL is not set */
-	addl	$VM86_STACK_SPACE, %ecx
-	jmp	2f
-1:	testl	$SEL_RPL_MASK, TF_CS(%esp)
+	jnz	1f			/* PCB_VM86CALL is not set */
+	testl	$SEL_RPL_MASK, TF_CS(%esp)
 	jz	doreti_popl_fs
-2:	movl	$handle_ibrs_exit,%eax
-	pushl	%ecx			/* preserve enough call-used regs */
+1:	movl	$handle_ibrs_exit,%eax
 	call	*%eax
 	movl	mds_handler,%eax
 	call	*%eax
-	popl	%ecx
 	movl	%esp, %esi
 	movl	PCPU(TRAMPSTK), %edx
-	subl	%ecx, %edx
+	movl	$TF_SZ, %ecx
+	testl	$PSL_VM,TF_EFLAGS(%esp)
+	jz	2f			/* PCB_VM86CALL is not set */
+	addl	$VM86_STACK_SPACE, %ecx
+2:	subl	%ecx, %edx
 	movl	%edx, %edi
 	rep; movsb
 	movl	%edx, %esp
@@ -543,7 +587,7 @@ doreti_iret_nmi:
 	 * case, and continues in the corresponding place in the code
 	 * below.
 	 *
-	 * If the fault occured during return to usermode, we recreate
+	 * If the fault occurred during return to usermode, we recreate
 	 * the trap frame and call trap() to send a signal.  Otherwise
 	 * the kernel was tricked into fault by attempt to restore invalid
 	 * usermode segment selectors on return from nested fault or

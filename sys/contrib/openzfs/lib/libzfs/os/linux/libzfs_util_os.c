@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -145,8 +145,8 @@ libzfs_load_module(void)
 		if (pfds[0].revents & POLLIN) {
 			verify(read(ino, ev, evsz) >
 			    sizeof (struct inotify_event));
-			if (strcmp(ev->name, &ZFS_DEV[sizeof (ZFS_DEVDIR)])
-			    == 0) {
+			if (strncmp(ev->name, &ZFS_DEV[sizeof (ZFS_DEVDIR)],
+			    ev->len) == 0) {
 				ret = 0;
 				break;
 			}

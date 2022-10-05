@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011 Gunnar Beutner
+ * Copyright (c) 2022 by Delphix. All rights reserved.
  */
 
 #include "libshare_impl.h"
@@ -33,3 +34,4 @@ boolean_t nfs_is_shared_impl(const char *exports, sa_share_impl_t impl_share);
 int nfs_toggle_share(const char *lockfile, const char *exports,
     const char *expdir, sa_share_impl_t impl_share,
     int(*cbk)(sa_share_impl_t impl_share, FILE *tmpfile));
+void nfs_reset_shares(const char *lockfile, const char *exports);

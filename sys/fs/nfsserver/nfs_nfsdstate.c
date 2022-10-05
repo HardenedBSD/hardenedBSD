@@ -6383,9 +6383,12 @@ nfsrv_cache_session(struct nfsrv_descript *nd, struct mbuf **m)
 			}
 			if (cp != NULL)
 				printf("nfsrv_cache_session: no session "
-				    "IPaddr=%s\n", cp);
+				    "IPaddr=%s, check NFS clients for unique "
+				    "/etc/hostid's\n", cp);
 			else
-				printf("nfsrv_cache_session: no session\n");
+				printf("nfsrv_cache_session: no session, "
+				    "check NFS clients for unique "
+				    "/etc/hostid's\n");
 			free(buf, M_TEMP);
 		}
 		m_freem(*m);
@@ -8423,10 +8426,10 @@ tryagain2:
 	 * NFS mount and they are not suspendable at this time.
 	 */
 	if (ret == 0)
-		ret = vn_start_write(vp, &mp, V_WAIT | PCATCH);
+		ret = vn_start_write(vp, &mp, V_WAIT | V_PCATCH);
 	if (ret == 0) {
 		tvmp = dvp->v_mount;
-		ret = vn_start_write(NULL, &tvmp, V_WAIT | PCATCH);
+		ret = vn_start_write(NULL, &tvmp, V_WAIT | V_PCATCH);
 	}
 
 	/*

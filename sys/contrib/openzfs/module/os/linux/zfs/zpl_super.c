@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -185,7 +185,9 @@ zpl_remount_fs(struct super_block *sb, int *flags, char *data)
 static int
 __zpl_show_devname(struct seq_file *seq, zfsvfs_t *zfsvfs)
 {
-	ZPL_ENTER(zfsvfs);
+	int error;
+	if ((error = zpl_enter(zfsvfs, FTAG)) != 0)
+		return (error);
 
 	char *fsname = kmem_alloc(ZFS_MAX_DATASET_NAME_LEN, KM_SLEEP);
 	dmu_objset_name(zfsvfs->z_os, fsname);
@@ -205,7 +207,7 @@ __zpl_show_devname(struct seq_file *seq, zfsvfs_t *zfsvfs)
 
 	kmem_free(fsname, ZFS_MAX_DATASET_NAME_LEN);
 
-	ZPL_EXIT(zfsvfs);
+	zpl_exit(zfsvfs, FTAG);
 
 	return (0);
 }
@@ -232,6 +234,18 @@ __zpl_show_options(struct seq_file *seq, zfsvfs_t *zfsvfs)
 		break;
 	}
 #endif /* CONFIG_FS_POSIX_ACL */
+
+	switch (zfsvfs->z_case) {
+	case ZFS_CASE_SENSITIVE:
+		seq_puts(seq, ",casesensitive");
+		break;
+	case ZFS_CASE_INSENSITIVE:
+		seq_puts(seq, ",caseinsensitive");
+		break;
+	default:
+		seq_puts(seq, ",casemixed");
+		break;
+	}
 
 	return (0);
 }

@@ -47,6 +47,7 @@
 #include <linux/mod_compat.h>
 #include <sys/cred.h>
 #include <sys/vnode.h>
+#include <sys/misc.h>
 
 unsigned long spl_hostid = 0;
 EXPORT_SYMBOL(spl_hostid);
@@ -517,6 +518,38 @@ ddi_copyin(const void *from, void *to, size_t len, int flags)
 }
 EXPORT_SYMBOL(ddi_copyin);
 
+/*
+ * Post a uevent to userspace whenever a new vdev adds to the pool. It is
+ * necessary to sync blkid information with udev, which zed daemon uses
+ * during device hotplug to identify the vdev.
+ */
+void
+spl_signal_kobj_evt(struct block_device *bdev)
+{
+#if defined(HAVE_BDEV_KOBJ) || defined(HAVE_PART_TO_DEV)
+#ifdef HAVE_BDEV_KOBJ
+	struct kobject *disk_kobj = bdev_kobj(bdev);
+#else
+	struct kobject *disk_kobj = &part_to_dev(bdev->bd_part)->kobj;
+#endif
+	if (disk_kobj) {
+		int ret = kobject_uevent(disk_kobj, KOBJ_CHANGE);
+		if (ret) {
+			pr_warn("ZFS: Sending event '%d' to kobject: '%s'"
+			    " (%p): failed(ret:%d)\n", KOBJ_CHANGE,
+			    kobject_name(disk_kobj), disk_kobj, ret);
+		}
+	}
+#else
+/*
+ * This is encountered if neither bdev_kobj() nor part_to_dev() is available
+ * in the kernel - likely due to an API change that needs to be chased down.
+ */
+#error "Unsupported kernel: unable to get struct kobj from bdev"
+#endif
+}
+EXPORT_SYMBOL(spl_signal_kobj_evt);
+
 int
 ddi_copyout(const void *from, void *to, size_t len, int flags)
 {
@@ -705,7 +738,7 @@ spl_kvmem_init(void)
  * initialize each of the per-cpu seeds so that the sequences generated on each
  * CPU are guaranteed to never overlap in practice.
  */
-static void __init
+static int __init
 spl_random_init(void)
 {
 	uint64_t s[2];
@@ -713,6 +746,9 @@ spl_random_init(void)
 
 	spl_pseudo_entropy = __alloc_percpu(2 * sizeof (uint64_t),
 	    sizeof (uint64_t));
+
+	if (!spl_pseudo_entropy)
+		return (-ENOMEM);
 
 	get_random_bytes(s, sizeof (s));
 
@@ -737,6 +773,8 @@ spl_random_init(void)
 		wordp[0] = s[0];
 		wordp[1] = s[1];
 	}
+
+	return (0);
 }
 
 static void
@@ -757,7 +795,8 @@ spl_init(void)
 {
 	int rc = 0;
 
-	spl_random_init();
+	if ((rc = spl_random_init()))
+		goto out0;
 
 	if ((rc = spl_kvmem_init()))
 		goto out1;
@@ -800,6 +839,8 @@ out3:
 out2:
 	spl_kvmem_fini();
 out1:
+	spl_random_fini();
+out0:
 	return (rc);
 }
 

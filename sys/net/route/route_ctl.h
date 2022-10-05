@@ -52,12 +52,12 @@ struct route_nhop_data {
 	uint32_t rnd_weight;
 };
 
-int rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+int rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
     struct route_nhop_data *rnd, int op_flags, struct rib_cmd_info *rc);
-int rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+int rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
     rib_filter_f_t *filter_func, void *filter_arg, int op_flags,
     struct rib_cmd_info *rc);
-int rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, unsigned int plen,
+int rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, int plen,
     const struct sockaddr *gw, int op_flags, struct rib_cmd_info *rc);
 
 /* operation flags */
@@ -75,10 +75,15 @@ int rib_change_route(uint32_t fibnum, struct rt_addrinfo *info,
   struct rib_cmd_info *rc);
 int rib_action(uint32_t fibnum, int action, struct rt_addrinfo *info,
   struct rib_cmd_info *rc);
+int rib_match_gw(const struct rtentry *rt, const struct nhop_object *nh,
+    void *_data);
 int rib_handle_ifaddr_info(uint32_t fibnum, int cmd, struct rt_addrinfo *info);
 
-typedef void route_notification_t(struct rib_cmd_info *rc, void *);
-void rib_decompose_notification(struct rib_cmd_info *rc,
+int rib_add_default_route(uint32_t fibnum, int family, struct ifnet *ifp,
+    struct sockaddr *gw, struct rib_cmd_info *rc);
+
+typedef void route_notification_t(const struct rib_cmd_info *rc, void *);
+void rib_decompose_notification(const struct rib_cmd_info *rc,
     route_notification_t *cb, void *cbdata);
 
 int rib_add_redirect(u_int fibnum, struct sockaddr *dst,
@@ -127,6 +132,7 @@ const struct rtentry *rib_lookup_lpm(uint32_t fibnum, int family,
 bool rt_is_host(const struct rtentry *rt);
 sa_family_t rt_get_family(const struct rtentry *);
 struct nhop_object *rt_get_raw_nhop(const struct rtentry *rt);
+void rt_get_rnd(const struct rtentry *rt, struct route_nhop_data *rnd);
 #ifdef INET
 struct in_addr;
 void rt_get_inet_prefix_plen(const struct rtentry *rt, struct in_addr *paddr,
@@ -157,6 +163,8 @@ struct weightened_nhop;
 const struct weightened_nhop *nhgrp_get_nhops(const struct nhgrp_object *nhg,
     uint32_t *pnum_nhops);
 uint32_t nhgrp_get_count(struct rib_head *rh);
+int nhgrp_get_group(struct rib_head *rh, struct weightened_nhop *wn, int num_nhops,
+    uint32_t uidx, struct nhgrp_object **pnhg);
 
 /* Route subscriptions */
 enum rib_subscription_type {
@@ -181,4 +189,11 @@ void rib_unsubscribe_locked(struct rib_subscription *rs);
 void rib_notify(struct rib_head *rnh, enum rib_subscription_type type,
     struct rib_cmd_info *rc);
 
+/* Event bridge */
+typedef void route_event_f(uint32_t fibnum, const struct rib_cmd_info *rc);
+struct rtbridge{
+	route_event_f	*route_f;
+};
+extern struct rtbridge *rtsock_callback_p;
+extern struct rtbridge *netlink_callback_p;
 #endif

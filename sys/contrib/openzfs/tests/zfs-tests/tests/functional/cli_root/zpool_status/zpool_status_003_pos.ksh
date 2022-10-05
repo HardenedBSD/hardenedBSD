@@ -7,7 +7,7 @@
 # You may not use this file except in compliance with the License.
 #
 # You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
+# or https://opensource.org/licenses/CDDL-1.0.
 # See the License for the specific language governing permissions
 # and limitations under the License.
 #
@@ -63,6 +63,7 @@ log_must zfs snapshot $TESTPOOL2@snap
 log_must zfs clone $TESTPOOL2@snap $TESTPOOL2/clone
 
 # Look to see that snapshot, clone and filesystem our files report errors
+log_must zpool status -v $TESTPOOL2
 log_must eval "zpool status -v | grep '$TESTPOOL2@snap:/10m_file'"
 log_must eval "zpool status -v | grep '$TESTPOOL2/clone/10m_file'"
 log_must eval "zpool status -v | grep '$TESTPOOL2/10m_file'"

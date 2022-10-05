@@ -4,7 +4,7 @@
  * Copyright (c) 2010 Panasas, Inc.
  * Copyright (c) 2013-2016 Mellanox Technologies, Ltd.
  * All rights reserved.
- * Copyright (c) 2020-2021 The FreeBSD Foundation
+ * Copyright (c) 2020-2022 The FreeBSD Foundation
  *
  * Portions of this software were developed by Björn Zeeb
  * under sponsorship from the FreeBSD Foundation.
@@ -106,7 +106,8 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 
 #define	to_pci_dev(n)	container_of(n, struct pci_dev, dev)
 
-#define	PCI_VENDOR_ID		PCIR_DEVVENDOR
+#define	PCI_VENDOR_ID		PCIR_VENDOR
+#define	PCI_DEVICE_ID		PCIR_DEVICE
 #define	PCI_COMMAND		PCIR_COMMAND
 #define	PCI_COMMAND_INTX_DISABLE	PCIM_CMD_INTxDIS
 #define	PCI_EXP_DEVCTL		PCIER_DEVICE_CTL		/* Device Control */
@@ -213,6 +214,7 @@ typedef int pci_power_t;
 #define	PCI_IRQ_LEGACY			0x01
 #define	PCI_IRQ_MSI			0x02
 #define	PCI_IRQ_MSIX			0x04
+#define	PCI_IRQ_ALL_TYPES		(PCI_IRQ_MSIX|PCI_IRQ_MSI|PCI_IRQ_LEGACY)
 
 struct pci_dev;
 
@@ -327,6 +329,13 @@ void lkpi_pci_devres_release(struct device *, void *);
 struct resource *_lkpi_pci_iomap(struct pci_dev *pdev, int bar, int mmio_size);
 struct pcim_iomap_devres *lkpi_pcim_iomap_devres_find(struct pci_dev *pdev);
 void lkpi_pcim_iomap_table_release(struct device *, void *);
+
+static inline bool
+dev_is_pci(struct device *dev)
+{
+
+	return (device_get_devclass(dev->bsddev) == devclass_find("pci"));
+}
 
 static inline int
 pci_resource_type(struct pci_dev *pdev, int bar)
@@ -1159,6 +1168,22 @@ pcie_capability_set_word(struct pci_dev *dev, int pos, uint16_t val)
 	return (error);
 }
 
+static inline int
+pcie_capability_clear_word(struct pci_dev *dev, int pos, uint16_t val)
+{
+	int error;
+	uint16_t v;
+
+	error = pcie_capability_read_word(dev, pos, &v);
+	if (error != 0)
+		return (error);
+
+	v &= ~val;
+
+	error = pcie_capability_write_word(dev, pos, v);
+	return (error);
+}
+
 static inline int pcie_get_minimum_link(struct pci_dev *dev,
     enum pci_bus_speed *speed, enum pcie_link_width *width)
 {
@@ -1447,27 +1472,16 @@ pcim_iomap_table(struct pci_dev *pdev)
 }
 
 static inline int
-pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
+pcim_iomap_regions(struct pci_dev *pdev, uint32_t mask, const char *name)
 {
 	struct pcim_iomap_devres *dr;
 	void *res;
-	uint32_t mappings, requests, req_mask;
-	int bar, error;
+	uint32_t mappings;
+	int bar;
 
 	dr = lkpi_pcim_iomap_devres_find(pdev);
 	if (dr == NULL)
 		return (-ENOMEM);
-
-	/* Request all the BARs ("regions") we do not iomap. */
-	req_mask = ((1 << (PCIR_MAX_BAR_0 + 1)) - 1) & ~mask;
-	for (bar = requests = 0; requests != req_mask; bar++) {
-		if ((req_mask & (1 << bar)) == 0)
-			continue;
-		error = pci_request_region(pdev, bar, name);
-		if (error != 0 && error != -ENODEV)
-			goto err;
-		requests |= (1 << bar);
-	}
 
 	/* Now iomap all the requested (by "mask") ones. */
 	for (bar = mappings = 0; mappings != mask; bar++) {
@@ -1491,7 +1505,6 @@ pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
 	}
 
 	return (0);
-
 err:
 	for (bar = PCIR_MAX_BAR_0; bar >= 0; bar--) {
 		if ((mappings & (1 << bar)) != 0) {
@@ -1499,9 +1512,39 @@ err:
 			if (res == NULL)
 				continue;
 			pci_iounmap(pdev, res);
-		} else if ((requests & (1 << bar)) != 0) {
-			pci_release_region(pdev, bar);
 		}
+	}
+
+	return (-EINVAL);
+}
+
+static inline int
+pcim_iomap_regions_request_all(struct pci_dev *pdev, uint32_t mask, char *name)
+{
+	uint32_t requests, req_mask;
+	int bar, error;
+
+	/* Request all the BARs ("regions") we do not iomap. */
+	req_mask = ((1 << (PCIR_MAX_BAR_0 + 1)) - 1) & ~mask;
+	for (bar = requests = 0; requests != req_mask; bar++) {
+		if ((req_mask & (1 << bar)) == 0)
+			continue;
+		error = pci_request_region(pdev, bar, name);
+		if (error != 0 && error != -ENODEV)
+			goto err;
+		requests |= (1 << bar);
+	}
+
+	error = pcim_iomap_regions(pdev, mask, name);
+	if (error != 0)
+		goto err;
+
+	return (0);
+
+err:
+	for (bar = PCIR_MAX_BAR_0; bar >= 0; bar--) {
+		if ((requests & (1 << bar)) != 0)
+			pci_release_region(pdev, bar);
 	}
 
 	return (-EINVAL);

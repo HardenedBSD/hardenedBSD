@@ -90,9 +90,6 @@ __FBSDID("$FreeBSD$");
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_syncache.h>
 #include <netinet/tcp_ecn.h>
-#ifdef INET6
-#include <netinet6/tcp6_var.h>
-#endif
 #ifdef TCP_OFFLOAD
 #include <netinet/toecore.h>
 #endif
@@ -1030,6 +1027,7 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	/*
 	 * Copy and activate timers.
 	 */
+	tp->t_maxunacktime = sototcpcb(lso)->t_maxunacktime;
 	tp->t_keepinit = sototcpcb(lso)->t_keepinit;
 	tp->t_keepidle = sototcpcb(lso)->t_keepidle;
 	tp->t_keepintvl = sototcpcb(lso)->t_keepintvl;
@@ -1039,7 +1037,8 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	TCPSTAT_INC(tcps_accepts);
 	TCP_PROBE6(state__change, NULL, tp, NULL, tp, NULL, TCPS_LISTEN);
 
-	solisten_enqueue(so, SS_ISCONNECTED);
+	if (!solisten_enqueue(so, SS_ISCONNECTED))
+		tp->t_flags |= TF_SONOTCONN;
 
 	return (so);
 
@@ -1361,6 +1360,7 @@ syncache_tfo_expand(struct syncache *sc, struct socket *lso, struct mbuf *m,
 		tp->snd_max = tp->iss;
 		tp->snd_nxt = tp->iss;
 		tp->t_tfo_pending = pending_counter;
+		TCPSTATES_INC(TCPS_SYN_RECEIVED);
 		TCPSTAT_INC(tcps_sc_completed);
 	}
 

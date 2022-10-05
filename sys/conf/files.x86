@@ -292,6 +292,8 @@ dev/qat_c2xxx/qat.c		optional	qat_c2xxx
 dev/qat_c2xxx/qat_ae.c		optional	qat_c2xxx
 dev/qat_c2xxx/qat_c2xxx.c	optional	qat_c2xxx
 dev/qat_c2xxx/qat_hw15.c	optional	qat_c2xxx
+libkern/strcmp.c		standard
+libkern/strncmp.c		standard
 libkern/x86/crc32_sse42.c	standard
 #
 # x86 shared code between IA32 and AMD64 architectures
@@ -335,7 +337,6 @@ x86/x86/legacy.c		standard
 x86/x86/mca.c			standard
 x86/x86/x86_mem.c		optional	mem
 x86/x86/mp_x86.c		optional	smp
-x86/x86/mp_watchdog.c		optional	mp_watchdog smp
 x86/x86/nexus.c			standard
 x86/x86/pvclock.c		optional	kvm_clock | xenhvm
 x86/x86/stack_machdep.c		optional	ddb | stack

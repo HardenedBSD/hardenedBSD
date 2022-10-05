@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -45,8 +45,11 @@ libspl_assertf(const char *file, const char *func, int line,
 	fprintf(stderr, "\n");
 	fprintf(stderr, "ASSERT at %s:%d:%s()", file, line, func);
 	va_end(args);
+
+#if !__has_feature(attribute_analyzer_noreturn) && !defined(__COVERITY__)
 	if (libspl_assert_ok) {
 		return;
 	}
+#endif
 	abort();
 }

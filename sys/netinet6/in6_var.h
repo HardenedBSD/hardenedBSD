@@ -326,7 +326,8 @@ struct in6_prflags {
 	struct prf_ra {
 		u_char onlink : 1;
 		u_char autonomous : 1;
-		u_char reserved : 6;
+		u_char ra_derived: 1;
+		u_char reserved : 5;
 	} prf_ra;
 	u_char prf_reserved1;
 	u_short prf_reserved2;
@@ -357,6 +358,7 @@ struct  in6_prefixreq {
 
 #define ipr_raf_onlink		ipr_flags.prf_ra.onlink
 #define ipr_raf_auto		ipr_flags.prf_ra.autonomous
+#define ipr_raf_ra_derived	ipr_flags.prf_ra.ra_derived
 
 #define ipr_statef_onlink	ipr_flags.prf_state.onlink
 
@@ -551,7 +553,6 @@ do {								\
 		    offsetof(struct in6_ifstat, tag) / sizeof(uint64_t)], 1);\
 } while (/*CONSTCOND*/ 0)
 
-extern u_char inet6ctlerrmap[];
 VNET_DECLARE(unsigned long, in6_maxmtu);
 #define	V_in6_maxmtu			VNET(in6_maxmtu)
 #endif /* _KERNEL */
@@ -881,12 +882,13 @@ int	ip6_setmoptions(struct inpcb *, struct sockopt *);
 #define IN6_IFAUPDATE_DADDELAY	0x1 /* first time to configure an address */
 
 int	in6_mask2len(struct in6_addr *, u_char *);
-int	in6_control(struct socket *, u_long, caddr_t, struct ifnet *,
+int	in6_control(struct socket *, u_long, void *, struct ifnet *,
 	struct thread *);
 int	in6_update_ifa(struct ifnet *, struct in6_aliasreq *,
 	struct in6_ifaddr *, int);
 void	in6_prepare_ifra(struct in6_aliasreq *, const struct in6_addr *,
 	const struct in6_addr *);
+int	in6_addifaddr(struct ifnet *, struct in6_aliasreq *, struct in6_ifaddr *);
 void	in6_purgeaddr(struct ifaddr *);
 void	in6_purgeifaddr(struct in6_ifaddr *);
 int	in6if_do_dad(struct ifnet *);

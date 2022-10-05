@@ -471,15 +471,15 @@ do {									\
 #define	TDF_THRWAKEUP	0x00100000 /* Libthr thread must not suspend itself. */
 #define	TDF_SEINTR	0x00200000 /* EINTR on stop attempts. */
 #define	TDF_SWAPINREQ	0x00400000 /* Swapin request due to wakeup. */
-#define	TDF_DOING_SA	0x00800000 /* Doing SINGLE_ALLPROC, do not unsuspend me */
+#define	TDF_UNUSED6	0x00800000 /* Available */
 #define	TDF_SCHED0	0x01000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED1	0x02000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED2	0x04000000 /* Reserved for scheduler private use */
 #define	TDF_SCHED3	0x08000000 /* Reserved for scheduler private use */
-#define	TDF_UNUSED6	0x10000000 /* Available */
-#define	TDF_UNUSED7	0x20000000 /* Available */
-#define	TDF_UNUSED8	0x40000000 /* Available */
-#define	TDF_UNUSED9	0x80000000 /* Available */
+#define	TDF_UNUSED7	0x10000000 /* Available */
+#define	TDF_UNUSED8	0x20000000 /* Available */
+#define	TDF_UNUSED9	0x40000000 /* Available */
+#define	TDF_UNUSED10	0x80000000 /* Available */
 
 enum {
 	TDA_AST = 0,		/* Special: call all non-flagged AST handlers */
@@ -721,8 +721,6 @@ struct proc {
 	int		p_pendingexits; /* (c) Count of pending thread exits. */
 	struct filemon	*p_filemon;	/* (c) filemon-specific data. */
 	int		p_pdeathsig;	/* (c) Signal from parent on exit. */
-	int		p_singlethr;	/* (c) Count of threads doing
-					   external thread_single() */
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_magic
 
@@ -783,6 +781,7 @@ struct proc {
 	LIST_HEAD(, proc) p_orphans;	/* (e) Pointer to list of orphans. */
 
 	TAILQ_HEAD(, kq_timer_cb_data)	p_kqtim_stop;	/* (c) */
+	LIST_ENTRY(proc) p_jaillist;	/* (d) Jail process linkage. */
 };
 
 #define	p_session	p_pgrp->pg_session

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -525,7 +525,7 @@ zfs_acl_valid_ace_type(uint_t type, uint_t flags)
 		    entry_type == ACE_EVERYONE || entry_type == 0 ||
 		    entry_type == ACE_IDENTIFIER_GROUP);
 	default:
-		if (type >= MIN_ACE_TYPE && type <= MAX_ACE_TYPE)
+		if (type <= MAX_ACE_TYPE)
 			return (B_TRUE);
 	}
 	return (B_FALSE);
@@ -2596,9 +2596,10 @@ zfs_fastaccesschk_execute(znode_t *zdp, cred_t *cr)
 
 slow:
 	DTRACE_PROBE(zfs__fastpath__execute__access__miss);
-	ZFS_ENTER(ZTOZSB(zdp));
+	if ((error = zfs_enter(ZTOZSB(zdp), FTAG)) != 0)
+		return (error);
 	error = zfs_zaccess(zdp, ACE_EXECUTE, 0, B_FALSE, cr);
-	ZFS_EXIT(ZTOZSB(zdp));
+	zfs_exit(ZTOZSB(zdp), FTAG);
 	return (error);
 }
 

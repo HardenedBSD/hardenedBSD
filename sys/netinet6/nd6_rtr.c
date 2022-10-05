@@ -522,6 +522,7 @@ nd6_ra_input(struct mbuf *m, int off, int icmp6len)
 			    ND_OPT_PI_FLAG_ONLINK) ? 1 : 0;
 			pr.ndpr_raf_auto = (pi->nd_opt_pi_flags_reserved &
 			    ND_OPT_PI_FLAG_AUTO) ? 1 : 0;
+			pr.ndpr_raf_ra_derived = 1;
 			pr.ndpr_plen = pi->nd_opt_pi_prefix_len;
 			pr.ndpr_vltime = ntohl(pi->nd_opt_pi_valid_time);
 			pr.ndpr_pltime = ntohl(pi->nd_opt_pi_preferred_time);
@@ -678,30 +679,21 @@ pfxrtr_del(struct nd_pfxrouter *pfr)
 static void
 defrouter_addreq(struct nd_defrouter *new)
 {
-	struct sockaddr_in6 def, mask, gate;
-	struct rt_addrinfo info;
-	struct rib_cmd_info rc;
-	unsigned int fibnum;
-	int error;
-
-	bzero(&def, sizeof(def));
-	bzero(&mask, sizeof(mask));
-	bzero(&gate, sizeof(gate));
-
-	def.sin6_len = mask.sin6_len = gate.sin6_len =
-	    sizeof(struct sockaddr_in6);
-	def.sin6_family = gate.sin6_family = AF_INET6;
-	gate.sin6_addr = new->rtaddr;
-	fibnum = new->ifp->if_fib;
-
-	bzero((caddr_t)&info, sizeof(info));
-	info.rti_flags = RTF_GATEWAY;
-	info.rti_info[RTAX_DST] = (struct sockaddr *)&def;
-	info.rti_info[RTAX_GATEWAY] = (struct sockaddr *)&gate;
-	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
+	uint32_t fibnum = new->ifp->if_fib;
+	struct rib_cmd_info rc = {};
+	int error = 0;
 
 	NET_EPOCH_ASSERT();
-	error = rib_action(fibnum, RTM_ADD, &info, &rc);
+
+	struct sockaddr_in6 gw = {
+		.sin6_family = AF_INET6,
+		.sin6_len = sizeof(struct sockaddr_in6),
+		.sin6_addr = new->rtaddr,
+	};
+
+	error = rib_add_default_route(fibnum, AF_INET6, new->ifp,
+	    (struct sockaddr *)&gw, &rc);
+
 	if (error == 0) {
 		struct nhop_object *nh = nhop_select_func(rc.rc_nh_new, 0);
 		rt_routemsg(RTM_ADD, rc.rc_rt, nh, fibnum);
@@ -717,31 +709,25 @@ defrouter_addreq(struct nd_defrouter *new)
 static void
 defrouter_delreq(struct nd_defrouter *dr)
 {
-	struct sockaddr_in6 def, mask, gate;
-	struct rt_addrinfo info;
-	struct rib_cmd_info rc;
+	uint32_t fibnum = dr->ifp->if_fib;
 	struct epoch_tracker et;
-	unsigned int fibnum;
+	struct rib_cmd_info rc;
 	int error;
 
-	bzero(&def, sizeof(def));
-	bzero(&mask, sizeof(mask));
-	bzero(&gate, sizeof(gate));
+	struct sockaddr_in6 dst = {
+		.sin6_family = AF_INET6,
+		.sin6_len = sizeof(struct sockaddr_in6),
+	};
 
-	def.sin6_len = mask.sin6_len = gate.sin6_len =
-	    sizeof(struct sockaddr_in6);
-	def.sin6_family = gate.sin6_family = AF_INET6;
-	gate.sin6_addr = dr->rtaddr;
-	fibnum = dr->ifp->if_fib;
-
-	bzero((caddr_t)&info, sizeof(info));
-	info.rti_flags = RTF_GATEWAY;
-	info.rti_info[RTAX_DST] = (struct sockaddr *)&def;
-	info.rti_info[RTAX_GATEWAY] = (struct sockaddr *)&gate;
-	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
+	struct sockaddr_in6 gw = {
+		.sin6_family = AF_INET6,
+		.sin6_len = sizeof(struct sockaddr_in6),
+		.sin6_addr = dr->rtaddr,
+	};
 
 	NET_EPOCH_ENTER(et);
-	error = rib_action(fibnum, RTM_DELETE, &info, &rc);
+	error = rib_del_route_px(fibnum, (struct sockaddr *)&dst, 0,
+		    rib_match_gw, (struct sockaddr *)&gw, 0, &rc);
 	if (error == 0) {
 		struct nhop_object *nh = nhop_select_func(rc.rc_nh_old, 0);
 		rt_routemsg(RTM_DELETE, rc.rc_rt, nh, fibnum);
@@ -920,6 +906,18 @@ rtpref(struct nd_defrouter *dr)
 	/* NOTREACHED */
 }
 
+static bool
+is_dr_reachable(const struct nd_defrouter *dr) {
+	struct llentry *ln = NULL;
+
+	ln = nd6_lookup(&dr->rtaddr, LLE_SF(AF_INET6, 0), dr->ifp);
+	if (ln == NULL)
+		return (false);
+	bool reachable = ND6_IS_LLINFO_PROBREACH(ln);
+	LLE_RUNLOCK(ln);
+	return reachable;
+}
+
 /*
  * Default Router Selection according to Section 6.3.6 of RFC 2461 and
  * draft-ietf-ipngwg-router-selection:
@@ -950,12 +948,12 @@ defrouter_select_fib(int fibnum)
 {
 	struct epoch_tracker et;
 	struct nd_defrouter *dr, *selected_dr, *installed_dr;
-	struct llentry *ln = NULL;
 
 	if (fibnum == RT_ALL_FIBS) {
 		for (fibnum = 0; fibnum < rt_numfibs; fibnum++) {
 			defrouter_select_fib(fibnum);
 		}
+		return;
 	}
 
 	ND6_RLOCK();
@@ -974,21 +972,17 @@ defrouter_select_fib(int fibnum)
 	 * the ordering rule of the list described in defrtrlist_update().
 	 */
 	selected_dr = installed_dr = NULL;
+	NET_EPOCH_ENTER(et);
 	TAILQ_FOREACH(dr, &V_nd6_defrouter, dr_entry) {
-		NET_EPOCH_ENTER(et);
-		if (selected_dr == NULL && dr->ifp->if_fib == fibnum &&
-		    (ln = nd6_lookup(&dr->rtaddr, LLE_SF(AF_INET6, 0), dr->ifp)) &&
-		    ND6_IS_LLINFO_PROBREACH(ln)) {
+		if (dr->ifp->if_fib != fibnum)
+			continue;
+
+		if (selected_dr == NULL && is_dr_reachable(dr)) {
 			selected_dr = dr;
 			defrouter_ref(selected_dr);
 		}
-		NET_EPOCH_EXIT(et);
-		if (ln != NULL) {
-			LLE_RUNLOCK(ln);
-			ln = NULL;
-		}
 
-		if (dr->installed && dr->ifp->if_fib == fibnum) {
+		if (dr->installed) {
 			if (installed_dr == NULL) {
 				installed_dr = dr;
 				defrouter_ref(installed_dr);
@@ -1002,6 +996,7 @@ defrouter_select_fib(int fibnum)
 			}
 		}
 	}
+
 	/*
 	 * If none of the default routers was found to be reachable,
 	 * round-robin the list regardless of preference.
@@ -1026,22 +1021,14 @@ defrouter_select_fib(int fibnum)
 			}
 		}
 	} else if (installed_dr != NULL) {
-		NET_EPOCH_ENTER(et);
-		if ((ln = nd6_lookup(&installed_dr->rtaddr, 0,
-		                     installed_dr->ifp)) &&
-		    ND6_IS_LLINFO_PROBREACH(ln) &&
-		    installed_dr->ifp->if_fib == fibnum &&
+		if (is_dr_reachable(installed_dr) &&
 		    rtpref(selected_dr) <= rtpref(installed_dr)) {
 			defrouter_rele(selected_dr);
 			selected_dr = installed_dr;
 		}
-		NET_EPOCH_EXIT(et);
-		if (ln != NULL)
-			LLE_RUNLOCK(ln);
 	}
 	ND6_RUNLOCK();
 
-	NET_EPOCH_ENTER(et);
 	/*
 	 * If we selected a router for this FIB and it's different
 	 * than the installed one, remove the installed router and
@@ -1812,20 +1799,12 @@ find_pfxlist_reachable_router(struct nd_prefix *pr)
 {
 	struct epoch_tracker et;
 	struct nd_pfxrouter *pfxrtr;
-	struct llentry *ln;
-	int canreach;
 
 	ND6_LOCK_ASSERT();
 
 	NET_EPOCH_ENTER(et);
 	LIST_FOREACH(pfxrtr, &pr->ndpr_advrtrs, pfr_entry) {
-		ln = nd6_lookup(&pfxrtr->router->rtaddr, LLE_SF(AF_INET6, 0),
-		    pfxrtr->router->ifp);
-		if (ln == NULL)
-			continue;
-		canreach = ND6_IS_LLINFO_PROBREACH(ln);
-		LLE_RUNLOCK(ln);
-		if (canreach)
+		if (is_dr_reachable(pfxrtr->router))
 			break;
 	}
 	NET_EPOCH_EXIT(et);

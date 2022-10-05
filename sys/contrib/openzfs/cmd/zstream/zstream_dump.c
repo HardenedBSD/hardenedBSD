@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -363,9 +363,6 @@ zstream_do_dump(int argc, char *argv[])
 				    BSWAP_64(drrb->drr_fromguid);
 			}
 
-			featureflags =
-			    DMU_GET_FEATUREFLAGS(drrb->drr_versioninfo);
-
 			(void) printf("BEGIN record\n");
 			(void) printf("\thdrtype = %lld\n",
 			    DMU_GET_STREAM_HDRTYPE(drrb->drr_versioninfo));
@@ -464,6 +461,9 @@ zstream_do_dump(int argc, char *argv[])
 				drro->drr_maxblkid =
 				    BSWAP_64(drro->drr_maxblkid);
 			}
+
+			featureflags =
+			    DMU_GET_FEATUREFLAGS(drrb->drr_versioninfo);
 
 			if (featureflags & DMU_BACKUP_FEATURE_RAW &&
 			    drro->drr_bonuslen > drro->drr_raw_bonuslen) {

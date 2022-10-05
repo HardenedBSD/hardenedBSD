@@ -6,7 +6,7 @@
 .\" You may not use this file except in compliance with the License.
 .\"
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-.\" or http://www.opensolaris.org/os/licensing.
+.\" or https://opensource.org/licenses/CDDL-1.0.
 .\" See the License for the specific language governing permissions
 .\" and limitations under the License.
 .\"
@@ -519,6 +519,16 @@ The root user, or a user who has been granted the
 privilege with
 .Nm zfs allow ,
 can access all projects' objects usage.
+.It Sy snapshots_changed
+Provides a mechanism to quickly determine whether snapshot list has
+changed without having to mount a dataset or iterate the snapshot list.
+Specifies the time at which a snapshot for a dataset was last
+created or deleted.
+.Pp
+This allows us to be more efficient how often we query snapshots.
+The property is persistent across mount and unmount operations only if the
+.Sy extensible_dataset
+feature is enabled.
 .It Sy volblocksize
 For volumes, specifies the block size of the volume.
 The
@@ -1538,7 +1548,7 @@ Access time is only updated if the previous
 access time was earlier than the current modify or change time or if the
 existing access time hasn't been updated within the past 24 hours.
 The default value is
-.Sy off .
+.Sy on .
 The values
 .Sy on
 and

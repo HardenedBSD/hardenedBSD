@@ -156,7 +156,7 @@ int	mac_ifnet_check_transmit_impl(struct ifnet *ifp, struct mbuf *m);
 #ifdef MAC
 extern bool mac_ifnet_check_transmit_fp_flag;
 #else
-#define mac_ifnet_check_transmit_fp_flag 0
+#define mac_ifnet_check_transmit_fp_flag false
 #endif
 #define mac_ifnet_check_transmit_enabled() __predict_false(mac_ifnet_check_transmit_fp_flag)
 static inline int
@@ -174,7 +174,7 @@ void	mac_ifnet_create_mbuf_impl(struct ifnet *ifp, struct mbuf *m);
 #ifdef MAC
 extern bool mac_ifnet_create_mbuf_fp_flag;
 #else
-#define mac_ifnet_create_mbuf_fp_flag 0
+#define mac_ifnet_create_mbuf_fp_flag false
 #endif
 #define mac_ifnet_create_mbuf_enabled() __predict_false(mac_ifnet_create_mbuf_fp_flag)
 static inline void
@@ -253,7 +253,7 @@ int	mac_pipe_check_poll_impl(struct ucred *cred, struct pipepair *pp);
 #ifdef MAC
 extern bool mac_pipe_check_poll_fp_flag;
 #else
-#define mac_pipe_check_poll_fp_flag 0
+#define mac_pipe_check_poll_fp_flag false
 #endif
 #define mac_pipe_check_poll_enabled() __predict_false(mac_pipe_check_poll_fp_flag)
 static inline int
@@ -268,11 +268,26 @@ mac_pipe_check_poll(struct ucred *cred, struct pipepair *pp)
 #ifdef MAC
 extern bool mac_pipe_check_stat_fp_flag;
 #else
-#define mac_pipe_check_stat_fp_flag 0
+#define mac_pipe_check_stat_fp_flag false
 #endif
 #define mac_pipe_check_stat_enabled() __predict_false(mac_pipe_check_stat_fp_flag)
 int	mac_pipe_check_stat(struct ucred *cred, struct pipepair *pp);
-int	mac_pipe_check_read(struct ucred *cred, struct pipepair *pp);
+int	mac_pipe_check_read_impl(struct ucred *cred, struct pipepair *pp);
+#ifdef MAC
+extern bool mac_pipe_check_read_fp_flag;
+#else
+#define mac_pipe_check_read_fp_flag false
+#endif
+#define mac_pipe_check_read_enabled() __predict_false(mac_pipe_check_read_fp_flag)
+static inline int
+mac_pipe_check_read(struct ucred *cred, struct pipepair *pp)
+{
+
+	if (mac_pipe_check_read_enabled())
+		return (mac_pipe_check_read_impl(cred, pp));
+	return (0);
+}
+
 int	mac_pipe_check_write(struct ucred *cred, struct pipepair *pp);
 void	mac_pipe_create(struct ucred *cred, struct pipepair *pp);
 void	mac_pipe_destroy(struct pipepair *);
@@ -324,7 +339,7 @@ int	mac_priv_check_impl(struct ucred *cred, int priv);
 #ifdef MAC
 extern bool mac_priv_check_fp_flag;
 #else
-#define mac_priv_check_fp_flag 0
+#define mac_priv_check_fp_flag false
 #endif
 #define mac_priv_check_enabled()	__predict_false(mac_priv_check_fp_flag)
 static inline int
@@ -340,7 +355,7 @@ int	mac_priv_grant_impl(struct ucred *cred, int priv);
 #ifdef MAC
 extern bool mac_priv_grant_fp_flag;
 #else
-#define mac_priv_grant_fp_flag 0
+#define mac_priv_grant_fp_flag false
 #endif
 #define mac_priv_grant_enabled()	__predict_false(mac_priv_grant_fp_flag)
 static inline int
@@ -508,7 +523,7 @@ int	mac_vnode_check_lookup_impl(struct ucred *cred, struct vnode *dvp,
 #ifdef MAC
 extern bool mac_vnode_check_lookup_fp_flag;
 #else
-#define mac_vnode_check_lookup_fp_flag 0
+#define mac_vnode_check_lookup_fp_flag false
 #endif
 #define mac_vnode_check_lookup_enabled() __predict_false(mac_vnode_check_lookup_fp_flag)
 static inline int
@@ -527,7 +542,7 @@ int	mac_vnode_check_mmap_impl(struct ucred *cred, struct vnode *vp, int prot,
 #ifdef MAC
 extern bool mac_vnode_check_mmap_fp_flag;
 #else
-#define mac_vnode_check_mmap_fp_flag 0
+#define mac_vnode_check_mmap_fp_flag false
 #endif
 #define mac_vnode_check_mmap_enabled() __predict_false(mac_vnode_check_mmap_fp_flag)
 static inline int
@@ -546,7 +561,7 @@ int	mac_vnode_check_open_impl(struct ucred *cred, struct vnode *vp,
 #ifdef MAC
 extern bool mac_vnode_check_open_fp_flag;
 #else
-#define mac_vnode_check_open_fp_flag 0
+#define mac_vnode_check_open_fp_flag false
 #endif
 #define mac_vnode_check_open_enabled() __predict_false(mac_vnode_check_open_fp_flag)
 static inline int
@@ -569,7 +584,7 @@ extern bool mac_vnode_check_poll_fp_flag;
 int	mac_vnode_check_poll(struct ucred *active_cred,
 	    struct ucred *file_cred, struct vnode *vp);
 #else
-#define mac_vnode_check_poll_fp_flag	0
+#define mac_vnode_check_poll_fp_flag	false
 static inline int
 mac_vnode_check_poll(struct ucred *active_cred, struct ucred *file_cred,
     struct vnode *vp)
@@ -583,7 +598,7 @@ int	mac_vnode_check_readlink_impl(struct ucred *cred, struct vnode *dvp);
 #ifdef MAC
 extern bool mac_vnode_check_readlink_fp_flag;
 #else
-#define mac_vnode_check_readlink_fp_flag 0
+#define mac_vnode_check_readlink_fp_flag false
 #endif
 #define mac_vnode_check_readlink_enabled() __predict_false(mac_vnode_check_readlink_fp_flag)
 static inline int
@@ -622,7 +637,7 @@ int	mac_vnode_check_stat_impl(struct ucred *active_cred,
 #ifdef MAC
 extern bool mac_vnode_check_stat_fp_flag;
 #else
-#define mac_vnode_check_stat_fp_flag 0
+#define mac_vnode_check_stat_fp_flag false
 #endif
 #define mac_vnode_check_stat_enabled()	__predict_false(mac_vnode_check_stat_fp_flag)
 static inline int
@@ -641,7 +656,7 @@ int	mac_vnode_check_read_impl(struct ucred *active_cred,
 #ifdef MAC
 extern bool mac_vnode_check_read_fp_flag;
 #else
-#define mac_vnode_check_read_fp_flag 0
+#define mac_vnode_check_read_fp_flag false
 #endif
 #define mac_vnode_check_read_enabled() __predict_false(mac_vnode_check_read_fp_flag)
 static inline int
@@ -660,7 +675,7 @@ int	mac_vnode_check_write_impl(struct ucred *active_cred,
 #ifdef MAC
 extern bool mac_vnode_check_write_fp_flag;
 #else
-#define mac_vnode_check_write_fp_flag 0
+#define mac_vnode_check_write_fp_flag false
 #endif
 #define mac_vnode_check_write_enabled() __predict_false(mac_vnode_check_write_fp_flag)
 static inline int

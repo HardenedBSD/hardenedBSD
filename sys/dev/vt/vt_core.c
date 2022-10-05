@@ -338,7 +338,7 @@ vt_suspend_flush_timer(struct vt_device *vd)
 }
 
 static void
-vt_switch_timer(void *arg)
+vt_switch_timer(void *arg, int pending)
 {
 
 	(void)vt_late_window_switch((struct vt_window *)arg);
@@ -442,8 +442,7 @@ vt_window_preswitch(struct vt_window *vw, struct vt_window *curvw)
 	DPRINTF(40, "%s\n", __func__);
 	curvw->vw_switch_to = vw;
 	/* Set timer to allow switch in case when process hang. */
-	callout_reset(&vw->vw_proc_dead_timer, hz * vt_deadtimer,
-	    vt_switch_timer, (void *)vw);
+	taskqueue_enqueue_timeout(taskqueue_thread, &vw->vw_timeout_task_dead, hz * vt_deadtimer);
 	/* Notify process about vt switch attempt. */
 	DPRINTF(30, "%s: Notify process.\n", __func__);
 	signal_vt_rel(curvw);
@@ -466,7 +465,7 @@ vt_late_window_switch(struct vt_window *vw)
 	struct vt_window *curvw;
 	int ret;
 
-	callout_stop(&vw->vw_proc_dead_timer);
+	taskqueue_cancel_timeout(taskqueue_thread, &vw->vw_timeout_task_dead, NULL);
 
 	ret = vt_window_switch(vw);
 	if (ret != 0) {
@@ -2045,7 +2044,7 @@ finish_vt_rel(struct vt_window *vw, int release, int *s)
 	if (vw->vw_flags & VWF_SWWAIT_REL) {
 		vw->vw_flags &= ~VWF_SWWAIT_REL;
 		if (release) {
-			callout_drain(&vw->vw_proc_dead_timer);
+			taskqueue_drain_timeout(taskqueue_thread, &vw->vw_timeout_task_dead);
 			(void)vt_late_window_switch(vw->vw_switch_to);
 		}
 		return (0);
@@ -2154,7 +2153,6 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 	vd = main_vd;
 	vw = vd->vd_curwindow;
 	vf = vw->vw_font;
-	mark = 0;
 
 	if (vw->vw_flags & (VWF_MOUSE_HIDE | VWF_GRAPHICS))
 		/*
@@ -2192,7 +2190,7 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 
 		vd->vd_mx = x;
 		vd->vd_my = y;
-		if (vd->vd_mstate & MOUSE_BUTTON1DOWN)
+		if (vd->vd_mstate & (MOUSE_BUTTON1DOWN | VT_MOUSE_EXTENDBUTTON))
 			vtbuf_set_mark(&vw->vw_buf, VTB_MARK_MOVE,
 			    vd->vd_mx / vf->vf_width,
 			    vd->vd_my / vf->vf_height);
@@ -2218,7 +2216,7 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 		case 2:	/* double click: cut a word */
 			mark = VTB_MARK_WORD;
 			break;
-		case 3:	/* triple click: cut a line */
+		default:	/* triple click: cut a line */
 			mark = VTB_MARK_ROW;
 			break;
 		}
@@ -2229,6 +2227,10 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 			break;
 		default:
 			vt_mouse_paste();
+			/* clear paste buffer selection after paste */
+			vtbuf_set_mark(&vw->vw_buf, VTB_MARK_START,
+			    vd->vd_mx / vf->vf_width,
+			    vd->vd_my / vf->vf_height);
 			break;
 		}
 		return; /* Done */
@@ -2238,7 +2240,7 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 			if (!(vd->vd_mstate & MOUSE_BUTTON1DOWN))
 				mark = VTB_MARK_EXTEND;
 			else
-				mark = 0;
+				mark = VTB_MARK_NONE;
 			break;
 		default:
 			mark = VTB_MARK_EXTEND;
@@ -2287,7 +2289,7 @@ vt_mouse_event(int type, int x, int y, int event, int cnt, int mlevel)
 			VD_PASTEBUFSZ(vd) = len;
 		}
 		/* Request copy/paste buffer data, no more than `len' */
-		vtbuf_extract_marked(&vw->vw_buf, VD_PASTEBUF(vd), len);
+		vtbuf_extract_marked(&vw->vw_buf, VD_PASTEBUF(vd), len, mark);
 
 		VD_PASTEBUFLEN(vd) = len;
 
@@ -2929,7 +2931,7 @@ vt_allocate_window(struct vt_device *vd, unsigned int window)
 
 	terminal_set_winsize(tm, &wsz);
 	vd->vd_windows[window] = vw;
-	callout_init(&vw->vw_proc_dead_timer, 1);
+	TIMEOUT_TASK_INIT(taskqueue_thread, &vw->vw_timeout_task_dead, 0, &vt_switch_timer, vw);
 
 	return (vw);
 }
@@ -2953,7 +2955,7 @@ vt_upgrade(struct vt_device *vd)
 			vw = vt_allocate_window(vd, i);
 		}
 		if (!(vw->vw_flags & VWF_READY)) {
-			callout_init(&vw->vw_proc_dead_timer, 1);
+			TIMEOUT_TASK_INIT(taskqueue_thread, &vw->vw_timeout_task_dead, 0, &vt_switch_timer, vw);
 			terminal_maketty(vw->vw_terminal, "v%r", VT_UNIT(vw));
 			vw->vw_flags |= VWF_READY;
 			if (vw->vw_flags & VWF_CONSOLE) {

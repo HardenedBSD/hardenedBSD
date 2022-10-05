@@ -131,7 +131,7 @@ zfsdev_ioctl(struct cdev *dev, ulong_t zcmd, caddr_t arg, int flag,
 	len = IOCPARM_LEN(zcmd);
 	vecnum = zcmd & 0xff;
 	zp = (void *)arg;
-	uaddr = (void *)zp->zfs_cmd;
+	uaddr = (void *)(uintptr_t)zp->zfs_cmd;
 	error = 0;
 	zcl = NULL;
 
@@ -219,9 +219,16 @@ static struct cdevsw zfs_cdevsw = {
 int
 zfsdev_attach(void)
 {
-	zfsdev = make_dev(&zfs_cdevsw, 0x0, UID_ROOT, GID_OPERATOR, 0666,
-	    ZFS_DRIVER);
-	return (0);
+	struct make_dev_args args;
+
+	make_dev_args_init(&args);
+	args.mda_flags = MAKEDEV_CHECKNAME | MAKEDEV_WAITOK;
+	args.mda_devsw = &zfs_cdevsw;
+	args.mda_cr = NULL;
+	args.mda_uid = UID_ROOT;
+	args.mda_gid = GID_OPERATOR;
+	args.mda_mode = 0666;
+	return (make_dev_s(&args, &zfsdev, ZFS_DRIVER));
 }
 
 void

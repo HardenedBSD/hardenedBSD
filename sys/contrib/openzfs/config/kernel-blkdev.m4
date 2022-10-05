@@ -104,6 +104,57 @@ AC_DEFUN([ZFS_AC_KERNEL_BLKDEV_CHECK_DISK_CHANGE], [
 ])
 
 dnl #
+dnl # bdev_kobj() is introduced from 5.12
+dnl #
+AC_DEFUN([ZFS_AC_KERNEL_SRC_BLKDEV_BDEV_KOBJ], [
+	ZFS_LINUX_TEST_SRC([bdev_kobj], [
+		#include <linux/fs.h>
+		#include <linux/blkdev.h>
+		#include <linux/kobject.h>
+	], [
+		struct block_device *bdev = NULL;
+		struct kobject *disk_kobj;
+		disk_kobj = bdev_kobj(bdev);
+	])
+])
+
+AC_DEFUN([ZFS_AC_KERNEL_BLKDEV_BDEV_KOBJ], [
+	AC_MSG_CHECKING([whether bdev_kobj() exists])
+	ZFS_LINUX_TEST_RESULT([bdev_kobj], [
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_BDEV_KOBJ, 1,
+		    [bdev_kobj() exists])
+	], [
+		AC_MSG_RESULT(no)
+	])
+])
+
+dnl #
+dnl # part_to_dev() was removed in 5.12
+dnl #
+AC_DEFUN([ZFS_AC_KERNEL_SRC_BLKDEV_PART_TO_DEV], [
+	ZFS_LINUX_TEST_SRC([part_to_dev], [
+		#include <linux/fs.h>
+		#include <linux/blkdev.h>
+	], [
+		struct hd_struct *p = NULL;
+		struct device *pdev;
+		pdev = part_to_dev(p);
+	])
+])
+
+AC_DEFUN([ZFS_AC_KERNEL_BLKDEV_PART_TO_DEV], [
+	AC_MSG_CHECKING([whether part_to_dev() exists])
+	ZFS_LINUX_TEST_RESULT([part_to_dev], [
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_PART_TO_DEV, 1,
+		    [part_to_dev() exists])
+	], [
+		AC_MSG_RESULT(no)
+	])
+])
+
+dnl #
 dnl # 5.10 API, check_disk_change() is removed, in favor of
 dnl # bdev_check_media_change(), which doesn't force revalidation
 dnl #
@@ -295,6 +346,32 @@ AC_DEFUN([ZFS_AC_KERNEL_BLKDEV_BDEV_WHOLE], [
 ])
 
 dnl #
+dnl # 5.20 API change,
+dnl # Removed bdevname(), snprintf(.., %pg) should be used.
+dnl #
+AC_DEFUN([ZFS_AC_KERNEL_SRC_BLKDEV_BDEVNAME], [
+	ZFS_LINUX_TEST_SRC([bdevname], [
+		#include <linux/fs.h>
+		#include <linux/blkdev.h>
+	], [
+		struct block_device *bdev __attribute__ ((unused)) = NULL;
+		char path[BDEVNAME_SIZE];
+
+		(void) bdevname(bdev, path);
+	])
+])
+
+AC_DEFUN([ZFS_AC_KERNEL_BLKDEV_BDEVNAME], [
+	AC_MSG_CHECKING([whether bdevname() exists])
+	ZFS_LINUX_TEST_RESULT([bdevname], [
+		AC_DEFINE(HAVE_BDEVNAME, 1, [bdevname() is available])
+		AC_MSG_RESULT(yes)
+	], [
+		AC_MSG_RESULT(no)
+	])
+])
+
+dnl #
 dnl # 5.19 API: blkdev_issue_secure_erase()
 dnl # 3.10 API: blkdev_issue_discard(..., BLKDEV_DISCARD_SECURE)
 dnl #
@@ -377,7 +454,10 @@ AC_DEFUN([ZFS_AC_KERNEL_SRC_BLKDEV], [
 	ZFS_AC_KERNEL_SRC_BLKDEV_CHECK_DISK_CHANGE
 	ZFS_AC_KERNEL_SRC_BLKDEV_BDEV_CHECK_MEDIA_CHANGE
 	ZFS_AC_KERNEL_SRC_BLKDEV_BDEV_WHOLE
+	ZFS_AC_KERNEL_SRC_BLKDEV_BDEVNAME
 	ZFS_AC_KERNEL_SRC_BLKDEV_ISSUE_SECURE_ERASE
+	ZFS_AC_KERNEL_SRC_BLKDEV_BDEV_KOBJ
+	ZFS_AC_KERNEL_SRC_BLKDEV_PART_TO_DEV
 ])
 
 AC_DEFUN([ZFS_AC_KERNEL_BLKDEV], [
@@ -391,6 +471,9 @@ AC_DEFUN([ZFS_AC_KERNEL_BLKDEV], [
 	ZFS_AC_KERNEL_BLKDEV_CHECK_DISK_CHANGE
 	ZFS_AC_KERNEL_BLKDEV_BDEV_CHECK_MEDIA_CHANGE
 	ZFS_AC_KERNEL_BLKDEV_BDEV_WHOLE
+	ZFS_AC_KERNEL_BLKDEV_BDEVNAME
 	ZFS_AC_KERNEL_BLKDEV_GET_ERESTARTSYS
 	ZFS_AC_KERNEL_BLKDEV_ISSUE_SECURE_ERASE
+	ZFS_AC_KERNEL_BLKDEV_BDEV_KOBJ
+	ZFS_AC_KERNEL_BLKDEV_PART_TO_DEV
 ])

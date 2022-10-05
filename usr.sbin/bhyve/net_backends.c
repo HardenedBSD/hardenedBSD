@@ -183,7 +183,7 @@ SET_DECLARE(net_backend_set, struct net_backend);
  */
 
 #if defined(INET6) || defined(INET)
-const int pf_list[] = {
+static const int pf_list[] = {
 #if defined(INET6)
 	PF_INET6,
 #endif
@@ -695,7 +695,6 @@ netmap_init(struct net_backend *be, const char *devname,
 	if (priv->nmd == NULL) {
 		WPRINTF(("Unable to nm_open(): interface '%s', errno (%s)",
 			devname, strerror(errno)));
-		free(priv);
 		return (-1);
 	}
 

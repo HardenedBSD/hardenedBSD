@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -158,8 +158,8 @@ kcf_prov_tab_rem_provider(crypto_provider_id_t prov_id)
 	 * at that time.
 	 */
 
-	KCF_PROV_REFRELE(prov_desc);
 	KCF_PROV_IREFRELE(prov_desc);
+	KCF_PROV_REFRELE(prov_desc);
 
 	return (CRYPTO_SUCCESS);
 }

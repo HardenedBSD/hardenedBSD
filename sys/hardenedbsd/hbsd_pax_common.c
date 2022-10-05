@@ -360,9 +360,10 @@ pax_elf(struct thread *td, struct image_params *imgp)
 	pax_set_flags(imgp->proc, td, flags);
 
 	/*
-	 * if we enable/disable features with secadm, print out a warning
+	 * if we enable/disable features with a pax flag, print out a warning.
+	 * Only if HBSD started in verbose mode so as not to pollute the logs.
 	 */
-	if (mode != 0) {
+	if (bootverbose && mode != 0) {
 		pax_log_internal_imgp(imgp, PAX_LOG_DEFAULT,
 		   "the process started with non-default hardening settings");
 	}

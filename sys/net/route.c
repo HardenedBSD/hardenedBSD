@@ -81,8 +81,6 @@ EVENTHANDLER_LIST_DEFINE(rt_addrmsg);
 
 static int rt_ifdelroute(const struct rtentry *rt, const struct nhop_object *,
     void *arg);
-static int rt_exportinfo(struct rtentry *rt, struct nhop_object *nh,
-    struct rt_addrinfo *info, int flags);
 
 /*
  * route initialization must occur before ip6_init2(), which happenas at
@@ -190,11 +188,10 @@ int
 rib_add_redirect(u_int fibnum, struct sockaddr *dst, struct sockaddr *gateway,
     struct sockaddr *author, struct ifnet *ifp, int flags, int lifetime_sec)
 {
+	struct route_nhop_data rnd = { .rnd_weight = RT_DEFAULT_WEIGHT };
 	struct rib_cmd_info rc;
-	int error;
-	struct rt_addrinfo info;
-	struct rt_metrics rti_rmx;
 	struct ifaddr *ifa;
+	int error;
 
 	NET_EPOCH_ASSERT();
 
@@ -210,21 +207,22 @@ rib_add_redirect(u_int fibnum, struct sockaddr *dst, struct sockaddr *gateway,
 	if ((ifa = ifaof_ifpforaddr(gateway, ifp)) == NULL)
 		return (ENETUNREACH);
 
-	bzero(&info, sizeof(info));
-	info.rti_info[RTAX_DST] = dst;
-	info.rti_info[RTAX_GATEWAY] = gateway;
-	info.rti_ifa = ifa;
-	info.rti_ifp = ifp;
-	info.rti_flags = flags;
+	struct nhop_object *nh = nhop_alloc(fibnum, dst->sa_family);
+	if (nh == NULL)
+		return (ENOMEM);
 
-	/* Setup route metrics to define expire time. */
-	bzero(&rti_rmx, sizeof(rti_rmx));
-	/* Set expire time as absolute. */
-	rti_rmx.rmx_expire = lifetime_sec + time_second;
-	info.rti_mflags |= RTV_EXPIRE;
-	info.rti_rmx = &rti_rmx;
-
-	error = rib_action(fibnum, RTM_ADD, &info, &rc);
+	nhop_set_gw(nh, gateway, flags & RTF_GATEWAY);
+	nhop_set_transmit_ifp(nh, ifp);
+	nhop_set_src(nh, ifa);
+	nhop_set_pxtype_flag(nh, NHF_HOST);
+	nhop_set_expire(nh, lifetime_sec + time_uptime);
+	nhop_set_redirect(nh, true);
+	nhop_set_origin(nh, NH_ORIGIN_REDIRECT);
+	rnd.rnd_nhop = nhop_get_nhop(nh, &error);
+	if (error == 0) {
+		error = rib_add_route_px(fibnum, dst, -1,
+		    &rnd, RTM_F_CREATE, &rc);
+	}
 
 	if (error != 0) {
 		/* TODO: add per-fib redirect stats. */
@@ -234,10 +232,11 @@ rib_add_redirect(u_int fibnum, struct sockaddr *dst, struct sockaddr *gateway,
 	RTSTAT_INC(rts_dynamic);
 
 	/* Send notification of a route addition to userland. */
-	bzero(&info, sizeof(info));
-	info.rti_info[RTAX_DST] = dst;
-	info.rti_info[RTAX_GATEWAY] = gateway;
-	info.rti_info[RTAX_AUTHOR] = author;
+	struct rt_addrinfo info = {
+		.rti_info[RTAX_DST] = dst,
+		.rti_info[RTAX_GATEWAY] = gateway,
+		.rti_info[RTAX_AUTHOR] = author,
+	};
 	rt_missmsg_fib(RTM_REDIRECT, &info, flags | RTF_UP, error, fibnum);
 
 	return (0);
@@ -315,151 +314,6 @@ ifa_ifwithroute(int flags, const struct sockaddr *dst,
 	}
 
 	return (ifa);
-}
-
-/*
- * Copy most of @rt data into @info.
- *
- * If @flags contains NHR_COPY, copies dst,netmask and gw to the
- * pointers specified by @info structure. Assume such pointers
- * are zeroed sockaddr-like structures with sa_len field initialized
- * to reflect size of the provided buffer. if no NHR_COPY is specified,
- * point dst,netmask and gw @info fields to appropriate @rt values.
- *
- * if @flags contains NHR_REF, do refcouting on rt_ifp and rt_ifa.
- *
- * Returns 0 on success.
- */
-static int
-rt_exportinfo(struct rtentry *rt, struct nhop_object *nh,
-    struct rt_addrinfo *info, int flags)
-{
-	struct rt_metrics *rmx;
-	struct sockaddr *src, *dst;
-	int sa_len;
-
-	if (flags & NHR_COPY) {
-		/* Copy destination if dst is non-zero */
-		src = rt_key(rt);
-		dst = info->rti_info[RTAX_DST];
-		sa_len = src->sa_len;
-		if (dst != NULL) {
-			if (src->sa_len > dst->sa_len)
-				return (ENOMEM);
-			memcpy(dst, src, src->sa_len);
-			info->rti_addrs |= RTA_DST;
-		}
-
-		/* Copy mask if set && dst is non-zero */
-		src = rt_mask(rt);
-		dst = info->rti_info[RTAX_NETMASK];
-		if (src != NULL && dst != NULL) {
-			/*
-			 * Radix stores different value in sa_len,
-			 * assume rt_mask() to have the same length
-			 * as rt_key()
-			 */
-			if (sa_len > dst->sa_len)
-				return (ENOMEM);
-			memcpy(dst, src, src->sa_len);
-			info->rti_addrs |= RTA_NETMASK;
-		}
-
-		/* Copy gateway is set && dst is non-zero */
-		src = &nh->gw_sa;
-		dst = info->rti_info[RTAX_GATEWAY];
-		if ((nhop_get_rtflags(nh) & RTF_GATEWAY) &&
-		    src != NULL && dst != NULL) {
-			if (src->sa_len > dst->sa_len)
-				return (ENOMEM);
-			memcpy(dst, src, src->sa_len);
-			info->rti_addrs |= RTA_GATEWAY;
-		}
-	} else {
-		info->rti_info[RTAX_DST] = rt_key(rt);
-		info->rti_addrs |= RTA_DST;
-		if (rt_mask(rt) != NULL) {
-			info->rti_info[RTAX_NETMASK] = rt_mask(rt);
-			info->rti_addrs |= RTA_NETMASK;
-		}
-		if (nhop_get_rtflags(nh) & RTF_GATEWAY) {
-			info->rti_info[RTAX_GATEWAY] = &nh->gw_sa;
-			info->rti_addrs |= RTA_GATEWAY;
-		}
-	}
-
-	rmx = info->rti_rmx;
-	if (rmx != NULL) {
-		info->rti_mflags |= RTV_MTU;
-		rmx->rmx_mtu = nh->nh_mtu;
-	}
-
-	info->rti_flags = rt->rte_flags | nhop_get_rtflags(nh);
-	info->rti_ifp = nh->nh_ifp;
-	info->rti_ifa = nh->nh_ifa;
-	if (flags & NHR_REF) {
-		if_ref(info->rti_ifp);
-		ifa_ref(info->rti_ifa);
-	}
-
-	return (0);
-}
-
-/*
- * Lookups up route entry for @dst in RIB database for fib @fibnum.
- * Exports entry data to @info using rt_exportinfo().
- *
- * If @flags contains NHR_REF, refcouting is performed on rt_ifp and rt_ifa.
- * All references can be released later by calling rib_free_info().
- *
- * Returns 0 on success.
- * Returns ENOENT for lookup failure, ENOMEM for export failure.
- */
-int
-rib_lookup_info(uint32_t fibnum, const struct sockaddr *dst, uint32_t flags,
-    uint32_t flowid, struct rt_addrinfo *info)
-{
-	RIB_RLOCK_TRACKER;
-	struct rib_head *rh;
-	struct radix_node *rn;
-	struct rtentry *rt;
-	struct nhop_object *nh;
-	int error;
-
-	KASSERT((fibnum < rt_numfibs), ("rib_lookup_rte: bad fibnum"));
-	rh = rt_tables_get_rnh(fibnum, dst->sa_family);
-	if (rh == NULL)
-		return (ENOENT);
-
-	RIB_RLOCK(rh);
-	rn = rh->rnh_matchaddr(__DECONST(void *, dst), &rh->head);
-	if (rn != NULL && ((rn->rn_flags & RNF_ROOT) == 0)) {
-		rt = RNTORT(rn);
-		nh = nhop_select(rt->rt_nhop, flowid);
-		/* Ensure route & ifp is UP */
-		if (RT_LINK_IS_UP(nh->nh_ifp)) {
-			flags = (flags & NHR_REF) | NHR_COPY;
-			error = rt_exportinfo(rt, nh, info, flags);
-			RIB_RUNLOCK(rh);
-
-			return (error);
-		}
-	}
-	RIB_RUNLOCK(rh);
-
-	return (ENOENT);
-}
-
-/*
- * Releases all references acquired by rib_lookup_info() when
- * called with NHR_REF flags.
- */
-void
-rib_free_info(struct rt_addrinfo *info)
-{
-
-	ifa_free(info->rti_ifa);
-	if_rele(info->rti_ifp);
 }
 
 /*
@@ -840,3 +694,14 @@ rt_routemsg_info(int cmd, struct rt_addrinfo *info, int fibnum)
 
 	return (rtsock_routemsg_info(cmd, info, fibnum));
 }
+
+/* Netlink-related callbacks needed to glue rtsock, netlink and linuxolator */
+static void
+ignore_route_event(uint32_t fibnum, const struct rib_cmd_info *rc)
+{
+}
+static struct rtbridge ignore_cb = { .route_f = ignore_route_event };
+
+void *linux_netlink_p = NULL; /* Callback pointer for Linux translator functions */
+struct rtbridge *rtsock_callback_p = &ignore_cb;
+struct rtbridge *netlink_callback_p = &ignore_cb;

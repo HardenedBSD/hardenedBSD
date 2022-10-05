@@ -811,6 +811,7 @@ fuse_vnop_copy_file_range(struct vop_copy_file_range_args *ap)
 	struct thread *td;
 	struct uio io;
 	off_t outfilesize;
+	ssize_t r = 0;
 	pid_t pid;
 	int err;
 
@@ -858,11 +859,11 @@ fuse_vnop_copy_file_range(struct vop_copy_file_range_args *ap)
 	if (err)
 		goto unlock;
 
+	io.uio_resid = *ap->a_lenp;
 	if (ap->a_fsizetd) {
 		io.uio_offset = *ap->a_outoffp;
-		io.uio_resid = *ap->a_lenp;
-		err = vn_rlimit_fsize(outvp, &io, ap->a_fsizetd);
-		if (err)
+		err = vn_rlimit_fsizex(outvp, &io, 0, &r, ap->a_fsizetd);
+		if (err != 0)
 			goto unlock;
 	}
 
@@ -871,7 +872,7 @@ fuse_vnop_copy_file_range(struct vop_copy_file_range_args *ap)
 		goto unlock;
 
 	err = fuse_inval_buf_range(outvp, outfilesize, *ap->a_outoffp,
-		*ap->a_outoffp + *ap->a_lenp);
+		*ap->a_outoffp + io.uio_resid);
 	if (err)
 		goto unlock;
 
@@ -883,7 +884,7 @@ fuse_vnop_copy_file_range(struct vop_copy_file_range_args *ap)
 	fcfri->nodeid_out = VTOI(outvp);
 	fcfri->fh_out = outfufh->fh_id;
 	fcfri->off_out = *ap->a_outoffp;
-	fcfri->len = *ap->a_lenp;
+	fcfri->len = io.uio_resid;
 	fcfri->flags = 0;
 
 	err = fdisp_wait_answ(&fdi);
@@ -915,6 +916,10 @@ fallback:
 		    ap->a_incred, ap->a_outcred, ap->a_fsizetd);
 	}
 
+	/*
+	 * No need to call vn_rlimit_fsizex_res before return, since the uio is
+	 * local.
+	 */
 	return (err);
 }
 
@@ -1391,7 +1396,6 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
 
 	int nameiop = cnp->cn_nameiop;
 	int flags = cnp->cn_flags;
-	int wantparent = flags & (LOCKPARENT | WANTPARENT);
 	int islastcn = flags & ISLASTCN;
 	struct mount *mp = vnode_mount(dvp);
 	struct fuse_data *data = fuse_get_mpdata(mp);
@@ -1533,13 +1537,6 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
 			else
 				err = 0;
 			if (!err) {
-				/*
-				 * Set the SAVENAME flag to hold onto the
-				 * pathname for use later in VOP_CREATE or
-				 * VOP_RENAME.
-				 */
-				cnp->cn_flags |= SAVENAME;
-
 				err = EJUSTRETURN;
 			}
 		} else {
@@ -1618,12 +1615,6 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
 					err = EPERM;
 					goto out;
 				}
-			}
-
-			if (islastcn && (
-				(nameiop == DELETE) ||
-				(nameiop == RENAME && wantparent))) {
-				cnp->cn_flags |= SAVENAME;
 			}
 		}
 	}
@@ -2262,6 +2253,9 @@ fuse_vnop_setattr(struct vop_setattr_args *ap)
 		case VREG:
 			if (vfs_isrdonly(mp))
 				return (EROFS);
+			err = vn_rlimit_trunc(vap->va_size, td);
+			if (err)
+				return (err);
 			break;
 		default:
 			/*

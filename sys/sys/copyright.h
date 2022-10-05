@@ -27,8 +27,13 @@
 
 /* Copyrights macros  */
 
-/* Add a FreeBSD vendor copyright here */
+/* Add a FreeBSD vendor copyright here - or via CFLAGS */
+#ifndef COPYRIGHT_Vendor
 #define	COPYRIGHT_Vendor \
+	""
+#endif
+
+#define COPYRIGHT_HardenedBSD \
 	"Copyright (c) 2013-2022 The HardenedBSD Project.\n"
 
 /* FreeBSD */
@@ -43,5 +48,5 @@
 #define COPYRIGHT_UCB \
 	"Copyright (c) 1979, 1980, 1983, 1986, 1988, 1989, 1991, 1992, 1993, 1994\n\tThe Regents of the University of California. All rights reserved.\n"
 
-char copyright[] = COPYRIGHT_Vendor COPYRIGHT_FreeBSD COPYRIGHT_UCB;
+char copyright[] = COPYRIGHT_Vendor COPYRIGHT_HardenedBSD COPYRIGHT_FreeBSD COPYRIGHT_UCB;
 char trademark[] = TRADEMARK_Foundation;

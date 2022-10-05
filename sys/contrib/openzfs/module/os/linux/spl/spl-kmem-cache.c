@@ -706,7 +706,7 @@ spl_kmem_cache_create(const char *name, size_t size, size_t align,
 		kfree(skc);
 		return (NULL);
 	}
-	strncpy(skc->skc_name, name, skc->skc_name_size);
+	strlcpy(skc->skc_name, name, skc->skc_name_size);
 
 	skc->skc_ctor = ctor;
 	skc->skc_dtor = dtor;
@@ -1451,6 +1451,9 @@ spl_kmem_cache_init(void)
 	    spl_kmem_cache_kmem_threads, maxclsyspri,
 	    spl_kmem_cache_kmem_threads * 8, INT_MAX,
 	    TASKQ_PREPOPULATE | TASKQ_DYNAMIC);
+
+	if (spl_kmem_cache_taskq == NULL)
+		return (-ENOMEM);
 
 	return (0);
 }

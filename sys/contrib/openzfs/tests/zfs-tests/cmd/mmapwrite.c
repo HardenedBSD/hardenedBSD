@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -66,14 +66,18 @@ normal_writer(void *filename)
 		err(1, "failed to open %s", file_path);
 	}
 
-	char buf;
+	char buf = 'z';
 	while (1) {
 		write_num = write(fd, &buf, 1);
 		if (write_num == 0) {
 			err(1, "write failed!");
 			break;
 		}
-		lseek(fd, page_size, SEEK_CUR);
+		if (lseek(fd, page_size, SEEK_CUR) == -1) {
+			err(1, "lseek failed on %s: %s", file_path,
+			    strerror(errno));
+			break;
+		}
 	}
 }
 

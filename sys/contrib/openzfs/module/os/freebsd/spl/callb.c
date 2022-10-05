@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -160,8 +160,7 @@ callb_add_common(boolean_t (*func)(void *arg, int code),
 		    "too long -- truncated to %d chars",
 		    name, CB_MAXNAME);
 #endif
-	(void) strncpy(cp->c_name, name, CB_MAXNAME);
-	cp->c_name[CB_MAXNAME] = '\0';
+	(void) strlcpy(cp->c_name, name, sizeof (cp->c_name));
 
 	/*
 	 * Insert the new callb at the head of its class list.

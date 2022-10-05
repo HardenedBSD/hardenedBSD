@@ -27,18 +27,16 @@
  * Use is subject to license terms.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/types.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/kmem.h>
+#include <sys/proc.h>
 #include <sys/smp.h>
 #include <sys/dtrace_impl.h>
 #include <sys/dtrace_bsd.h>
+#include <cddl/dev/dtrace/dtrace_cddl.h>
 #include <machine/clock.h>
 #include <machine/frame.h>
 #include <machine/trap.h>
@@ -65,14 +63,18 @@ dtrace_invop_hdlr_t *dtrace_invop_hdlr;
 int
 dtrace_invop(uintptr_t addr, struct trapframe *frame, uintptr_t arg0)
 {
+	struct thread *td;
 	dtrace_invop_hdlr_t *hdlr;
 	int rval;
 
+	rval = 0;
+	td = curthread;
+	td->t_dtrace_trapframe = frame;
 	for (hdlr = dtrace_invop_hdlr; hdlr != NULL; hdlr = hdlr->dtih_next)
 		if ((rval = hdlr->dtih_func(addr, frame, arg0)) != 0)
-			return (rval);
-
-	return (0);
+			break;
+	td->t_dtrace_trapframe = NULL;
+	return (rval);
 }
 
 void
@@ -234,7 +236,7 @@ SYSINIT(dtrace_gethrtime_init, SI_SUB_SMP, SI_ORDER_ANY, dtrace_gethrtime_init,
  * Returns nanoseconds since boot.
  */
 uint64_t
-dtrace_gethrtime()
+dtrace_gethrtime(void)
 {
 	uint64_t timebase;
 	uint32_t lo;

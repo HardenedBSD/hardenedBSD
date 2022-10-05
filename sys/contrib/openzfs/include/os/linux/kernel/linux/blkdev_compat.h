@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -260,6 +260,32 @@ bio_set_bi_error(struct bio *bio, int error)
 #define	BIO_END_IO_PROTO(fn, x, z)	static void fn(struct bio *x, int z)
 #define	BIO_END_IO(bio, error)		bio_endio(bio, error);
 #endif /* HAVE_1ARG_BIO_END_IO_T */
+
+/*
+ * 5.15 MACRO,
+ *   GD_DEAD
+ *
+ * 2.6.36 - 5.14 MACRO,
+ *   GENHD_FL_UP
+ *
+ * Check the disk status and return B_TRUE if alive
+ * otherwise B_FALSE
+ */
+static inline boolean_t
+zfs_check_disk_status(struct block_device *bdev)
+{
+#if defined(GENHD_FL_UP)
+	return (!!(bdev->bd_disk->flags & GENHD_FL_UP));
+#elif defined(GD_DEAD)
+	return (!test_bit(GD_DEAD, &bdev->bd_disk->state));
+#else
+/*
+ * This is encountered if neither GENHD_FL_UP nor GD_DEAD is available in
+ * the kernel - likely due to an MACRO change that needs to be chased down.
+ */
+#error "Unsupported kernel: no usable disk status check"
+#endif
+}
 
 /*
  * 4.1 API,

@@ -91,6 +91,8 @@ static const char *bootstrap_names []  = {
 
 STAILQ_HEAD(fingerprint_list, fingerprint);
 
+static int debug;
+
 static int
 extract_pkg_static(int fd, char *p, int sz)
 {
@@ -1113,6 +1115,7 @@ main(int argc, char *argv[])
 	yes = false;
 
 	struct option longopts[] = {
+		{ "debug",		no_argument,		NULL,	'd' },
 		{ "force",		no_argument,		NULL,	'f' },
 		{ "only-ipv4",		no_argument,		NULL,	'4' },
 		{ "only-ipv6",		no_argument,		NULL,	'6' },
@@ -1122,8 +1125,11 @@ main(int argc, char *argv[])
 
 	snprintf(pkgpath, MAXPATHLEN, "%s/sbin/pkg", getlocalbase());
 
-	while ((ch = getopt_long(argc, argv, "-:fr::yN46", longopts, NULL)) != -1) {
+	while ((ch = getopt_long(argc, argv, "-:dfr::yN46", longopts, NULL)) != -1) {
 		switch (ch) {
+		case 'd':
+			debug++;
+			break;
 		case 'f':
 			force = true;
 			break;
@@ -1220,12 +1226,14 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
+	if (debug > 1)
+		fetchDebug = 1;
 
 	if ((bootstrap_only && force) || access(pkgpath, X_OK) == -1) {
-		/* 
+		/*
 		 * To allow 'pkg -N' to be used as a reliable test for whether
 		 * a system is configured to use pkg, don't bootstrap pkg
-		 * when that that option is passed.
+		 * when that option is passed.
 		 */
 		if (activation_test)
 			errx(EXIT_FAILURE, "pkg is not installed");

@@ -108,7 +108,8 @@ struct zfs_be_entry {
 static int
 zfs_open(const char *upath, struct open_file *f)
 {
-	struct zfsmount *mount = (struct zfsmount *)f->f_devdata;
+	struct devdesc *dev = f->f_devdata;
+	struct zfsmount *mount = dev->d_opendata;
 	struct file *fp;
 	int rc;
 
@@ -149,7 +150,8 @@ zfs_close(struct open_file *f)
 static int
 zfs_read(struct open_file *f, void *start, size_t size, size_t *resid	/* out */)
 {
-	const spa_t *spa = ((struct zfsmount *)f->f_devdata)->spa;
+	struct devdesc *dev = f->f_devdata;
+	const spa_t *spa = ((struct zfsmount *)dev->d_opendata)->spa;
 	struct file *fp = (struct file *)f->f_fsdata;
 	struct stat sb;
 	size_t n;
@@ -213,7 +215,8 @@ zfs_seek(struct open_file *f, off_t offset, int where)
 static int
 zfs_stat(struct open_file *f, struct stat *sb)
 {
-	const spa_t *spa = ((struct zfsmount *)f->f_devdata)->spa;
+	struct devdesc *dev = f->f_devdata;
+	const spa_t *spa = ((struct zfsmount *)dev->d_opendata)->spa;
 	struct file *fp = (struct file *)f->f_fsdata;
 
 	return (zfs_dnode_stat(spa, &fp->f_dnode, sb));
@@ -222,7 +225,8 @@ zfs_stat(struct open_file *f, struct stat *sb)
 static int
 zfs_readdir(struct open_file *f, struct dirent *d)
 {
-	const spa_t *spa = ((struct zfsmount *)f->f_devdata)->spa;
+	struct devdesc *dev = f->f_devdata;
+	const spa_t *spa = ((struct zfsmount *)dev->d_opendata)->spa;
 	struct file *fp = (struct file *)f->f_fsdata;
 	mzap_ent_phys_t mze;
 	struct stat sb;
@@ -1583,11 +1587,10 @@ zfs_dev_open(struct open_file *f, ...)
 	rv = 0;
 	/* This device is not set as currdev, mount us private copy. */
 	if (mount == NULL)
-		rv = zfs_mount(zfs_fmtdev(dev), NULL, (void **)&mount);
+		rv = zfs_mount(devformat(&dev->dd), NULL, (void **)&mount);
 
 	if (rv == 0) {
-		f->f_devdata = mount;
-		free(dev);
+		dev->dd.d_opendata = mount;
 	}
 	return (rv);
 }
@@ -1595,25 +1598,18 @@ zfs_dev_open(struct open_file *f, ...)
 static int
 zfs_dev_close(struct open_file *f)
 {
+	struct devdesc *dev;
 	struct zfsmount	*mnt, *mount;
 
-	mnt = f->f_devdata;
+	dev = f->f_devdata;
+	mnt = dev->d_opendata;
 
 	STAILQ_FOREACH(mount, &zfsmount, next) {
 		if (mnt->spa->spa_guid == mount->spa->spa_guid)
 			break;
 	}
 
-	/*
-	 * devclose() will free f->f_devdata, but since we do have
-	 * pointer to zfsmount structure in f->f_devdata, and
-	 * zfs_unmount() will also free the zfsmount structure,
-	 * we will get double free. To prevent double free,
-	 * we must set f_devdata to NULL there.
-	 */
-	if (mount != NULL)
-		f->f_devdata = NULL;
-
+	/* XXX */
 	return (0);
 }
 
@@ -1634,6 +1630,7 @@ struct devsw zfs_dev = {
 	.dv_ioctl = noioctl,
 	.dv_print = zfs_dev_print,
 	.dv_cleanup = nullsys,
+	.dv_fmtdev = zfs_fmtdev,
 };
 
 int
@@ -1681,7 +1678,7 @@ zfs_parsedev(struct zfs_devdesc *dev, const char *devspec, const char **path)
 }
 
 char *
-zfs_fmtdev(void *vdev)
+zfs_fmtdev(struct devdesc *vdev)
 {
 	static char		rootname[ZFS_MAXNAMELEN];
 	static char		buf[2 * ZFS_MAXNAMELEN + 8];
@@ -1689,7 +1686,7 @@ zfs_fmtdev(void *vdev)
 	spa_t			*spa;
 
 	buf[0] = '\0';
-	if (dev->dd.d_dev->dv_type != DEVT_ZFS)
+	if (vdev->d_dev->dv_type != DEVT_ZFS)
 		return (buf);
 
 	/* Do we have any pools? */

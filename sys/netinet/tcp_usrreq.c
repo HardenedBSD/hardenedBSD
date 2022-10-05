@@ -103,9 +103,7 @@ __FBSDID("$FreeBSD$");
 #ifdef TCPPCAP
 #include <netinet/tcp_pcap.h>
 #endif
-#ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
-#endif
 #ifdef TCP_OFFLOAD
 #include <netinet/tcp_offload.h>
 #endif
@@ -695,20 +693,18 @@ tcp6_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 	inp->inp_vflag &= ~INP_IPV4;
 	inp->inp_vflag |= INP_IPV6;
 	inp->inp_inc.inc_flags |= INC_ISIPV6;
+	NET_EPOCH_ENTER(et);
 	if ((error = tcp6_connect(tp, nam, td)) != 0)
-		goto out;
+		goto out_in_epoch;
 #ifdef TCP_OFFLOAD
 	if (registered_toedevs > 0 &&
 	    (so->so_options & SO_NO_OFFLOAD) == 0 &&
 	    (error = tcp_offload_connect(so, nam)) == 0)
-		goto out;
+		goto out_in_epoch;
 #endif
 	tcp_timer_activate(tp, TT_KEEP, TP_KEEPINIT(tp));
-	NET_EPOCH_ENTER(et);
 	error = tcp_output(tp);
-#ifdef INET
 out_in_epoch:
-#endif
 	NET_EPOCH_EXIT(et);
 out:
 	KASSERT(error >= 0, ("TCP stack %s requested tcp_drop(%p) at connect()"
@@ -1120,6 +1116,8 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 		}
 	}
 	if (!(flags & PRUS_OOB)) {
+		if (tp->t_acktime == 0)
+			tp->t_acktime = ticks;
 		sbappendstream(&so->so_snd, m, flags);
 		m = NULL;
 		if (nam && tp->t_state < TCPS_SYN_SENT) {
@@ -1206,6 +1204,8 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 		 * of data past the urgent section.
 		 * Otherwise, snd_up should be one lower.
 		 */
+		if (tp->t_acktime == 0)
+			tp->t_acktime = ticks;
 		sbappendstream_locked(&so->so_snd, m, flags);
 		SOCKBUF_UNLOCK(&so->so_snd);
 		m = NULL;
@@ -1464,48 +1464,58 @@ out:
 }
 
 #ifdef INET
-struct pr_usrreqs tcp_usrreqs = {
-	.pru_abort =		tcp_usr_abort,
-	.pru_accept =		tcp_usr_accept,
-	.pru_attach =		tcp_usr_attach,
-	.pru_bind =		tcp_usr_bind,
-	.pru_connect =		tcp_usr_connect,
-	.pru_control =		in_control,
-	.pru_detach =		tcp_usr_detach,
-	.pru_disconnect =	tcp_usr_disconnect,
-	.pru_listen =		tcp_usr_listen,
-	.pru_peeraddr =		in_getpeeraddr,
-	.pru_rcvd =		tcp_usr_rcvd,
-	.pru_rcvoob =		tcp_usr_rcvoob,
-	.pru_send =		tcp_usr_send,
-	.pru_ready =		tcp_usr_ready,
-	.pru_shutdown =		tcp_usr_shutdown,
-	.pru_sockaddr =		in_getsockaddr,
-	.pru_sosetlabel =	in_pcbsosetlabel,
-	.pru_close =		tcp_usr_close,
+struct protosw tcp_protosw = {
+	.pr_type =		SOCK_STREAM,
+	.pr_protocol =		IPPROTO_TCP,
+	.pr_flags =		PR_CONNREQUIRED | PR_IMPLOPCL | PR_WANTRCVD |
+				    PR_CAPATTACH,
+	.pr_ctloutput =		tcp_ctloutput,
+	.pr_abort =		tcp_usr_abort,
+	.pr_accept =		tcp_usr_accept,
+	.pr_attach =		tcp_usr_attach,
+	.pr_bind =		tcp_usr_bind,
+	.pr_connect =		tcp_usr_connect,
+	.pr_control =		in_control,
+	.pr_detach =		tcp_usr_detach,
+	.pr_disconnect =	tcp_usr_disconnect,
+	.pr_listen =		tcp_usr_listen,
+	.pr_peeraddr =		in_getpeeraddr,
+	.pr_rcvd =		tcp_usr_rcvd,
+	.pr_rcvoob =		tcp_usr_rcvoob,
+	.pr_send =		tcp_usr_send,
+	.pr_ready =		tcp_usr_ready,
+	.pr_shutdown =		tcp_usr_shutdown,
+	.pr_sockaddr =		in_getsockaddr,
+	.pr_sosetlabel =	in_pcbsosetlabel,
+	.pr_close =		tcp_usr_close,
 };
 #endif /* INET */
 
 #ifdef INET6
-struct pr_usrreqs tcp6_usrreqs = {
-	.pru_abort =		tcp_usr_abort,
-	.pru_accept =		tcp6_usr_accept,
-	.pru_attach =		tcp_usr_attach,
-	.pru_bind =		tcp6_usr_bind,
-	.pru_connect =		tcp6_usr_connect,
-	.pru_control =		in6_control,
-	.pru_detach =		tcp_usr_detach,
-	.pru_disconnect =	tcp_usr_disconnect,
-	.pru_listen =		tcp6_usr_listen,
-	.pru_peeraddr =		in6_mapped_peeraddr,
-	.pru_rcvd =		tcp_usr_rcvd,
-	.pru_rcvoob =		tcp_usr_rcvoob,
-	.pru_send =		tcp_usr_send,
-	.pru_ready =		tcp_usr_ready,
-	.pru_shutdown =		tcp_usr_shutdown,
-	.pru_sockaddr =		in6_mapped_sockaddr,
-	.pru_sosetlabel =	in_pcbsosetlabel,
-	.pru_close =		tcp_usr_close,
+struct protosw tcp6_protosw = {
+	.pr_type =		SOCK_STREAM,
+	.pr_protocol =		IPPROTO_TCP,
+	.pr_flags =		PR_CONNREQUIRED | PR_IMPLOPCL |PR_WANTRCVD |
+				    PR_CAPATTACH,
+	.pr_ctloutput =		tcp_ctloutput,
+	.pr_abort =		tcp_usr_abort,
+	.pr_accept =		tcp6_usr_accept,
+	.pr_attach =		tcp_usr_attach,
+	.pr_bind =		tcp6_usr_bind,
+	.pr_connect =		tcp6_usr_connect,
+	.pr_control =		in6_control,
+	.pr_detach =		tcp_usr_detach,
+	.pr_disconnect =	tcp_usr_disconnect,
+	.pr_listen =		tcp6_usr_listen,
+	.pr_peeraddr =		in6_mapped_peeraddr,
+	.pr_rcvd =		tcp_usr_rcvd,
+	.pr_rcvoob =		tcp_usr_rcvoob,
+	.pr_send =		tcp_usr_send,
+	.pr_ready =		tcp_usr_ready,
+	.pr_shutdown =		tcp_usr_shutdown,
+	.pr_sockaddr =		in6_mapped_sockaddr,
+	.pr_sosetlabel =	in_pcbsosetlabel,
+	.pr_close =		tcp_usr_close,
 };
 #endif /* INET6 */
 
@@ -2369,7 +2379,7 @@ unlock_and_done:
 			error = ktls_enable_rx(so, &tls);
 			break;
 #endif
-
+		case TCP_MAXUNACKTIME:
 		case TCP_KEEPIDLE:
 		case TCP_KEEPINTVL:
 		case TCP_KEEPINIT:
@@ -2386,6 +2396,10 @@ unlock_and_done:
 
 			INP_WLOCK_RECHECK(inp);
 			switch (sopt->sopt_name) {
+			case TCP_MAXUNACKTIME:
+				tp->t_maxunacktime = ui;
+				break;
+
 			case TCP_KEEPIDLE:
 				tp->t_keepidle = ui;
 				/*
@@ -2652,11 +2666,15 @@ unhold:
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, buf, len + 1);
 			break;
+		case TCP_MAXUNACKTIME:
 		case TCP_KEEPIDLE:
 		case TCP_KEEPINTVL:
 		case TCP_KEEPINIT:
 		case TCP_KEEPCNT:
 			switch (sopt->sopt_name) {
+			case TCP_MAXUNACKTIME:
+				ui = TP_MAXUNACKTIME(tp) / hz;
+				break;
 			case TCP_KEEPIDLE:
 				ui = TP_KEEPIDLE(tp) / hz;
 				break;
@@ -2828,6 +2846,8 @@ tcp_usrclosed(struct tcpcb *tp)
 		tcp_state_change(tp, TCPS_LAST_ACK);
 		break;
 	}
+	if (tp->t_acktime == 0)
+		tp->t_acktime = ticks;
 	if (tp->t_state >= TCPS_FIN_WAIT_2) {
 		soisdisconnected(tp->t_inpcb->inp_socket);
 		/* Prevent the connection hanging in FIN_WAIT_2 forever. */
@@ -2972,8 +2992,8 @@ db_print_tflags(u_int t_flags)
 		db_printf("%sTF_MORETOCOME", comma ? ", " : "");
 		comma = 1;
 	}
-	if (t_flags & TF_LQ_OVERFLOW) {
-		db_printf("%sTF_LQ_OVERFLOW", comma ? ", " : "");
+	if (t_flags & TF_SONOTCONN) {
+		db_printf("%sTF_SONOTCONN", comma ? ", " : "");
 		comma = 1;
 	}
 	if (t_flags & TF_LASTIDLE) {

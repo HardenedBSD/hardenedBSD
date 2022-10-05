@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -49,6 +49,7 @@ int
 zstream_do_token(int argc, char *argv[])
 {
 	char *resume_token = NULL;
+	libzfs_handle_t *hdl;
 
 	if (argc < 2) {
 		(void) fprintf(stderr, "Need to pass the resume token\n");
@@ -57,7 +58,10 @@ zstream_do_token(int argc, char *argv[])
 
 	resume_token = argv[1];
 
-	libzfs_handle_t *hdl = libzfs_init();
+	if ((hdl = libzfs_init()) == NULL) {
+		(void) fprintf(stderr, "%s\n", libzfs_error_init(errno));
+		return (1);
+	}
 
 	nvlist_t *resume_nvl =
 	    zfs_send_resume_token_to_nvlist(hdl, resume_token);

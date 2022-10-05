@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -43,7 +43,7 @@ typedef struct libpc_handle {
 	boolean_t lpc_open_access_error;
 	boolean_t lpc_desc_active;
 	char lpc_desc[1024];
-	const pool_config_ops_t *lpc_ops;
+	pool_config_ops_t *lpc_ops;
 	void *lpc_lib_handle;
 } libpc_handle_t;
 

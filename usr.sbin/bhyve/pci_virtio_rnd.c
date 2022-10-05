@@ -84,17 +84,13 @@ static void pci_vtrnd_reset(void *);
 static void pci_vtrnd_notify(void *, struct vqueue_info *);
 
 static struct virtio_consts vtrnd_vi_consts = {
-	"vtrnd",		/* our name */
-	1,			/* we support 1 virtqueue */
-	0,			/* config reg size */
-	pci_vtrnd_reset,	/* reset */
-	pci_vtrnd_notify,	/* device-wide qnotify */
-	NULL,			/* read virtio config */
-	NULL,			/* write virtio config */
-	NULL,			/* apply negotiated features */
-	0,			/* our capabilities */
+	.vc_name =	"vtrnd",
+	.vc_nvq =	1,
+	.vc_cfgsize =	0,
+	.vc_reset =	pci_vtrnd_reset,
+	.vc_qnotify =	pci_vtrnd_notify,
+	.vc_hv_caps =	0,
 };
-
 
 static void
 pci_vtrnd_reset(void *vsc)
@@ -204,7 +200,7 @@ pci_vtrnd_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 }
 
 
-struct pci_devemu pci_de_vrnd = {
+static const struct pci_devemu pci_de_vrnd = {
 	.pe_emu =	"virtio-rnd",
 	.pe_init =	pci_vtrnd_init,
 	.pe_barwrite =	vi_pci_write,

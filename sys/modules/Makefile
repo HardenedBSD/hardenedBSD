@@ -169,7 +169,7 @@ SUBDIR=	\
 	${_io} \
 	${_ioat} \
         ${_ipoib} \
-	${_ipdivert} \
+	ipdivert \
 	${_ipfilter} \
 	${_ipfw} \
 	ipfw_nat \
@@ -265,6 +265,7 @@ SUBDIR=	\
 	my \
 	${_nctgpio} \
 	${_neta} \
+	netlink \
 	${_netgraph} \
 	${_nfe} \
 	nfscl \
@@ -462,7 +463,6 @@ _if_stf=	if_stf
 
 .if ${MK_INET_SUPPORT} != "no" || defined(ALL_MODULES)
 _if_me=		if_me
-_ipdivert=	ipdivert
 _ipfw=		ipfw
 .if ${MK_INET6_SUPPORT} != "no" || defined(ALL_MODULES)
 _ipfw_nat64=	ipfw_nat64

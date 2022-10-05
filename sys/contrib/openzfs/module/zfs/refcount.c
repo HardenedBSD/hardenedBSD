@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -33,7 +33,7 @@
  * cpu time.  Until its performance is improved it should be manually enabled.
  */
 int reference_tracking_enable = B_FALSE;
-static int reference_history = 3; /* tunable */
+static uint_t reference_history = 3; /* tunable */
 
 static kmem_cache_t *reference_cache;
 static kmem_cache_t *reference_history_cache;
@@ -137,7 +137,6 @@ zfs_refcount_add_many(zfs_refcount_t *rc, uint64_t number, const void *holder)
 	ref->ref_holder = holder;
 	ref->ref_number = number;
 	mutex_enter(&rc->rc_mtx);
-	ASSERT3U(rc->rc_count, >=, 0);
 	list_insert_head(&rc->rc_list, ref);
 	rc->rc_count += number;
 	count = rc->rc_count;
@@ -330,7 +329,7 @@ EXPORT_SYMBOL(zfs_refcount_held);
 ZFS_MODULE_PARAM(zfs, , reference_tracking_enable, INT, ZMOD_RW,
 	"Track reference holders to refcount_t objects");
 
-ZFS_MODULE_PARAM(zfs, , reference_history, INT, ZMOD_RW,
+ZFS_MODULE_PARAM(zfs, , reference_history, UINT, ZMOD_RW,
 	"Maximum reference holders being tracked");
 /* END CSTYLED */
 #endif	/* ZFS_DEBUG */

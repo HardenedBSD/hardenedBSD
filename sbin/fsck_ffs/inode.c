@@ -415,7 +415,12 @@ chkrange(ufs2_daddr_t blk, int cnt)
 
 /*
  * General purpose interface for reading inodes.
+ *
+ * firstinum and lastinum track contents of getnextino() cache (below).
  */
+static ino_t firstinum, lastinum;
+static struct bufarea inobuf;
+
 void
 ginode(ino_t inumber, struct inode *ip)
 {
@@ -425,11 +430,17 @@ ginode(ino_t inumber, struct inode *ip)
 		errx(EEXIT, "bad inode number %ju to ginode",
 		    (uintmax_t)inumber);
 	ip->i_number = inumber;
-	if (icachebp != NULL &&
+	if (inumber >= firstinum && inumber < lastinum) {
+		/* contents in getnextino() cache */
+		ip->i_bp = &inobuf;
+		inobuf.b_refcnt++;
+		inobuf.b_index = firstinum;
+	} else if (icachebp != NULL &&
 	    inumber >= icachebp->b_index &&
 	    inumber < icachebp->b_index + INOPB(&sblock)) {
 		/* take an additional reference for the returned inode */
 		icachebp->b_refcnt++;
+		ip->i_bp = icachebp;
 	} else {
 		iblk = ino_to_fsba(&sblock, inumber);
 		/* release our cache-hold reference on old icachebp */
@@ -445,15 +456,15 @@ ginode(ino_t inumber, struct inode *ip)
 		/* take a cache-hold reference on new icachebp */
 		icachebp->b_refcnt++;
 		icachebp->b_index = rounddown(inumber, INOPB(&sblock));
+		ip->i_bp = icachebp;
 	}
-	ip->i_bp = icachebp;
 	if (sblock.fs_magic == FS_UFS1_MAGIC) {
 		ip->i_dp = (union dinode *)
-		    &icachebp->b_un.b_dinode1[inumber % INOPB(&sblock)];
+		    &ip->i_bp->b_un.b_dinode1[inumber - ip->i_bp->b_index];
 		return;
 	}
 	ip->i_dp = (union dinode *)
-	    &icachebp->b_un.b_dinode2[inumber % INOPB(&sblock)];
+	    &ip->i_bp->b_un.b_dinode2[inumber - ip->i_bp->b_index];
 	if (ffs_verify_dinode_ckhash(&sblock, (struct ufs2_dinode *)ip->i_dp)) {
 		pwarn("INODE CHECK-HASH FAILED");
 		prtinode(ip);
@@ -474,6 +485,9 @@ void
 irelse(struct inode *ip)
 {
 
+	/* Check for failed inode read */
+	if (ip->i_bp == NULL)
+		return;
 	if (ip->i_bp->b_refcnt <= 0)
 		pfatal("irelse: releasing unreferenced ino %ju\n",
 		    (uintmax_t) ip->i_number);
@@ -484,9 +498,8 @@ irelse(struct inode *ip)
  * Special purpose version of ginode used to optimize first pass
  * over all the inodes in numerical order.
  */
-static ino_t nextino, lastinum, lastvalidinum;
+static ino_t nextinum, lastvalidinum;
 static long readcount, readpercg, fullcnt, inobufsize, partialcnt, partialsize;
-static struct bufarea inobuf;
 
 union dinode *
 getnextinode(ino_t inumber, int rebuildcg)
@@ -499,11 +512,12 @@ getnextinode(ino_t inumber, int rebuildcg)
 	struct inode ip;
 	static caddr_t nextinop;
 
-	if (inumber != nextino++ || inumber > lastvalidinum)
+	if (inumber != nextinum++ || inumber > lastvalidinum)
 		errx(EEXIT, "bad inode number %ju to nextinode",
 		    (uintmax_t)inumber);
 	if (inumber >= lastinum) {
 		readcount++;
+		firstinum = lastinum;
 		blk = ino_to_fsba(&sblock, lastinum);
 		if (readcount % readpercg == 0) {
 			size = partialsize;
@@ -517,6 +531,9 @@ getnextinode(ino_t inumber, int rebuildcg)
 		 * If getblk encounters an error, it will already have zeroed
 		 * out the buffer, so we do not need to do so here.
 		 */
+		if (inobuf.b_refcnt != 0)
+			pfatal("Non-zero getnextinode() ref count %d\n",
+			    inobuf.b_refcnt);
 		flush(fswritefd, &inobuf);
 		getblk(&inobuf, blk, size);
 		nextinop = inobuf.b_un.b_buf;
@@ -601,7 +618,7 @@ setinodebuf(int cg, ino_t inosused)
 
 	inum = cg * sblock.fs_ipg;
 	lastvalidinum = inum + inosused - 1;
-	nextino = inum;
+	nextinum = inum;
 	lastinum = inum;
 	readcount = 0;
 	/* Flush old contents in case they have been updated */
@@ -671,6 +688,7 @@ freeinodebuf(void)
 	if (inobuf.b_un.b_buf != NULL)
 		free((char *)inobuf.b_un.b_buf);
 	inobuf.b_un.b_buf = NULL;
+	firstinum = lastinum = 0;
 }
 
 /*
@@ -680,12 +698,15 @@ freeinodebuf(void)
  *
  * Enter inodes into the cache.
  */
-void
+struct inoinfo *
 cacheino(union dinode *dp, ino_t inumber)
 {
 	struct inoinfo *inp, **inpp;
 	int i, blks;
 
+	if (getinoinfo(inumber) != NULL)
+		pfatal("cacheino: duplicate entry for ino %jd\n",
+		    (intmax_t)inumber);
 	if (howmany(DIP(dp, di_size), sblock.fs_bsize) > UFS_NDADDR)
 		blks = UFS_NDADDR + UFS_NIADDR;
 	else if (DIP(dp, di_size) > 0)
@@ -717,6 +738,7 @@ cacheino(union dinode *dp, ino_t inumber)
 			errx(EEXIT, "cannot increase directory list");
 	}
 	inpsort[inplast++] = inp;
+	return (inp);
 }
 
 /*
@@ -732,7 +754,6 @@ getinoinfo(ino_t inumber)
 			continue;
 		return (inp);
 	}
-	errx(EEXIT, "cannot find inode %ju", (uintmax_t)inumber);
 	return ((struct inoinfo *)0);
 }
 

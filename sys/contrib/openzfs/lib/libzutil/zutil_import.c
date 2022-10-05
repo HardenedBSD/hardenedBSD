@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -1694,6 +1694,8 @@ zpool_find_import_cached(libpc_handle_t *hdl, importargs_t *iarg)
 			 * caller.
 			 */
 			nvpair_t *pair = nvlist_next_nvpair(nv, NULL);
+			if (pair == NULL)
+				continue;
 			fnvlist_add_nvlist(pools, nvpair_name(pair),
 			    fnvpair_value_nvlist(pair));
 
@@ -1775,8 +1777,7 @@ zpool_find_import(libpc_handle_t *hdl, importargs_t *iarg)
 
 
 nvlist_t *
-zpool_search_import(void *hdl, importargs_t *import,
-    const pool_config_ops_t *pco)
+zpool_search_import(void *hdl, importargs_t *import, pool_config_ops_t *pco)
 {
 	libpc_handle_t handle = { 0 };
 	nvlist_t *pools = NULL;
@@ -1819,7 +1820,7 @@ pool_match(nvlist_t *cfg, char *tgt)
 
 int
 zpool_find_config(void *hdl, const char *target, nvlist_t **configp,
-    importargs_t *args, const pool_config_ops_t *pco)
+    importargs_t *args, pool_config_ops_t *pco)
 {
 	nvlist_t *pools;
 	nvlist_t *match = NULL;

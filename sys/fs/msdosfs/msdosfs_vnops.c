@@ -161,10 +161,6 @@ msdosfs_create(struct vop_create_args *ap)
 	 * use the absence of the owner write bit to make the file
 	 * readonly.
 	 */
-#ifdef DIAGNOSTIC
-	if ((cnp->cn_flags & HASBUF) == 0)
-		panic("msdosfs_create: no name");
-#endif
 	memset(&ndirent, 0, sizeof(ndirent));
 	error = uniqdosname(pdep, cnp, ndirent.de_Name);
 	if (error)
@@ -460,6 +456,9 @@ msdosfs_setattr(struct vop_setattr_args *ap)
 			 */
 			break;
 		}
+		error = vn_rlimit_trunc(vap->va_size, td);
+		if (error != 0)
+			return (error);
 		error = detrunc(dep, vap->va_size, 0, cred);
 		if (error)
 			return error;
@@ -615,7 +614,7 @@ msdosfs_write(struct vop_write_args *ap)
 {
 	int n;
 	int croffset;
-	ssize_t resid;
+	ssize_t resid, r;
 	u_long osize;
 	int error = 0;
 	u_long count;
@@ -660,15 +659,15 @@ msdosfs_write(struct vop_write_args *ap)
 	/*
 	 * The caller is supposed to ensure that
 	 * uio->uio_offset >= 0 and uio->uio_resid >= 0.
-	 */
-	if ((uoff_t)uio->uio_offset + uio->uio_resid > MSDOSFS_FILESIZE_MAX)
-		return (EFBIG);
-
-	/*
+	 *
 	 * If they've exceeded their filesize limit, tell them about it.
 	 */
-	if (vn_rlimit_fsize(vp, uio, uio->uio_td))
-		return (EFBIG);
+	error = vn_rlimit_fsizex(vp, uio, MSDOSFS_FILESIZE_MAX, &r,
+	    uio->uio_td);
+	if (error != 0) {
+		vn_rlimit_fsizex_res(uio, r);
+		return (error);
+	}
 
 	/*
 	 * If the offset we are starting the write at is beyond the end of
@@ -678,8 +677,10 @@ msdosfs_write(struct vop_write_args *ap)
 	 */
 	if (uio->uio_offset > dep->de_FileSize) {
 		error = deextend(dep, uio->uio_offset, cred);
-		if (error)
+		if (error != 0) {
+			vn_rlimit_fsizex_res(uio, r);
 			return (error);
+		}
 	}
 
 	/*
@@ -822,6 +823,7 @@ errexit:
 		}
 	} else if (ioflag & IO_SYNC)
 		error = deupdat(dep, 1);
+	vn_rlimit_fsizex_res(uio, r);
 	return (error);
 }
 
@@ -958,11 +960,6 @@ msdosfs_rename(struct vop_rename_args *ap)
 	fcnp = ap->a_fcnp;
 	pmp = VFSTOMSDOSFS(fdvp->v_mount);
 
-#ifdef DIAGNOSTIC
-	if ((tcnp->cn_flags & HASBUF) == 0 ||
-	    (fcnp->cn_flags & HASBUF) == 0)
-		panic("msdosfs_rename: no name");
-#endif
 	/*
 	 * Check for cross-device rename.
 	 */
@@ -1414,10 +1411,6 @@ msdosfs_mkdir(struct vop_mkdir_args *ap)
 	 * cluster.  This will be written to an empty slot in the parent
 	 * directory.
 	 */
-#ifdef DIAGNOSTIC
-	if ((cnp->cn_flags & HASBUF) == 0)
-		panic("msdosfs_mkdir: no name");
-#endif
 	error = uniqdosname(pdep, cnp, ndirent.de_Name);
 	if (error)
 		goto bad;

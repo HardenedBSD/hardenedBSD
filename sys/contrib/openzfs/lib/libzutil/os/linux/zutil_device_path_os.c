@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -273,7 +273,6 @@ zfs_get_pci_slots_sys_path(const char *dev_name)
 			free(address2);
 			if (asprintf(&path, "/sys/bus/pci/slots/%s",
 			    ep->d_name) == -1) {
-				free(tmp);
 				continue;
 			}
 			break;
@@ -345,6 +344,8 @@ zfs_get_enclosure_sysfs_path(const char *dev_name)
 		if (strstr(ep->d_name, "enclosure_device") == NULL)
 			continue;
 
+		if (tmp2 != NULL)
+			free(tmp2);
 		if (asprintf(&tmp2, "%s/%s", tmp1, ep->d_name) == -1) {
 			tmp2 = NULL;
 			break;
@@ -373,14 +374,13 @@ zfs_get_enclosure_sysfs_path(const char *dev_name)
 		if (tmp3 == NULL)
 			break;
 
+		if (path != NULL)
+			free(path);
 		if (asprintf(&path, "/sys/class/%s", tmp3) == -1) {
 			/* If asprintf() fails, 'path' is undefined */
 			path = NULL;
 			break;
 		}
-
-		if (path == NULL)
-			break;
 	}
 
 end:

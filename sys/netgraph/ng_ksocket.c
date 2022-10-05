@@ -121,6 +121,7 @@ static const struct ng_ksocket_alias ng_ksocket_families[] = {
 	{ "inet",	PF_INET		},
 	{ "inet6",	PF_INET6	},
 	{ "atm",	PF_ATM		},
+	{ "divert",	PF_DIVERT	},
 	{ NULL,		-1		},
 };
 
@@ -147,7 +148,6 @@ static const struct ng_ksocket_alias ng_ksocket_protos[] = {
 	{ "ah",		IPPROTO_AH,		PF_INET		},
 	{ "swipe",	IPPROTO_SWIPE,		PF_INET		},
 	{ "encap",	IPPROTO_ENCAP,		PF_INET		},
-	{ "divert",	IPPROTO_DIVERT,		PF_INET		},
 	{ "pim",	IPPROTO_PIM,		PF_INET		},
 	{ NULL,		-1					},
 };
@@ -774,9 +774,9 @@ ng_ksocket_rcvmsg(node_p node, item_p item, hook_p lasthook)
 				if ((so->so_state
 				    & (SS_ISCONNECTED|SS_ISCONFIRMING)) == 0)
 					ERROUT(ENOTCONN);
-				func = so->so_proto->pr_usrreqs->pru_peeraddr;
+				func = so->so_proto->pr_peeraddr;
 			} else
-				func = so->so_proto->pr_usrreqs->pru_sockaddr;
+				func = so->so_proto->pr_sockaddr;
 
 			/* Get local or peer address */
 			if ((error = (*func)(so, &sa)) != 0)

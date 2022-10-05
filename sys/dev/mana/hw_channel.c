@@ -128,7 +128,7 @@ mana_hwc_post_rx_wqe(const struct hwc_wq *hwc_rxq,
 	int err;
 
 	sge = &req->sge;
-	sge->address = (uint64_t)req->buf_sge_addr;
+	sge->address = (uintptr_t)req->buf_sge_addr;
 	sge->mem_key = hwc_rxq->msg_buf->gpa_mkey;
 	sge->size = req->buf_len;
 
@@ -616,7 +616,7 @@ mana_hwc_post_tx_wqe(const struct hwc_wq *hwc_txq,
 	tx_oob->vsq_id = hwc_txq->gdma_wq->id;
 
 	sge = &req->sge;
-	sge->address = (uint64_t)req->buf_sge_addr;
+	sge->address = (uintptr_t)req->buf_sge_addr;
 	sge->mem_key = hwc_txq->msg_buf->gpa_mkey;
 	sge->size = req->msg_size;
 
@@ -931,7 +931,7 @@ mana_hwc_send_request(struct hw_channel_context *hwc, uint32_t req_len,
 		goto out;
 	}
 
-	if (ctx->status_code) {
+	if (ctx->status_code && ctx->status_code != GDMA_STATUS_MORE_ENTRIES) {
 		device_printf(hwc->dev,
 		    "HWC: Failed hw_channel req: 0x%x\n", ctx->status_code);
 		err = EPROTO;

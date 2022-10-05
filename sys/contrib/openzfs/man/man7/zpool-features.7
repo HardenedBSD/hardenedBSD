@@ -5,7 +5,7 @@
 .\" The contents of this file are subject to the terms of the Common Development
 .\" and Distribution License (the "License").  You may not use this file except
 .\" in compliance with the License. You can obtain a copy of the license at
-.\" usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.
+.\" usr/src/OPENSOLARIS.LICENSE or https://opensource.org/licenses/CDDL-1.0.
 .\"
 .\" See the License for the specific language governing permissions and
 .\" limitations under the License. When distributing Covered Code, include this
@@ -545,6 +545,9 @@ This feature enables the upgraded version of errlog, which required an on-disk
 error log format change.
 Now the error log of each head dataset is stored separately in the zap object
 and keyed by the head id.
+In case of encrypted filesystems with unloaded keys or unmounted encrypted
+filesystems we are unable to check their snapshots or clones for errors and
+these will not be reported.
 With this feature enabled, every dataset affected by an error block is listed
 in the output of
 .Nm zpool Cm status .

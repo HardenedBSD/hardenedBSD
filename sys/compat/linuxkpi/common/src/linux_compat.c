@@ -97,6 +97,7 @@ __FBSDID("$FreeBSD$");
 
 #if defined(__i386__) || defined(__amd64__)
 #include <asm/smp.h>
+#include <asm/processor.h>
 #endif
 
 SYSCTL_NODE(_compat, OID_AUTO, linuxkpi, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
@@ -1975,7 +1976,7 @@ iounmap(void *addr)
 	if (vmmap == NULL)
 		return;
 #if defined(__i386__) || defined(__amd64__) || defined(__powerpc__) || defined(__aarch64__) || defined(__riscv)
-	pmap_unmapdev((vm_offset_t)addr, vmmap->vm_size);
+	pmap_unmapdev(addr, vmmap->vm_size);
 #endif
 	kfree(vmmap);
 }
@@ -2561,7 +2562,7 @@ struct list_sort_thunk {
 };
 
 static inline int
-linux_le_cmp(void *priv, const void *d1, const void *d2)
+linux_le_cmp(const void *d1, const void *d2, void *priv)
 {
 	struct list_head *le1, *le2;
 	struct list_sort_thunk *thunk;
@@ -2589,7 +2590,7 @@ list_sort(void *priv, struct list_head *head, int (*cmp)(void *priv,
 		ar[i++] = le;
 	thunk.cmp = cmp;
 	thunk.priv = priv;
-	qsort_r(ar, count, sizeof(struct list_head *), &thunk, linux_le_cmp);
+	qsort_r(ar, count, sizeof(struct list_head *), linux_le_cmp, &thunk);
 	INIT_LIST_HEAD(head);
 	for (i = 0; i < count; i++)
 		list_add_tail(ar[i], head);
@@ -2730,6 +2731,7 @@ io_mapping_create_wc(resource_size_t base, unsigned long size)
 
 #if defined(__i386__) || defined(__amd64__)
 bool linux_cpu_has_clflush;
+struct cpuinfo_x86 boot_cpu_data;
 #endif
 
 static void
@@ -2740,6 +2742,8 @@ linux_compat_init(void *arg)
 
 #if defined(__i386__) || defined(__amd64__)
 	linux_cpu_has_clflush = (cpu_feature & CPUID_CLFSH);
+	boot_cpu_data.x86_clflush_size = cpu_clflush_line_size;
+	boot_cpu_data.x86 = ((cpu_id & 0xf0000) >> 12) | ((cpu_id & 0xf0) >> 4);
 #endif
 	rw_init(&linux_vma_lock, "lkpi-vma-lock");
 

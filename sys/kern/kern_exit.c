@@ -218,8 +218,6 @@ proc_set_p2_wexit(struct proc *p)
 {
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 	p->p_flag2 |= P2_WEXIT;
-	while (p->p_singlethr > 0)
-		msleep(&p->p_singlethr, &p->p_mtx, PWAIT | PCATCH, "exit1t", 0);
 }
 
 /*
@@ -276,16 +274,15 @@ exit1(struct thread *td, int rval, int signo)
 		 * Kill off the other threads. This requires
 		 * some co-operation from other parts of the kernel
 		 * so it may not be instantaneous.  With this state set
-		 * any thread entering the kernel from userspace will
-		 * thread_exit() in trap().  Any thread attempting to
+		 * any thread attempting to interruptibly
 		 * sleep will return immediately with EINTR or EWOULDBLOCK
 		 * which will hopefully force them to back out to userland
 		 * freeing resources as they go.  Any thread attempting
-		 * to return to userland will thread_exit() from userret().
+		 * to return to userland will thread_exit() from ast().
 		 * thread_exit() will unsuspend us when the last of the
 		 * other threads exits.
 		 * If there is already a thread singler after resumption,
-		 * calling thread_single will fail; in that case, we just
+		 * calling thread_single() will fail; in that case, we just
 		 * re-check all suspension request, the thread should
 		 * either be suspended there or exit.
 		 */
@@ -476,6 +473,7 @@ exit1(struct thread *td, int rval, int signo)
 	 */
 	p->p_list.le_prev = NULL;
 #endif
+	prison_proc_unlink(p->p_ucred->cr_prison, p);
 	sx_xunlock(&allproc_lock);
 
 	sx_xlock(&proctree_lock);
@@ -499,7 +497,7 @@ exit1(struct thread *td, int rval, int signo)
 		wakeup(q->p_reaper);
 	for (; q != NULL; q = nq) {
 		nq = LIST_NEXT(q, p_sibling);
-		ksi = ksiginfo_alloc(TRUE);
+		ksi = ksiginfo_alloc(M_WAITOK);
 		PROC_LOCK(q);
 		q->p_sigparent = SIGCHLD;
 
@@ -767,7 +765,7 @@ sys_abort2(struct thread *td, struct abort2_args *uap)
  * kern_abort2()
  * Arguments:
  *  why - user pointer to why
- *  nargs - number of arguments copied or -1 if an error occured in copying
+ *  nargs - number of arguments copied or -1 if an error occurred in copying
  *  args - pointer to an array of pointers in kernel format
  */
 int
@@ -1272,8 +1270,8 @@ report_alive_proc(struct thread *td, struct proc *p, siginfo_t *siginfo,
 	}
 	if (status != NULL)
 		*status = cont ? SIGCONT : W_STOPCODE(p->p_xsig);
-	PROC_UNLOCK(p);
 	td->td_retval[0] = p->p_pid;
+	PROC_UNLOCK(p);
 }
 
 int

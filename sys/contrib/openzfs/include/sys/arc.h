@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -84,7 +84,7 @@ typedef void arc_write_done_func_t(zio_t *zio, arc_buf_t *buf, void *priv);
 typedef void arc_prune_func_t(int64_t bytes, void *priv);
 
 /* Shared module parameters */
-extern int zfs_arc_average_blocksize;
+extern uint_t zfs_arc_average_blocksize;
 extern int l2arc_exclude_special;
 
 /* generic arc_done_func_t's which you can use */

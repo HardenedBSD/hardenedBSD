@@ -46,8 +46,10 @@ module_param(spl_taskq_thread_priority, int, 0644);
 MODULE_PARM_DESC(spl_taskq_thread_priority,
 	"Allow non-default priority for taskq threads");
 
-static int spl_taskq_thread_sequential = 4;
-module_param(spl_taskq_thread_sequential, int, 0644);
+static uint_t spl_taskq_thread_sequential = 4;
+/* BEGIN CSTYLED */
+module_param(spl_taskq_thread_sequential, uint, 0644);
+/* END CSTYLED */
 MODULE_PARM_DESC(spl_taskq_thread_sequential,
 	"Create new taskq threads after N sequential tasks");
 
@@ -1379,7 +1381,7 @@ spl_taskq_init(void)
 	system_taskq = taskq_create("spl_system_taskq", MAX(boot_ncpus, 64),
 	    maxclsyspri, boot_ncpus, INT_MAX, TASKQ_PREPOPULATE|TASKQ_DYNAMIC);
 	if (system_taskq == NULL)
-		return (1);
+		return (-ENOMEM);
 
 	system_delay_taskq = taskq_create("spl_delay_taskq", MAX(boot_ncpus, 4),
 	    maxclsyspri, boot_ncpus, INT_MAX, TASKQ_PREPOPULATE|TASKQ_DYNAMIC);
@@ -1388,7 +1390,7 @@ spl_taskq_init(void)
 		cpuhp_remove_multi_state(spl_taskq_cpuhp_state);
 #endif
 		taskq_destroy(system_taskq);
-		return (1);
+		return (-ENOMEM);
 	}
 
 	dynamic_taskq = taskq_create("spl_dynamic_taskq", 1,
@@ -1399,7 +1401,7 @@ spl_taskq_init(void)
 #endif
 		taskq_destroy(system_taskq);
 		taskq_destroy(system_delay_taskq);
-		return (1);
+		return (-ENOMEM);
 	}
 
 	/*

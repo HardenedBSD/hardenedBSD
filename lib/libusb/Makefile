@@ -35,6 +35,12 @@ SRCS+=		libusb10_hotplug.c
 SRCS+=		libusb10_io.c
 
 PCFILES=	libusb-0.1.pc libusb-1.0.pc libusb-2.0.pc
+.for pcfile in ${PCFILES}
+${pcfile}: ${pcfile}.in
+	sed -e 's,@libdir@,${LIBDIR},g ; s,@sharedlibdir@,${SHLIBDIR},g ; \
+		s,@includedir@,${INCLUDEDIR},g ;' ${.ALLSRC} > ${.TARGET}
+.endfor
+CLEANFILES+=	${PCFILES}
 
 #
 # Cross platform support
@@ -131,6 +137,7 @@ MLINKS += libusb.3 libusb_lock_events.3
 MLINKS += libusb.3 libusb_unlock_events.3
 MLINKS += libusb.3 libusb_event_handling_ok.3
 MLINKS += libusb.3 libusb_event_handler_active.3
+MLINKS += libusb.3 libusb_interrupt_event_handler.3
 MLINKS += libusb.3 libusb_lock_event_waiters.3
 MLINKS += libusb.3 libusb_unlock_event_waiters.3
 MLINKS += libusb.3 libusb_wait_for_event.3

@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <libshare.h>
+#include <unistd.h>
 #include "nfs.h"
 
 
@@ -94,8 +95,8 @@ nfs_init_tmpfile(const char *prefix, const char *mdir, struct tmpfile *tmpf)
 		return (B_FALSE);
 	}
 
-	strcpy(tmpf->name, prefix);
-	strcat(tmpf->name, ".XXXXXXXX");
+	strlcpy(tmpf->name, prefix, sizeof (tmpf->name));
+	strlcat(tmpf->name, ".XXXXXXXX", sizeof (tmpf->name) - strlen(prefix));
 
 	int fd = mkostemp(tmpf->name, O_CLOEXEC);
 	if (fd == -1) {
@@ -279,6 +280,17 @@ fullerr:
 	nfs_abort_tmpfile(&tmpf);
 	nfs_exports_unlock(lockfile, &nfs_lock_fd);
 	return (error);
+}
+
+void
+nfs_reset_shares(const char *lockfile, const char *exports)
+{
+	int nfs_lock_fd = -1;
+
+	if (nfs_exports_lock(lockfile, &nfs_lock_fd) == 0) {
+		(void) ! truncate(exports, 0);
+		nfs_exports_unlock(lockfile, &nfs_lock_fd);
+	}
 }
 
 static boolean_t

@@ -38,7 +38,6 @@ __FBSDID("$FreeBSD$");
 #include <stddef.h>
 
 #include "stand.h"
-#include "disk.h"
 
 #include "dosfs.h"
 
@@ -314,7 +313,7 @@ dos_open(const char *path, struct open_file *fd)
 	u_int size, clus;
 	int err;
 
-	dev = disk_fmtdev(fd->f_devdata);
+	dev = devformat((struct devdesc *)fd->f_devdata);
 	STAILQ_FOREACH(mnt, &mnt_list, dos_link) {
 		if (strcmp(dev, mnt->dos_dev) == 0)
 			break;
@@ -322,7 +321,7 @@ dos_open(const char *path, struct open_file *fd)
 
 	if (mnt == NULL) {
 		/* Allocate mount structure, associate with open */
-		if ((fs = malloc(sizeof(DOS_FS))) == NULL)
+		if ((fs = calloc(1, sizeof(DOS_FS))) == NULL)
 			return (errno);
 		if ((err = dos_mount_impl(fs, fd))) {
 			free(fs);

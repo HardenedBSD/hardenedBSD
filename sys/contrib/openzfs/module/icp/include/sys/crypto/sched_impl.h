@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -73,9 +73,10 @@ typedef struct kcf_context {
  * context structure is freed along with the global context.
  */
 #define	KCF_CONTEXT_REFRELE(ictx) {				\
-	ASSERT((ictx)->kc_refcnt != 0);				\
-	membar_exit();						\
-	if (atomic_add_32_nv(&(ictx)->kc_refcnt, -1) == 0)	\
+	membar_producer();					\
+	int newval = atomic_add_32_nv(&(ictx)->kc_refcnt, -1);	\
+	ASSERT(newval != -1);					\
+	if (newval == 0)					\
 		kcf_free_context(ictx);				\
 }
 

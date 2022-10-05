@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -342,8 +342,8 @@ kcf_remove_mech_provider(const char *mech_name, kcf_provider_desc_t *prov_desc)
 	mech_entry->me_sw_prov = NULL;
 
 	/* free entry  */
-	KCF_PROV_REFRELE(prov_mech->pm_prov_desc);
 	KCF_PROV_IREFRELE(prov_mech->pm_prov_desc);
+	KCF_PROV_REFRELE(prov_mech->pm_prov_desc);
 	kmem_free(prov_mech, sizeof (kcf_prov_mech_desc_t));
 }
 

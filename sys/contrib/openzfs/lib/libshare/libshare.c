@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011 Gunnar Beutner
- * Copyright (c) 2018, 2020 by Delphix. All rights reserved.
+ * Copyright (c) 2018, 2022 by Delphix. All rights reserved.
  */
 
 #include <stdio.h>
@@ -94,6 +94,16 @@ sa_commit_shares(enum sa_protocol protocol)
 	VALIDATE_PROTOCOL(protocol, );
 
 	fstypes[protocol]->commit_shares();
+}
+
+void
+sa_truncate_shares(enum sa_protocol protocol)
+{
+	/* CSTYLED */
+	VALIDATE_PROTOCOL(protocol, );
+
+	if (fstypes[protocol]->truncate_shares != NULL)
+		fstypes[protocol]->truncate_shares();
 }
 
 int

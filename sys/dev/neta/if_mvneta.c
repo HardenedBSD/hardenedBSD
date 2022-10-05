@@ -65,9 +65,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/rman.h>
 #include <machine/resource.h>
 
-#if defined(__aarch64__)
 #include <dev/extres/clk/clk.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -532,9 +530,8 @@ mvneta_attach(device_t self)
 #if !defined(__aarch64__)
 	uint32_t reg;
 #endif
-#if defined(__aarch64__)
 	clk_t clk;
-#endif
+
 	sc = device_get_softc(self);
 	sc->dev = self;
 
@@ -556,14 +553,19 @@ mvneta_attach(device_t self)
 	MVNETA_WRITE(sc, MVNETA_PRXINIT, 0x00000001);
 	MVNETA_WRITE(sc, MVNETA_PTXINIT, 0x00000001);
 
-#if defined(__aarch64__)
 	error = clk_get_by_ofw_index(sc->dev, ofw_bus_get_node(sc->dev), 0,
 	    &clk);
 	if (error != 0) {
+#if defined(__aarch64__)
 		device_printf(sc->dev,
 			"Cannot get clock, using default frequency: %d\n",
 			A3700_TCLK_250MHZ);
 		sc->clk_freq = A3700_TCLK_250MHZ;
+#else
+		device_printf(sc->dev,
+			"Cannot get clock, using get_tclk()\n");
+		sc->clk_freq = get_tclk();
+#endif
 	} else {
 		error = clk_get_freq(clk, &sc->clk_freq);
 		if (error != 0) {
@@ -573,9 +575,6 @@ mvneta_attach(device_t self)
 			return (error);
 		}
 	}
-#else
-	sc->clk_freq = get_tclk();
-#endif
 
 #if !defined(__aarch64__)
 	/*
@@ -2054,9 +2053,11 @@ mvneta_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr;
 	int error, mask;
 	uint32_t flags;
+	bool reinit;
 	int q;
 
 	error = 0;
+	reinit = false;
 	sc = ifp->if_softc;
 	ifr = (struct ifreq *)data;
 	switch (cmd) {
@@ -2157,8 +2158,10 @@ mvneta_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			 * Reinitialize RX queues.
 			 * We need to update RX descriptor size.
 			 */
-			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+			if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
+				reinit = true;
 				mvneta_stop_locked(sc);
+			}
 
 			for (q = 0; q < MVNETA_RX_QNUM_MAX; q++) {
 				mvneta_rx_lockq(sc, q);
@@ -2172,7 +2175,7 @@ mvneta_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				}
 				mvneta_rx_unlockq(sc, q);
 			}
-			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+			if (reinit)
 				mvneta_init_locked(sc);
 
 			mvneta_sc_unlock(sc);

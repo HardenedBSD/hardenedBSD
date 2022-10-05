@@ -701,11 +701,10 @@ struct	rttimer;
 struct	in6_multi;
 # endif
 void	icmp6_paramerror(struct mbuf *, int);
+int	icmp6_errmap(const struct icmp6_hdr *);
 void	icmp6_error(struct mbuf *, int, int, int);
 void	icmp6_error2(struct mbuf *, int, int, int, struct ifnet *);
 int	icmp6_input(struct mbuf **, int *, int);
-void	icmp6_fasttimo(void);
-void	icmp6_slowtimo(void);
 void	icmp6_prepare(struct mbuf *);
 void	icmp6_redirect_input(struct mbuf *, int);
 void	icmp6_redirect_output(struct mbuf *, struct nhop_object *);

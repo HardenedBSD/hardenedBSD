@@ -248,143 +248,115 @@ sctp6_notify(struct sctp_inpcb *inp,
 }
 
 void
-sctp6_ctlinput(int cmd, struct sockaddr *pktdst, void *d)
+sctp6_ctlinput(struct ip6ctlparam *ip6cp)
 {
-	struct ip6ctlparam *ip6cp;
 	struct sctp_inpcb *inp;
 	struct sctp_tcb *stcb;
 	struct sctp_nets *net;
 	struct sctphdr sh;
 	struct sockaddr_in6 src, dst;
 
-	if (pktdst->sa_family != AF_INET6 ||
-	    pktdst->sa_len != sizeof(struct sockaddr_in6)) {
+	if (icmp6_errmap(ip6cp->ip6c_icmp6) == 0)
+		return;
+
+	/*
+	 * Check if we can safely examine the ports and the
+	 * verification tag of the SCTP common header.
+	 */
+	if (ip6cp->ip6c_m->m_pkthdr.len <
+	    (int32_t)(ip6cp->ip6c_off + offsetof(struct sctphdr, checksum))) {
 		return;
 	}
 
-	if ((unsigned)cmd >= PRC_NCMDS) {
+	/* Copy out the port numbers and the verification tag. */
+	memset(&sh, 0, sizeof(sh));
+	m_copydata(ip6cp->ip6c_m,
+	    ip6cp->ip6c_off,
+	    sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t),
+	    (caddr_t)&sh);
+	memset(&src, 0, sizeof(struct sockaddr_in6));
+	src.sin6_family = AF_INET6;
+	src.sin6_len = sizeof(struct sockaddr_in6);
+	src.sin6_port = sh.src_port;
+	src.sin6_addr = ip6cp->ip6c_ip6->ip6_src;
+	if (in6_setscope(&src.sin6_addr, ip6cp->ip6c_m->m_pkthdr.rcvif, NULL) != 0) {
 		return;
 	}
-	if (PRC_IS_REDIRECT(cmd)) {
-		d = NULL;
-	} else if (inet6ctlerrmap[cmd] == 0) {
+	memset(&dst, 0, sizeof(struct sockaddr_in6));
+	dst.sin6_family = AF_INET6;
+	dst.sin6_len = sizeof(struct sockaddr_in6);
+	dst.sin6_port = sh.dest_port;
+	dst.sin6_addr = ip6cp->ip6c_ip6->ip6_dst;
+	if (in6_setscope(&dst.sin6_addr, ip6cp->ip6c_m->m_pkthdr.rcvif, NULL) != 0) {
 		return;
 	}
-	/* If the parameter is from icmp6, decode it. */
-	if (d != NULL) {
-		ip6cp = (struct ip6ctlparam *)d;
-	} else {
-		ip6cp = (struct ip6ctlparam *)NULL;
-	}
-
-	if (ip6cp != NULL) {
-		/*
-		 * XXX: We assume that when IPV6 is non NULL, M and OFF are
-		 * valid.
-		 */
-		if (ip6cp->ip6c_m == NULL) {
-			return;
-		}
-
-		/*
-		 * Check if we can safely examine the ports and the
-		 * verification tag of the SCTP common header.
-		 */
-		if (ip6cp->ip6c_m->m_pkthdr.len <
-		    (int32_t)(ip6cp->ip6c_off + offsetof(struct sctphdr, checksum))) {
-			return;
-		}
-
-		/* Copy out the port numbers and the verification tag. */
-		memset(&sh, 0, sizeof(sh));
-		m_copydata(ip6cp->ip6c_m,
-		    ip6cp->ip6c_off,
-		    sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t),
-		    (caddr_t)&sh);
-		memset(&src, 0, sizeof(struct sockaddr_in6));
-		src.sin6_family = AF_INET6;
-		src.sin6_len = sizeof(struct sockaddr_in6);
-		src.sin6_port = sh.src_port;
-		src.sin6_addr = ip6cp->ip6c_ip6->ip6_src;
-		if (in6_setscope(&src.sin6_addr, ip6cp->ip6c_m->m_pkthdr.rcvif, NULL) != 0) {
-			return;
-		}
-		memset(&dst, 0, sizeof(struct sockaddr_in6));
-		dst.sin6_family = AF_INET6;
-		dst.sin6_len = sizeof(struct sockaddr_in6);
-		dst.sin6_port = sh.dest_port;
-		dst.sin6_addr = ip6cp->ip6c_ip6->ip6_dst;
-		if (in6_setscope(&dst.sin6_addr, ip6cp->ip6c_m->m_pkthdr.rcvif, NULL) != 0) {
-			return;
-		}
-		inp = NULL;
-		net = NULL;
-		stcb = sctp_findassociation_addr_sa((struct sockaddr *)&dst,
-		    (struct sockaddr *)&src,
-		    &inp, &net, 1, SCTP_DEFAULT_VRFID);
-		if ((stcb != NULL) &&
-		    (net != NULL) &&
-		    (inp != NULL)) {
-			/* Check the verification tag */
-			if (ntohl(sh.v_tag) != 0) {
+	inp = NULL;
+	net = NULL;
+	stcb = sctp_findassociation_addr_sa((struct sockaddr *)&dst,
+	    (struct sockaddr *)&src,
+	    &inp, &net, 1, SCTP_DEFAULT_VRFID);
+	if ((stcb != NULL) &&
+	    (net != NULL) &&
+	    (inp != NULL)) {
+		/* Check the verification tag */
+		if (ntohl(sh.v_tag) != 0) {
+			/*
+			 * This must be the verification tag used
+			 * for sending out packets. We don't
+			 * consider packets reflecting the
+			 * verification tag.
+			 */
+			if (ntohl(sh.v_tag) != stcb->asoc.peer_vtag) {
+				SCTP_TCB_UNLOCK(stcb);
+				return;
+			}
+		} else {
+			if (ip6cp->ip6c_m->m_pkthdr.len >=
+			    ip6cp->ip6c_off + sizeof(struct sctphdr) +
+			    sizeof(struct sctp_chunkhdr) +
+			    offsetof(struct sctp_init, a_rwnd)) {
 				/*
-				 * This must be the verification tag used
-				 * for sending out packets. We don't
-				 * consider packets reflecting the
-				 * verification tag.
+				 * In this case we can check if we
+				 * got an INIT chunk and if the
+				 * initiate tag matches.
 				 */
-				if (ntohl(sh.v_tag) != stcb->asoc.peer_vtag) {
+				uint32_t initiate_tag;
+				uint8_t chunk_type;
+
+				m_copydata(ip6cp->ip6c_m,
+				    ip6cp->ip6c_off +
+				    sizeof(struct sctphdr),
+				    sizeof(uint8_t),
+				    (caddr_t)&chunk_type);
+				m_copydata(ip6cp->ip6c_m,
+				    ip6cp->ip6c_off +
+				    sizeof(struct sctphdr) +
+				    sizeof(struct sctp_chunkhdr),
+				    sizeof(uint32_t),
+				    (caddr_t)&initiate_tag);
+				if ((chunk_type != SCTP_INITIATION) ||
+				    (ntohl(initiate_tag) != stcb->asoc.my_vtag)) {
 					SCTP_TCB_UNLOCK(stcb);
 					return;
 				}
 			} else {
-				if (ip6cp->ip6c_m->m_pkthdr.len >=
-				    ip6cp->ip6c_off + sizeof(struct sctphdr) +
-				    sizeof(struct sctp_chunkhdr) +
-				    offsetof(struct sctp_init, a_rwnd)) {
-					/*
-					 * In this case we can check if we
-					 * got an INIT chunk and if the
-					 * initiate tag matches.
-					 */
-					uint32_t initiate_tag;
-					uint8_t chunk_type;
-
-					m_copydata(ip6cp->ip6c_m,
-					    ip6cp->ip6c_off +
-					    sizeof(struct sctphdr),
-					    sizeof(uint8_t),
-					    (caddr_t)&chunk_type);
-					m_copydata(ip6cp->ip6c_m,
-					    ip6cp->ip6c_off +
-					    sizeof(struct sctphdr) +
-					    sizeof(struct sctp_chunkhdr),
-					    sizeof(uint32_t),
-					    (caddr_t)&initiate_tag);
-					if ((chunk_type != SCTP_INITIATION) ||
-					    (ntohl(initiate_tag) != stcb->asoc.my_vtag)) {
-						SCTP_TCB_UNLOCK(stcb);
-						return;
-					}
-				} else {
-					SCTP_TCB_UNLOCK(stcb);
-					return;
-				}
-			}
-			sctp6_notify(inp, stcb, net,
-			    ip6cp->ip6c_icmp6->icmp6_type,
-			    ip6cp->ip6c_icmp6->icmp6_code,
-			    ntohl(ip6cp->ip6c_icmp6->icmp6_mtu));
-		} else {
-			if ((stcb == NULL) && (inp != NULL)) {
-				/* reduce inp's ref-count */
-				SCTP_INP_WLOCK(inp);
-				SCTP_INP_DECR_REF(inp);
-				SCTP_INP_WUNLOCK(inp);
-			}
-			if (stcb) {
 				SCTP_TCB_UNLOCK(stcb);
+				return;
 			}
+		}
+		sctp6_notify(inp, stcb, net,
+		    ip6cp->ip6c_icmp6->icmp6_type,
+		    ip6cp->ip6c_icmp6->icmp6_code,
+		    ntohl(ip6cp->ip6c_icmp6->icmp6_mtu));
+	} else {
+		if ((stcb == NULL) && (inp != NULL)) {
+			/* reduce inp's ref-count */
+			SCTP_INP_WLOCK(inp);
+			SCTP_INP_DECR_REF(inp);
+			SCTP_INP_WUNLOCK(inp);
+		}
+		if (stcb) {
+			SCTP_TCB_UNLOCK(stcb);
 		}
 	}
 }
@@ -1199,25 +1171,37 @@ sctp6_getpeeraddr(struct socket *so, struct sockaddr **nam)
 	return (error);
 }
 
-struct pr_usrreqs sctp6_usrreqs = {
-	.pru_abort = sctp6_abort,
-	.pru_accept = sctp_accept,
-	.pru_attach = sctp6_attach,
-	.pru_bind = sctp6_bind,
-	.pru_connect = sctp6_connect,
-	.pru_control = in6_control,
-	.pru_close = sctp6_close,
-	.pru_detach = sctp6_close,
-	.pru_sopoll = sopoll_generic,
-	.pru_flush = sctp_flush,
-	.pru_disconnect = sctp6_disconnect,
-	.pru_listen = sctp_listen,
-	.pru_peeraddr = sctp6_getpeeraddr,
-	.pru_send = sctp6_send,
-	.pru_shutdown = sctp_shutdown,
-	.pru_sockaddr = sctp6_in6getaddr,
-	.pru_sosend = sctp_sosend,
-	.pru_soreceive = sctp_soreceive
+#define	SCTP6_PROTOSW							\
+	.pr_protocol =	IPPROTO_SCTP,					\
+	.pr_ctloutput =	sctp_ctloutput,					\
+	.pr_abort =	sctp6_abort,					\
+	.pr_accept =	sctp_accept,					\
+	.pr_attach =	sctp6_attach,					\
+	.pr_bind =	sctp6_bind,					\
+	.pr_connect =	sctp6_connect,					\
+	.pr_control =	in6_control,					\
+	.pr_close =	sctp6_close,					\
+	.pr_detach =	sctp6_close,					\
+	.pr_sopoll =	sopoll_generic,					\
+	.pr_flush =	sctp_flush,					\
+	.pr_disconnect = sctp6_disconnect,				\
+	.pr_listen =	sctp_listen,					\
+	.pr_peeraddr =	sctp6_getpeeraddr,				\
+	.pr_send =	sctp6_send,					\
+	.pr_shutdown =	sctp_shutdown,					\
+	.pr_sockaddr =	sctp6_in6getaddr,				\
+	.pr_sosend =	sctp_sosend,					\
+	.pr_soreceive =	sctp_soreceive
+
+struct protosw sctp6_seqpacket_protosw = {
+	.pr_type =	SOCK_SEQPACKET,
+	.pr_flags =	PR_WANTRCVD,
+	SCTP6_PROTOSW
 };
 
+struct protosw sctp6_stream_protosw = {
+	.pr_type =	SOCK_STREAM,
+	.pr_flags =	PR_CONNREQUIRED | PR_WANTRCVD,
+	SCTP6_PROTOSW
+};
 #endif

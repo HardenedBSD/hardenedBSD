@@ -91,7 +91,6 @@ SUBDIR=	alias \
 	m4 \
 	mandoc \
 	mesg \
-	minigzip \
 	ministat \
 	mkdep \
 	mkfifo \
@@ -107,9 +106,6 @@ SUBDIR=	alias \
 	nice \
 	nl \
 	nohup \
-	opieinfo \
-	opiekey \
-	opiepasswd \
 	pagesize \
 	passwd \
 	paste \

@@ -7,7 +7,7 @@
  * with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -377,6 +377,12 @@ membar_enter(void)
 
 void
 membar_exit(void)
+{
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+
+void
+membar_sync(void)
 {
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 }

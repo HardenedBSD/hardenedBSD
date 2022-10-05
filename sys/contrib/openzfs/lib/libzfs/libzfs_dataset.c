@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -527,6 +527,7 @@ make_dataset_simple_handle_zc(zfs_handle_t *pzhp, zfs_cmd_t *zc)
 	zhp->zfs_head_type = pzhp->zfs_type;
 	zhp->zfs_type = ZFS_TYPE_SNAPSHOT;
 	zhp->zpool_hdl = zpool_handle(zhp);
+	zhp->zfs_dmustats = zc->zc_objset_stats;
 
 	return (zhp);
 }
@@ -716,8 +717,8 @@ zfs_open(libzfs_handle_t *hdl, const char *path, int types)
 		 * to get the parent dataset name only.
 		 */
 		assert(bookp - path < sizeof (dsname));
-		(void) strncpy(dsname, path, bookp - path);
-		dsname[bookp - path] = '\0';
+		(void) strlcpy(dsname, path,
+		    MIN(sizeof (dsname), bookp - path + 1));
 
 		/*
 		 * Create handle for the parent dataset.
@@ -2006,6 +2007,7 @@ zfs_prop_inherit(zfs_handle_t *zhp, const char *propname, boolean_t received)
 		goto error;
 
 	if ((ret = zfs_ioctl(zhp->zfs_hdl, ZFS_IOC_INHERIT_PROP, &zc)) != 0) {
+		changelist_free(cl);
 		return (zfs_standard_error(hdl, errno, errbuf));
 	} else {
 
@@ -2282,6 +2284,19 @@ get_numeric_property(zfs_handle_t *zhp, zfs_prop_t prop, zprop_source_t *src,
 	case ZFS_PROP_REDACTED:
 		*val = zhp->zfs_dmustats.dds_redacted;
 		break;
+
+	case ZFS_PROP_CREATETXG:
+		/*
+		 * We can directly read createtxg property from zfs
+		 * handle for Filesystem, Snapshot and ZVOL types.
+		 */
+		if ((zhp->zfs_type == ZFS_TYPE_FILESYSTEM) ||
+		    (zhp->zfs_type == ZFS_TYPE_SNAPSHOT) ||
+		    (zhp->zfs_type == ZFS_TYPE_VOLUME)) {
+			*val = zhp->zfs_dmustats.dds_creation_txg;
+			break;
+		}
+		zfs_fallthrough;
 
 	default:
 		switch (zfs_prop_get_type(prop)) {
@@ -2921,6 +2936,26 @@ zfs_prop_get(zfs_handle_t *zhp, zfs_prop_t prop, char *propbuf, size_t proplen,
 		zcp_check(zhp, prop, val, NULL);
 		break;
 
+	case ZFS_PROP_SNAPSHOTS_CHANGED:
+		{
+			if ((get_numeric_property(zhp, prop, src, &source,
+			    &val) != 0) || val == 0) {
+				return (-1);
+			}
+
+			time_t time = (time_t)val;
+			struct tm t;
+
+			if (literal ||
+			    localtime_r(&time, &t) == NULL ||
+			    strftime(propbuf, proplen, "%a %b %e %k:%M:%S %Y",
+			    &t) == 0)
+				(void) snprintf(propbuf, proplen, "%llu",
+				    (u_longlong_t)val);
+		}
+		zcp_check(zhp, prop, val, NULL);
+		break;
+
 	default:
 		switch (zfs_prop_get_type(prop)) {
 		case PROP_TYPE_NUMBER:
@@ -3419,8 +3454,8 @@ check_parents(libzfs_handle_t *hdl, const char *path, uint64_t *zoned,
 	/* check to see if the pool exists */
 	if ((slash = strchr(parent, '/')) == NULL)
 		slash = parent + strlen(parent);
-	(void) strncpy(zc.zc_name, parent, slash - parent);
-	zc.zc_name[slash - parent] = '\0';
+	(void) strlcpy(zc.zc_name, parent,
+	    MIN(sizeof (zc.zc_name), slash - parent + 1));
 	if (zfs_ioctl(hdl, ZFS_IOC_OBJSET_STATS, &zc) != 0 &&
 	    errno == ENOENT) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
@@ -4129,6 +4164,8 @@ zfs_snapshot_nvl(libzfs_handle_t *hdl, nvlist_t *snaps, nvlist_t *props)
 	 * same pool, as does lzc_snapshot (below).
 	 */
 	elem = nvlist_next_nvpair(snaps, NULL);
+	if (elem == NULL)
+		return (-1);
 	(void) strlcpy(pool, nvpair_name(elem), sizeof (pool));
 	pool[strcspn(pool, "/@")] = '\0';
 	zpool_hdl = zpool_open(hdl, pool);

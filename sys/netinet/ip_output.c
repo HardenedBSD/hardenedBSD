@@ -106,7 +106,6 @@ SYSCTL_INT(_net_inet_ip, OID_AUTO, mbuf_frag_size, CTLFLAG_RW,
 static void	ip_mloopback(struct ifnet *, const struct mbuf *, int);
 
 extern int in_mcast_loop;
-extern	struct protosw inetsw[];
 
 static inline int
 ip_output_pfil(struct mbuf **mp, struct ifnet *ifp, int flags,
@@ -117,9 +116,6 @@ ip_output_pfil(struct mbuf **mp, struct ifnet *ifp, int flags,
 	struct in_addr odst;
 	struct ip *ip;
 	int pflags = PFIL_OUT;
-
-	if (flags & IP_FORWARDING)
-		pflags |= PFIL_FWD;
 
 	m = *mp;
 	ip = mtod(m, struct ip *);
@@ -872,16 +868,14 @@ ip_fragment(struct ip *ip, struct mbuf **m_frag, int mtu,
 	ip_len = ntohs(ip->ip_len);
 	ip_off = ntohs(ip->ip_off);
 
-	if (ip_off & IP_DF) {	/* Fragmentation not allowed */
-		IPSTAT_INC(ips_cantfrag);
-		return EMSGSIZE;
-	}
-
 	/*
-	 * Must be able to put at least 8 bytes per fragment.
+	 * Packet shall not have "Don't Fragment" flag and have at least 8
+	 * bytes of payload.
 	 */
-	if (len < 8)
-		return EMSGSIZE;
+	if (__predict_false((ip_off & IP_DF) || len < 8)) {
+		IPSTAT_INC(ips_cantfrag);
+		return (EMSGSIZE);
+	}
 
 	/*
 	 * If the interface will not calculate checksums on

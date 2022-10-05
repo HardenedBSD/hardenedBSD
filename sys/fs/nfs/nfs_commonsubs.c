@@ -744,7 +744,7 @@ nfsm_dissct(struct nfsrv_descript *nd, int siz, int how)
 	} else if (siz > ncl_mbuf_mhlen) {
 		panic("nfs S too big");
 	} else {
-		MGET(mp2, MT_DATA, how);
+		MGET(mp2, how, MT_DATA);
 		if (mp2 == NULL)
 			return (NULL);
 		mp2->m_next = nd->nd_md->m_next;
@@ -4787,7 +4787,6 @@ nfsv4_setsequence(struct nfsmount *nmp, struct nfsrv_descript *nd,
 		if (error == NFSERR_SEQMISORDERED) {
 			/* If all slots are bad, Destroy the session. */
 			nfsrpc_destroysession(nmp, sep, cred, curthread);
-			error = 0;
 		}
 	} else
 		error = nfsv4_sequencelookup(nmp, sep, &slotpos, &maxslot,

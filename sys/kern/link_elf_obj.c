@@ -229,6 +229,7 @@ link_elf_detect_insecure_late(struct thread *td, const char *filename,
 		return (0);
 	}
 
+#ifdef HARDEN_KLD
 	if ((flags & PAX_NOTE_FORBIDKMOD) == PAX_NOTE_FORBIDKMOD ||
 	    (link_elf_kmod_is_insecure(lf) && !pax_insecure_kmod())) {
 		pax_log_internal(td->td_proc, PAX_LOG_P_COMM,
@@ -236,6 +237,7 @@ link_elf_detect_insecure_late(struct thread *td, const char *filename,
 		    filename != NULL ? filename : "<unknown>");
 		return (EPERM);
 	}
+#endif
 
 	return (0);
 }

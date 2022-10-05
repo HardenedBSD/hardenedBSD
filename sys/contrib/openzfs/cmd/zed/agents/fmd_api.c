@@ -6,7 +6,7 @@
  * You may not use this file except in compliance with the License.
  *
  * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or http://www.opensolaris.org/os/licensing.
+ * or https://opensource.org/licenses/CDDL-1.0.
  * See the License for the specific language governing permissions
  * and limitations under the License.
  *
@@ -372,7 +372,7 @@ zed_log_fault(nvlist_t *nvl, const char *uuid, const char *code)
 	if (code != NULL)
 		zed_log_msg(LOG_INFO, "\t%s: %s", FM_SUSPECT_DIAG_CODE, code);
 	if (nvlist_lookup_uint8(nvl, FM_FAULT_CERTAINTY, &byte) == 0)
-		zed_log_msg(LOG_INFO, "\t%s: %llu", FM_FAULT_CERTAINTY, byte);
+		zed_log_msg(LOG_INFO, "\t%s: %hhu", FM_FAULT_CERTAINTY, byte);
 	if (nvlist_lookup_nvlist(nvl, FM_FAULT_RESOURCE, &rsrc) == 0) {
 		if (nvlist_lookup_string(rsrc, FM_FMRI_SCHEME, &strval) == 0)
 			zed_log_msg(LOG_INFO, "\t%s: %s", FM_FMRI_SCHEME,

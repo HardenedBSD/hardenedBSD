@@ -434,6 +434,8 @@ lapic_init(vm_paddr_t addr)
 	int i;
 	bool arat;
 
+	TSENTER();
+
 	/*
 	 * Enable x2APIC mode if possible. Map the local APIC
 	 * registers page.
@@ -531,7 +533,7 @@ lapic_init(vm_paddr_t addr)
 	}
 
 #ifdef SMP
-#define	LOOPS	100000
+#define	LOOPS	1000
 	/*
 	 * Calibrate the busy loop waiting for IPI ack in xAPIC mode.
 	 * lapic_ipi_wait_mult contains the number of iterations which
@@ -563,6 +565,8 @@ lapic_init(vm_paddr_t addr)
 	}
 #undef LOOPS
 #endif /* SMP */
+
+	TSEXIT();
 }
 
 /*
@@ -1292,6 +1296,7 @@ lapic_handle_intr(int vector, struct trapframe *frame)
 	kasan_mark(frame, sizeof(*frame), sizeof(*frame), 0);
 	kmsan_mark(&vector, sizeof(vector), KMSAN_STATE_INITED);
 	kmsan_mark(frame, sizeof(*frame), KMSAN_STATE_INITED);
+	trap_check_kstack();
 
 	isrc = intr_lookup_source(apic_idt_to_irq(PCPU_GET(apic_id),
 	    vector));
@@ -1310,6 +1315,7 @@ lapic_handle_timer(struct trapframe *frame)
 
 	kasan_mark(frame, sizeof(*frame), sizeof(*frame), 0);
 	kmsan_mark(frame, sizeof(*frame), KMSAN_STATE_INITED);
+	trap_check_kstack();
 
 #if defined(SMP) && !defined(SCHED_ULE)
 	/*
@@ -1429,6 +1435,7 @@ lapic_timer_stop(struct lapic *la)
 void
 lapic_handle_cmc(void)
 {
+	trap_check_kstack();
 
 	lapic_eoi();
 	cmc_intr();
@@ -1490,6 +1497,8 @@ void
 lapic_handle_error(void)
 {
 	uint32_t esr;
+
+	trap_check_kstack();
 
 	/*
 	 * Read the contents of the error status register.  Write to

@@ -163,6 +163,20 @@ sys_setfib(struct thread *td, struct setfib_args *uap)
 }
 
 /*
+ * If required, copy interface routes from existing tables to the
+ * newly-created routing table.
+ */
+static void
+populate_kernel_routes(struct rib_head **new_rt_tables, struct rib_head *rh)
+{
+	for (int i = 0; i < V_rt_numfibs; i++) {
+		struct rib_head *rh_src = new_rt_tables[i * (AF_MAX + 1) + rh->rib_family];
+		if ((rh_src != NULL) && (rh_src != rh))
+			rib_copy_kernel_routes(rh_src, rh);
+	}
+}
+
+/*
  * Grows up the number of routing tables in the current fib.
  * Function creates new index array for all rtables and allocates
  *  remaining routing tables.
@@ -202,7 +216,7 @@ grow_rtables(uint32_t num_tables)
 		    V_rt_numfibs * (AF_MAX + 1) * sizeof(void *));
 
 	/* Populate the remainders */
-	for (dom = domains; dom; dom = dom->dom_next) {
+	SLIST_FOREACH(dom, &domains, dom_next) {
 		if (dom->dom_rtattach == NULL)
 			continue;
 		family = dom->dom_family;
@@ -214,6 +228,8 @@ grow_rtables(uint32_t num_tables)
 			if (rh == NULL)
 				log(LOG_ERR, "unable to create routing table for %d.%d\n",
 				    dom->dom_family, i);
+			else
+				populate_kernel_routes(new_rt_tables, rh);
 			*prnh = rh;
 		}
 	}
@@ -236,7 +252,7 @@ grow_rtables(uint32_t num_tables)
 
 #ifdef FIB_ALGO
 	/* Attach fib algo to the new rtables */
-	for (dom = domains; dom; dom = dom->dom_next) {
+	SLIST_FOREACH(dom, &domains, dom_next) {
 		if (dom->dom_rtattach != NULL)
 			fib_setup_family(dom->dom_family, num_tables);
 	}
@@ -280,7 +296,7 @@ rtables_destroy(const void *unused __unused)
 	int family;
 
 	RTABLES_LOCK();
-	for (dom = domains; dom; dom = dom->dom_next) {
+	SLIST_FOREACH(dom, &domains, dom_next) {
 		if (dom->dom_rtdetach == NULL)
 			continue;
 		family = dom->dom_family;

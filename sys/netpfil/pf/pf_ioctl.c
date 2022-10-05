@@ -739,11 +739,6 @@ pf_begin_eth(uint32_t *ticket, const char *anchor)
 	if (rs == NULL)
 		return (EINVAL);
 
-	if (rs->inactive.open)
-		/* We may be waiting for NET_EPOCH_CALL(pf_rollback_eth_cb) to
-		 * finish. */
-		return (EBUSY);
-
 	/* Purge old inactive rules. */
 	TAILQ_FOREACH_SAFE(rule, rs->inactive.rules, entries,
 	    tmp) {
@@ -6713,6 +6708,9 @@ pf_unload_vnet(void)
 	pf_syncookies_cleanup();
 	shutdown_pf();
 	PF_RULES_WUNLOCK();
+
+	/* Make sure we've cleaned up ethernet rules before we continue. */
+	NET_EPOCH_DRAIN_CALLBACKS();
 
 	ret = swi_remove(V_pf_swi_cookie);
 	MPASS(ret == 0);

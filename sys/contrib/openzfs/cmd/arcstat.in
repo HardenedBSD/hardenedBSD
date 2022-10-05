@@ -29,7 +29,7 @@
 # with the License.
 #
 # You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
+# or https://opensource.org/licenses/CDDL-1.0.
 # See the License for the specific language governing permissions
 # and limitations under the License.
 #
@@ -271,7 +271,7 @@ def print_values():
     if pretty_print:
         fmt = lambda col: prettynum(cols[col][0], cols[col][1], v[col])
     else:
-        fmt = lambda col: v[col]
+        fmt = lambda col: str(v[col])
 
     sys.stdout.write(sep.join(fmt(col) for col in hdr))
     sys.stdout.write("\n")

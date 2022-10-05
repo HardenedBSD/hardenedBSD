@@ -63,6 +63,10 @@ __FBSDID("$FreeBSD$");
 #include <machine/machdep.h> /* For arm_set_delay */
 #endif
 
+#if defined(__aarch64__)
+#include <machine/undefined.h>
+#endif
+
 #ifdef FDT
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
@@ -73,6 +77,12 @@ __FBSDID("$FreeBSD$");
 #include <contrib/dev/acpica/include/acpi.h>
 #include <dev/acpica/acpivar.h>
 #endif
+
+#define	GT_PHYS_SECURE		0
+#define	GT_PHYS_NONSECURE	1
+#define	GT_VIRT			2
+#define	GT_HYP			3
+#define	GT_IRQ_COUNT		4
 
 #define	GT_CTRL_ENABLE		(1 << 0)
 #define	GT_CTRL_INT_MASK	(1 << 1)
@@ -89,8 +99,8 @@ __FBSDID("$FreeBSD$");
 #define	GT_CNTKCTL_PL0PCTEN	(1 << 0) /* PL0 CNTPCT and CNTFRQ access */
 
 struct arm_tmr_softc {
-	struct resource		*res[4];
-	void			*ihl[4];
+	struct resource		*res[GT_IRQ_COUNT];
+	void			*ihl[GT_IRQ_COUNT];
 	uint64_t		(*get_cntxct)(bool);
 	uint32_t		clkfreq;
 	struct eventtimer	et;
@@ -100,10 +110,10 @@ struct arm_tmr_softc {
 static struct arm_tmr_softc *arm_tmr_sc = NULL;
 
 static struct resource_spec timer_spec[] = {
-	{ SYS_RES_IRQ,		0,	RF_ACTIVE },	/* Secure */
-	{ SYS_RES_IRQ,		1,	RF_ACTIVE },	/* Non-secure */
-	{ SYS_RES_IRQ,		2,	RF_ACTIVE | RF_OPTIONAL }, /* Virt */
-	{ SYS_RES_IRQ,		3,	RF_ACTIVE | RF_OPTIONAL	}, /* Hyp */
+	{ SYS_RES_IRQ,	GT_PHYS_SECURE,		RF_ACTIVE },
+	{ SYS_RES_IRQ,	GT_PHYS_NONSECURE,	RF_ACTIVE },
+	{ SYS_RES_IRQ,	GT_VIRT,		RF_ACTIVE | RF_OPTIONAL },
+	{ SYS_RES_IRQ,	GT_HYP,			RF_ACTIVE | RF_OPTIONAL	},
 	{ -1, 0 }
 };
 
@@ -235,12 +245,54 @@ setup_user_access(void *arg __unused)
 	isb();
 }
 
+#ifdef __aarch64__
+static int
+cntpct_handler(vm_offset_t va, uint32_t insn, struct trapframe *frame,
+    uint32_t esr)
+{
+	uint64_t val;
+	int reg;
+
+	if ((insn & MRS_MASK) != MRS_VALUE)
+		return (0);
+
+	if (MRS_SPECIAL(insn) != MRS_SPECIAL(CNTPCT_EL0))
+		return (0);
+
+	reg = MRS_REGISTER(insn);
+	val = READ_SPECIALREG(cntvct_el0);
+	if (reg < nitems(frame->tf_x)) {
+		frame->tf_x[reg] = val;
+	} else if (reg == 30) {
+		frame->tf_lr = val;
+	}
+
+	/*
+	 * We will handle this instruction, move to the next so we
+	 * don't trap here again.
+	 */
+	frame->tf_elr += INSN_SIZE;
+
+	return (1);
+}
+#endif
+
 static void
 tmr_setup_user_access(void *arg __unused)
 {
+#ifdef __aarch64__
+	int emulate;
+#endif
 
-	if (arm_tmr_sc != NULL)
+	if (arm_tmr_sc != NULL) {
 		smp_rendezvous(NULL, setup_user_access, NULL, NULL);
+#ifdef __aarch64__
+		if (TUNABLE_INT_FETCH("hw.emulate_phys_counter", &emulate) &&
+		    emulate != 0) {
+			install_undef_handler(true, cntpct_handler);
+		}
+#endif
+	}
 }
 SYSINIT(tmr_ua, SI_SUB_SMP, SI_ORDER_ANY, tmr_setup_user_access, NULL);
 
@@ -366,9 +418,12 @@ arm_tmr_acpi_identify(driver_t *driver, device_t parent)
 		goto out;
 	}
 
-	arm_tmr_acpi_add_irq(parent, dev, 0, gtdt->SecureEl1Interrupt);
-	arm_tmr_acpi_add_irq(parent, dev, 1, gtdt->NonSecureEl1Interrupt);
-	arm_tmr_acpi_add_irq(parent, dev, 2, gtdt->VirtualTimerInterrupt);
+	arm_tmr_acpi_add_irq(parent, dev, GT_PHYS_SECURE,
+	    gtdt->SecureEl1Interrupt);
+	arm_tmr_acpi_add_irq(parent, dev, GT_PHYS_NONSECURE,
+	    gtdt->NonSecureEl1Interrupt);
+	arm_tmr_acpi_add_irq(parent, dev, GT_VIRT,
+	    gtdt->VirtualTimerInterrupt);
 
 out:
 	acpi_unmap_table(gtdt);
@@ -434,17 +489,17 @@ arm_tmr_attach(device_t dev)
 
 #ifdef __aarch64__
 	/* Use the virtual timer if we have one. */
-	if (sc->res[2] != NULL) {
+	if (sc->res[GT_VIRT] != NULL) {
 		sc->physical = false;
-		first_timer = 2;
-		last_timer = 2;
+		first_timer = GT_VIRT;
+		last_timer = GT_VIRT;
 	} else
 #endif
 	/* Otherwise set up the secure and non-secure physical timers. */
 	{
 		sc->physical = true;
-		first_timer = 0;
-		last_timer = 1;
+		first_timer = GT_PHYS_SECURE;
+		last_timer = GT_PHYS_NONSECURE;
 	}
 
 	arm_tmr_sc = sc;
@@ -463,7 +518,7 @@ arm_tmr_attach(device_t dev)
 	}
 
 	/* Disable the virtual timer until we are ready */
-	if (sc->res[2] != NULL)
+	if (sc->res[GT_VIRT] != NULL)
 		arm_tmr_disable(false);
 	/* And the physical */
 	if (sc->physical)
@@ -498,11 +553,8 @@ static device_method_t arm_tmr_fdt_methods[] = {
 	{ 0, 0 }
 };
 
-static driver_t arm_tmr_fdt_driver = {
-	"generic_timer",
-	arm_tmr_fdt_methods,
-	sizeof(struct arm_tmr_softc),
-};
+static DEFINE_CLASS_0(generic_timer, arm_tmr_fdt_driver, arm_tmr_fdt_methods,
+    sizeof(struct arm_tmr_softc));
 
 EARLY_DRIVER_MODULE(timer, simplebus, arm_tmr_fdt_driver, 0, 0,
     BUS_PASS_TIMER + BUS_PASS_ORDER_MIDDLE);
@@ -518,11 +570,8 @@ static device_method_t arm_tmr_acpi_methods[] = {
 	{ 0, 0 }
 };
 
-static driver_t arm_tmr_acpi_driver = {
-	"generic_timer",
-	arm_tmr_acpi_methods,
-	sizeof(struct arm_tmr_softc),
-};
+static DEFINE_CLASS_0(generic_timer, arm_tmr_acpi_driver, arm_tmr_acpi_methods,
+    sizeof(struct arm_tmr_softc));
 
 EARLY_DRIVER_MODULE(timer, acpi, arm_tmr_acpi_driver, 0, 0,
     BUS_PASS_TIMER + BUS_PASS_ORDER_MIDDLE);

@@ -241,7 +241,8 @@ tests = ['zfs_receive_001_pos', 'zfs_receive_002_pos', 'zfs_receive_003_pos',
     'zfs_receive_from_encrypted', 'zfs_receive_to_encrypted',
     'zfs_receive_raw', 'zfs_receive_raw_incremental', 'zfs_receive_-e',
     'zfs_receive_raw_-d', 'zfs_receive_from_zstd', 'zfs_receive_new_props',
-    'zfs_receive_-wR-encrypted-mix']
+    'zfs_receive_-wR-encrypted-mix', 'zfs_receive_corrective',
+    'zfs_receive_compressed_corrective']
 tags = ['functional', 'cli_root', 'zfs_receive']
 
 [tests/functional/cli_root/zfs_rename]
@@ -493,7 +494,7 @@ tags = ['functional', 'cli_root', 'zpool_split']
 [tests/functional/cli_root/zpool_status]
 tests = ['zpool_status_001_pos', 'zpool_status_002_pos',
     'zpool_status_003_pos', 'zpool_status_004_pos',
-    'zpool_status_features_001_pos']
+    'zpool_status_005_pos', 'zpool_status_features_001_pos']
 tags = ['functional', 'cli_root', 'zpool_status']
 
 [tests/functional/cli_root/zpool_sync]
@@ -550,7 +551,8 @@ tests = ['zdb_001_neg', 'zfs_001_neg', 'zfs_allow_001_neg',
     'zpool_offline_001_neg', 'zpool_online_001_neg', 'zpool_remove_001_neg',
     'zpool_replace_001_neg', 'zpool_scrub_001_neg', 'zpool_set_001_neg',
     'zpool_status_001_neg', 'zpool_upgrade_001_neg', 'arcstat_001_pos',
-    'arc_summary_001_pos', 'arc_summary_002_neg', 'zpool_wait_privilege']
+    'arc_summary_001_pos', 'arc_summary_002_neg', 'zpool_wait_privilege',
+    'zilstat_001_pos']
 user =
 tags = ['functional', 'cli_user', 'misc']
 
@@ -834,9 +836,9 @@ tests = ['recv_dedup', 'recv_dedup_encrypted_zvol', 'rsend_001_pos',
     'rsend_014_pos', 'rsend_016_neg', 'rsend_019_pos', 'rsend_020_pos',
     'rsend_021_pos', 'rsend_022_pos', 'rsend_024_pos', 'rsend_025_pos',
     'rsend_026_neg', 'rsend_027_pos', 'rsend_028_neg', 'rsend_029_neg',
-    'send-c_verify_ratio', 'send-c_verify_contents', 'send-c_props',
-    'send-c_incremental', 'send-c_volume', 'send-c_zstreamdump',
-    'send-c_lz4_disabled', 'send-c_recv_lz4_disabled',
+    'rsend_030_pos', 'send-c_verify_ratio', 'send-c_verify_contents',
+    'send-c_props', 'send-c_incremental', 'send-c_volume',
+    'send-c_zstreamdump', 'send-c_lz4_disabled', 'send-c_recv_lz4_disabled',
     'send-c_mixed_compression', 'send-c_stream_size_estimate',
     'send-c_embedded_blocks', 'send-c_resume', 'send-cpL_varied_recsize',
     'send-c_recv_dedup', 'send-L_toggle', 'send_encrypted_hierarchy',
@@ -868,7 +870,7 @@ tests = ['clone_001_pos', 'rollback_001_pos', 'rollback_002_pos',
     'snapshot_006_pos', 'snapshot_007_pos', 'snapshot_008_pos',
     'snapshot_009_pos', 'snapshot_010_pos', 'snapshot_011_pos',
     'snapshot_012_pos', 'snapshot_013_pos', 'snapshot_014_pos',
-    'snapshot_017_pos']
+    'snapshot_017_pos', 'snapshot_018_pos']
 tags = ['functional', 'snapshot']
 
 [tests/functional/snapused]

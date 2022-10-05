@@ -7,7 +7,7 @@
 # You may not use this file except in compliance with the License.
 #
 # You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
-# or http://www.opensolaris.org/os/licensing.
+# or https://opensource.org/licenses/CDDL-1.0.
 # See the License for the specific language governing permissions
 # and limitations under the License.
 #
@@ -85,7 +85,7 @@ fi
 list="$($NSENTER zfs list -r -H -o name | tr '\n' ' ')"
 log_must test -z "$list"
 log_must zfs zone $proc_ns $TESTPOOL/userns
-proc_ns_added="$ns"
+proc_ns_added="$proc_ns"
 
 # 2. 'zfs list'
 list="$($NSENTER zfs list -r -H -o name $TESTPOOL | tr '\n' ' ')"

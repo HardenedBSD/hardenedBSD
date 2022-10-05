@@ -377,7 +377,7 @@ sendfile_iodone(void *arg, vm_page_t *pa, int count, int error)
 		 * for read, so that application receives EIO on next
 		 * syscall and eventually closes the socket.
 		 */
-		so->so_proto->pr_usrreqs->pru_abort(so);
+		so->so_proto->pr_abort(so);
 		so->so_error = EIO;
 
 		mb_free_notready(sfio->m, sfio->npages);
@@ -396,8 +396,7 @@ sendfile_iodone(void *arg, vm_page_t *pa, int count, int error)
 		goto out_with_ref;
 #endif
 	} else
-		(void)(so->so_proto->pr_usrreqs->pru_ready)(so, sfio->m,
-		    sfio->npages);
+		(void)so->so_proto->pr_ready(so, sfio->m, sfio->npages);
 
 	sorele(so);
 #ifdef KERN_TLS
@@ -654,8 +653,7 @@ sendfile_getsock(struct thread *td, int s, struct file **sock_fp,
 	/*
 	 * The socket must be a stream socket and connected.
 	 */
-	error = getsock_cap(td, s, &cap_send_rights,
-	    sock_fp, NULL, NULL);
+	error = getsock(td, s, &cap_send_rights, sock_fp);
 	if (error != 0)
 		return (error);
 	*so = (*sock_fp)->f_data;
@@ -1172,8 +1170,8 @@ prepend_header:
 				sendfile_iodone(sfio, NULL, 0, 0);
 #ifdef KERN_TLS
 			if (tls != NULL && tls->mode == TCP_TLS_MODE_SW) {
-				error = (*so->so_proto->pr_usrreqs->pru_send)
-				    (so, PRUS_NOTREADY, m, NULL, NULL, td);
+				error = so->so_proto->pr_send(so,
+				    PRUS_NOTREADY, m, NULL, NULL, td);
 				if (error != 0) {
 					m_freem(m);
 				} else {
@@ -1182,14 +1180,14 @@ prepend_header:
 				}
 			} else
 #endif
-				error = (*so->so_proto->pr_usrreqs->pru_send)
-				    (so, 0, m, NULL, NULL, td);
+				error = so->so_proto->pr_send(so, 0, m, NULL,
+				    NULL, td);
 		} else {
 			sfio->so = so;
 			sfio->m = m0;
 			soref(so);
-			error = (*so->so_proto->pr_usrreqs->pru_send)
-			    (so, PRUS_NOTREADY, m, NULL, NULL, td);
+			error = so->so_proto->pr_send(so, PRUS_NOTREADY, m,
+			    NULL, NULL, td);
 			sendfile_iodone(sfio, NULL, 0, error);
 		}
 		CURVNET_RESTORE();
