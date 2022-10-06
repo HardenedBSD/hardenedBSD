@@ -22,10 +22,6 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
-#ifdef __FreeBSD__
-#define	ElfW	__ElfN
-#endif
-
 #if SANITIZER_LINUX
 typedef ElfW(Phdr) Elf_Phdr;
 typedef ElfW(Ehdr) Elf_Ehdr;
@@ -177,7 +173,9 @@ void ShadowBuilder::Add(uptr begin, uptr end, uptr cfi_check) {
 
 #if SANITIZER_LINUX || SANITIZER_FREEBSD || SANITIZER_NETBSD
 void ShadowBuilder::Install() {
+#if 0
   MprotectReadOnly(shadow_, GetShadowSize());
+#endif
   uptr main_shadow = GetShadow();
   if (main_shadow) {
     // Update.
@@ -192,18 +190,21 @@ void ShadowBuilder::Install() {
 #else
     void *res = MmapFixedOrDie(shadow_, GetShadowSize(), "cfi shadow");
     CHECK(res != MAP_FAILED);
-    ::memcpy(&shadow_, &main_shadow, GetShadowSize());
+    ::memmove((void *)shadow_, (void *)main_shadow, GetShadowSize());
 #endif
   } else {
     // Initial setup.
     CHECK_EQ(kCfiShadowLimitsStorageSize, GetPageSizeCached());
     CHECK_EQ(0, GetShadow());
     cfi_shadow_limits_storage.limits.start = shadow_;
+#if 0
     MprotectReadOnly((uptr)&cfi_shadow_limits_storage,
                      sizeof(cfi_shadow_limits_storage));
+#endif
     CHECK_EQ(shadow_, GetShadow());
   }
 }
+/*
 #elif SANITIZER_FREEBSD
 void ShadowBuilder::Install() {
   unsigned char *dst, *src, t;
@@ -231,6 +232,7 @@ void ShadowBuilder::Install() {
     CHECK_EQ(shadow_, GetShadow());
   }
 }
+*/
 #else
 #error not implemented
 #endif
@@ -454,10 +456,14 @@ static void EnsureInterceptorsInitialized();
 INTERCEPTOR(void*, dlopen, const char *filename, int flag) {
   void *(*rdlo)(const char *, int);
   EnsureInterceptorsInitialized();
-  EnterLoader();
+  if (filename != NULL) {
+	EnterLoader();
+  }
   rdlo = REAL(dlopen);
   void *handle = rdlo(filename, flag);
-  ExitLoader();
+  if (filename != NULL) {
+	ExitLoader();
+  }
   return handle;
 }
 

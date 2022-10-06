@@ -110,6 +110,24 @@ dllockinit(void *context,
 		context_destroy(context);
 }
 
+#pragma weak _hbsd_cfi_dlopen
+void *
+_hbsd_cfi_dlopen(const char *name __unused, int mode __unused)
+{
+
+	_rtld_error(sorry);
+	return (NULL);
+}
+
+#pragma weak _hbsd_cfi_dlclose
+int
+_hbsd_cfi_dlclose(void *handle __unused)
+{
+
+	_rtld_error(sorry);
+	return (-1);
+}
+
 #pragma weak dlopen
 void *
 dlopen(const char *name __unused, int mode __unused)

@@ -42,14 +42,25 @@ __FBSDID("$FreeBSD$");
 static int __libc_restricted_mode = 0;
 
 void *
-libc_dlopen(const char *path, int mode)
+libc_dlopen(const char *path, int mode) __attribute__((no_sanitize("cfi")))
 {
 
 	if (__libc_restricted_mode) {
 		_rtld_error("Service unavailable -- libc in restricted mode");
 		return (NULL);
 	}
-	return (dlopen(path, mode));
+	return (_hbsd_cfi_dlopen(path, mode));
+}
+
+int
+libc_dlclose(void *handle) __attribute__((no_sanitize("cfi")))
+{
+
+	if (__libc_restricted_mode) {
+		_rtld_error("Service unavailable -- libc in restricted mode");
+		return (-1);
+	}
+	return (_hbsd_cfi_dlclose(handle));
 }
 
 void

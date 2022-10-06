@@ -3,6 +3,8 @@
  */
 
 FBSD_1.0 {
+   _hbsd_cfi_dlclose;
+   _hbsd_cfi_dlopen;
     _rtld_error;
     dlclose;
     dlerror;

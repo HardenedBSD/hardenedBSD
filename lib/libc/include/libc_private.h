@@ -64,6 +64,8 @@ extern void	*__elf_aux_vector;
  */
 void *libc_dlopen(const char *, int);
 
+int libc_dlclose(void *);
+
 /*
  * For dynamic linker.
  */

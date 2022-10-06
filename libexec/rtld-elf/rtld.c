@@ -3749,7 +3749,7 @@ search_library_pathfds(const char *name, const char *path, int *fdp)
 
 
 int
-dlclose(void *handle)
+dlclose(void *handle) __attribute__((no_sanitize("cfi")))
 {
 	RtldLockState lockstate;
 	int error;
@@ -3795,7 +3795,7 @@ dlclose_locked(void *handle, RtldLockState *lockstate)
 }
 
 char *
-dlerror(void)
+dlerror(void) __attribute__((no_sanitize("cfi")))
 {
 	if (*(lockinfo.dlerror_seen()) != 0)
 		return (NULL);
@@ -3826,14 +3826,28 @@ dllockinit(void *context,
 }
 
 void *
-dlopen(const char *name, int mode)
+_hbsd_cfi_dlopen(const char *name, int mode)
+{
+
+	return (rtld_dlopen(name, -1, mode));
+}
+
+int
+_hbsd_cfi_dlclose(void *handle)
+{
+
+	return (dlclose(handle));
+}
+
+void *
+dlopen(const char *name, int mode) __attribute__((no_sanitize("cfi")))
 {
 
 	return (rtld_dlopen(name, -1, mode));
 }
 
 void *
-fdlopen(int fd, int mode)
+fdlopen(int fd, int mode) __attribute__((no_sanitize("cfi")))
 {
 
 	return (rtld_dlopen(NULL, fd, mode));

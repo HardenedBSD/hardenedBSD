@@ -331,8 +331,9 @@ _nsdbtdump(const ns_dbt *dbt)
  * or after nsswitch.conf has been updated), nss_configure will
  * prepare global data needed by NSS.
  */
+__attribute__((noinline))
 static int
-nss_configure(void)
+nss_configure(void) __attribute__((no_sanitize("cfi")))
 {
 	static time_t	 confmod;
 #ifndef NS_REREAD_CONF
@@ -399,7 +400,7 @@ nss_configure(void)
 	if (handle != NULL) {
 		nss_cache_cycle_prevention_func = dlsym(handle,
 		    "_nss_cache_cycle_prevention_function");
-		dlclose(handle);
+		libc_dlclose(handle);
 	}
 #endif
 fin:
@@ -626,10 +627,10 @@ fb_endstate(void *p)
 }
 
 __weak_reference(_nsdispatch, nsdispatch);
-
+__attribute__((noinline))
 int
 _nsdispatch(void *retval, const ns_dtab disp_tab[], const char *database,
-	    const char *method_name, const ns_src defaults[], ...)
+	    const char *method_name, const ns_src defaults[], ...) __attribute__((no_sanitize("cfi")))
 {
 	va_list		 ap;
 	const ns_dbt	*dbt;

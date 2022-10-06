@@ -135,6 +135,8 @@ void	 dllockinit(void *_context,
 	    void (*_context_destroy)(void *_context));
 void	*dlvsym(void * __restrict, const char * __restrict,
 	    const char * __restrict);
+void	*_hbsd_cfi_dlopen(const char *, int);
+int	 _hbsd_cfi_dlclose(void *);
 #endif /* __BSD_VISIBLE */
 __END_DECLS
 

@@ -122,7 +122,7 @@ CFLAGS+= ${PICFLAG}
 #CXXFLAGS+=	-flto -fvisibility=hidden -fsanitize=cfi -fsanitize-cfi-cross-dso
 #LDFLAGS+=	-flto -fvisibility=hidden -fsanitize=cfi -fsanitize-cfi-cross-dso
 
-CFI_OVERRIDE+=	-fno-sanitize=cfi-icall
+CFI_OVERRIDE+=	-fno-sanitize=cfi-icall -fsanitize-recover=cfi
 
 CFLAGS+=	-flto -fsanitize-cfi-cross-dso -fsanitize=cfi-cast-strict ${CFI_OVERRIDE}
 CXXFLAGS+=	-flto -fsanitize-cfi-cross-dso -fsanitize=cfi-cast-strict ${CFI_OVERRIDE}

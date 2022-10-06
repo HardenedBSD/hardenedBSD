@@ -8,6 +8,7 @@ SHLIBDIR?= /lib
 
 # Force building of libc_pic.a
 MK_TOOLCHAIN=	yes
+#MK_CROSS_DSO_CFI=	no
 
 LIBC_SRCTOP?= ${.CURDIR}
 
