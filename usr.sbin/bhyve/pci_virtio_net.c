@@ -399,7 +399,7 @@ pci_vtnet_rx(struct pci_vtnet_softc *sc)
  * an entire ethernet frame + rx header.
  */
 static void
-pci_vtnet_rx_callback(int fd, enum ev_type type, void *param)
+pci_vtnet_rx_callback(int fd __unused, enum ev_type type __unused, void *param)
 {
 	struct pci_vtnet_softc *sc = param;
 
@@ -560,7 +560,8 @@ pci_vtnet_ping_ctlq(void *vsc, struct vqueue_info *vq)
 #endif
 
 static int
-pci_vtnet_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
+pci_vtnet_init(struct vmctx *ctx __unused, struct pci_devinst *pi,
+    nvlist_t *nvl)
 {
 	struct pci_vtnet_softc *sc;
 	const char *value;
@@ -785,9 +786,11 @@ pci_vtnet_snapshot(void *vsc, struct vm_snapshot_meta *meta)
 	 */
 
 	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_features, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->features_negotiated, meta, ret, done);
 
 	/* Force reapply negociated features at restore time */
-	if (meta->op == VM_SNAPSHOT_RESTORE) {
+	if (meta->op == VM_SNAPSHOT_RESTORE &&
+	    sc->features_negotiated) {
 		pci_vtnet_neg_features(sc, sc->vsc_features);
 		netbe_rx_enable(sc->vsc_be);
 	}

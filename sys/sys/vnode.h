@@ -276,6 +276,7 @@ struct xvnode {
 #define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed */
 #define	VV_READLINK	0x2000	/* fdescfs linux vnode */
 #define	VV_UNREF	0x4000	/* vunref, do not drop lock in inactive() */
+#define	VV_CROSSLOCK	0x8000	/* vnode lock is shared w/ root mounted here */
 
 #define	VMP_LAZYLIST	0x0001	/* Vnode is on mnt's lazy list */
 
@@ -676,9 +677,15 @@ void	cache_vop_rmdir(struct vnode *dvp, struct vnode *vp);
 #ifdef INVARIANTS
 void	cache_validate(struct vnode *dvp, struct vnode *vp,
 	    struct componentname *cnp);
+void	cache_assert_no_entries(struct vnode *vp);
 #else
 static inline void
 cache_validate(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
+{
+}
+
+static inline void
+cache_assert_no_entries(struct vnode *vp)
 {
 }
 #endif

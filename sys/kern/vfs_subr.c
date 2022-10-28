@@ -770,17 +770,22 @@ SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_FIRST, vntblinit, NULL);
  *              +->F->D->E
  *
  * The lookup() process for namei("/var") illustrates the process:
- *  VOP_LOOKUP() obtains B while A is held
- *  vfs_busy() obtains a shared lock on F while A and B are held
- *  vput() releases lock on B
- *  vput() releases lock on A
- *  VFS_ROOT() obtains lock on D while shared lock on F is held
- *  vfs_unbusy() releases shared lock on F
- *  vn_lock() obtains lock on deadfs vnode vp_crossmp instead of A.
- *    Attempt to lock A (instead of vp_crossmp) while D is held would
- *    violate the global order, causing deadlocks.
+ *  1. VOP_LOOKUP() obtains B while A is held
+ *  2. vfs_busy() obtains a shared lock on F while A and B are held
+ *  3. vput() releases lock on B
+ *  4. vput() releases lock on A
+ *  5. VFS_ROOT() obtains lock on D while shared lock on F is held
+ *  6. vfs_unbusy() releases shared lock on F
+ *  7. vn_lock() obtains lock on deadfs vnode vp_crossmp instead of A.
+ *     Attempt to lock A (instead of vp_crossmp) while D is held would
+ *     violate the global order, causing deadlocks.
  *
- * dounmount() locks B while F is drained.
+ * dounmount() locks B while F is drained.  Note that for stacked
+ * filesystems, D and B in the example above may be the same lock,
+ * which introdues potential lock order reversal deadlock between
+ * dounmount() and step 5 above.  These filesystems may avoid the LOR
+ * by setting VV_CROSSLOCK on the covered vnode so that lock B will
+ * remain held until after step 5.
  */
 int
 vfs_busy(struct mount *mp, int flags)
@@ -814,8 +819,7 @@ vfs_busy(struct mount *mp, int flags)
 	 * flag in addition to MNTK_UNMOUNT, indicating that mount point is
 	 * about to be really destroyed.  vfs_busy needs to release its
 	 * reference on the mount point in this case and return with ENOENT,
-	 * telling the caller that mount mount it tried to busy is no longer
-	 * valid.
+	 * telling the caller the mount it tried to busy is no longer valid.
 	 */
 	while (mp->mnt_kern_flag & MNTK_UNMOUNT) {
 		KASSERT(TAILQ_EMPTY(&mp->mnt_uppers),
@@ -1906,14 +1910,13 @@ freevnode(struct vnode *vp)
 	VNASSERT(bo->bo_dirty.bv_cnt == 0, vp, ("dirtybufcnt not 0"));
 	VNASSERT(pctrie_is_empty(&bo->bo_dirty.bv_root), vp,
 	    ("dirty blk trie not empty"));
-	VNASSERT(TAILQ_EMPTY(&vp->v_cache_dst), vp, ("vp has namecache dst"));
-	VNASSERT(LIST_EMPTY(&vp->v_cache_src), vp, ("vp has namecache src"));
-	VNASSERT(vp->v_cache_dd == NULL, vp, ("vp has namecache for .."));
 	VNASSERT(TAILQ_EMPTY(&vp->v_rl.rl_waiters), vp,
 	    ("Dangling rangelock waiters"));
 	VNASSERT((vp->v_iflag & (VI_DOINGINACT | VI_OWEINACT)) == 0, vp,
 	    ("Leaked inactivation"));
 	VI_UNLOCK(vp);
+	cache_assert_no_entries(vp);
+
 #ifdef MAC
 	mac_vnode_destroy(vp);
 #endif

@@ -344,7 +344,8 @@ pfattach_vnet(void)
 	V_pf_default_rule.states_tot = counter_u64_alloc(M_WAITOK);
 	V_pf_default_rule.src_nodes = counter_u64_alloc(M_WAITOK);
 
-	V_pf_default_rule.timestamp = uma_zalloc_pcpu(pcpu_zone_4, M_WAITOK | M_ZERO);
+	V_pf_default_rule.timestamp = uma_zalloc_pcpu(pf_timestamp_pcpu_zone,
+	    M_WAITOK | M_ZERO);
 
 #ifdef PF_WANT_32_TO_64_COUNTER
 	V_pf_kifmarker = malloc(sizeof(*V_pf_kifmarker), PFI_MTYPE, M_WAITOK | M_ZERO);
@@ -534,7 +535,7 @@ pf_free_eth_rule(struct pf_keth_rule *rule)
 		counter_u64_free(rule->packets[i]);
 		counter_u64_free(rule->bytes[i]);
 	}
-	uma_zfree_pcpu(pcpu_zone_4, rule->timestamp);
+	uma_zfree_pcpu(pf_timestamp_pcpu_zone, rule->timestamp);
 	pf_keth_anchor_remove(rule);
 
 	free(rule, M_PFRULE);
@@ -1786,7 +1787,8 @@ pf_krule_alloc(void)
 
 	rule = malloc(sizeof(struct pf_krule), M_PFRULE, M_WAITOK | M_ZERO);
 	mtx_init(&rule->rpool.mtx, "pf_krule_pool", NULL, MTX_DEF);
-	rule->timestamp = uma_zalloc_pcpu(pcpu_zone_4, M_WAITOK | M_ZERO);
+	rule->timestamp = uma_zalloc_pcpu(pf_timestamp_pcpu_zone,
+	    M_WAITOK | M_ZERO);
 	return (rule);
 }
 
@@ -1820,7 +1822,7 @@ pf_krule_free(struct pf_krule *rule)
 	counter_u64_free(rule->states_cur);
 	counter_u64_free(rule->states_tot);
 	counter_u64_free(rule->src_nodes);
-	uma_zfree_pcpu(pcpu_zone_4, rule->timestamp);
+	uma_zfree_pcpu(pf_timestamp_pcpu_zone, rule->timestamp);
 
 	mtx_destroy(&rule->rpool.mtx);
 	free(rule, M_PFRULE);
@@ -2593,16 +2595,12 @@ pfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags, struct thread *td
 		if (V_pf_status.running)
 			error = EEXIST;
 		else {
-			int cpu;
-
 			hook_pf();
 			if (! TAILQ_EMPTY(V_pf_keth->active.rules))
 				hook_pf_eth();
 			V_pf_status.running = 1;
 			V_pf_status.since = time_second;
-
-			CPU_FOREACH(cpu)
-				V_pf_stateid[cpu] = time_second;
+			new_unrhdr64(&V_pf_stateid, time_second);
 
 			DPFPRINTF(PF_DEBUG_MISC, ("pf: started\n"));
 		}
@@ -2868,7 +2866,7 @@ DIOCGETETHRULE_error:
 			rule->packets[i] = counter_u64_alloc(M_WAITOK);
 			rule->bytes[i] = counter_u64_alloc(M_WAITOK);
 		}
-		rule->timestamp = uma_zalloc_pcpu(pcpu_zone_4,
+		rule->timestamp = uma_zalloc_pcpu(pf_timestamp_pcpu_zone,
 		    M_WAITOK | M_ZERO);
 
 		PF_RULES_WLOCK();
@@ -5897,7 +5895,7 @@ done:
 }
 
 /*
- * XXX - Check for version missmatch!!!
+ * XXX - Check for version mismatch!!!
  */
 static void
 pf_clear_all_states(void)
@@ -6325,7 +6323,7 @@ errout:
 }
 
 /*
- * XXX - Check for version missmatch!!!
+ * XXX - Check for version mismatch!!!
  */
 
 /*
@@ -6769,7 +6767,7 @@ pf_unload_vnet(void)
 	counter_u64_free(V_pf_default_rule.states_cur);
 	counter_u64_free(V_pf_default_rule.states_tot);
 	counter_u64_free(V_pf_default_rule.src_nodes);
-	uma_zfree_pcpu(pcpu_zone_4, V_pf_default_rule.timestamp);
+	uma_zfree_pcpu(pf_timestamp_pcpu_zone, V_pf_default_rule.timestamp);
 
 	for (int i = 0; i < PFRES_MAX; i++)
 		counter_u64_free(V_pf_status.counters[i]);

@@ -1004,29 +1004,29 @@ findpcb:
 			goto dropunlock;
 	}
 
-	/*
-	 * A previous connection in TIMEWAIT state is supposed to catch stray
-	 * or duplicate segments arriving late.  If this segment was a
-	 * legitimate new connection attempt, the old INPCB gets removed and
-	 * we can try again to find a listening socket.
-	 */
-	if (inp->inp_flags & INP_TIMEWAIT) {
+	tp = intotcpcb(inp);
+	switch (tp->t_state) {
+	case TCPS_TIME_WAIT:
+		/*
+		 * A previous connection in TIMEWAIT state is supposed to catch
+		 * stray or duplicate segments arriving late.  If this segment
+		 * was a legitimate new connection attempt, the old INPCB gets
+		 * removed and we can try again to find a listening socket.
+		 */
 		tcp_dooptions(&to, optp, optlen,
 		    (thflags & TH_SYN) ? TO_SYN : 0);
 		/*
-		 * NB: tcp_twcheck unlocks the INP and frees the mbuf.
+		 * tcp_twcheck unlocks the inp always, and frees the m if fails.
 		 */
 		if (tcp_twcheck(inp, &to, th, m, tlen))
 			goto findpcb;
 		return (IPPROTO_DONE);
-	}
-	/*
-	 * The TCPCB may no longer exist if the connection is winding
-	 * down or it is in the CLOSED state.  Either way we drop the
-	 * segment and send an appropriate response.
-	 */
-	tp = intotcpcb(inp);
-	if (tp == NULL || tp->t_state == TCPS_CLOSED) {
+	case TCPS_CLOSED:
+		/*
+		 * The TCPCB may no longer exist if the connection is winding
+		 * down or it is in the CLOSED state.  Either way we drop the
+		 * segment and send an appropriate response.
+		 */
 		rstreason = BANDLIM_RST_CLOSEDPORT;
 		goto dropwithreset;
 	}
@@ -2136,8 +2136,6 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tcp_state_change(tp, TCPS_SYN_RECEIVED);
 		}
 
-		INP_WLOCK_ASSERT(tp->t_inpcb);
-
 		/*
 		 * Advance th->th_seq to correspond to first data byte.
 		 * If data, trim to stay within window,
@@ -2248,6 +2246,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tp = tcp_drop(tp, ECONNRESET);
 			rstreason = BANDLIM_UNLIMITED;
 		} else {
+			tcp_ecn_input_syn_sent(tp, thflags, iptos);
 			/* Send challenge ACK. */
 			tcp_respond(tp, mtod(m, void *), th, m, tp->rcv_nxt,
 			    tp->snd_nxt, TH_ACK);
@@ -3035,10 +3034,6 @@ process_ACK:
 				 * Starting the timer is contrary to the
 				 * specification, but if we don't get a FIN
 				 * we'll hang forever.
-				 *
-				 * XXXjl:
-				 * we should release the tp also, and use a
-				 * compressed state.
 				 */
 				if (so->so_rcv.sb_state & SBS_CANTRCVMORE) {
 					soisdisconnected(so);

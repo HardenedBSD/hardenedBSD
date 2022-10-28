@@ -407,6 +407,7 @@ timeout_client_body()
 
 	vnet_mkjail a ${l}a
 	jexec a ifconfig ${l}a 192.0.2.1/24 up
+	jexec a ifconfig lo0 127.0.0.1/8 up
 	vnet_mkjail b ${l}b
 	jexec b ifconfig ${l}b 192.0.2.2/24 up
 
@@ -434,6 +435,8 @@ timeout_client_body()
 		topology subnet
 
 		keepalive 2 10
+
+		management 192.0.2.1 1234
 	"
 	ovpn_start b "
 		dev tun0
@@ -449,8 +452,7 @@ timeout_client_body()
 		key $(atf_get_srcdir)/client.key
 		dh $(atf_get_srcdir)/dh.pem
 
-		ping 2
-		ping-exit 10
+		keepalive 2 10
 	"
 
 	# Give the tunnel time to come up
@@ -458,19 +460,105 @@ timeout_client_body()
 
 	atf_check -s exit:0 -o ignore jexec b ping -c 3 198.51.100.1
 
-	# Kill the server
-	jexec a killall openvpn
+	# Kill the client
+	jexec b killall openvpn
 
-	# Now wait for the client to notice
-	sleep 20
+	# Now wait for the server to notice
+	sleep 15
 
-	if [ jexec b pgrep openvpn ]; then
-		jexec b ps auxf
-		atf_fail "OpenVPN client still running?"
-	fi
+	while echo "status" | jexec a nc -N 192.0.2.1 1234 | grep 192.0.2.2; do
+		echo "Client disconnect not discovered"
+		sleep 1
+	done
 }
 
 timeout_client_cleanup()
+{
+	ovpn_cleanup
+}
+
+atf_test_case "explicit_exit" "cleanup"
+explicit_exit_head()
+{
+	atf_set descr 'Text explicit exit notification'
+	atf_set require.user root
+	atf_set require.progs openvpn
+}
+
+explicit_exit_body()
+{
+	ovpn_init
+
+	l=$(vnet_mkepair)
+
+	vnet_mkjail a ${l}a
+	jexec a ifconfig ${l}a 192.0.2.1/24 up
+	jexec a ifconfig lo0 127.0.0.1/8 up
+	vnet_mkjail b ${l}b
+	jexec b ifconfig ${l}b 192.0.2.2/24 up
+
+	# Sanity check
+	atf_check -s exit:0 -o ignore jexec a ping -c 1 192.0.2.2
+
+	ovpn_start a "
+		dev ovpn0
+		dev-type tun
+		proto udp4
+
+		cipher AES-256-GCM
+		auth SHA256
+
+		local 192.0.2.1
+		server 198.51.100.0 255.255.255.0
+		ca $(atf_get_srcdir)/ca.crt
+		cert $(atf_get_srcdir)/server.crt
+		key $(atf_get_srcdir)/server.key
+		dh $(atf_get_srcdir)/dh.pem
+
+		mode server
+		script-security 2
+		auth-user-pass-verify /usr/bin/true via-env
+		topology subnet
+
+		management 192.0.2.1 1234
+	"
+	ovpn_start b "
+		dev tun0
+		dev-type tun
+
+		client
+
+		remote 192.0.2.1
+		auth-user-pass $(atf_get_srcdir)/user.pass
+
+		ca $(atf_get_srcdir)/ca.crt
+		cert $(atf_get_srcdir)/client.crt
+		key $(atf_get_srcdir)/client.key
+		dh $(atf_get_srcdir)/dh.pem
+
+		explicit-exit-notify
+	"
+
+	# Give the tunnel time to come up
+	sleep 10
+
+	atf_check -s exit:0 -o ignore jexec b ping -c 3 198.51.100.1
+
+	if ! echo "status" | jexec a nc -N 192.0.2.1 1234 | grep 192.0.2.2; then
+		atf_fail "Client not found in status list!"
+	fi
+
+	# Kill the client
+	jexec b killall openvpn
+
+	while echo "status" | jexec a nc -N 192.0.2.1 1234 | grep 192.0.2.2; do
+		jexec a ps auxf
+		echo "Client disconnect not discovered"
+		sleep 1
+	done
+}
+
+explicit_exit_cleanup()
 {
 	ovpn_cleanup
 }
@@ -909,6 +997,7 @@ atf_init_test_cases()
 	atf_add_test_case "6in6"
 	atf_add_test_case "4in6"
 	atf_add_test_case "timeout_client"
+	atf_add_test_case "explicit_exit"
 	atf_add_test_case "multi_client"
 	atf_add_test_case "route_to"
 	atf_add_test_case "ra"

@@ -98,6 +98,7 @@ SUBDIR=	\
 	dc \
 	dcons \
 	dcons_crom \
+	${_dpaa2} \
 	${_dpdk_lpm4} \
 	${_dpdk_lpm6} \
 	${_dpms} \
@@ -607,7 +608,9 @@ _irdma=		irdma
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm" || \
 	${MACHINE_CPUARCH} == "riscv"
+.if !empty(OPT_FDT)
 _if_cgem=	if_cgem
+.endif
 .endif
 
 # These rely on 64bit atomics
@@ -634,19 +637,28 @@ _cxgb=		cxgb
 .endif
 
 .if ${MACHINE_CPUARCH} == "aarch64"
-_allwinner=	allwinner
 _armv8crypto=	armv8crypto
-_dwwdt=		dwwdt
+_dpaa2=		dpaa2
 _em=		em
+
+.if !empty(OPT_FDT)
+_allwinner=	allwinner
+_dwwdt=		dwwdt
 _enetc=		enetc
 _felix=		felix
 _rockchip=	rockchip
 .endif
+.endif
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm"
+.if !empty(OPT_FDT)
 _sdhci_fdt=	sdhci_fdt
+.endif
 _e6000sw=	e6000sw
 _neta=		neta
+.endif
+.if ${MACHINE_CPUARCH} == "aarch64"
+_hyperv=  hyperv
 .endif
 
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"

@@ -258,6 +258,8 @@ in_pcbhashseed_init(void)
 VNET_SYSINIT(in_pcbhashseed_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_FIRST,
     in_pcbhashseed_init, 0);
 
+static void in_pcbremhash(struct inpcb *);
+
 /*
  * in_pcb.c: manage the Protocol Control Blocks.
  *
@@ -1031,7 +1033,6 @@ in_pcbbind_setup(struct inpcb *inp, struct sockaddr *nam, in_addr_t *laddrp,
 		laddr = sin->sin_addr;
 		if (lport) {
 			struct inpcb *t;
-			struct tcptw *tw;
 
 			/* GROSS */
 			if (ntohs(lport) <= V_ipport_reservedhigh &&
@@ -1048,7 +1049,6 @@ in_pcbbind_setup(struct inpcb *inp, struct sockaddr *nam, in_addr_t *laddrp,
 	 */
 				if (t &&
 				    ((inp->inp_flags2 & INP_BINDMULTI) == 0) &&
-				    ((t->inp_flags & INP_TIMEWAIT) == 0) &&
 				    (so->so_type != SOCK_STREAM ||
 				     ntohl(t->inp_faddr.s_addr) == INADDR_ANY) &&
 				    (ntohl(sin->sin_addr.s_addr) != INADDR_ANY ||
@@ -1070,24 +1070,9 @@ in_pcbbind_setup(struct inpcb *inp, struct sockaddr *nam, in_addr_t *laddrp,
 			}
 			t = in_pcblookup_local(pcbinfo, sin->sin_addr,
 			    lport, lookupflags, cred);
-			if (t && (t->inp_flags & INP_TIMEWAIT)) {
-				/*
-				 * XXXRW: If an incpb has had its timewait
-				 * state recycled, we treat the address as
-				 * being in use (for now).  This is better
-				 * than a panic, but not desirable.
-				 */
-				tw = intotw(t);
-				if (tw == NULL ||
-				    ((reuseport & tw->tw_so_options) == 0 &&
-					(reuseport_lb &
-				            tw->tw_so_options) == 0)) {
-					return (EADDRINUSE);
-				}
-			} else if (t &&
-				   ((inp->inp_flags2 & INP_BINDMULTI) == 0) &&
-				   (reuseport & inp_so_options(t)) == 0 &&
-				   (reuseport_lb & inp_so_options(t)) == 0) {
+			if (t && ((inp->inp_flags2 & INP_BINDMULTI) == 0) &&
+			    (reuseport & inp_so_options(t)) == 0 &&
+			    (reuseport_lb & inp_so_options(t)) == 0) {
 #ifdef INET6
 				if (ntohl(sin->sin_addr.s_addr) !=
 				    INADDR_ANY ||
@@ -1856,22 +1841,8 @@ in_pcbfree(struct inpcb *inp)
 	CK_LIST_REMOVE(inp, inp_list);
 	INP_INFO_WUNLOCK(pcbinfo);
 
-	if (inp->inp_flags & INP_INHASHLIST) {
-		struct inpcbport *phd = inp->inp_phd;
-
-		INP_HASH_WLOCK(pcbinfo);
-		/* XXX: Only do if SO_REUSEPORT_LB set? */
-		in_pcbremlbgrouphash(inp);
-
-		CK_LIST_REMOVE(inp, inp_hash);
-		CK_LIST_REMOVE(inp, inp_portlist);
-		if (CK_LIST_FIRST(&phd->phd_pcblist) == NULL) {
-			CK_LIST_REMOVE(phd, phd_hash);
-			uma_zfree_smr(pcbinfo->ipi_portzone, phd);
-		}
-		INP_HASH_WUNLOCK(pcbinfo);
-		inp->inp_flags &= ~INP_INHASHLIST;
-	}
+	if (inp->inp_flags & INP_INHASHLIST)
+		in_pcbremhash(inp);
 
 	RO_INVALIDATE_CACHE(&inp->inp_route);
 #ifdef MAC
@@ -1953,25 +1924,9 @@ in_pcbdrop(struct inpcb *inp)
 		MPASS(inp->inp_refcount > 1);
 #endif
 
-	/*
-	 * XXXRW: Possibly we should protect the setting of INP_DROPPED with
-	 * the hash lock...?
-	 */
 	inp->inp_flags |= INP_DROPPED;
-	if (inp->inp_flags & INP_INHASHLIST) {
-		struct inpcbport *phd = inp->inp_phd;
-
-		INP_HASH_WLOCK(inp->inp_pcbinfo);
-		in_pcbremlbgrouphash(inp);
-		CK_LIST_REMOVE(inp, inp_hash);
-		CK_LIST_REMOVE(inp, inp_portlist);
-		if (CK_LIST_FIRST(&phd->phd_pcblist) == NULL) {
-			CK_LIST_REMOVE(phd, phd_hash);
-			uma_zfree_smr(inp->inp_pcbinfo->ipi_portzone, phd);
-		}
-		INP_HASH_WUNLOCK(inp->inp_pcbinfo);
-		inp->inp_flags &= ~INP_INHASHLIST;
-	}
+	if (inp->inp_flags & INP_INHASHLIST)
+		in_pcbremhash(inp);
 }
 
 #ifdef INET
@@ -2551,6 +2506,27 @@ in_pcbinshash(struct inpcb *inp)
 	return (0);
 }
 
+static void
+in_pcbremhash(struct inpcb *inp)
+{
+	struct inpcbport *phd = inp->inp_phd;
+
+	INP_WLOCK_ASSERT(inp);
+	MPASS(inp->inp_flags & INP_INHASHLIST);
+
+	INP_HASH_WLOCK(inp->inp_pcbinfo);
+	/* XXX: Only do if SO_REUSEPORT_LB set? */
+	in_pcbremlbgrouphash(inp);
+	CK_LIST_REMOVE(inp, inp_hash);
+	CK_LIST_REMOVE(inp, inp_portlist);
+	if (CK_LIST_FIRST(&phd->phd_pcblist) == NULL) {
+		CK_LIST_REMOVE(phd, phd_hash);
+		uma_zfree_smr(inp->inp_pcbinfo->ipi_portzone, phd);
+	}
+	INP_HASH_WUNLOCK(inp->inp_pcbinfo);
+	inp->inp_flags &= ~INP_INHASHLIST;
+}
+
 /*
  * Move PCB to the proper hash bucket when { faddr, fport } have  been
  * changed. NOTE: This does not handle the case of the lport changing (the
@@ -2718,9 +2694,10 @@ inp_unlock_assert(struct inpcb *inp)
 #endif
 
 void
-inp_apply_all(void (*func)(struct inpcb *, void *), void *arg)
+inp_apply_all(struct inpcbinfo *pcbinfo,
+    void (*func)(struct inpcb *, void *), void *arg)
 {
-	struct inpcb_iterator inpi = INP_ALL_ITERATOR(&V_tcbinfo,
+	struct inpcb_iterator inpi = INP_ALL_ITERATOR(pcbinfo,
 	    INPLOOKUP_WLOCKPCB);
 	struct inpcb *inp;
 
@@ -2775,13 +2752,6 @@ so_sotoinpcb(struct socket *so)
 {
 
 	return (sotoinpcb(so));
-}
-
-struct tcpcb *
-so_sototcpcb(struct socket *so)
-{
-
-	return (sototcpcb(so));
 }
 
 /*
@@ -2881,7 +2851,7 @@ sysctl_setsockopt(SYSCTL_HANDLER_ARGS, struct inpcbinfo *pcbinfo,
 	}
 	while ((inp = inp_next(&inpi)) != NULL)
 		if (inp->inp_gencnt == params->sop_id) {
-			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+			if (inp->inp_flags & INP_DROPPED) {
 				INP_WUNLOCK(inp);
 				return (ECONNRESET);
 			}
@@ -3030,10 +3000,6 @@ db_print_inpflags(int inp_flags)
 	if (inp_flags & IN6P_AUTOFLOWLABEL) {
 		db_printf("%sIN6P_AUTOFLOWLABEL", comma ? ", " : "");
 		comma = 1;
-	}
-	if (inp_flags & INP_TIMEWAIT) {
-		db_printf("%sINP_TIMEWAIT", comma ? ", " : "");
-		comma  = 1;
 	}
 	if (inp_flags & INP_ONESBCAST) {
 		db_printf("%sINP_ONESBCAST", comma ? ", " : "");
@@ -3250,7 +3216,7 @@ in_pcbattach_txrtlmt(struct inpcb *inp, struct ifnet *ifp,
 	 * down, allocating a new send tag is not allowed. Else send
 	 * tags may leak.
 	 */
-	if (*st != NULL || (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) != 0)
+	if (*st != NULL || (inp->inp_flags & INP_DROPPED) != 0)
 		return (EINVAL);
 
 	error = m_snd_tag_alloc(ifp, &params, st);

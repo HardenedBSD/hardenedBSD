@@ -253,6 +253,8 @@
                 amd64
                     arrays
                     ..
+                    kinst
+                    ..
                 ..
             ..
             zfsd
@@ -1085,6 +1087,8 @@
         soelim
         ..
         sort
+        ..
+        split
         ..
         stat
         ..

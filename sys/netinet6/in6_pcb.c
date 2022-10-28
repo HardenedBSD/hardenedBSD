@@ -242,7 +242,6 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
 		}
 		if (lport) {
 			struct inpcb *t;
-			struct tcptw *tw;
 
 			/* GROSS */
 			if (ntohs(lport) <= V_ipport_reservedhigh &&
@@ -256,7 +255,6 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
 				    INPLOOKUP_WILDCARD, cred);
 				if (t &&
 				    ((inp->inp_flags2 & INP_BINDMULTI) == 0) &&
-				    ((t->inp_flags & INP_TIMEWAIT) == 0) &&
 				    (so->so_type != SOCK_STREAM ||
 				     IN6_IS_ADDR_UNSPECIFIED(&t->in6p_faddr)) &&
 				    (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr) ||
@@ -287,8 +285,6 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
 					    INPLOOKUP_WILDCARD, cred);
 					if (t &&
 					    ((inp->inp_flags2 & INP_BINDMULTI) == 0) &&
-					    ((t->inp_flags &
-					      INP_TIMEWAIT) == 0) &&
 					    (so->so_type != SOCK_STREAM ||
 					     ntohl(t->inp_faddr.s_addr) ==
 					      INADDR_ANY) &&
@@ -303,20 +299,8 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
 			}
 			t = in6_pcblookup_local(pcbinfo, &sin6->sin6_addr,
 			    lport, lookupflags, cred);
-			if (t && (t->inp_flags & INP_TIMEWAIT)) {
-				/*
-				 * XXXRW: If an incpb has had its timewait
-				 * state recycled, we treat the address as
-				 * being in use (for now).  This is better
-				 * than a panic, but not desirable.
-				 */
-				tw = intotw(t);
-				if (tw == NULL ||
-				    ((reuseport & tw->tw_so_options) == 0 &&
-					 (reuseport_lb & tw->tw_so_options) == 0))
-					return (EADDRINUSE);
-			} else if (t && (reuseport & inp_so_options(t)) == 0 &&
-					   (reuseport_lb & inp_so_options(t)) == 0) {
+			if (t && (reuseport & inp_so_options(t)) == 0 &&
+			    (reuseport_lb & inp_so_options(t)) == 0) {
 				return (EADDRINUSE);
 			}
 #ifdef INET
@@ -327,18 +311,7 @@ in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
 				in6_sin6_2_sin(&sin, sin6);
 				t = in_pcblookup_local(pcbinfo, sin.sin_addr,
 				   lport, lookupflags, cred);
-				if (t && t->inp_flags & INP_TIMEWAIT) {
-					tw = intotw(t);
-					if (tw == NULL)
-						return (EADDRINUSE);
-					if ((reuseport & tw->tw_so_options) == 0
-					    && (reuseport_lb & tw->tw_so_options) == 0
-					    && (ntohl(t->inp_laddr.s_addr) !=
-					        INADDR_ANY || ((inp->inp_vflag &
-					                INP_IPV6PROTO) ==
-					            (t->inp_vflag & INP_IPV6PROTO))))
-						return (EADDRINUSE);
-				} else if (t &&
+				if (t &&
 				    (reuseport & inp_so_options(t)) == 0 &&
 				    (reuseport_lb & inp_so_options(t)) == 0 &&
 				    (ntohl(t->inp_laddr.s_addr) != INADDR_ANY ||

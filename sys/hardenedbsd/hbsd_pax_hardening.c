@@ -75,6 +75,8 @@ static int pax_tpe_global = PAX_FEATURE_OPTIN;
 static int harden_rtld_global = PAX_FEATURE_SIMPLE_DISABLED;
 #endif
 
+static int pax_kmod_load_disable = PAX_FEATURE_SIMPLE_DISABLED;
+
 static int pax_tpe_gid = 0;
 static int pax_tpe_negate = 0;
 static int pax_tpe_all = 0;
@@ -84,6 +86,7 @@ static int pax_tpe_user_owned = 0;
 TUNABLE_INT("hardening.procfs_harden", &pax_procfs_harden_global);
 TUNABLE_INT("hardening.randomize_pids", &pax_randomize_pids_global);
 TUNABLE_INT("hardening.insecure_kmod", &pax_insecure_kmod_global);
+TUNABLE_INT("hardening.kmod_load_disable", &pax_kmod_load_disable);
 TUNABLE_INT("hardening.tpe.status", &pax_tpe_global);
 TUNABLE_INT("hardening.tpe.gid", &pax_tpe_gid);
 TUNABLE_INT("hardening.tpe.negate", &pax_tpe_negate);
@@ -128,6 +131,13 @@ SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, root_owned,
 SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, user_owned,
     CTLFLAG_RWTUN|CTLFLAG_SECURE, &pax_tpe_user_owned, 0,
     "Ensure directory is user-owned");
+
+static int sysctl_pax_kmod_load_disable(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax, OID_AUTO, kmod_load_disable,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_SECURE, NULL, 0,
+    sysctl_pax_kmod_load_disable, "I",
+    "Entirely disable loading of kernel modules.");
+
 #endif
 
 #ifdef PAX_JAIL_SUPPORT
@@ -159,6 +169,13 @@ pax_insecure_kmod(void)
 {
 
 	return (pax_insecure_kmod_global == PAX_FEATURE_SIMPLE_ENABLED);
+}
+
+bool
+pax_kmod_load_disabled(void)
+{
+
+	return (pax_kmod_load_disable > 0);
 }
 
 static void
@@ -383,6 +400,29 @@ _pax_tpe_active(struct thread *td)
 
 	return (pax_tpe_negate != 0);
 }
+
+#ifdef PAX_SYSCTLS
+static int
+sysctl_pax_kmod_load_disable(SYSCTL_HANDLER_ARGS)
+{
+	int err, val;
+
+	val = pax_kmod_load_disable;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pax_kmod_load_disable && val == 0) {
+		return (EPERM);
+	}
+
+	pax_kmod_load_disable = val;
+
+	return (0);
+
+}
+#endif /* PAX_SYSCTLS */
 
 extern int randompid;
 

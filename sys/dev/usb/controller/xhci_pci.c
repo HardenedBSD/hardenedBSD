@@ -64,6 +64,7 @@ __FBSDID("$FreeBSD$");
 
 #define	PCI_XHCI_VENDORID_AMD		0x1022
 #define	PCI_XHCI_VENDORID_INTEL		0x8086
+#define	PCI_XHCI_VENDORID_VMWARE	0x15ad
 
 static device_probe_t xhci_pci_probe;
 static device_detach_t xhci_pci_detach;
@@ -109,6 +110,10 @@ xhci_pci_match(device_t self)
 	case 0x78141022:
 	case 0x79141022:
 		return ("AMD FCH USB 3.0 controller");
+
+	case 0x077815ad:
+	case 0x077915ad:
+		return ("VMware USB 3.0 controller");
 
 	case 0x145f1d94:
 		return ("Hygon USB 3.0 controller");
@@ -385,6 +390,9 @@ xhci_pci_attach(device_t self)
 	case PCI_XHCI_VENDORID_INTEL:
 		strlcpy(sc->sc_vendor, "Intel", sizeof(sc->sc_vendor));
 		break;
+	case PCI_XHCI_VENDORID_VMWARE:
+		strlcpy(sc->sc_vendor, "VMware", sizeof(sc->sc_vendor));
+		break;
 	default:
 		if (bootverbose)
 			device_printf(self, "(New XHCI DeviceId=0x%08x)\n",
@@ -394,7 +402,7 @@ xhci_pci_attach(device_t self)
 		break;
 	}
 
-	if (sc->sc_irq_res != NULL) {
+	if (sc->sc_irq_res != NULL && xhci_use_polling() == 0) {
 		err = bus_setup_intr(self, sc->sc_irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
 		    NULL, (driver_intr_t *)xhci_interrupt, sc, &sc->sc_intr_hdl);
 		if (err != 0) {

@@ -2261,8 +2261,7 @@ bbr_log_ack_event(struct tcp_bbr *bbr, struct tcphdr *th, struct tcpopt *to, uin
 				log.u_bbr.lt_epoch = 0;
 			}
 			if (m->m_flags & M_TSTMP_LRO) {
-				tv.tv_sec = m->m_pkthdr.rcv_tstmp / 1000000000;
-				tv.tv_usec = (m->m_pkthdr.rcv_tstmp % 1000000000) / 1000;
+				mbuf_tstmp2timeval(m, &tv);
 				log.u_bbr.flex5 = tcp_tv_to_usectick(&tv);
 			} else {
 				/* No arrival timestamp */
@@ -9260,7 +9259,7 @@ bbr_do_established(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	/*
@@ -9356,7 +9355,7 @@ bbr_do_close_wait(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	/*
@@ -9477,7 +9476,7 @@ bbr_do_fin_wait_1(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	/*
@@ -9601,7 +9600,7 @@ bbr_do_closing(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	/*
@@ -9711,7 +9710,7 @@ bbr_do_lastack(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	/*
@@ -9823,7 +9822,7 @@ bbr_do_fin_wait_2(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * synchronized state.
 	 */
 	if (thflags & TH_SYN) {
-		ctf_challenge_ack(m, th, tp, &ret_val);
+		ctf_challenge_ack(m, th, tp, iptos, &ret_val);
 		return (ret_val);
 	}
 	INP_WLOCK_ASSERT(tp->t_inpcb);
@@ -11360,8 +11359,6 @@ bbr_do_segment_nounlock(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	INP_WLOCK_ASSERT(tp->t_inpcb);
 	KASSERT(tp->t_state > TCPS_LISTEN, ("%s: TCPS_LISTEN",
 	    __func__));
-	KASSERT(tp->t_state != TCPS_TIME_WAIT, ("%s: TCPS_TIME_WAIT",
-	    __func__));
 
 	tp->t_rcvtime = ticks;
 	/*
@@ -11691,8 +11688,7 @@ bbr_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		}
 	}
 	if (m->m_flags & M_TSTMP_LRO) {
-		tv.tv_sec = m->m_pkthdr.rcv_tstmp /1000000000;
-		tv.tv_usec = (m->m_pkthdr.rcv_tstmp % 1000000000)/1000;
+		mbuf_tstmp2timeval(m, &tv);
 	} else {
 		/* Should not be should we kassert instead? */
 		tcp_get_usecs(&tv);
@@ -14284,7 +14280,7 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
 	if (error)
 		return (error);
 	INP_WLOCK(inp);
-	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+	if (inp->inp_flags & INP_DROPPED) {
 		INP_WUNLOCK(inp);
 		return (ECONNRESET);
 	}

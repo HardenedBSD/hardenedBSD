@@ -215,6 +215,10 @@ link_elf_detect_insecure_early(struct thread *td, struct vnode *vp,
     const char *filename)
 {
 
+	if (pax_kmod_load_disabled()) {
+		return (EPERM);
+	}
+
 	return (0);
 }
 

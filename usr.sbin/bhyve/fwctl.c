@@ -95,7 +95,7 @@ fwctl_send_rest(uint32_t *data, size_t len)
 		uint32_t w;
 	} u;
 	uint8_t *cdata;
-	int i;
+	size_t i;
 
 	cdata = (uint8_t *) data;
 	u.w = 0;
@@ -119,7 +119,7 @@ errop_set(int err)
 }
 
 static int
-errop_start(uint32_t len)
+errop_start(uint32_t len __unused)
 {
 	errop_code = ENOENT;
 
@@ -128,7 +128,7 @@ errop_start(uint32_t len)
 }
 
 static void
-errop_data(uint32_t data, uint32_t len)
+errop_data(uint32_t data __unused, uint32_t len __unused)
 {
 
 	/* ignore */
@@ -144,7 +144,7 @@ errop_result(struct iovec **data)
 }
 
 static void
-errop_done(struct iovec *data)
+errop_done(struct iovec *data __unused)
 {
 
 	/* assert data is NULL */
@@ -200,7 +200,7 @@ fget_start(uint32_t len)
 }
 
 static void
-fget_data(uint32_t data, uint32_t len)
+fget_data(uint32_t data, uint32_t len __unused)
 {
 
 	*((uint32_t *) &fget_str[fget_cnt]) = data;
@@ -244,7 +244,7 @@ fget_result(struct iovec **data, int val)
 }
 
 static void
-fget_done(struct iovec *data)
+fget_done(struct iovec *data __unused)
 {
 
 	/* nothing needs to be freed */
@@ -427,7 +427,7 @@ fwctl_response(uint32_t *retval)
 		remlen = rinfo.resp_size - rinfo.resp_off;
 		dp = (uint32_t *)
 		    ((uint8_t *)rinfo.resp_biov->iov_base + rinfo.resp_off);
-		if (remlen >= sizeof(uint32_t)) {
+		if (remlen >= (ssize_t)sizeof(uint32_t)) {
 			*retval = *dp;
 		} else if (remlen > 0) {
 			*retval = fwctl_send_rest(dp, remlen);
@@ -520,8 +520,8 @@ fwctl_outl(uint32_t val)
 }
 
 static int
-fwctl_handler(struct vmctx *ctx, int vcpu, int in, int port, int bytes,
-    uint32_t *eax, void *arg)
+fwctl_handler(struct vmctx *ctx __unused, int vcpu __unused, int in,
+    int port __unused, int bytes, uint32_t *eax, void *arg __unused)
 {
 
 	if (in) {

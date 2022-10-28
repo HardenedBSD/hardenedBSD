@@ -555,6 +555,7 @@ contrib/dev/acpica/components/utilities/utalloc.c	optional acpi
 contrib/dev/acpica/components/utilities/utascii.c	optional acpi
 contrib/dev/acpica/components/utilities/utbuffer.c	optional acpi
 contrib/dev/acpica/components/utilities/utcache.c	optional acpi
+contrib/dev/acpica/components/utilities/utcksum.c	optional acpi
 contrib/dev/acpica/components/utilities/utcopy.c	optional acpi
 contrib/dev/acpica/components/utilities/utdebug.c	optional acpi
 contrib/dev/acpica/components/utilities/utdecode.c	optional acpi
@@ -806,6 +807,7 @@ dev/acpica/acpi_button.c	optional acpi
 dev/acpica/acpi_cmbat.c		optional acpi
 dev/acpica/acpi_cpu.c		optional acpi
 dev/acpica/acpi_ec.c		optional acpi
+dev/acpica/acpi_ged.c		optional acpi_ged acpi
 dev/acpica/acpi_isab.c		optional acpi isa
 dev/acpica/acpi_lid.c		optional acpi
 dev/acpica/acpi_package.c	optional acpi
@@ -1710,7 +1712,7 @@ dev/etherswitch/ip17x/ip17x_phy.c	optional ip17x
 dev/etherswitch/ip17x/ip17x_vlans.c	optional ip17x
 dev/etherswitch/miiproxy.c		optional miiproxy
 dev/etherswitch/rtl8366/rtl8366rb.c	optional rtl8366rb
-dev/etherswitch/e6000sw/e6000sw.c	optional e6000sw
+dev/etherswitch/e6000sw/e6000sw.c	optional e6000sw fdt
 dev/etherswitch/e6000sw/e6060sw.c	optional e6060sw
 dev/etherswitch/infineon/adm6996fc.c	optional adm6996fc
 dev/etherswitch/micrel/ksz8995ma.c	optional ksz8995ma
@@ -1740,8 +1742,8 @@ dev/extres/hwreset/hwreset_if.m	optional hwreset fdt
 dev/extres/nvmem/nvmem.c	optional nvmem fdt
 dev/extres/nvmem/nvmem_if.m	optional nvmem fdt
 dev/extres/regulator/regdev_if.m	optional regulator fdt
-dev/extres/regulator/regnode_if.m	optional regulator fdt
-dev/extres/regulator/regulator.c	optional regulator fdt
+dev/extres/regulator/regnode_if.m	optional regulator
+dev/extres/regulator/regulator.c	optional regulator
 dev/extres/regulator/regulator_bus.c	optional regulator fdt
 dev/extres/regulator/regulator_fixed.c	optional regulator fdt
 dev/extres/syscon/syscon.c		optional syscon
@@ -3222,7 +3224,7 @@ dev/uart/uart_cpu_acpi.c	optional uart acpi
 dev/uart/uart_dbg.c		optional uart gdb
 dev/uart/uart_dev_imx.c		optional uart uart_imx fdt
 dev/uart/uart_dev_msm.c		optional uart uart_msm fdt
-dev/uart/uart_dev_mvebu.c	optional uart uart_mvebu
+dev/uart/uart_dev_mvebu.c	optional uart uart_mvebu fdt
 dev/uart/uart_dev_ns8250.c	optional uart uart_ns8250 | uart uart_snps
 dev/uart/uart_dev_pl011.c	optional uart pl011
 dev/uart/uart_dev_quicc.c	optional uart quicc
@@ -3437,6 +3439,7 @@ dev/virtio/pci/virtio_pci_legacy.c	optional	virtio_pci
 dev/virtio/pci/virtio_pci_modern.c	optional	virtio_pci
 dev/virtio/mmio/virtio_mmio.c		optional	virtio_mmio
 dev/virtio/mmio/virtio_mmio_acpi.c	optional	virtio_mmio acpi
+dev/virtio/mmio/virtio_mmio_cmdline.c	optional	virtio_mmio
 dev/virtio/mmio/virtio_mmio_fdt.c	optional	virtio_mmio fdt
 dev/virtio/mmio/virtio_mmio_if.m	optional	virtio_mmio
 dev/virtio/network/if_vtnet.c		optional	vtnet
@@ -3492,7 +3495,7 @@ wpi.fw			optional wpifw					\
 	compile-with	"${NORMAL_FW}"					\
 	no-obj no-implicit-rule						\
 	clean		"wpi.fw"
-dev/xdma/controller/pl330.c	optional xdma pl330
+dev/xdma/controller/pl330.c	optional xdma pl330 fdt
 dev/xdma/xdma.c			optional xdma
 dev/xdma/xdma_bank.c		optional xdma
 dev/xdma/xdma_bio.c		optional xdma

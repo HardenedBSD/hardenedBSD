@@ -235,6 +235,18 @@ VNET_DEFINE_STATIC(int, replay_protection) = 0;
 SYSCTL_INT(_net_link_openvpn, OID_AUTO, replay_protection, CTLFLAG_VNET | CTLFLAG_RW,
     &VNET_NAME(replay_protection), 0, "Validate sequence numbers");
 
+VNET_DEFINE_STATIC(int, async_crypto);
+#define	V_async_crypto		VNET(async_crypto)
+SYSCTL_INT(_net_link_openvpn, OID_AUTO, async_crypto,
+	CTLFLAG_VNET | CTLFLAG_RW, &VNET_NAME(async_crypto), 0,
+	"Use asynchronous mode to parallelize crypto jobs.");
+
+VNET_DEFINE_STATIC(int, async_netisr_queue);
+#define	V_async_netisr_queue		VNET(async_netisr_queue)
+SYSCTL_INT(_net_link_openvpn, OID_AUTO, netisr_queue,
+	CTLFLAG_VNET | CTLFLAG_RW, &VNET_NAME(async_netisr_queue), 0,
+	"Use netisr_queue() rather than netisr_dispatch().");
+
 static struct ovpn_kpeer *
 ovpn_find_peer(struct ovpn_softc *sc, uint32_t peerid)
 {
@@ -1082,6 +1094,45 @@ ovpn_set_peer(struct ifnet *ifp, const nvlist_t *nvl)
 }
 
 static int
+ovpn_set_ifmode(struct ifnet *ifp, const nvlist_t *nvl)
+{
+	struct ovpn_softc *sc = ifp->if_softc;
+	int ifmode;
+
+	if (nvl == NULL)
+		return (EINVAL);
+
+	if (! nvlist_exists_number(nvl, "ifmode") )
+		return (EINVAL);
+
+	ifmode = nvlist_get_number(nvl, "ifmode");
+
+	OVPN_WLOCK(sc);
+
+	/* deny this if UP */
+	if (ifp->if_flags & IFF_UP) {
+		OVPN_WUNLOCK(sc);
+		return (EBUSY);
+	}
+
+	switch (ifmode & ~IFF_MULTICAST) {
+	case IFF_POINTOPOINT:
+	case IFF_BROADCAST:
+		ifp->if_flags &=
+		    ~(IFF_BROADCAST|IFF_POINTOPOINT|IFF_MULTICAST);
+		ifp->if_flags |= ifmode;
+		break;
+	default:
+		OVPN_WUNLOCK(sc);
+		return (EINVAL);
+	}
+
+	OVPN_WUNLOCK(sc);
+
+	return (0);
+}
+
+static int
 ovpn_ioctl_set(struct ifnet *ifp, struct ifdrv *ifd)
 {
 	struct ovpn_softc *sc = ifp->if_softc;
@@ -1134,6 +1185,9 @@ ovpn_ioctl_set(struct ifnet *ifp, struct ifdrv *ifd)
 		break;
 	case OVPN_SET_PEER:
 		ret = ovpn_set_peer(ifp, nvl);
+		break;
+	case OVPN_SET_IFMODE:
+		ret = ovpn_set_ifmode(ifp, nvl);
 		break;
 	default:
 		ret = ENOTSUP;
@@ -1378,9 +1432,11 @@ ovpn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 static int
 ovpn_encrypt_tx_cb(struct cryptop *crp)
 {
+	struct epoch_tracker et;
 	struct ovpn_kpeer *peer = crp->crp_opaque;
 	struct ovpn_softc *sc = peer->sc;
 	struct mbuf *m = crp->crp_buf.cb_mbuf;
+	int tunnel_len;
 	int ret;
 
 	if (crp->crp_etype != 0) {
@@ -1391,18 +1447,20 @@ ovpn_encrypt_tx_cb(struct cryptop *crp)
 		return (0);
 	}
 
+	NET_EPOCH_ENTER(et);
 	CURVNET_SET(sc->ifp->if_vnet);
 
 	MPASS(crp->crp_buf.cb_type == CRYPTO_BUF_MBUF);
 
+	tunnel_len = m->m_pkthdr.len - sizeof(struct ovpn_wire_header);
 	ret = ovpn_encap(sc, peer->peerid, m);
 	if (ret == 0) {
 		OVPN_COUNTER_ADD(sc, sent_data_pkts, 1);
-		OVPN_COUNTER_ADD(sc, tunnel_bytes_sent, m->m_pkthdr.len -
-		    sizeof(struct ovpn_wire_header));
+		OVPN_COUNTER_ADD(sc, tunnel_bytes_sent, tunnel_len);
 	}
 
 	CURVNET_RESTORE();
+	NET_EPOCH_EXIT(et);
 
 	crypto_freereq(crp);
 	ovpn_peer_release_ref(peer, false);
@@ -1416,9 +1474,9 @@ ovpn_finish_rx(struct ovpn_softc *sc, struct mbuf *m,
     struct rm_priotracker *_ovpn_lock_trackerp)
 {
 	uint32_t af;
-	int ret __diagused;
 
 	OVPN_RASSERT(sc);
+	NET_EPOCH_ASSERT();
 
 	/* Replay protection. */
 	if (V_replay_protection && ! ovpn_check_replay(key->decrypt, seq)) {
@@ -1457,9 +1515,10 @@ ovpn_finish_rx(struct ovpn_softc *sc, struct mbuf *m,
 	af = ovpn_get_af(m);
 	if (af != 0) {
 		BPF_MTAP2(sc->ifp, &af, sizeof(af), m);
-		ret = netisr_dispatch(af == AF_INET ? NETISR_IP : NETISR_IPV6,
-		    m);
-		MPASS(ret == 0);
+		if (V_async_netisr_queue)
+			netisr_queue(af == AF_INET ? NETISR_IP : NETISR_IPV6, m);
+		else
+			netisr_dispatch(af == AF_INET ? NETISR_IP : NETISR_IPV6, m);
 	} else {
 		OVPN_COUNTER_ADD(sc, lost_data_pkts_in, 1);
 		m_freem(m);
@@ -1488,6 +1547,7 @@ ovpn_find_key(struct ovpn_softc *sc, struct ovpn_kpeer *peer,
 static int
 ovpn_decrypt_rx_cb(struct cryptop *crp)
 {
+	struct epoch_tracker et;
 	struct ovpn_softc *sc = crp->crp_opaque;
 	struct mbuf *m = crp->crp_buf.cb_mbuf;
 	struct ovpn_kkey *key;
@@ -1546,7 +1606,9 @@ ovpn_decrypt_rx_cb(struct cryptop *crp)
 	m_adj_decap(m, sizeof(struct udphdr) +
 	    sizeof(struct ovpn_wire_header));
 
+	NET_EPOCH_ENTER(et);
 	ovpn_finish_rx(sc, m, peer, key, ntohl(ohdr->seq), _ovpn_lock_trackerp);
+	NET_EPOCH_EXIT(et);
 	OVPN_UNLOCK_ASSERT(sc);
 
 	CURVNET_RESTORE();
@@ -1822,7 +1884,10 @@ ovpn_transmit_to_peer(struct ifnet *ifp, struct mbuf *m,
 	atomic_add_int(&peer->refcount, 1);
 	if (_ovpn_lock_trackerp != NULL)
 		OVPN_RUNLOCK(sc);
-	ret = crypto_dispatch(crp);
+	if (V_async_crypto)
+		ret = crypto_dispatch_async(crp, CRYPTO_ASYNC_ORDERED);
+	else
+		ret = crypto_dispatch(crp);
 	if (ret) {
 		OVPN_COUNTER_ADD(sc, lost_data_pkts_out, 1);
 	}
@@ -2219,7 +2284,10 @@ ovpn_udp_input(struct mbuf *m, int off, struct inpcb *inp,
 
 	atomic_add_int(&sc->refcount, 1);
 	OVPN_RUNLOCK(sc);
-	ret = crypto_dispatch(crp);
+	if (V_async_crypto)
+		ret = crypto_dispatch_async(crp, CRYPTO_ASYNC_ORDERED);
+	else
+		ret = crypto_dispatch(crp);
 	if (ret != 0) {
 		OVPN_COUNTER_ADD(sc, lost_data_pkts_in, 1);
 	}

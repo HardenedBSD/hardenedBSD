@@ -240,6 +240,7 @@ pax_flag_t pax_hardening_setup_flags(struct image_params *, struct thread *,
     pax_flag_t);
 
 bool pax_insecure_kmod(void);
+bool pax_kmod_load_disabled(void);
 
 #endif /* _KERNEL */
 

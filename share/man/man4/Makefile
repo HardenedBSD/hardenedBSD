@@ -15,6 +15,7 @@ MAN=	aac.4 \
 	${_acpi_panasonic.4} \
 	${_acpi_rapidstart.4} \
 	${_acpi_sony.4} \
+	acpi_ged.4 \
 	acpi_thermal.4 \
 	acpi_battery.4 \
 	${_acpi_toshiba.4} \
@@ -286,6 +287,7 @@ MAN=	aac.4 \
 	mac.4 \
 	mac_biba.4 \
 	mac_bsdextended.4 \
+	mac_ddb.4 \
 	mac_ifoff.4 \
 	mac_lomac.4 \
 	mac_mls.4 \
@@ -919,6 +921,7 @@ _ccd.4=		ccd.4
 _dtrace_provs=	dtrace_audit.4 \
 		dtrace_io.4 \
 		dtrace_ip.4 \
+		dtrace_kinst.4 \
 		dtrace_lockstat.4 \
 		dtrace_proc.4 \
 		dtrace_sched.4 \

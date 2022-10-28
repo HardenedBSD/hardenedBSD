@@ -34,13 +34,14 @@
 
 name="kld"
 desc="Load kernel modules"
+rcvars="hbsd_late_kld_prohibit"
 
 start_cmd="${name}_start"
 stop_cmd=':'
 
 kld_start()
 {
-	[ -n "$kld_list" ] || return
+	[ -n "$kld_list" ] || kld_list=""
 	[ -z "$(kenv -q kld_disable 2>/dev/null)" ] || return
 
 	local _kld
@@ -49,6 +50,10 @@ kld_start()
 	for _kld in $kld_list ; do
 		load_kld -e ${_kld}.ko $_kld
 	done
+
+	if checkyesno hbsd_late_kld_prohibit; then
+		sysctl hardening.pax.kmod_load_disable=1
+	fi
 }
 
 load_rc_config $name

@@ -650,8 +650,7 @@ pci_xhci_init_ep(struct pci_xhci_dev_emu *dev, int epid)
 	struct xhci_dev_ctx    *dev_ctx;
 	struct pci_xhci_dev_ep *devep;
 	struct xhci_endp_ctx   *ep_ctx;
-	uint32_t	pstreams;
-	int		i;
+	uint32_t	i, pstreams;
 
 	dev_ctx = dev->dev_ctx;
 	ep_ctx = &dev_ctx->ctx_ep[epid];
@@ -1184,8 +1183,7 @@ done:
 
 static uint32_t
 pci_xhci_find_stream(struct pci_xhci_softc *sc, struct xhci_endp_ctx *ep,
-    struct pci_xhci_dev_ep *devep, uint32_t streamid,
-    struct xhci_stream_ctx **osctx)
+    struct pci_xhci_dev_ep *devep, uint32_t streamid)
 {
 	struct xhci_stream_ctx *sctx;
 
@@ -1204,11 +1202,10 @@ pci_xhci_find_stream(struct pci_xhci_softc *sc, struct xhci_endp_ctx *ep,
 	if (streamid > devep->ep_MaxPStreams)
 		return (XHCI_TRB_ERROR_STREAM_TYPE);
 
-	sctx = XHCI_GADDR(sc, ep->qwEpCtx2 & ~0xFUL) + streamid;
+	sctx = (struct xhci_stream_ctx *)XHCI_GADDR(sc, ep->qwEpCtx2 & ~0xFUL) +
+	    streamid;
 	if (!XHCI_SCTX_0_SCT_GET(sctx->qwSctx0))
 		return (XHCI_TRB_ERROR_STREAM_TYPE);
-
-	*osctx = sctx;
 
 	return (XHCI_TRB_ERROR_SUCCESS);
 }
@@ -1264,12 +1261,8 @@ pci_xhci_cmd_set_tr(struct pci_xhci_softc *sc, uint32_t slot,
 
 	streamid = XHCI_TRB_2_STREAM_GET(trb->dwTrb2);
 	if (devep->ep_MaxPStreams > 0) {
-		struct xhci_stream_ctx *sctx;
-
-		sctx = NULL;
-		cmderr = pci_xhci_find_stream(sc, ep_ctx, devep, streamid,
-		    &sctx);
-		if (sctx != NULL) {
+		cmderr = pci_xhci_find_stream(sc, ep_ctx, devep, streamid);
+		if (cmderr == XHCI_TRB_ERROR_SUCCESS) {
 			assert(devep->ep_sctx != NULL);
 
 			devep->ep_sctx[streamid].qwSctx0 = trb->qwTrb0;
@@ -1633,9 +1626,9 @@ pci_xhci_xfer_complete(struct pci_xhci_softc *sc, struct usb_data_xfer *xfer,
 }
 
 static void
-pci_xhci_update_ep_ring(struct pci_xhci_softc *sc, struct pci_xhci_dev_emu *dev,
-    struct pci_xhci_dev_ep *devep, struct xhci_endp_ctx *ep_ctx,
-    uint32_t streamid, uint64_t ringaddr, int ccs)
+pci_xhci_update_ep_ring(struct pci_xhci_softc *sc,
+    struct pci_xhci_dev_emu *dev __unused, struct pci_xhci_dev_ep *devep,
+    struct xhci_endp_ctx *ep_ctx, uint32_t streamid, uint64_t ringaddr, int ccs)
 {
 
 	if (devep->ep_MaxPStreams != 0) {
@@ -1911,6 +1904,7 @@ pci_xhci_device_doorbell(struct pci_xhci_softc *sc, uint32_t slot,
 	struct xhci_trb	*trb;
 	uint64_t	ringaddr;
 	uint32_t	ccs;
+	int		error;
 
 	DPRINTF(("pci_xhci doorbell slot %u epid %u stream %u",
 	    slot, epid, streamid));
@@ -1950,8 +1944,6 @@ pci_xhci_device_doorbell(struct pci_xhci_softc *sc, uint32_t slot,
 
 	/* get next trb work item */
 	if (devep->ep_MaxPStreams != 0) {
-		struct xhci_stream_ctx *sctx;
-
 		/*
 		 * Stream IDs of 0, 65535 (any stream), and 65534
 		 * (prime) are invalid.
@@ -1961,10 +1953,10 @@ pci_xhci_device_doorbell(struct pci_xhci_softc *sc, uint32_t slot,
 			return;
 		}
 
-		sctx = NULL;
-		pci_xhci_find_stream(sc, ep_ctx, devep, streamid, &sctx);
-		if (sctx == NULL) {
-			DPRINTF(("pci_xhci: invalid stream %u", streamid));
+		error = pci_xhci_find_stream(sc, ep_ctx, devep, streamid);
+		if (error != XHCI_TRB_ERROR_SUCCESS) {
+			DPRINTF(("pci_xhci: invalid stream %u: %d",
+			    streamid, error));
 			return;
 		}
 		sctx_tr = &devep->ep_sctx_trbs[streamid];
@@ -2107,7 +2099,7 @@ pci_xhci_rtsregs_write(struct pci_xhci_softc *sc, uint64_t offset,
 
 		if (rts->er_events_cnt > 0) {
 			uint64_t erdp;
-			uint32_t erdp_i;
+			int erdp_i;
 
 			erdp = rts->intrreg.erdp & ~0xF;
 			erdp_i = (erdp - rts->erstba_p->qwEvrsTablePtr) /
@@ -2251,8 +2243,9 @@ pci_xhci_hostop_write(struct pci_xhci_softc *sc, uint64_t offset,
 
 
 static void
-pci_xhci_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-                int baridx, uint64_t offset, int size, uint64_t value)
+pci_xhci_write(struct vmctx *ctx __unused, int vcpu __unused,
+    struct pci_devinst *pi, int baridx, uint64_t offset, int size __unused,
+    uint64_t value)
 {
 	struct pci_xhci_softc *sc;
 
@@ -2385,9 +2378,9 @@ pci_xhci_hostop_read(struct pci_xhci_softc *sc, uint64_t offset)
 }
 
 static uint64_t
-pci_xhci_dbregs_read(struct pci_xhci_softc *sc, uint64_t offset)
+pci_xhci_dbregs_read(struct pci_xhci_softc *sc __unused,
+    uint64_t offset __unused)
 {
-
 	/* read doorbell always returns 0 */
 	return (0);
 }
@@ -2472,8 +2465,8 @@ pci_xhci_xecp_read(struct pci_xhci_softc *sc, uint64_t offset)
 
 
 static uint64_t
-pci_xhci_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
-    uint64_t offset, int size)
+pci_xhci_read(struct vmctx *ctx __unused, int vcpu __unused,
+    struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 {
 	struct pci_xhci_softc *sc;
 	uint32_t	value;
@@ -2645,9 +2638,9 @@ done:
 }
 
 static int
-pci_xhci_dev_event(struct usb_hci *hci, enum hci_usbev evid, void *param)
+pci_xhci_dev_event(struct usb_hci *hci, enum hci_usbev evid __unused,
+    void *param __unused)
 {
-
 	DPRINTF(("xhci device event port %d", hci->hci_port));
 	return (0);
 }
@@ -2841,7 +2834,7 @@ bad:
 }
 
 static int
-pci_xhci_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
+pci_xhci_init(struct vmctx *ctx __unused, struct pci_devinst *pi, nvlist_t *nvl)
 {
 	struct pci_xhci_softc *sc;
 	int	error;
@@ -2955,8 +2948,8 @@ pci_xhci_map_devs_slots(struct pci_xhci_softc *sc, int maps[])
 }
 
 static int
-pci_xhci_snapshot_ep(struct pci_xhci_softc *sc, struct pci_xhci_dev_emu *dev,
-		     int idx, struct vm_snapshot_meta *meta)
+pci_xhci_snapshot_ep(struct pci_xhci_softc *sc __unused,
+    struct pci_xhci_dev_emu *dev, int idx, struct vm_snapshot_meta *meta)
 {
 	int k;
 	int ret;
