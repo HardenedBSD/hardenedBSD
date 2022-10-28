@@ -173,9 +173,7 @@ void ShadowBuilder::Add(uptr begin, uptr end, uptr cfi_check) {
 
 #if SANITIZER_LINUX || SANITIZER_FREEBSD || SANITIZER_NETBSD
 void ShadowBuilder::Install() {
-#if 0
   MprotectReadOnly(shadow_, GetShadowSize());
-#endif
   uptr main_shadow = GetShadow();
   if (main_shadow) {
     // Update.
@@ -190,38 +188,7 @@ void ShadowBuilder::Install() {
 #else
     void *res = MmapFixedOrDie(shadow_, GetShadowSize(), "cfi shadow");
     CHECK(res != MAP_FAILED);
-    ::memmove((void *)shadow_, (void *)main_shadow, GetShadowSize());
 #endif
-  } else {
-    // Initial setup.
-    CHECK_EQ(kCfiShadowLimitsStorageSize, GetPageSizeCached());
-    CHECK_EQ(0, GetShadow());
-    cfi_shadow_limits_storage.limits.start = shadow_;
-#if 0
-    MprotectReadOnly((uptr)&cfi_shadow_limits_storage,
-                     sizeof(cfi_shadow_limits_storage));
-#endif
-    CHECK_EQ(shadow_, GetShadow());
-  }
-}
-/*
-#elif SANITIZER_FREEBSD
-void ShadowBuilder::Install() {
-  unsigned char *dst, *src, t;
-  size_t sz;
-  sz = GetShadowSize();
-  MprotectReadOnly(shadow_, sz);
-  uptr main_shadow = GetShadow();
-  if (main_shadow) {
-    // Update.
-    dst = (unsigned char *)main_shadow;
-    src = (unsigned char *)shadow_;
-
-    while ((dst - (unsigned char *)shadow_) < sz) {
-      t = *src++;
-      *dst++ = t;
-    }
-    UnmapOrDie((void *)shadow_, sz);
   } else {
     // Initial setup.
     CHECK_EQ(kCfiShadowLimitsStorageSize, GetPageSizeCached());
@@ -232,7 +199,6 @@ void ShadowBuilder::Install() {
     CHECK_EQ(shadow_, GetShadow());
   }
 }
-*/
 #else
 #error not implemented
 #endif
