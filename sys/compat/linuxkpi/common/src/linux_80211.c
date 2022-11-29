@@ -71,6 +71,7 @@ __FBSDID("$FreeBSD$");
 #include <linux/workqueue.h>
 #include "linux_80211.h"
 
+#define	LKPI_80211_WME
 /* #define	LKPI_80211_HW_CRYPTO */
 
 static MALLOC_DEFINE(M_LKPI80211, "lkpi80211", "LinuxKPI 80211 compat");
@@ -88,22 +89,6 @@ SYSCTL_NODE(_compat_linuxkpi, OID_AUTO, 80211, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
 SYSCTL_INT(_compat_linuxkpi_80211, OID_AUTO, debug, CTLFLAG_RWTUN,
     &linuxkpi_debug_80211, 0, "LinuxKPI 802.11 debug level");
 
-#ifndef	D80211_TODO
-#define	D80211_TODO		0x1
-#endif
-#ifndef D80211_IMPROVE
-#define	D80211_IMPROVE		0x2
-#endif
-#define	D80211_TRACE		0x10
-#define	D80211_TRACEOK		0x20
-#define	D80211_TRACE_TX		0x100
-#define	D80211_TRACE_TX_DUMP	0x200
-#define	D80211_TRACE_RX		0x1000
-#define	D80211_TRACE_RX_DUMP	0x2000
-#define	D80211_TRACE_RX_BEACONS	0x4000
-#define	D80211_TRACEX		(D80211_TRACE_TX|D80211_TRACE_RX)
-#define	D80211_TRACEX_DUMP	(D80211_TRACE_TX_DUMP|D80211_TRACE_RX_DUMP)
-#define	D80211_TRACE_STA	0x10000
 #define	UNIMPLEMENTED		if (linuxkpi_debug_80211 & D80211_TODO)		\
     printf("XXX-TODO %s:%d: UNIMPLEMENTED\n", __func__, __LINE__)
 #define	TRACEOK()		if (linuxkpi_debug_80211 & D80211_TRACEOK)	\
@@ -153,6 +138,9 @@ static struct lkpi_sta *lkpi_find_lsta_by_ni(struct lkpi_vif *,
     struct ieee80211_node *);
 static void lkpi_80211_txq_task(void *, int);
 static void lkpi_ieee80211_free_skb_mbuf(void *);
+#ifdef LKPI_80211_WME
+static int lkpi_wme_update(struct lkpi_hw *, struct ieee80211vap *, bool);
+#endif
 
 static void
 lkpi_lsta_dump(struct lkpi_sta *lsta, struct ieee80211_node *ni,
@@ -922,7 +910,6 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	struct ieee80211_vif *vif;
 	struct ieee80211_node *ni;
 	struct lkpi_sta *lsta;
-	struct ieee80211_sta *sta;
 	enum ieee80211_bss_changed bss_changed;
 	struct ieee80211_prep_tx_info prep_tx_info;
 	uint32_t changed;
@@ -1048,8 +1035,7 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NOTEXIST, ("%s: lsta %p state not "
 	    "NOTEXIST: %#x\n", __func__, lsta, lsta->state));
-	sta = LSTA_TO_STA(lsta);
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NONE);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NONE);
 	if (error != 0) {
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
@@ -1068,7 +1054,7 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	 * XXX-BZ and by now we know that this does not work on all drivers
 	 * for all queues.
 	 */
-	lkpi_wake_tx_queues(hw, sta, false, false);
+	lkpi_wake_tx_queues(hw, LSTA_TO_STA(lsta), false, false);
 
 	/* Start mgd_prepare_tx. */
 	memset(&prep_tx_info, 0, sizeof(prep_tx_info));
@@ -1148,7 +1134,7 @@ lkpi_sta_auth_to_scan(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
 	    "NONE: %#x, nstate %d arg %d\n", __func__, lsta, lsta->state, nstate, arg));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NOTEXIST);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NOTEXIST);
 	if (error != 0) {
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
@@ -1204,7 +1190,6 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 	struct ieee80211_vif *vif;
 	struct ieee80211_node *ni;
 	struct lkpi_sta *lsta;
-	struct ieee80211_sta *sta;
 	struct ieee80211_prep_tx_info prep_tx_info;
 	int error;
 
@@ -1225,8 +1210,7 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
 	    "NONE: %#x\n", __func__, lsta, lsta->state));
-	sta = LSTA_TO_STA(lsta);
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_AUTH);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_AUTH);
 	if (error != 0)
 		goto out;
 
@@ -1249,7 +1233,7 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 	}
 
 	/* Wake tx queue to get packet out. */
-	lkpi_wake_tx_queues(hw, sta, true, true);
+	lkpi_wake_tx_queues(hw, LSTA_TO_STA(lsta), true, true);
 
 	/*
 	 * <twiddle> .. we end up in "assoc_to_run"
@@ -1394,7 +1378,7 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_AUTH, ("%s: lsta %p state not "
 	    "AUTH: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NONE);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NONE);
 	if (error != 0)
 		goto out;
 
@@ -1404,7 +1388,7 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
 	    "NONE: %#x, nstate %d arg %d\n", __func__, lsta, lsta->state, nstate, arg));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NOTEXIST);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NOTEXIST);
 	if (error != 0) {
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
@@ -1522,7 +1506,11 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	    "AUTH: %#x\n", __func__, lsta, lsta->state));
 	sta = LSTA_TO_STA(lsta);
 	sta->aid = IEEE80211_NODE_AID(ni);
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_ASSOC);
+#ifdef LKPI_80211_WME
+	if (vap->iv_flags & IEEE80211_F_WME)
+		sta->wme = true;
+#endif
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_ASSOC);
 	if (error != 0)
 		goto out;
 
@@ -1530,6 +1518,9 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 
 	/* Update bss info (bss_info_changed) (assoc, aid, ..). */
 	bss_changed = 0;
+#ifdef LKPI_80211_WME
+	bss_changed |= lkpi_wme_update(lhw, vap, true);
+#endif
 	if (!vif->bss_conf.assoc || vif->bss_conf.aid != IEEE80211_NODE_AID(ni)) {
 		vif->bss_conf.assoc = true;
 		vif->bss_conf.aid = IEEE80211_NODE_AID(ni);
@@ -1592,7 +1583,7 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_ASSOC, ("%s: lsta %p state not "
 	    "ASSOC: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_AUTHORIZED);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_AUTHORIZED);
 	if (error != 0) {
 		IMPROVE("undo some changes?");
 		goto out;
@@ -1709,7 +1700,7 @@ lkpi_sta_run_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_AUTHORIZED, ("%s: lsta %p state not "
 	    "AUTHORIZED: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_ASSOC);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_ASSOC);
 	if (error != 0)
 		goto out;
 
@@ -1719,7 +1710,7 @@ lkpi_sta_run_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_ASSOC, ("%s: lsta %p state not "
 	    "ASSOC: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_AUTH);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_AUTH);
 	if (error != 0)
 		goto out;
 
@@ -1816,7 +1807,7 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_AUTHORIZED, ("%s: lsta %p state not "
 	    "AUTHORIZED: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_ASSOC);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_ASSOC);
 	if (error != 0)
 		goto out;
 
@@ -1826,7 +1817,7 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_ASSOC, ("%s: lsta %p state not "
 	    "ASSOC: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_AUTH);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_AUTH);
 	if (error != 0)
 		goto out;
 
@@ -1836,7 +1827,7 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_AUTH, ("%s: lsta %p state not "
 	    "AUTH: %#x\n", __func__, lsta, lsta->state));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NONE);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NONE);
 	if (error != 0)
 		goto out;
 
@@ -1846,7 +1837,7 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
 	    "NONE: %#x, nstate %d arg %d\n", __func__, lsta, lsta->state, nstate, arg));
-	error = lkpi_80211_mo_sta_state(hw, vif, sta, IEEE80211_STA_NOTEXIST);
+	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_NOTEXIST);
 	if (error != 0) {
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
@@ -2117,13 +2108,11 @@ out:
 	return (lvif->iv_update_bss(vap, ni));
 }
 
+#ifdef LKPI_80211_WME
 static int
-lkpi_ic_wme_update(struct ieee80211com *ic)
+lkpi_wme_update(struct lkpi_hw *lhw, struct ieee80211vap *vap, bool planned)
 {
-	/* This needs queuing and go at the right moment. */
-#ifdef WITH_WME_UPDATE
-	struct ieee80211vap *vap;
-	struct lkpi_hw *lhw;
+	struct ieee80211com *ic;
 	struct ieee80211_hw *hw;
 	struct lkpi_vif *lvif;
 	struct ieee80211_vif *vif;
@@ -2133,39 +2122,42 @@ lkpi_ic_wme_update(struct ieee80211com *ic)
 	enum ieee80211_bss_changed changed;
 	int error;
 	uint16_t ac;
-#endif
 
 	IMPROVE();
 	KASSERT(WME_NUM_AC == IEEE80211_NUM_ACS, ("%s: WME_NUM_AC %d != "
 	    "IEEE80211_NUM_ACS %d\n", __func__, WME_NUM_AC, IEEE80211_NUM_ACS));
 
-#ifdef WITH_WME_UPDATE
-	vap = TAILQ_FIRST(&ic->ic_vaps);
 	if (vap == NULL)
 		return (0);
 
-	/* We should factor this out into per-vap (*wme_update). */
-	lhw = ic->ic_softc;
+	if ((vap->iv_flags & IEEE80211_F_WME) == 0)
+		return (0);
+
 	if (lhw->ops->conf_tx == NULL)
 		return (0);
 
-	/* XXX-BZ check amount of hw queues */
-	hw = LHW_TO_HW(lhw);
-	lvif = VAP_TO_LVIF(vap);
-	vif = LVIF_TO_VIF(lvif);
+	if (!planned && (vap->iv_state != IEEE80211_S_RUN)) {
+		lhw->update_wme = true;
+		return (0);
+	}
+	lhw->update_wme = false;
 
+	ic = lhw->ic;
 	ieee80211_wme_ic_getparams(ic, &chp);
 	IEEE80211_LOCK(ic);
 	for (ac = 0; ac < WME_NUM_AC; ac++)
 		wmeparr[ac] = chp.cap_wmeParams[ac];
 	IEEE80211_UNLOCK(ic);
 
+	hw = LHW_TO_HW(lhw);
+	lvif = VAP_TO_LVIF(vap);
+	vif = LVIF_TO_VIF(lvif);
+
 	/* Configure tx queues (conf_tx) & send BSS_CHANGED_QOS. */
 	LKPI_80211_LHW_LOCK(lhw);
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
 		struct wmeParams *wmep;
 
-		/* XXX-BZ should keep this in lvif? */
 		wmep = &wmeparr[ac];
 		bzero(&txqp, sizeof(txqp));
 		txqp.cw_min = wmep->wmep_logcwmin;
@@ -2179,10 +2171,30 @@ lkpi_ic_wme_update(struct ieee80211com *ic)
 	}
 	LKPI_80211_LHW_UNLOCK(lhw);
 	changed = BSS_CHANGED_QOS;
-	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, changed);
+	if (!planned)
+		lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, changed);
+
+	return (changed);
+}
 #endif
 
-	return (0);
+static int
+lkpi_ic_wme_update(struct ieee80211com *ic)
+{
+#ifdef LKPI_80211_WME
+	struct ieee80211vap *vap;
+	struct lkpi_hw *lhw;
+
+	IMPROVE("Use the per-VAP callback in net80211.");
+	vap = TAILQ_FIRST(&ic->ic_vaps);
+	if (vap == NULL)
+		return (0);
+
+	lhw = ic->ic_softc;
+
+	lkpi_wme_update(lhw, vap, false);
+#endif
+	return (0);	/* unused */
 }
 
 static struct ieee80211vap *
@@ -3482,7 +3494,9 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 	    IEEE80211_C_STA |
 	    IEEE80211_C_MONITOR |
 	    IEEE80211_C_WPA |		/* WPA/RSN */
+#ifdef LKPI_80211_WME
 	    IEEE80211_C_WME |
+#endif
 #if 0
 	    IEEE80211_C_PMGT |
 #endif

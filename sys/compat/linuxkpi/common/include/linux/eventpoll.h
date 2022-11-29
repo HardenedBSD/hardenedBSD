@@ -1,6 +1,7 @@
 /*-
- * Copyright (c) 2017 Limelight Networks, Inc.
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
+ * Copyright (c) 2022, Jake Freeland <jfree@freebsd.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,26 +23,23 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
-#ifndef _LINUXKPI_LINUX_DCACHE_H
-#define	_LINUXKPI_LINUX_DCACHE_H
+#ifndef	_LINUXKPI_LINUX_EVENTPOLL_H_
+#define	_LINUXKPI_LINUX_EVENTPOLL_H_
 
-#include <sys/vnode.h>
+#include <sys/poll.h>
 
-#include <fs/pseudofs/pseudofs.h>
+#define EPOLLIN		POLLIN
+#define EPOLLPRI	POLLPRI
+#define EPOLLOUT	POLLOUT
+#define EPOLLERR	POLLERR
+#define EPOLLHUP	POLLHUP
+#define EPOLLNVAL	POLLNVAL
+#define EPOLLRDNORM	POLLRDNORM
+#define EPOLLRDBAND	POLLRDBAND
+#define EPOLLWRNORM	POLLWRNORM
+#define EPOLLWRBAND	POLLWRBAND
+#define EPOLLRDHUP	POLLRDHUP
 
-struct dentry {
-	struct vnode *d_inode;
-	struct pfs_node *d_pfs_node;	/* FreeBSD specific field */
-};
-
-static inline struct vnode *
-d_inode(const struct dentry *dentry)
-{
-	return (dentry->d_inode);
-}
-
-#endif /* _LINUXKPI_LINUX_DCACHE_H */
+#endif	/* _LINUXKPI_LINUX_EVENTPOLL_H_ */
