@@ -37,11 +37,24 @@
 
 struct basl_table;
 
+void basl_fill_gas(ACPI_GENERIC_ADDRESS *gas, uint8_t space_id,
+    uint8_t bit_width, uint8_t bit_offset, uint8_t access_width,
+    uint64_t address);
 int basl_finish(void);
 int basl_init(void);
+int basl_table_add_checksum(struct basl_table *const table, const uint32_t off,
+    const uint32_t start, const uint32_t len);
+int basl_table_add_length(struct basl_table *const table, const uint32_t off,
+    const uint8_t size);
+int basl_table_add_pointer(struct basl_table *const table,
+    const uint8_t src_signature[ACPI_NAMESEG_SIZE], const uint32_t off,
+    const uint8_t size);
 int basl_table_append_bytes(struct basl_table *table, const void *bytes,
     uint32_t len);
 int basl_table_append_checksum(struct basl_table *table, uint32_t start,
+    uint32_t len);
+/* Add an ACPI_TABLE_* to basl without its header. */
+int basl_table_append_content(struct basl_table *table, void *data,
     uint32_t len);
 int basl_table_append_gas(struct basl_table *table, uint8_t space_id,
     uint8_t bit_width, uint8_t bit_offset, uint8_t access_width,
@@ -54,4 +67,4 @@ int basl_table_append_length(struct basl_table *table, uint8_t size);
 int basl_table_append_pointer(struct basl_table *table,
     const uint8_t src_signature[ACPI_NAMESEG_SIZE], uint8_t size);
 int basl_table_create(struct basl_table **table, struct vmctx *ctx,
-    const uint8_t *name, uint32_t alignment, uint32_t off);
+    const uint8_t *name, uint32_t alignment);
