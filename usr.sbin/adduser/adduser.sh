@@ -885,7 +885,7 @@ defaultclass=
 defaultLgroup=
 defaultgroups=
 defaultshell="${DEFAULTSHELL}"
-defaultHomePerm=
+defaultHomePerm="750"
 
 # Make sure the user running this program is root. This isn't a security
 # measure as much as it is a useful method of reminding the user to
