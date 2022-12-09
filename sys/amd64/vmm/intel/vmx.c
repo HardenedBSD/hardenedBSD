@@ -2790,8 +2790,9 @@ vmx_exit_process(struct vmx *vmx, int vcpu, struct vm_exit *vmexit)
 		SDT_PROBE3(vmm, vmx, exit, vminsn, vmx, vcpu, vmexit);
 		vmexit->exitcode = VM_EXITCODE_VMINSN;
 		break;
+	case EXIT_REASON_INVD:
 	case EXIT_REASON_WBINVD:
-		/* ignore WBINVD */
+		/* ignore exit */
 		handled = HANDLED;
 		break;
 	default:
@@ -3503,6 +3504,7 @@ vmx_getcap(void *arg, int vcpu, int type, int *retval)
 			ret = 0;
 		break;
 	case VM_CAP_BPT_EXIT:
+	case VM_CAP_IPI_EXIT:
 		ret = 0;
 		break;
 	default:
@@ -3520,6 +3522,7 @@ vmx_setcap(void *arg, int vcpu, int type, int val)
 {
 	struct vmx *vmx = arg;
 	struct vmcs *vmcs = &vmx->vmcs[vcpu];
+	struct vlapic *vlapic;
 	uint32_t baseval;
 	uint32_t *pptr;
 	int error;
@@ -3597,6 +3600,12 @@ vmx_setcap(void *arg, int vcpu, int type, int val)
 			flag = (1 << IDT_BP);
 			reg = VMCS_EXCEPTION_BITMAP;
 		}
+		break;
+	case VM_CAP_IPI_EXIT:
+		retval = 0;
+
+		vlapic = vm_lapic(vmx->vm, vcpu);
+		vlapic->ipi_exit = val;
 		break;
 	default:
 		break;

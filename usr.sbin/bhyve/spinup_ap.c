@@ -77,7 +77,7 @@ spinup_ap_realmode(struct vmctx *ctx, int newcpu, uint64_t *rip)
 }
 
 int
-spinup_ap(struct vmctx *ctx, int vcpu, int newcpu, uint64_t rip)
+spinup_ap(struct vmctx *ctx, int newcpu, uint64_t rip)
 {
 	int error;
 
@@ -98,9 +98,12 @@ spinup_ap(struct vmctx *ctx, int vcpu, int newcpu, uint64_t rip)
 	error = vm_set_capability(ctx, newcpu, VM_CAP_UNRESTRICTED_GUEST, 1);
 	assert(error == 0);
 
+	error = vm_set_capability(ctx, newcpu, VM_CAP_IPI_EXIT, 1);
+	assert(error == 0);
+
 	spinup_ap_realmode(ctx, newcpu, &rip);
 
-	fbsdrun_addcpu(ctx, vcpu, newcpu, rip);
+	vm_resume_cpu(ctx, newcpu);
 
 	return (newcpu);
 }
