@@ -61,7 +61,7 @@ __FBSDID("$FreeBSD$");
 
 #define	PRIO(x)			((x) >> 4)
 
-#define VLAPIC_VERSION		(16)
+#define VLAPIC_VERSION		(0x14)
 
 #define	x2apic(vlapic)	(((vlapic)->msr_apicbase & APICBASE_X2APIC) ? 1 : 0)
 
@@ -953,6 +953,86 @@ vlapic_get_cr8(struct vlapic *vlapic)
 	return (tpr >> 4);
 }
 
+static bool
+vlapic_is_icr_valid(uint64_t icrval)
+{
+	uint32_t mode = icrval & APIC_DELMODE_MASK;
+	uint32_t level = icrval & APIC_LEVEL_MASK;
+	uint32_t trigger = icrval & APIC_TRIGMOD_MASK;
+	uint32_t shorthand = icrval & APIC_DEST_MASK;
+
+	switch (mode) {
+	case APIC_DELMODE_FIXED:
+		if (trigger == APIC_TRIGMOD_EDGE)
+			return (true);
+		/*
+		 * AMD allows a level assert IPI and Intel converts a level
+		 * assert IPI into an edge IPI.
+		 */
+		if (trigger == APIC_TRIGMOD_LEVEL && level == APIC_LEVEL_ASSERT)
+			return (true);
+		break;
+	case APIC_DELMODE_LOWPRIO:
+	case APIC_DELMODE_SMI:
+	case APIC_DELMODE_NMI:
+	case APIC_DELMODE_INIT:
+		if (trigger == APIC_TRIGMOD_EDGE &&
+		    (shorthand == APIC_DEST_DESTFLD ||
+			shorthand == APIC_DEST_ALLESELF))
+			return (true);
+		/*
+		 * AMD allows a level assert IPI and Intel converts a level
+		 * assert IPI into an edge IPI.
+		 */
+		if (trigger == APIC_TRIGMOD_LEVEL &&
+		    level == APIC_LEVEL_ASSERT &&
+		    (shorthand == APIC_DEST_DESTFLD ||
+			shorthand == APIC_DEST_ALLESELF))
+			return (true);
+		/*
+		 * An level triggered deassert INIT is defined in the Intel
+		 * Multiprocessor Specification and the Intel Software Developer
+		 * Manual. Due to the MPS it's required to send a level assert
+		 * INIT to a cpu and then a level deassert INIT. Some operating
+		 * systems e.g. FreeBSD or Linux use that algorithm. According
+		 * to the SDM a level deassert INIT is only supported by Pentium
+		 * and P6 processors. It's always send to all cpus regardless of
+		 * the destination or shorthand field. It resets the arbitration
+		 * id register. This register is not software accessible and
+		 * only required for the APIC bus arbitration. So, the level
+		 * deassert INIT doesn't need any emulation and we should ignore
+		 * it. The SDM also defines that newer processors don't support
+		 * the level deassert INIT and it's not valid any more. As it's
+		 * defined for older systems, it can't be invalid per se.
+		 * Otherwise, backward compatibility would be broken. However,
+		 * when returning false here, it'll be ignored which is the
+		 * desired behaviour.
+		 */
+		if (mode == APIC_DELMODE_INIT &&
+		    trigger == APIC_TRIGMOD_LEVEL &&
+		    level == APIC_LEVEL_DEASSERT)
+			return (false);
+		break;
+	case APIC_DELMODE_STARTUP:
+		if (shorthand == APIC_DEST_DESTFLD ||
+		    shorthand == APIC_DEST_ALLESELF)
+			return (true);
+		break;
+	case APIC_DELMODE_RR:
+		/* Only available on AMD! */
+		if (trigger == APIC_TRIGMOD_EDGE &&
+		    shorthand == APIC_DEST_DESTFLD)
+			return (true);
+		break;
+	case APIC_DELMODE_RESV:
+		return (false);
+	default:
+		__assert_unreachable();
+	}
+
+	return (false);
+}
+
 int
 vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 {
@@ -999,6 +1079,14 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 	}
 
 	/*
+	 * Ignore invalid combinations of the icr.
+	 */
+	if (!vlapic_is_icr_valid(icrval)) {
+		VLAPIC_CTR1(vlapic, "Ignoring invalid ICR %016lx", icrval);
+		return (0);
+	}
+
+	/*
 	 * ipimask is a set of vCPUs needing userland handling of the current
 	 * IPI.
 	 */
@@ -1031,23 +1119,61 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 
 		break;
 	case APIC_DELMODE_INIT:
-		if ((icrval & APIC_LEVEL_MASK) == APIC_LEVEL_DEASSERT)
-			break;
+		if (!vlapic->ipi_exit) {
+			if (!phys)
+				break;
 
-		CPU_FOREACH_ISSET(i, &dmask) {
+			i = vm_apicid2vcpuid(vlapic->vm, dest);
+			if (i >= vm_get_maxcpus(vlapic->vm) ||
+			    i == vlapic->vcpuid)
+				break;
+
 			/*
-			 * Userland which doesn't support the IPI exit requires
-			 * that the boot state is set to SIPI here.
+			 * Userland which doesn't support the IPI exit
+			 * requires that the boot state is set to SIPI
+			 * here.
 			 */
 			vlapic2 = vm_lapic(vlapic->vm, i);
 			vlapic2->boot_state = BS_SIPI;
-			CPU_SET(i, &ipimask);
+			break;
 		}
 
+		CPU_COPY(&dmask, &ipimask);
 		break;
 	case APIC_DELMODE_STARTUP:
+		if (!vlapic->ipi_exit) {
+			if (!phys)
+				break;
+
+			/*
+			 * Old bhyve versions don't support the IPI
+			 * exit. Translate it into the old style.
+			 */
+			i = vm_apicid2vcpuid(vlapic->vm, dest);
+			if (i >= vm_get_maxcpus(vlapic->vm) ||
+			    i == vlapic->vcpuid)
+				break;
+
+			/*
+			 * Ignore SIPIs in any state other than wait-for-SIPI
+			 */
+			vlapic2 = vm_lapic(vlapic->vm, i);
+			if (vlapic2->boot_state != BS_SIPI)
+				break;
+			vlapic2->boot_state = BS_RUNNING;
+
+			vmexit = vm_exitinfo(vlapic->vm, vlapic->vcpuid);
+			vmexit->exitcode = VM_EXITCODE_SPINUP_AP;
+			vmexit->u.spinup_ap.vcpu = i;
+			vmexit->u.spinup_ap.rip = vec << PAGE_SHIFT;
+
+			*retu = true;
+			break;
+		}
+
 		CPU_FOREACH_ISSET(i, &dmask) {
 			vlapic2 = vm_lapic(vlapic->vm, i);
+
 			/*
 			 * Ignore SIPIs in any state other than wait-for-SIPI
 			 */
@@ -1070,20 +1196,6 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 		vmexit->u.ipi.dmask = dmask;
 
 		*retu = true;
-
-		/*
-		 * Old bhyve versions don't support the IPI exit. Translate it
-		 * into the old style.
-		 */
-		if (!vlapic->ipi_exit) {
-			if (mode == APIC_DELMODE_STARTUP) {
-				vmexit->exitcode = VM_EXITCODE_SPINUP_AP;
-				vmexit->u.spinup_ap.vcpu = CPU_FFS(&ipimask) - 1;
-				vmexit->u.spinup_ap.rip = vec << PAGE_SHIFT;
-			} else {
-				*retu = false;
-			}
-		}
 	}
 
 	return (0);
