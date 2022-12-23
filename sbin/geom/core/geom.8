@@ -24,7 +24,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd September 14, 2018
+.Dd December 12, 2022
 .Dt GEOM 8
 .Os
 .Sh NAME
@@ -62,10 +62,10 @@ The
 .Nm
 utility is used to control various GEOM classes.
 A class has to be aware of
-.Xr geom 8
+.Nm
 communication methods, but there are also some standard commands
 which can be used for existing
-.Xr geom 8
+.Nm
 unaware classes.
 Here is the list of standard commands:
 .Bl -tag -width ".Cm status"
@@ -128,7 +128,7 @@ available under the name of
 .Nm g Ns Ar class .
 .Pp
 Currently available classes which are aware of
-.Xr geom 8 :
+.Nm :
 .Pp
 .Bl -bullet -offset indent -compact
 .It
@@ -161,6 +161,8 @@ SCHED
 SHSEC
 .It
 STRIPE
+.It
+VINUM (deprecated)
 .It
 VIRSTOR
 .El
@@ -210,6 +212,7 @@ geom md unload
 .Xr gsched 8 ,
 .Xr gshsec 8 ,
 .Xr gstripe 8 ,
+.Xr gvinum 8 ,
 .Xr gvirstor 8
 .Sh HISTORY
 The
