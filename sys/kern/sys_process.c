@@ -1622,6 +1622,12 @@ coredump_cleanup_nofp:
 		break;
 
 	case PT_SC_REMOTE:
+#ifdef PAX_HARDENING
+		error = pax_ptrace_syscall_prohibit(td);
+		if (error != 0) {
+			break;
+		}
+#endif
 		pscr = addr;
 		CTR2(KTR_PTRACE, "PT_SC_REMOTE: pid %d, syscall %d",
 		    p->p_pid, pscr->pscr_syscall);
