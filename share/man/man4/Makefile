@@ -71,6 +71,7 @@ MAN=	aac.4 \
 	axe.4 \
 	axge.4 \
 	bce.4 \
+	bcm5974.4 \
 	bcma.4 \
 	bfe.4 \
 	bge.4 \
@@ -215,6 +216,7 @@ MAN=	aac.4 \
 	icmp.4 \
 	icmp6.4 \
 	ida.4 \
+	ietp.4 \
 	if_ipsec.4 \
 	iflib.4 \
 	ifmib.4 \
