@@ -36,7 +36,6 @@ SRCS+=		sanitizer_common/sanitizer_thread_registry.cpp
 SRCS+=		sanitizer_common/sanitizer_tls_get_addr.cpp
 SRCS+=		sanitizer_common/sanitizer_type_traits.cpp
 
-.if ${MK_CROSS_DSO_CFI} == "no" && ${MK_LLD_IS_LD} != "no" && ${MK_CLANG_IS_CC} != "no"
 CFLAGS+=	-flto
 CXXFLAGS+=	-flto
 LDFLAGS+=	-flto
