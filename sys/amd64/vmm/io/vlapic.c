@@ -460,13 +460,13 @@ vlapic_fire_lvt(struct vlapic *vlapic, u_int lvt)
 			return (0);
 		}
 		if (vlapic_set_intr_ready(vlapic, vec, false))
-			vcpu_notify_event(vlapic->vm, vlapic->vcpuid, true);
+			vcpu_notify_event(vlapic->vcpu, true);
 		break;
 	case APIC_LVT_DM_NMI:
-		vm_inject_nmi(vlapic->vm, vlapic->vcpuid);
+		vm_inject_nmi(vlapic->vcpu);
 		break;
 	case APIC_LVT_DM_EXTINT:
-		vm_inject_extint(vlapic->vm, vlapic->vcpuid);
+		vm_inject_extint(vlapic->vcpu);
 		break;
 	default:
 		// Other modes ignored
@@ -588,20 +588,18 @@ vlapic_process_eoi(struct vlapic *vlapic)
 			}
 			isrptr[idx] &= ~(1 << bitpos);
 			vector = i * 32 + bitpos;
-			VCPU_CTR1(vlapic->vm, vlapic->vcpuid, "EOI vector %d",
-			    vector);
+			VLAPIC_CTR1(vlapic, "EOI vector %d", vector);
 			VLAPIC_CTR_ISR(vlapic, "vlapic_process_eoi");
 			vlapic->isrvec_stk_top--;
 			vlapic_update_ppr(vlapic);
 			if ((tmrptr[idx] & (1 << bitpos)) != 0) {
-				vioapic_process_eoi(vlapic->vm, vlapic->vcpuid,
-				    vector);
+				vioapic_process_eoi(vlapic->vm, vector);
 			}
 			return;
 		}
 	}
-	VCPU_CTR0(vlapic->vm, vlapic->vcpuid, "Gratuitous EOI");
-	vmm_stat_incr(vlapic->vm, vlapic->vcpuid, VLAPIC_GRATUITOUS_EOI, 1);
+	VLAPIC_CTR0(vlapic, "Gratuitous EOI");
+	vmm_stat_incr(vlapic->vcpu, VLAPIC_GRATUITOUS_EOI, 1);
 }
 
 static __inline int
@@ -637,7 +635,7 @@ vlapic_set_error(struct vlapic *vlapic, uint32_t mask, bool lvt_error)
 		return;
 
 	if (vlapic_fire_lvt(vlapic, APIC_LVT_ERROR)) {
-		vmm_stat_incr(vlapic->vm, vlapic->vcpuid, VLAPIC_INTR_ERROR, 1);
+		vmm_stat_incr(vlapic->vcpu, VLAPIC_INTR_ERROR, 1);
 	}
 }
 
@@ -651,7 +649,7 @@ vlapic_fire_timer(struct vlapic *vlapic)
 
 	if (vlapic_fire_lvt(vlapic, APIC_LVT_TIMER)) {
 		VLAPIC_CTR0(vlapic, "vlapic timer fired");
-		vmm_stat_incr(vlapic->vm, vlapic->vcpuid, VLAPIC_INTR_TIMER, 1);
+		vmm_stat_incr(vlapic->vcpu, VLAPIC_INTR_TIMER, 1);
 	}
 }
 
@@ -663,7 +661,7 @@ vlapic_fire_cmci(struct vlapic *vlapic)
 {
 
 	if (vlapic_fire_lvt(vlapic, APIC_LVT_CMCI)) {
-		vmm_stat_incr(vlapic->vm, vlapic->vcpuid, VLAPIC_INTR_CMC, 1);
+		vmm_stat_incr(vlapic->vcpu, VLAPIC_INTR_CMC, 1);
 	}
 }
 
@@ -682,10 +680,10 @@ vlapic_trigger_lvt(struct vlapic *vlapic, int vector)
 		*/
 		switch (vector) {
 			case APIC_LVT_LINT0:
-				vm_inject_extint(vlapic->vm, vlapic->vcpuid);
+				vm_inject_extint(vlapic->vcpu);
 				break;
 			case APIC_LVT_LINT1:
-				vm_inject_nmi(vlapic->vm, vlapic->vcpuid);
+				vm_inject_nmi(vlapic->vcpu);
 				break;
 			default:
 				break;
@@ -702,8 +700,8 @@ vlapic_trigger_lvt(struct vlapic *vlapic, int vector)
 	case APIC_LVT_THERMAL:
 	case APIC_LVT_CMCI:
 		if (vlapic_fire_lvt(vlapic, vector)) {
-			vmm_stat_array_incr(vlapic->vm, vlapic->vcpuid,
-			    LVTS_TRIGGERRED, vector, 1);
+			vmm_stat_array_incr(vlapic->vcpu, LVTS_TRIGGERRED,
+			    vector, 1);
 		}
 		break;
 	default:
@@ -868,7 +866,7 @@ vlapic_calcdest(struct vm *vm, cpuset_t *dmask, uint32_t dest, bool phys,
 		CPU_ZERO(dmask);
 		amask = vm_active_cpus(vm);
 		CPU_FOREACH_ISSET(vcpuid, &amask) {
-			vlapic = vm_lapic(vm, vcpuid);
+			vlapic = vm_lapic(vm_vcpu(vm, vcpuid));
 			dfr = vlapic->apic_page->dfr;
 			ldr = vlapic->apic_page->ldr;
 
@@ -907,7 +905,7 @@ vlapic_calcdest(struct vm *vm, cpuset_t *dmask, uint32_t dest, bool phys,
 	}
 }
 
-static VMM_STAT_ARRAY(IPIS_SENT, VM_MAXCPU, "ipis sent to vcpu");
+static VMM_STAT_ARRAY(IPIS_SENT, VMM_STAT_NELEMS_VCPU, "ipis sent to vcpu");
 
 static void
 vlapic_set_tpr(struct vlapic *vlapic, uint8_t val)
@@ -915,8 +913,8 @@ vlapic_set_tpr(struct vlapic *vlapic, uint8_t val)
 	struct LAPIC *lapic = vlapic->apic_page;
 
 	if (lapic->tpr != val) {
-		VCPU_CTR2(vlapic->vm, vlapic->vcpuid, "vlapic TPR changed "
-		    "from %#x to %#x", lapic->tpr, val);
+		VLAPIC_CTR2(vlapic, "vlapic TPR changed from %#x to %#x",
+		    lapic->tpr, val);
 		lapic->tpr = val;
 		vlapic_update_ppr(vlapic);
 	}
@@ -936,7 +934,7 @@ vlapic_set_cr8(struct vlapic *vlapic, uint64_t val)
 	uint8_t tpr;
 
 	if (val & ~0xf) {
-		vm_inject_gp(vlapic->vm, vlapic->vcpuid);
+		vm_inject_gp(vlapic->vcpu);
 		return;
 	}
 
@@ -1041,7 +1039,7 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 	cpuset_t dmask, ipimask;
 	uint64_t icrval;
 	uint32_t dest, vec, mode, shorthand;
-	struct vlapic *vlapic2;
+	struct vcpu *vcpu;
 	struct vm_exit *vmexit;
 	struct LAPIC *lapic;
 
@@ -1102,9 +1100,9 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 		}
 
 		CPU_FOREACH_ISSET(i, &dmask) {
-			lapic_intr_edge(vlapic->vm, i, vec);
-			vmm_stat_array_incr(vlapic->vm, vlapic->vcpuid,
-			    IPIS_SENT, i, 1);
+			vcpu = vm_vcpu(vlapic->vm, i);
+			lapic_intr_edge(vcpu, vec);
+			vmm_stat_array_incr(vlapic->vcpu, IPIS_SENT, i, 1);
 			VLAPIC_CTR2(vlapic,
 			    "vlapic sending ipi %d to vcpuid %d", vec, i);
 		}
@@ -1112,7 +1110,8 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 		break;
 	case APIC_DELMODE_NMI:
 		CPU_FOREACH_ISSET(i, &dmask) {
-			vm_inject_nmi(vlapic->vm, i);
+			vcpu = vm_vcpu(vlapic->vm, i);
+			vm_inject_nmi(vcpu);
 			VLAPIC_CTR1(vlapic,
 			    "vlapic sending ipi nmi to vcpuid %d", i);
 		}
@@ -1128,13 +1127,8 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 			    i == vlapic->vcpuid)
 				break;
 
-			/*
-			 * Userland which doesn't support the IPI exit
-			 * requires that the boot state is set to SIPI
-			 * here.
-			 */
-			vlapic2 = vm_lapic(vlapic->vm, i);
-			vlapic2->boot_state = BS_SIPI;
+			CPU_SETOF(i, &ipimask);
+
 			break;
 		}
 
@@ -1145,51 +1139,24 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 			if (!phys)
 				break;
 
-			/*
-			 * Old bhyve versions don't support the IPI
-			 * exit. Translate it into the old style.
-			 */
 			i = vm_apicid2vcpuid(vlapic->vm, dest);
 			if (i >= vm_get_maxcpus(vlapic->vm) ||
 			    i == vlapic->vcpuid)
 				break;
 
-			/*
-			 * Ignore SIPIs in any state other than wait-for-SIPI
-			 */
-			vlapic2 = vm_lapic(vlapic->vm, i);
-			if (vlapic2->boot_state != BS_SIPI)
-				break;
-			vlapic2->boot_state = BS_RUNNING;
+			CPU_SETOF(i, &ipimask);
 
-			vmexit = vm_exitinfo(vlapic->vm, vlapic->vcpuid);
-			vmexit->exitcode = VM_EXITCODE_SPINUP_AP;
-			vmexit->u.spinup_ap.vcpu = i;
-			vmexit->u.spinup_ap.rip = vec << PAGE_SHIFT;
-
-			*retu = true;
 			break;
 		}
 
-		CPU_FOREACH_ISSET(i, &dmask) {
-			vlapic2 = vm_lapic(vlapic->vm, i);
-
-			/*
-			 * Ignore SIPIs in any state other than wait-for-SIPI
-			 */
-			if (vlapic2->boot_state != BS_SIPI)
-				continue;
-			vlapic2->boot_state = BS_RUNNING;
-			CPU_SET(i, &ipimask);
-		}
-
+		CPU_COPY(&dmask, &ipimask);
 		break;
 	default:
 		return (1);
 	}
 
 	if (!CPU_EMPTY(&ipimask)) {
-		vmexit = vm_exitinfo(vlapic->vm, vlapic->vcpuid);
+		vmexit = vm_exitinfo(vlapic->vcpu);
 		vmexit->exitcode = VM_EXITCODE_IPI;
 		vmexit->u.ipi.mode = mode;
 		vmexit->u.ipi.vector = vec;
@@ -1202,26 +1169,53 @@ vlapic_icrlo_write_handler(struct vlapic *vlapic, bool *retu)
 }
 
 static void
-vlapic_handle_init(struct vm *vm, int vcpuid, void *arg)
+vlapic_handle_init(struct vcpu *vcpu, void *arg)
 {
-	struct vlapic *vlapic = vm_lapic(vm, vcpuid);
+	struct vlapic *vlapic = vm_lapic(vcpu);
 
 	vlapic_reset(vlapic);
-
-	/* vlapic_reset modifies the boot state. */
-	vlapic->boot_state = BS_SIPI;
 }
 
 int
-vm_handle_ipi(struct vm *vm, int vcpuid, struct vm_exit *vme, bool *retu)
+vm_handle_ipi(struct vcpu *vcpu, struct vm_exit *vme, bool *retu)
 {
+	struct vlapic *vlapic = vm_lapic(vcpu);
+	cpuset_t *dmask = &vme->u.ipi.dmask;
+	uint8_t vec = vme->u.ipi.vector;
+
 	*retu = true;
 	switch (vme->u.ipi.mode) {
 	case APIC_DELMODE_INIT:
-		vm_smp_rendezvous(vm, vcpuid, vme->u.ipi.dmask,
-		    vlapic_handle_init, NULL);
+		vm_smp_rendezvous(vcpu, *dmask, vlapic_handle_init,
+		    NULL);
+		vm_await_start(vcpu_vm(vcpu), dmask);
+
+		if (!vlapic->ipi_exit) {
+			*retu = false;
+		}
+
 		break;
 	case APIC_DELMODE_STARTUP:
+		/*
+		 * Ignore SIPIs in any state other than wait-for-SIPI
+		 */
+		*dmask = vm_start_cpus(vcpu_vm(vcpu), dmask);
+
+		if (CPU_EMPTY(dmask)) {
+			*retu = false;
+			break;
+		}
+
+		/*
+		 * Old bhyve versions don't support the IPI
+		 * exit. Translate it into the old style.
+		 */
+		if (!vlapic->ipi_exit) {
+			vme->exitcode = VM_EXITCODE_SPINUP_AP;
+			vme->u.spinup_ap.vcpu = CPU_FFS(dmask);
+			vme->u.spinup_ap.rip = vec << PAGE_SHIFT;
+		}
+
 		break;
 	default:
 		return (1);
@@ -1238,9 +1232,8 @@ vlapic_self_ipi_handler(struct vlapic *vlapic, uint64_t val)
 	KASSERT(x2apic(vlapic), ("SELF_IPI does not exist in xAPIC mode"));
 
 	vec = val & 0xff;
-	lapic_intr_edge(vlapic->vm, vlapic->vcpuid, vec);
-	vmm_stat_array_incr(vlapic->vm, vlapic->vcpuid, IPIS_SENT,
-	    vlapic->vcpuid, 1);
+	lapic_intr_edge(vlapic->vcpu, vec);
+	vmm_stat_array_incr(vlapic->vcpu, IPIS_SENT, vlapic->vcpuid, 1);
 	VLAPIC_CTR1(vlapic, "vlapic self-ipi %d", vec);
 }
 
@@ -1596,11 +1589,6 @@ vlapic_reset(struct vlapic *vlapic)
 	lapic->dcr_timer = 0;
 	vlapic_dcr_write_handler(vlapic);
 
-	if (vlapic->vcpuid == 0)
-		vlapic->boot_state = BS_RUNNING;	/* BSP */
-	else
-		vlapic->boot_state = BS_INIT;		/* AP */
-
 	vlapic->svr_last = lapic->svr;
 }
 
@@ -1639,6 +1627,7 @@ vlapic_cleanup(struct vlapic *vlapic)
 {
 
 	callout_drain(&vlapic->callout);
+	mtx_destroy(&vlapic->timer_mtx);
 }
 
 uint64_t
@@ -1662,12 +1651,12 @@ vlapic_set_apicbase(struct vlapic *vlapic, uint64_t new)
 }
 
 void
-vlapic_set_x2apic_state(struct vm *vm, int vcpuid, enum x2apic_state state)
+vlapic_set_x2apic_state(struct vcpu *vcpu, enum x2apic_state state)
 {
 	struct vlapic *vlapic;
 	struct LAPIC *lapic;
 
-	vlapic = vm_lapic(vm, vcpuid);
+	vlapic = vm_lapic(vcpu);
 
 	if (state == X2APIC_DISABLED)
 		vlapic->msr_apicbase &= ~APICBASE_X2APIC;
@@ -1700,6 +1689,7 @@ void
 vlapic_deliver_intr(struct vm *vm, bool level, uint32_t dest, bool phys,
     int delmode, int vec)
 {
+	struct vcpu *vcpu;
 	bool lowprio;
 	int vcpuid;
 	cpuset_t dmask;
@@ -1720,10 +1710,11 @@ vlapic_deliver_intr(struct vm *vm, bool level, uint32_t dest, bool phys,
 	vlapic_calcdest(vm, &dmask, dest, phys, lowprio, false);
 
 	CPU_FOREACH_ISSET(vcpuid, &dmask) {
+		vcpu = vm_vcpu(vm, vcpuid);
 		if (delmode == IOART_DELEXINT) {
-			vm_inject_extint(vm, vcpuid);
+			vm_inject_extint(vcpu);
 		} else {
-			lapic_set_intr(vm, vcpuid, vec, level);
+			lapic_set_intr(vcpu, vec, level);
 		}
 	}
 }
@@ -1857,17 +1848,23 @@ vlapic_reset_callout(struct vlapic *vlapic, uint32_t ccr)
 int
 vlapic_snapshot(struct vm *vm, struct vm_snapshot_meta *meta)
 {
-	int i, ret;
+	int ret;
+	struct vcpu *vcpu;
 	struct vlapic *vlapic;
 	struct LAPIC *lapic;
 	uint32_t ccr;
+	uint16_t i, maxcpus;
 
 	KASSERT(vm != NULL, ("%s: arg was NULL", __func__));
 
 	ret = 0;
 
-	for (i = 0; i < VM_MAXCPU; i++) {
-		vlapic = vm_lapic(vm, i);
+	maxcpus = vm_get_maxcpus(vm);
+	for (i = 0; i < maxcpus; i++) {
+		vcpu = vm_vcpu(vm, i);
+		if (vcpu == NULL)
+			continue;
+		vlapic = vm_lapic(vcpu);
 
 		/* snapshot the page first; timer period depends on icr_timer */
 		lapic = vlapic->apic_page;
@@ -1893,7 +1890,6 @@ vlapic_snapshot(struct vm *vm, struct vm_snapshot_meta *meta)
 				      sizeof(vlapic->isrvec_stk),
 				      meta, ret, done);
 		SNAPSHOT_VAR_OR_LEAVE(vlapic->isrvec_stk_top, meta, ret, done);
-		SNAPSHOT_VAR_OR_LEAVE(vlapic->boot_state, meta, ret, done);
 
 		SNAPSHOT_BUF_OR_LEAVE(vlapic->lvt_last,
 				      sizeof(vlapic->lvt_last),

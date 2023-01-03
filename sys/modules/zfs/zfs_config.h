@@ -254,6 +254,9 @@
 /* DECLARE_EVENT_CLASS() is available */
 /* #undef HAVE_DECLARE_EVENT_CLASS */
 
+/* dentry aliases are in d_u member */
+/* #undef HAVE_DENTRY_D_U_ALIASES */
+
 /* dequeue_signal() takes 4 arguments */
 /* #undef HAVE_DEQUEUE_SIGNAL_4ARG */
 
@@ -311,6 +314,9 @@
 /* iops->follow_link() nameidata */
 /* #undef HAVE_FOLLOW_LINK_NAMEIDATA */
 
+/* Define if compiler supports -Wformat-overflow */
+/* #undef HAVE_FORMAT_OVERFLOW  */
+
 /* fops->fsync() with range */
 /* #undef HAVE_FSYNC_RANGE */
 
@@ -359,8 +365,17 @@
 /* has_capability() is available */
 /* #undef HAVE_HAS_CAPABILITY */
 
+/* iattr->ia_vfsuid and iattr->ia_vfsgid exist */
+/* #undef HAVE_IATTR_VFSID */
+
 /* Define if you have the iconv() function and it works. */
 #define HAVE_ICONV 1
+
+/* APIs for idmapped mount are present */
+/* #undef HAVE_IDMAP_MNT_API */
+
+/* Define if compiler supports -Wimplicit-fallthrough */
+/* #undef HAVE_IMPLICIT_FALLTHROUGH */
 
 /* Define if compiler supports -Winfinite-recursion */
 /* #undef HAVE_INFINITE_RECURSION */
@@ -448,6 +463,9 @@
 
 /* uncached_acl_sentinel() exists */
 /* #undef HAVE_KERNEL_GET_ACL_HANDLE_CACHE */
+
+/* Define if compiler supports -Winfinite-recursion */
+/* #undef HAVE_KERNEL_INFINITE_RECURSION */
 
 /* kernel does stack verification */
 /* #undef HAVE_KERNEL_OBJTOOL */
@@ -589,6 +607,12 @@
 
 /* register_shrinker is vararg */
 /* #undef HAVE_REGISTER_SHRINKER_VARARG */
+
+/* iops->rename2() exists */
+/* #undef HAVE_RENAME2 */
+
+/* struct inode_operations_wrapper takes .rename2() */
+/* #undef HAVE_RENAME2_OPERATIONS_WRAPPER */
 
 /* iops->rename() wants flags */
 /* #undef HAVE_RENAME_WANTS_FLAGS */
@@ -886,9 +910,6 @@
 /* make_request_fn() return type */
 /* #undef MAKE_REQUEST_FN_RET */
 
-/* hardened module_param_call */
-/* #undef MODULE_PARAM_CALL_CONST */
-
 /* struct shrink_control has nid */
 /* #undef SHRINK_CONTROL_HAS_NID */
 
@@ -955,7 +976,7 @@
 /* #undef ZFS_IS_GPL_COMPATIBLE */
 
 /* Define the project alias string. */
-#define ZFS_META_ALIAS "zfs-2.1.99-FreeBSD_gd62bafee9"
+#define ZFS_META_ALIAS "zfs-2.1.99-FreeBSD_g59493b63c"
 
 /* Define the project author. */
 #define ZFS_META_AUTHOR "OpenZFS"
@@ -964,7 +985,7 @@
 /* #undef ZFS_META_DATA */
 
 /* Define the maximum compatible kernel version. */
-#define ZFS_META_KVER_MAX "5.19"
+#define ZFS_META_KVER_MAX "6.0"
 
 /* Define the minimum compatible kernel version. */
 #define ZFS_META_KVER_MIN "3.10"
@@ -985,7 +1006,7 @@
 #define ZFS_META_NAME "zfs"
 
 /* Define the project release. */
-#define ZFS_META_RELEASE "FreeBSD_gd62bafee9"
+#define ZFS_META_RELEASE "FreeBSD_g59493b63c"
 
 /* Define the project version. */
 #define ZFS_META_VERSION "2.1.99"

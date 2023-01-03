@@ -530,6 +530,12 @@ SYSCTL_INT(_vm_pmap, OID_AUTO, pcid_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
 int invpcid_works = 0;
 SYSCTL_INT(_vm_pmap, OID_AUTO, invpcid_works, CTLFLAG_RD, &invpcid_works, 0,
     "Is the invpcid instruction available ?");
+int pmap_pcid_invlpg_workaround = 0;
+SYSCTL_INT(_vm_pmap, OID_AUTO, pcid_invlpg_workaround,
+    CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+    &pmap_pcid_invlpg_workaround, 0,
+    "Enable small core PCID/INVLPG workaround");
+int pmap_pcid_invlpg_workaround_uena = 1;
 
 #ifdef PAX
 /* The related part of code is in x86/identcpu.c - see pti_get_default() */
@@ -2566,6 +2572,9 @@ pmap_init(void)
 			    VM_PAGE_TO_PHYS(m);
 		}
 	}
+
+	TUNABLE_INT_FETCH("vm.pmap.pcid_invlpg_workaround",
+	    &pmap_pcid_invlpg_workaround_uena);
 }
 
 SYSCTL_UINT(_vm_pmap, OID_AUTO, large_map_pml4_entries,
@@ -2797,7 +2806,7 @@ pmap_update_pde_invalidate(pmap_t pmap, vm_offset_t va, pd_entry_t newpde)
 
 	if ((newpde & PG_PS) == 0)
 		/* Demotion: flush a specific 2MB page mapping. */
-		invlpg(va);
+		pmap_invlpg(pmap, va);
 	else if ((newpde & PG_G) == 0)
 		/*
 		 * Promotion: flush every 4KB page mapping from the TLB
@@ -3136,7 +3145,7 @@ pmap_invalidate_page_curcpu_cb(pmap_t pmap, vm_offset_t va,
     vm_offset_t addr2 __unused)
 {
 	if (pmap == kernel_pmap) {
-		invlpg(va);
+		pmap_invlpg(kernel_pmap, va);
 	} else if (pmap == PCPU_GET(curpmap)) {
 		invlpg(va);
 		pmap_invalidate_page_cb(pmap, va);
@@ -3227,8 +3236,14 @@ pmap_invalidate_range_curcpu_cb(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	vm_offset_t addr;
 
 	if (pmap == kernel_pmap) {
-		for (addr = sva; addr < eva; addr += PAGE_SIZE)
-			invlpg(addr);
+		if (PCPU_GET(pcid_invlpg_workaround)) {
+			struct invpcid_descr d = { 0 };
+
+			invpcid(&d, INVPCID_CTXGLOB);
+		} else {
+			for (addr = sva; addr < eva; addr += PAGE_SIZE)
+				invlpg(addr);
+		}
 	} else if (pmap == PCPU_GET(curpmap)) {
 		for (addr = sva; addr < eva; addr += PAGE_SIZE)
 			invlpg(addr);
@@ -3766,7 +3781,7 @@ pmap_flush_cache_phys_range(vm_paddr_t spa, vm_paddr_t epa, vm_memattr_t mattr)
 	for (; spa < epa; spa += PAGE_SIZE) {
 		sched_pin();
 		pte_store(pte, spa | pte_bits);
-		invlpg(vaddr);
+		pmap_invlpg(kernel_pmap, vaddr);
 		/* XXXKIB atomic inside flush_cache_range are excessive */
 		pmap_flush_cache_range(vaddr, vaddr + PAGE_SIZE);
 		sched_unpin();
@@ -6777,19 +6792,36 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 
 	/*
 	 * Examine the first PTE in the specified PTP.  Abort if this PTE is
-	 * either invalid, unused, or does not map the first 4KB physical page
-	 * within a 2MB page. 
+	 * ineligible for promotion due to hardware errata, invalid, or does
+	 * not map the first 4KB physical page within a 2MB page.
 	 */
 	firstpte = (pt_entry_t *)PHYS_TO_DMAP(*pde & PG_FRAME);
 	newpde = *firstpte;
-	if ((newpde & ((PG_FRAME & PDRMASK) | PG_A | PG_V)) != (PG_A | PG_V) ||
-	    !pmap_allow_2m_x_page(pmap, pmap_pde_ept_executable(pmap,
-	    newpde))) {
+	if (!pmap_allow_2m_x_page(pmap, pmap_pde_ept_executable(pmap, newpde)))
+		return;
+	if ((newpde & ((PG_FRAME & PDRMASK) | PG_V)) != PG_V) {
 		counter_u64_add(pmap_pde_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
 		    " in pmap %p", va, pmap);
 		return;
 	}
+
+	/*
+	 * Both here and in the below "for" loop, to allow for repromotion
+	 * after MADV_FREE, conditionally write protect a clean PTE before
+	 * possibly aborting the promotion due to other PTE attributes.  Why?
+	 * Suppose that MADV_FREE is applied to a part of a superpage, the
+	 * address range [S, E).  pmap_advise() will demote the superpage
+	 * mapping, destroy the 4KB page mapping at the end of [S, E), and
+	 * clear PG_M and PG_A in the PTEs for the rest of [S, E).  Later,
+	 * imagine that the memory in [S, E) is recycled, but the last 4KB
+	 * page in [S, E) is not the last to be rewritten, or simply accessed.
+	 * In other words, there is still a 4KB page in [S, E), call it P,
+	 * that is writeable but PG_M and PG_A are clear in P's PTE.  Unless
+	 * we write protect P before aborting the promotion, if and when P is
+	 * finally rewritten, there won't be a page fault to trigger
+	 * repromotion.
+	 */
 setpde:
 	if ((newpde & (PG_M | PG_RW)) == PG_RW) {
 		/*
@@ -6800,16 +6832,22 @@ setpde:
 			goto setpde;
 		newpde &= ~PG_RW;
 	}
+	if ((newpde & PG_A) == 0) {
+		counter_u64_add(pmap_pde_p_failures, 1);
+		CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
+		    " in pmap %p", va, pmap);
+		return;
+	}
 
 	/*
 	 * Examine each of the other PTEs in the specified PTP.  Abort if this
 	 * PTE maps an unexpected 4KB physical page or does not have identical
 	 * characteristics to the first PTE.
 	 */
-	pa = (newpde & (PG_PS_FRAME | PG_A | PG_V)) + NBPDR - PAGE_SIZE;
+	pa = (newpde & (PG_PS_FRAME | PG_V)) + NBPDR - PAGE_SIZE;
 	for (pte = firstpte + NPTEPG - 1; pte > firstpte; pte--) {
 		oldpte = *pte;
-		if ((oldpte & (PG_FRAME | PG_A | PG_V)) != pa) {
+		if ((oldpte & (PG_FRAME | PG_V)) != pa) {
 			counter_u64_add(pmap_pde_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
 			    " in pmap %p", va, pmap);
@@ -7651,7 +7689,7 @@ pmap_kenter_temporary(vm_paddr_t pa, int i)
 
 	va = (vm_offset_t)crashdumpmap + (i * PAGE_SIZE);
 	pmap_kenter(va, pa);
-	invlpg(va);
+	pmap_invlpg(kernel_pmap, va);
 	return ((void *)crashdumpmap);
 }
 
@@ -10354,7 +10392,7 @@ pmap_map_io_transient(vm_page_t page[], vm_offset_t vaddr[], int count,
 				    page[i]->md.pat_mode, 0);
 				pte_store(pte, paddr | X86_PG_RW | X86_PG_V |
 				    cache_bits);
-				invlpg(vaddr[i]);
+				pmap_invlpg(kernel_pmap, vaddr[i]);
 			}
 		}
 	}
@@ -10391,6 +10429,13 @@ pmap_quick_enter_page(vm_page_t m)
 		return (PHYS_TO_DMAP(paddr));
 	mtx_lock_spin(&qframe_mtx);
 	KASSERT(*vtopte(qframe) == 0, ("qframe busy"));
+
+	/*
+	 * Since qframe is exclusively mapped by us, and we do not set
+	 * PG_G, we can use INVLPG here.
+	 */
+	invlpg(qframe);
+
 	pte_store(vtopte(qframe), paddr | X86_PG_RW | X86_PG_V | X86_PG_A |
 	    X86_PG_M | pmap_cache_bits(kernel_pmap, m->md.pat_mode, 0));
 	return (qframe);
@@ -10403,7 +10448,6 @@ pmap_quick_remove_page(vm_offset_t addr)
 	if (addr != qframe)
 		return;
 	pte_store(vtopte(qframe), 0);
-	invlpg(qframe);
 	mtx_unlock_spin(&qframe_mtx);
 }
 

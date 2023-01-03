@@ -27,6 +27,41 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 14.x IS SLOW:
 	world, or to merely disable the most expensive debugging functionality
 	at runtime, run "ln -s 'abort:false,junk:false' /etc/malloc.conf".)
 
+20221212:
+	llvm-objump is now always installed as objdump.  Previously there was
+	no /usr/bin/objdump unless the WITH_LLVM_BINUTILS knob was used.
+
+	Some LLVM objdump options have a different output format compared to
+	GNU objdump; readelf is available for inspecting ELF files, and GNU
+	objdump is available from the devel/binutils port or package.
+
+20221205:
+	dma(8) has replaced sendmail(8) as the default mta.  For people willing
+	to reenable sendmail(8):
+
+	$ cp /usr/share/examples/sendmail/mailer.conf /etc/mail/mailer.conf
+
+	and add sendmail_enable="YES" to rc.conf.
+
+20221204:
+	hw.bus.disable_failed_devices has changed from 'false' to 'true' by
+	default. Now if newbus succeeds in probing a device, but fails to attach
+	the device, we'll disable the device. In the past, we'd keep retrying
+	the device on each new driver loaded. To get that behavior now, one
+	needs to use devctl to re-enable the device, and reprobe it (or set
+	the sysctl/tunable hw.bus.disable_failed_devices=false).
+
+	NOTE: This was reverted 20221205 due to unexpected compatibility issues
+
+20221122:
+	pf no longer accepts 'scrub fragment crop' or 'scrub fragment drop-ovl'.
+	These configurations are no longer automatically reinterpreted as
+	'scrub fragment reassemble'.
+
+20221121:
+	The WITHOUT_CLANG_IS_CC option has been removed.  When Clang is enabled
+	it is always installed as /usr/bin/cc (and c++, cpp).
+
 20221026:
 	Some programs have been moved into separate packages. It is recommended
 	for pkgbase users to do:

@@ -37,7 +37,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_tcpdebug.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -83,9 +82,6 @@ __FBSDID("$FreeBSD$");
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_hpts.h>
 #include <netinet/tcpip.h>
-#ifdef TCPDEBUG
-#include <netinet/tcp_debug.h>
-#endif
 
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
@@ -115,7 +111,7 @@ SYSCTL_BOOL(_net_inet_tcp, OID_AUTO, nolocaltimewait,
 void
 tcp_twstart(struct tcpcb *tp)
 {
-	struct inpcb *inp = tp->t_inpcb;
+	struct inpcb *inp = tptoinpcb(tp);
 #ifdef INET6
 	bool isipv6 = inp->inp_inc.inc_flags & INC_ISIPV6;
 #endif

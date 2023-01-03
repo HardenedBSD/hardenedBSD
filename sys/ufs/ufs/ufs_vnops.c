@@ -1510,8 +1510,6 @@ relock:
 		}
 		if (error)
 			goto unlockout;
-		if ((tcnp->cn_flags & SAVESTART) == 0)
-			panic("ufs_rename: lost to startdir");
 	}
 	if (fip->i_effnlink == 0 || fdp->i_effnlink == 0 ||
 	    tdp->i_effnlink == 0)
@@ -2513,7 +2511,7 @@ nextentry:
 		error = 0;
 	if (ap->a_ncookies != NULL) {
 		if (error == 0) {
-			ap->a_ncookies -= ncookies;
+			*ap->a_ncookies -= ncookies;
 		} else {
 			free(*ap->a_cookies, M_TEMP);
 			*ap->a_ncookies = 0;

@@ -405,7 +405,8 @@ pci_vtscsi_tmf_handle(struct pci_vtscsi_softc *sc,
 	io->io_hdr.nexus.initid = sc->vss_iid;
 	io->io_hdr.nexus.targ_lun = pci_vtscsi_get_lun(tmf->lun);
 	io->taskio.tag_type = CTL_TAG_SIMPLE;
-	io->taskio.tag_num = (uint32_t)tmf->id;
+	io->taskio.tag_num = tmf->id;
+	io->io_hdr.flags |= CTL_FLAG_USER_TAG;
 
 	switch (tmf->subtype) {
 	case VIRTIO_SCSI_T_TMF_ABORT_TASK:
@@ -519,7 +520,8 @@ pci_vtscsi_request_handle(struct pci_vtscsi_queue *q, struct iovec *iov_in,
 	}
 
 	io->scsiio.sense_len = sc->vss_config.sense_size;
-	io->scsiio.tag_num = (uint32_t)cmd_rd->id;
+	io->scsiio.tag_num = cmd_rd->id;
+	io->io_hdr.flags |= CTL_FLAG_USER_TAG;
 	switch (cmd_rd->task_attr) {
 	case VIRTIO_SCSI_S_ORDERED:
 		io->scsiio.tag_type = CTL_TAG_ORDERED;
@@ -557,7 +559,7 @@ pci_vtscsi_request_handle(struct pci_vtscsi_queue *q, struct iovec *iov_in,
 	} else {
 		cmd_wr->sense_len = MIN(io->scsiio.sense_len,
 		    sc->vss_config.sense_size);
-		cmd_wr->residual = io->scsiio.residual;
+		cmd_wr->residual = ext_data_len - io->scsiio.ext_data_filled;
 		cmd_wr->status = io->scsiio.scsi_status;
 		cmd_wr->response = VIRTIO_SCSI_S_OK;
 		memcpy(&cmd_wr->sense, &io->scsiio.sense_data,

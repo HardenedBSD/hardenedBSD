@@ -169,6 +169,7 @@ MAN=	aac.4 \
 	gdb.4 \
 	gem.4 \
 	genet.4 \
+	genetlink.4 \
 	geom.4 \
 	geom_linux_lvm.4 \
 	geom_map.4 \
@@ -337,6 +338,7 @@ MAN=	aac.4 \
 	netgdb.4 \
 	netgraph.4 \
 	netintro.4 \
+	netlink.4 \
 	netmap.4 \
 	${_nfe.4} \
 	${_nfsmb.4} \
@@ -470,6 +472,7 @@ MAN=	aac.4 \
 	rl.4 \
 	rndtest.4 \
 	route.4 \
+	rtnetlink.4 \
 	rtsx.4 \
 	rtw88.4 \
 	rtw88fw.4 \
@@ -548,6 +551,7 @@ MAN=	aac.4 \
 	targ.4 \
 	tcp.4 \
 	tcp_bbr.4 \
+	tcp_rack.4 \
 	tdfx.4 \
 	termios.4 \
 	textdump.4 \
@@ -586,6 +590,7 @@ MAN=	aac.4 \
 	vtnet.4 \
 	watchdog.4 \
 	${_wbwd.4} \
+	wg.4 \
 	witness.4 \
 	wlan.4 \
 	wlan_acl.4 \
@@ -763,6 +768,7 @@ MLINKS+=vr.4 if_vr.4
 MLINKS+=vte.4 if_vte.4
 MLINKS+=vtnet.4 if_vtnet.4
 MLINKS+=watchdog.4 SW_WATCHDOG.4
+MLINKS+=wg.4 if_wg.4
 MLINKS+=${_wpi.4} ${_if_wpi.4}
 MLINKS+=xl.4 if_xl.4
 

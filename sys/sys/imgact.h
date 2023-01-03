@@ -96,6 +96,7 @@ struct image_params {
 		uint32_t req_acl_flags; /* Requested PaX settings from ACL */
 		uint32_t req_extattr_flags; /* Req. PaX setting from extattr */
 	} pax;
+	struct vnode *interpreter_vp;	/* vnode of the interpreter */
 };
 
 #ifdef _KERNEL

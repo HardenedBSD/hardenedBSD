@@ -172,7 +172,7 @@ contrib/openzfs/module/lua/lcompat.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/lua/lcorolib.c		optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/lua/lctype.c			optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/lua/ldebug.c			optional zfs compile-with "${ZFS_C}"
-contrib/openzfs/module/lua/ldo.c			optional zfs compile-with "${ZFS_C}"
+contrib/openzfs/module/lua/ldo.c			optional zfs compile-with "${ZFS_C} ${NO_WINFINITE_RECURSION}"
 contrib/openzfs/module/lua/lfunc.c			optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/lua/lgc.c			optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/lua/llex.c			optional zfs compile-with "${ZFS_C}"
@@ -191,7 +191,7 @@ contrib/openzfs/module/lua/lzio.c			optional zfs compile-with "${ZFS_C}"
 
 # zfs nvpair support
 contrib/openzfs/module/nvpair/fnvpair.c		optional zfs compile-with "${ZFS_C}"
-contrib/openzfs/module/nvpair/nvpair.c		optional zfs compile-with "${ZFS_RPC_C}"
+contrib/openzfs/module/nvpair/nvpair.c		optional zfs compile-with "${ZFS_RPC_C} ${NO_WSTRINGOP_OVERREAD}"
 contrib/openzfs/module/nvpair/nvpair_alloc_fixed.c	optional zfs compile-with "${ZFS_C}"
 contrib/openzfs/module/nvpair/nvpair_alloc_spl.c	optional zfs compile-with "${ZFS_C}"
 
@@ -750,8 +750,8 @@ crypto/sha2/sha256c.c		optional crypto | ekcd | geom_bde | \
 crypto/sha2/sha512c.c		optional crypto | geom_bde | zfs
 crypto/skein/skein.c		optional crypto | zfs
 crypto/skein/skein_block.c	optional crypto | zfs
-crypto/siphash/siphash.c	optional inet | inet6
-crypto/siphash/siphash_test.c	optional inet | inet6
+crypto/siphash/siphash.c	optional inet | inet6 | wg
+crypto/siphash/siphash_test.c	optional inet | inet6 | wg
 ddb/db_access.c			optional ddb
 ddb/db_break.c			optional ddb
 ddb/db_capture.c		optional ddb
@@ -1376,6 +1376,7 @@ dev/bhnd/siba/siba_erom.c		optional siba bhnd
 dev/bhnd/siba/siba_subr.c		optional siba bhnd
 #
 dev/bnxt/bnxt_hwrm.c		optional bnxt iflib pci
+dev/bnxt/bnxt_mgmt.c		optional bnxt iflib pci
 dev/bnxt/bnxt_sysctl.c		optional bnxt iflib pci
 dev/bnxt/bnxt_txrx.c		optional bnxt iflib pci
 dev/bnxt/if_bnxt.c		optional bnxt iflib pci
@@ -1723,33 +1724,34 @@ dev/evdev/evdev_mt.c			optional evdev
 dev/evdev/evdev_utils.c			optional evdev
 dev/evdev/uinput.c			optional evdev uinput
 dev/exca/exca.c			optional cbb
-dev/extres/clk/clk.c		optional clk fdt
-dev/extres/clk/clkdev_if.m	optional clk fdt
-dev/extres/clk/clknode_if.m	optional clk fdt
+dev/extres/clk/clk.c		optional clk
+dev/extres/clk/clkdev_if.m	optional clk
+dev/extres/clk/clknode_if.m	optional clk
 dev/extres/clk/clk_bus.c	optional clk fdt
-dev/extres/clk/clk_div.c	optional clk fdt
-dev/extres/clk/clk_fixed.c	optional clk fdt
-dev/extres/clk/clk_gate.c	optional clk fdt
-dev/extres/clk/clk_link.c	optional clk fdt
-dev/extres/clk/clk_mux.c	optional clk fdt
-dev/extres/phy/phy.c		optional phy fdt
+dev/extres/clk/clk_div.c	optional clk
+dev/extres/clk/clk_fixed.c	optional clk
+dev/extres/clk/clk_gate.c	optional clk
+dev/extres/clk/clk_link.c	optional clk
+dev/extres/clk/clk_mux.c	optional clk
+dev/extres/phy/phy.c		optional phy
 dev/extres/phy/phydev_if.m	optional phy fdt
-dev/extres/phy/phynode_if.m	optional phy fdt
-dev/extres/phy/phy_usb.c	optional phy fdt
-dev/extres/phy/phynode_usb_if.m	optional phy fdt
-dev/extres/hwreset/hwreset.c	optional hwreset fdt
-dev/extres/hwreset/hwreset_if.m	optional hwreset fdt
+dev/extres/phy/phynode_if.m	optional phy
+dev/extres/phy/phy_usb.c	optional phy
+dev/extres/phy/phynode_usb_if.m	optional phy
+dev/extres/hwreset/hwreset.c	optional hwreset
+dev/extres/hwreset/hwreset_array.c	optional hwreset
+dev/extres/hwreset/hwreset_if.m	optional hwreset
 dev/extres/nvmem/nvmem.c	optional nvmem fdt
-dev/extres/nvmem/nvmem_if.m	optional nvmem fdt
+dev/extres/nvmem/nvmem_if.m	optional nvmem
 dev/extres/regulator/regdev_if.m	optional regulator fdt
 dev/extres/regulator/regnode_if.m	optional regulator
 dev/extres/regulator/regulator.c	optional regulator
 dev/extres/regulator/regulator_bus.c	optional regulator fdt
-dev/extres/regulator/regulator_fixed.c	optional regulator fdt
+dev/extres/regulator/regulator_fixed.c	optional regulator
 dev/extres/syscon/syscon.c		optional syscon
 dev/extres/syscon/syscon_generic.c	optional syscon fdt
 dev/extres/syscon/syscon_if.m		optional syscon
-dev/extres/syscon/syscon_power.c	optional syscon syscon_power fdt
+dev/extres/syscon/syscon_power.c	optional syscon syscon_power
 dev/fb/fbd.c			optional fbd | vt
 dev/fb/fb_if.m			standard
 dev/fb/splash.c			optional sc splash
@@ -2432,6 +2434,7 @@ dev/mii/icsphy.c		optional miibus | icsphy
 dev/mii/ip1000phy.c		optional miibus | ip1000phy
 dev/mii/jmphy.c			optional miibus | jmphy
 dev/mii/lxtphy.c		optional miibus | lxtphy
+dev/mii/mcommphy.c		optional miibus | mcommphy
 dev/mii/micphy.c		optional miibus fdt | micphy fdt
 dev/mii/mii.c			optional miibus | mii
 dev/mii/mii_bitbang.c		optional miibus | mii_bitbang
@@ -3480,6 +3483,14 @@ dev/vt/vt_font.c		optional vt
 dev/vt/vt_sysmouse.c		optional vt
 dev/vte/if_vte.c		optional vte pci
 dev/watchdog/watchdog.c		standard
+dev/wg/if_wg.c			optional wg				\
+	compile-with "${NORMAL_C} -include $S/dev/wg/compat.h"
+dev/wg/wg_cookie.c		optional wg				\
+	compile-with "${NORMAL_C} -include $S/dev/wg/compat.h"
+dev/wg/wg_crypto.c		optional wg				\
+	compile-with "${NORMAL_C} -include $S/dev/wg/compat.h"
+dev/wg/wg_noise.c		optional wg				\
+	compile-with "${NORMAL_C} -include $S/dev/wg/compat.h"
 dev/wpi/if_wpi.c		optional wpi pci
 wpifw.c			optional wpifw					\
 	compile-with	"${AWK} -f $S/tools/fw_stub.awk wpi.fw:wpifw:153229 -mwpi -c${.TARGET}" \
@@ -3772,7 +3783,7 @@ kern/bus_if.m			standard
 kern/clock_if.m			standard
 kern/cpufreq_if.m		standard
 kern/device_if.m		standard
-kern/imgact_binmisc.c		optional	imagact_binmisc
+kern/imgact_binmisc.c		optional imgact_binmisc
 kern/imgact_elf.c		standard
 kern/imgact_elf32.c		optional compat_freebsd32
 kern/imgact_shell.c		standard
@@ -3874,7 +3885,7 @@ kern/stack_protector.c		standard \
 kern/subr_acl_nfs4.c		optional ufs_acl | zfs
 kern/subr_acl_posix1e.c		optional ufs_acl
 kern/subr_asan.c		optional kasan \
-	compile-with "${NORMAL_C:N-fsanitize*}"
+	compile-with "${NORMAL_C:N-fsanitize*:N-fstack-protector*}"
 kern/subr_autoconf.c		standard
 kern/subr_blist.c		standard
 kern/subr_boot.c		standard
@@ -3889,7 +3900,7 @@ kern/subr_coverage.c		optional coverage \
 	compile-with "${NORMAL_C:N-fsanitize*}"
 kern/subr_counter.c		standard
 kern/subr_csan.c		optional kcsan \
-	compile-with "${NORMAL_C:N-fsanitize*}"
+	compile-with "${NORMAL_C:N-fsanitize*:N-fstack-protector*}"
 kern/subr_devstat.c		standard
 kern/subr_disk.c		standard
 kern/subr_early.c		standard
@@ -3908,7 +3919,7 @@ kern/subr_log.c			standard
 kern/subr_mchain.c		optional libmchain
 kern/subr_module.c		standard
 kern/subr_msan.c		optional kmsan \
-	compile-with "${NORMAL_C:N-fsanitize*}"
+	compile-with "${NORMAL_C:N-fsanitize*:N-fstack-protector*}"
 kern/subr_msgbuf.c		standard
 kern/subr_param.c		standard
 kern/subr_pcpu.c		standard
@@ -4387,7 +4398,6 @@ netinet/sctp_timer.c		optional inet sctp | inet6 sctp
 netinet/sctp_usrreq.c		optional inet sctp | inet6 sctp
 netinet/sctputil.c		optional inet sctp | inet6 sctp
 netinet/siftr.c			optional inet siftr alq | inet6 siftr alq
-netinet/tcp_debug.c		optional tcpdebug
 netinet/tcp_ecn.c		optional inet | inet6
 netinet/tcp_fastopen.c		optional inet tcp_rfc7413 | inet6 tcp_rfc7413
 netinet/tcp_hostcache.c		optional inet | inet6
@@ -4470,6 +4480,18 @@ netipsec/xform_ipcomp.c		optional ipsec inet | ipsec inet6
 netipsec/xform_tcp.c		optional ipsec inet tcp_signature | \
 	 ipsec inet6 tcp_signature | ipsec_support inet tcp_signature | \
 	 ipsec_support inet6 tcp_signature
+netlink/netlink_domain.c	optional netlink
+netlink/netlink_generic.c	optional netlink
+netlink/netlink_io.c		optional netlink
+netlink/netlink_message_parser.c	optional netlink
+netlink/netlink_message_writer.c	optional netlink
+netlink/netlink_module.c	optional netlink
+netlink/netlink_route.c		optional netlink
+netlink/route/iface_drivers.c	optional netlink
+netlink/route/iface.c		optional netlink
+netlink/route/neigh.c		optional netlink
+netlink/route/nexthop.c		optional netlink
+netlink/route/rt.c		optional netlink
 netpfil/ipfw/dn_aqm_codel.c	optional inet dummynet
 netpfil/ipfw/dn_aqm_pie.c	optional inet dummynet
 netpfil/ipfw/dn_heap.c		optional inet dummynet
@@ -4530,6 +4552,7 @@ netpfil/pf/pf_osfp.c		optional pf inet
 netpfil/pf/pf_ruleset.c		optional pf inet
 netpfil/pf/pf_syncookies.c	optional pf inet
 netpfil/pf/pf_table.c		optional pf inet
+netpfil/pf/pfsync_nv.c		optional pfsync pf inet
 netpfil/pf/in4_cksum.c		optional pf inet
 netsmb/smb_conn.c		optional netsmb
 netsmb/smb_crypt.c		optional netsmb

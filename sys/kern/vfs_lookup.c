@@ -161,6 +161,7 @@ nameiinit(void *dummy __unused)
 	    UMA_ALIGN_PTR, 0);
 	vfs_vector_op_register(&crossmp_vnodeops);
 	getnewvnode("crossmp", NULL, &crossmp_vnodeops, &vp_crossmp);
+	vp_crossmp->v_state = VSTATE_CONSTRUCTED;
 }
 SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_SECOND, nameiinit, NULL);
 
@@ -800,9 +801,6 @@ vfs_lookup_degenerate(struct nameidata *ndp, struct vnode *dp, int wantparent)
 
 	if (!(cnp->cn_flags & (LOCKPARENT | LOCKLEAF)))
 		VOP_UNLOCK(dp);
-	/* XXX This should probably move to the top of function. */
-	if (cnp->cn_flags & SAVESTART)
-		panic("lookup: SAVESTART");
 	return (0);
 bad:
 	VOP_UNLOCK(dp);
@@ -1208,10 +1206,6 @@ unionlookup:
 		 * doesn't currently exist, leaving a pointer to the
 		 * (possibly locked) directory vnode in ndp->ni_dvp.
 		 */
-		if (cnp->cn_flags & SAVESTART) {
-			ndp->ni_startdir = ndp->ni_dvp;
-			VREF(ndp->ni_startdir);
-		}
 		goto success;
 	}
 
@@ -1265,14 +1259,28 @@ good:
 		crosslock = (dp->v_vflag & VV_CROSSLOCK) != 0;
 		crosslkflags = compute_cn_lkflags(mp, cnp->cn_lkflags,
 		    cnp->cn_flags);
-		if (__predict_false(crosslock) &&
-		    (crosslkflags & LK_EXCLUSIVE) != 0 &&
-		    VOP_ISLOCKED(dp) != LK_EXCLUSIVE) {
-			vn_lock(dp, LK_UPGRADE | LK_RETRY);
-			if (VN_IS_DOOMED(dp)) {
-				error = ENOENT;
-				goto bad2;
-			}
+		if (__predict_false(crosslock)) {
+			/*
+			 * We are going to be holding the vnode lock, which
+			 * in this case is shared by the root vnode of the
+			 * filesystem mounted at mp, across the call to
+			 * VFS_ROOT().  Make the situation clear to the
+			 * filesystem by passing LK_CANRECURSE if the
+			 * lock is held exclusive, or by clearinng
+			 * LK_NODDLKTREAT to allow recursion on the shared
+			 * lock in the presence of an exclusive waiter.
+			 */
+			if (VOP_ISLOCKED(dp) == LK_EXCLUSIVE) {
+				crosslkflags &= ~LK_SHARED;
+				crosslkflags |= LK_EXCLUSIVE | LK_CANRECURSE;
+			} else if ((crosslkflags & LK_EXCLUSIVE) != 0) {
+				vn_lock(dp, LK_UPGRADE | LK_RETRY);
+				if (VN_IS_DOOMED(dp)) {
+					error = ENOENT;
+					goto bad2;
+				}
+			} else
+				crosslkflags &= ~LK_NODDLKTREAT;
 		}
 		if (vfs_busy(mp, 0) != 0)
 			continue;
@@ -1352,10 +1360,6 @@ nextname:
 		error = EROFS;
 		goto bad2;
 	}
-	if (cnp->cn_flags & SAVESTART) {
-		ndp->ni_startdir = ndp->ni_dvp;
-		VREF(ndp->ni_startdir);
-	}
 	if (!wantparent) {
 		ni_dvp_unlocked = 2;
 		if (ndp->ni_dvp != dp)
@@ -1421,7 +1425,8 @@ bad_unlocked:
  *    Used by lookup to re-acquire things.
  */
 int
-vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
+vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
+    bool refstart)
 {
 	struct vnode *dp = NULL;		/* the directory we are searching */
 	int rdonly;			/* lookup read-only flag bit */
@@ -1465,7 +1470,7 @@ vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 			VOP_UNLOCK(dp);
 		*vpp = dp;
 		/* XXX This should probably move to the top of function. */
-		if (cnp->cn_flags & SAVESTART)
+		if (refstart)
 			panic("lookup: SAVESTART");
 		return (0);
 	}
@@ -1492,7 +1497,7 @@ vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 			goto bad;
 		}
 		/* ASSERT(dvp == ndp->ni_startdir) */
-		if (cnp->cn_flags & SAVESTART)
+		if (refstart)
 			VREF(dvp);
 		if ((cnp->cn_flags & LOCKPARENT) == 0)
 			VOP_UNLOCK(dp);
@@ -1530,7 +1535,7 @@ vfs_relookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 	    ("relookup: symlink found.\n"));
 
 	/* ASSERT(dvp == ndp->ni_startdir) */
-	if (cnp->cn_flags & SAVESTART)
+	if (refstart)
 		VREF(dvp);
 
 	if ((cnp->cn_flags & LOCKLEAF) == 0)
@@ -1540,53 +1545,6 @@ bad:
 	vput(dp);
 	*vpp = NULL;
 	return (error);
-}
-
-void
-(NDFREE)(struct nameidata *ndp, const u_int flags)
-{
-	int unlock_dvp;
-	int unlock_vp;
-
-	unlock_dvp = 0;
-	unlock_vp = 0;
-
-	if (!(flags & NDF_NO_FREE_PNBUF)) {
-		NDFREE_PNBUF(ndp);
-	}
-	if (!(flags & NDF_NO_VP_UNLOCK) &&
-	    (ndp->ni_cnd.cn_flags & LOCKLEAF) && ndp->ni_vp)
-		unlock_vp = 1;
-	if (!(flags & NDF_NO_DVP_UNLOCK) &&
-	    (ndp->ni_cnd.cn_flags & LOCKPARENT) &&
-	    ndp->ni_dvp != ndp->ni_vp)
-		unlock_dvp = 1;
-	if (!(flags & NDF_NO_VP_RELE) && ndp->ni_vp) {
-		if (unlock_vp) {
-			vput(ndp->ni_vp);
-			unlock_vp = 0;
-		} else
-			vrele(ndp->ni_vp);
-		ndp->ni_vp = NULL;
-	}
-	if (unlock_vp)
-		VOP_UNLOCK(ndp->ni_vp);
-	if (!(flags & NDF_NO_DVP_RELE) &&
-	    (ndp->ni_cnd.cn_flags & (LOCKPARENT|WANTPARENT))) {
-		if (unlock_dvp) {
-			vput(ndp->ni_dvp);
-			unlock_dvp = 0;
-		} else
-			vrele(ndp->ni_dvp);
-		ndp->ni_dvp = NULL;
-	}
-	if (unlock_dvp)
-		VOP_UNLOCK(ndp->ni_dvp);
-	if (!(flags & NDF_NO_STARTDIR_RELE) &&
-	    (ndp->ni_cnd.cn_flags & SAVESTART)) {
-		vrele(ndp->ni_startdir);
-		ndp->ni_startdir = NULL;
-	}
 }
 
 #ifdef INVARIANTS

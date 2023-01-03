@@ -118,7 +118,6 @@ gcm_mode_encrypt_contiguous_blocks(gcm_ctx_t *ctx, char *data, size_t length,
 		return (CRYPTO_SUCCESS);
 	}
 
-	lastp = (uint8_t *)ctx->gcm_cb;
 	crypto_init_ptrs(out, &iov_or_mp, &offset);
 
 	gops = gcm_impl_get_ops();
@@ -1021,13 +1020,15 @@ icp_gcm_impl_get(char *buffer, zfs_kernel_param_t *kp)
 		}
 #endif
 		fmt = (impl == gcm_impl_opts[i].sel) ? "[%s] " : "%s ";
-		cnt += sprintf(buffer + cnt, fmt, gcm_impl_opts[i].name);
+		cnt += kmem_scnprintf(buffer + cnt, PAGE_SIZE - cnt, fmt,
+		    gcm_impl_opts[i].name);
 	}
 
 	/* list all supported implementations */
 	for (i = 0; i < gcm_supp_impl_cnt; i++) {
 		fmt = (i == impl) ? "[%s] " : "%s ";
-		cnt += sprintf(buffer + cnt, fmt, gcm_supp_impl[i]->name);
+		cnt += kmem_scnprintf(buffer + cnt, PAGE_SIZE - cnt, fmt,
+		    gcm_supp_impl[i]->name);
 	}
 
 	return (cnt);

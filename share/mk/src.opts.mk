@@ -82,7 +82,6 @@ __DEFAULT_YES_OPTIONS = \
     CDDL \
     CLANG \
     CLANG_BOOTSTRAP \
-    CLANG_IS_CC \
     CLEAN \
     CPP \
     CROSS_COMPILER \
@@ -203,7 +202,6 @@ __DEFAULT_NO_OPTIONS = \
     ASAN \
     BEARSSL \
     BHYVE_SNAPSHOT \
-    DEVD_PIE \
     CLANG_FORMAT \
     DETECT_TZ_CHANGES \
     DTRACE_TESTS \
@@ -211,8 +209,6 @@ __DEFAULT_NO_OPTIONS = \
     FREEBSD_UPDATE \
     HESIOD \
     LIB32 \
-    HTTPD \
-    LOADER_FIREWIRE \
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
     MALLOC_PRODUCTION \
@@ -252,6 +248,8 @@ __DEFAULT_DEPENDENT_OPTIONS= \
     WIRELESS
 __DEFAULT_DEPENDENT_OPTIONS+= ${var}_SUPPORT/${var}
 .endfor
+
+.-include <site.src.opts.mk>
 
 #
 # Default behaviour of some options depends on the architecture.  Unfortunately
@@ -389,6 +387,11 @@ __DEFAULT_YES_OPTIONS+=OPENMP
 __DEFAULT_NO_OPTIONS+=OPENMP
 .endif
 
+# libc++ requires C++20
+.if !${COMPILER_FEATURES:Mc++20}
+BROKEN_OPTIONS+=CXX
+.endif
+
 .include <bsd.mkopt.mk>
 
 #
@@ -420,6 +423,9 @@ MK_KERBEROS_SUPPORT:=	no
 
 .if ${MK_CXX} == "no"
 MK_CLANG:=	no
+MK_LLD:=	no
+MK_LLDB:=	no
+MK_LLVM_BINUTILS:= no
 MK_GOOGLETEST:=	no
 MK_OFED:=	no
 MK_OPENMP:=	no

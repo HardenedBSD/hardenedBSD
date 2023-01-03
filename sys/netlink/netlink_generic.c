@@ -29,6 +29,7 @@
 __FBSDID("$FreeBSD$");
 #include <sys/types.h>
 #include <sys/ck.h>
+#include <sys/epoch.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -38,7 +39,6 @@ __FBSDID("$FreeBSD$");
 
 #include <netlink/netlink.h>
 #include <netlink/netlink_ctl.h>
-#include <netlink/netlink_var.h>
 #include <netlink/netlink_generic.h>
 
 #define	DEBUG_MOD_NAME	nl_generic
@@ -47,7 +47,7 @@ __FBSDID("$FreeBSD$");
 _DECLARE_DEBUG(LOG_DEBUG3);
 
 #define	MAX_FAMILIES	20
-#define	MAX_GROUPS	20
+#define	MAX_GROUPS	64
 
 #define	MIN_GROUP_NUM	48
 
@@ -134,6 +134,22 @@ free_family(struct genl_family *gf)
 }
 
 /*
+ * unregister groups of a given family
+ */
+static void
+unregister_groups(const struct genl_family *gf)
+{
+
+	for (int i = 0; i < MAX_GROUPS; i++) {
+		struct genl_group *gg = &groups[i];
+		if (gg->group_family == gf && gg->group_name != NULL) {
+			gg->group_family = NULL;
+			gg->group_name = NULL;
+		}
+	}
+}
+
+/*
  * Can sleep, I guess
  */
 bool
@@ -148,6 +164,7 @@ genl_unregister_family(const char *family_name)
 
 	if (gf != NULL) {
 		found = true;
+		unregister_groups(gf);
 		/* TODO: zero pointer first */
 		free_family(gf);
 		bzero(gf, sizeof(*gf));
@@ -378,12 +395,24 @@ static const struct nlfield_parser nlf_p_generic[] = {
 };
 
 static struct nlattr_parser nla_p_generic[] = {
-	{ .type = CTRL_ATTR_FAMILY_ID , .off = _OUT(family_id), .cb = nlattr_get_uint32 },
-	{ .type = CTRL_ATTR_FAMILY_NAME , .off = _OUT(family_id), .cb = nlattr_get_string },
+	{ .type = CTRL_ATTR_FAMILY_ID , .off = _OUT(family_id), .cb = nlattr_get_uint16 },
+	{ .type = CTRL_ATTR_FAMILY_NAME , .off = _OUT(family_name), .cb = nlattr_get_string },
 };
 #undef _IN
 #undef _OUT
 NL_DECLARE_PARSER(genl_parser, struct genlmsghdr, nlf_p_generic, nla_p_generic);
+
+static bool
+match_family(const struct genl_family *gf, const struct nl_parsed_family *attrs)
+{
+	if (gf->family_name == NULL)
+		return (false);
+	if (attrs->family_id != 0 && attrs->family_id != gf->family_id)
+		return (false);
+	if (attrs->family_name != NULL && strcmp(attrs->family_name, gf->family_name))
+		return (false);
+	return (true);
+}
 
 static int
 nlctrl_handle_getfamily(struct nlmsghdr *hdr, struct nl_pstate *npt)
@@ -399,18 +428,32 @@ nlctrl_handle_getfamily(struct nlmsghdr *hdr, struct nl_pstate *npt)
 		.cmd = CTRL_CMD_NEWFAMILY,
 	};
 
+	if (attrs.family_id != 0 || attrs.family_name != NULL) {
+		/* Resolve request */
+		for (int i = 0; i < MAX_FAMILIES; i++) {
+			struct genl_family *gf = &families[i];
+			if (match_family(gf, &attrs)) {
+				error = dump_family(hdr, &ghdr, gf, npt->nw);
+				return (error);
+			}
+		}
+		return (ENOENT);
+	}
+
+	hdr->nlmsg_flags = hdr->nlmsg_flags | NLM_F_MULTI;
 	for (int i = 0; i < MAX_FAMILIES; i++) {
 		struct genl_family *gf = &families[i];
-		if (gf->family_name == NULL)
-			continue;
-		if (attrs.family_id != 0 && attrs.family_id != gf->family_id)
-			continue;
-		if (attrs.family_name != NULL && strcmp(attrs.family_name, gf->family_name))
-			continue;
-		error = dump_family(hdr, &ghdr, &families[i], npt->nw);
-		if (error != 0)
-			break;
+		if (match_family(gf, &attrs)) {
+			error = dump_family(hdr, &ghdr, gf, npt->nw);
+			if (error != 0)
+				break;
+		}
 	}
+
+	if (!nlmsg_end_dump(npt->nw, error, hdr)) {
+                NL_LOG(LOG_DEBUG, "Unable to finalize the dump");
+                return (ENOMEM);
+        }
 
 	return (error);
 }
@@ -435,7 +478,7 @@ static const struct genl_cmd nlctrl_cmds[] = {
 		.cmd_num = CTRL_CMD_GETFAMILY,
 		.cmd_name = "GETFAMILY",
 		.cmd_cb = nlctrl_handle_getfamily,
-		.cmd_flags = GENL_CMD_CAP_DO | GENL_CMD_CAP_DUMP, GENL_CMD_CAP_HASPOL,
+		.cmd_flags = GENL_CMD_CAP_DO | GENL_CMD_CAP_DUMP | GENL_CMD_CAP_HASPOL,
 	},
 };
 
@@ -470,6 +513,6 @@ genl_unload(void *u __unused)
 {
 	genl_nlctrl_destroy();
 	GENL_LOCK_DESTROY();
-	epoch_wait_preempt(net_epoch_preempt);
+	NET_EPOCH_WAIT();
 }
 SYSUNINIT(genl_unload, SI_SUB_PROTO_DOMAIN, SI_ORDER_THIRD, genl_unload, NULL);

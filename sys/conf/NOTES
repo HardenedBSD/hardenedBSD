@@ -692,6 +692,9 @@ options		IPSEC_SUPPORT
 # TLS framing and encryption/decryption of data over TCP sockets.
 options		KERN_TLS		# TLS transmit and receive offload
 
+# Netlink kernel/user<>kernel/user messaging interface
+options		NETLINK
+
 #
 # SMB/CIFS requester
 # NETSMB enables support for SMB protocol, it requires LIBMCHAIN and LIBICONV
@@ -961,6 +964,9 @@ device		enc
 # Link aggregation interface.
 device		lagg
 
+# WireGuard interface.
+device		wg
+
 #
 # Internet family options:
 #
@@ -1006,10 +1012,6 @@ device		lagg
 #
 # PF_DEFAULT_TO_DROP causes the default pf(4) rule to deny everything.
 #
-# TCPDEBUG enables code which keeps traces of the TCP state machine
-# for sockets with the SO_DEBUG option set, which can then be examined
-# using the trpt(8) utility.
-#
 # TCPPCAP enables code which keeps the last n packets sent and received
 # on a TCP socket.
 #
@@ -1034,7 +1036,6 @@ options 	IPFILTER_LOOKUP		#ipfilter pools
 options 	IPFILTER_DEFAULT_BLOCK	#block all packets by default
 options 	IPSTEALTH		#support for stealth forwarding
 options 	PF_DEFAULT_TO_DROP	#drop everything by default
-options 	TCPDEBUG
 options 	TCPPCAP
 options 	TCP_BLACKBOX
 options 	TCP_HHOOK
@@ -2769,7 +2770,7 @@ options 	RANDOM_ENABLE_UMA	# slab allocator
 options 	RANDOM_ENABLE_ETHER	# ether_input
 
 # Module to enable execution of application via emulators like QEMU
-options         IMAGACT_BINMISC
+options         IMGACT_BINMISC
 
 # zlib I/O stream support
 # This enables support for compressed core dumps.

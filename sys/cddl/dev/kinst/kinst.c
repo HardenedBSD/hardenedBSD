@@ -39,7 +39,7 @@ static dtrace_pattr_t kinst_attr = {
 { DTRACE_STABILITY_PRIVATE, DTRACE_STABILITY_PRIVATE, DTRACE_CLASS_ISA },
 };
 
-static dtrace_pops_t kinst_pops = {
+static const dtrace_pops_t kinst_pops = {
 	.dtps_provide		= NULL,
 	.dtps_provide_module	= kinst_provide_module,
 	.dtps_enable		= kinst_enable,
@@ -153,6 +153,13 @@ static void
 kinst_enable(void *arg, dtrace_id_t id, void *parg)
 {
 	struct kinst_probe *kp = parg;
+	static bool warned = false;
+
+	if (!warned) {
+		KINST_LOG(
+		    "kinst: This provider is experimental, exercise caution");
+		warned = true;
+	}
 
 	kinst_patch_tracepoint(kp, kp->kp_patchval);
 }
@@ -173,10 +180,16 @@ kinst_load(void *dummy)
 	error = kinst_trampoline_init();
 	if (error != 0)
 		return (error);
+	error = kinst_md_init();
+	if (error != 0) {
+		kinst_trampoline_deinit();
+		return (error);
+	}
 
 	error = dtrace_register("kinst", &kinst_attr, DTRACE_PRIV_USER, NULL,
 	    &kinst_pops, NULL, &kinst_id);
 	if (error != 0) {
+		kinst_md_deinit();
 		kinst_trampoline_deinit();
 		return (error);
 	}
@@ -194,6 +207,7 @@ static int
 kinst_unload(void *dummy)
 {
 	free(kinst_probetab, M_KINST);
+	kinst_md_deinit();
 	kinst_trampoline_deinit();
 	dtrace_invop_remove(kinst_invop);
 	destroy_dev(kinst_cdev);
@@ -208,8 +222,6 @@ kinst_modevent(module_t mod __unused, int type, void *data __unused)
 
 	switch (type) {
 	case MOD_LOAD:
-		KINST_LOG(
-		    "kinst: This provider is experimental, exercise caution");
 		break;
 	case MOD_UNLOAD:
 		break;

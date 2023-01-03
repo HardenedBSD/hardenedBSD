@@ -111,4 +111,6 @@ CFLAGS.b3_ppc64le_sse41.S = -DLOCORE
 
 CFI_OVERRIDE=	-fno-sanitize=cfi-icall
 
+LDFLAGS.bfd+= -Wl,-znoexecstack
+
 .include <bsd.lib.mk>

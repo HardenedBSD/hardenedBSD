@@ -119,7 +119,6 @@
       - X11Forwarding defaults to "yes".
       - PasswordAuthentication defaults to "no".
       - VersionAddendum defaults to "FreeBSD-YYYYMMDD".
-      - PrivilegeSeparation defaults to "sandbox".
       - UseDNS defaults to "yes".
 
 2) Modified client-side defaults
@@ -128,7 +127,6 @@
 
       - CheckHostIP defaults to "no".
       - VerifyHostKeyDNS defaults to "yes" if built with LDNS.
-      - VersionAddendum defaults to "FreeBSD-YYYYMMDD".
 
 3) Canonic host names
 
@@ -162,7 +160,17 @@
    upstream submission from
    https://github.com/openssh/openssh-portable/pull/262.
 
-8) Retired patches
+8) Blocklist integration
+
+   We include blocklist (https://github.com/zoulasc/blocklist) in FreeBSD,
+   and ssh is patched to report login failures to it.
+
+9) Paths
+
+   A number of paths are changed to match FreeBSD's configuration (e.g.,
+   using /usr/local/ instead of /uxr/X11R6/).
+
+10) Retired patches
 
    We no longer have HPN patches (adaptive buffer size for increased
    throughput on high-BxD links) or client-side VersionAddendum, but we

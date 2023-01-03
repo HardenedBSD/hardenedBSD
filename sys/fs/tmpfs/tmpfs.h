@@ -170,6 +170,7 @@ LIST_HEAD(tmpfs_extattr_list_head, tmpfs_extattr_list_entry);
  * (i)  tn_interlock
  * (m)  tmpfs_mount tm_allnode_lock
  * (c)  stable after creation
+ * (v)  tn_reg.tn_aobj vm_object lock
  */
 struct tmpfs_node {
 	/*
@@ -321,6 +322,7 @@ struct tmpfs_node {
 			 */
 			vm_object_t		tn_aobj;	/* (c) */
 			struct tmpfs_mount	*tn_tmp;	/* (c) */
+			vm_pindex_t		tn_pages;	/* (v) */
 
 			/*
 			 * The extended attributes list, which may be
@@ -555,6 +557,37 @@ extern int tmpfs_pager_type;
  * Macros/functions to convert from generic data structures to tmpfs
  * specific ones.
  */
+
+static inline struct vnode *
+VM_TO_TMPFS_VP(vm_object_t obj)
+{
+	struct tmpfs_node *node;
+
+	if ((obj->flags & OBJ_TMPFS) == 0)
+		return (NULL);
+
+	/*
+	 * swp_priv is the back-pointer to the tmpfs node, if any,
+	 * which uses the vm object as backing store.  The object
+	 * handle is not used to avoid locking sw_alloc_sx on tmpfs
+	 * node instantiation/destroy.
+	 */
+	node = obj->un_pager.swp.swp_priv;
+	return (node->tn_vnode);
+}
+
+static inline struct tmpfs_mount *
+VM_TO_TMPFS_MP(vm_object_t obj)
+{
+	struct tmpfs_node *node;
+
+	if ((obj->flags & OBJ_TMPFS) == 0)
+		return (NULL);
+
+	node = obj->un_pager.swp.swp_priv;
+	MPASS(node->tn_type == VREG);
+	return (node->tn_reg.tn_tmp);
+}
 
 static inline struct tmpfs_mount *
 VFS_TO_TMPFS(struct mount *mp)

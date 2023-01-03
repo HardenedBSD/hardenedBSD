@@ -265,6 +265,8 @@
         rc.d
         ..
     ..
+    examples
+    ..
     games
     ..
     gnu
@@ -826,6 +828,8 @@
             tunnel
             ..
         ..
+        netlink
+        ..
         netmap
         ..
         netpfil
@@ -1059,6 +1063,8 @@
         m4
         ..
         mkimg
+        ..
+        mktemp
         ..
         ncal
         ..

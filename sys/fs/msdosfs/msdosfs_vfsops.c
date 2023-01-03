@@ -431,8 +431,6 @@ mountmsdosfs(struct vnode *odevvp, struct mount *mp)
 	ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
 
 	devvp = mntfs_allocvp(mp, odevvp);
-	VOP_UNLOCK(odevvp);
-	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 	dev = devvp->v_rdev;
 	if (atomic_cmpset_acq_ptr((uintptr_t *)&dev->si_mountpt, 0,
 	    (uintptr_t)mp) == 0) {
@@ -1041,8 +1039,7 @@ loop:
 		error = VOP_FSYNC(vp, waitfor, td);
 		if (error)
 			allerror = error;
-		VOP_UNLOCK(vp);
-		vrele(vp);
+		vput(vp);
 	}
 
 	/*

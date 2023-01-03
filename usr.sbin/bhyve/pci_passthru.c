@@ -212,7 +212,7 @@ cfginitmsi(struct passthru_softc *sc)
 	struct pcisel sel;
 	struct pci_devinst *pi;
 	struct msixcap msixcap;
-	uint32_t *msixcap_ptr;
+	char *msixcap_ptr;
 
 	pi = sc->psc_pi;
 	sel = sc->psc_sel;
@@ -249,15 +249,15 @@ cfginitmsi(struct passthru_softc *sc)
 				 */
 				sc->psc_msix.capoff = ptr;
 				caplen = 12;
-				msixcap_ptr = (uint32_t*) &msixcap;
+				msixcap_ptr = (char *)&msixcap;
 				capptr = ptr;
 				while (caplen > 0) {
 					u32 = read_config(&sel, capptr, 4);
-					*msixcap_ptr = u32;
+					memcpy(msixcap_ptr, &u32, 4);
 					pci_set_cfgdata32(pi, capptr, u32);
 					caplen -= 4;
 					capptr += 4;
-					msixcap_ptr++;
+					msixcap_ptr += 4;
 				}
 			}
 			ptr = read_config(&sel, ptr + PCICAP_NEXTPTR, 1);
@@ -386,7 +386,7 @@ msix_table_read(struct passthru_softc *sc, uint64_t offset, int size)
 }
 
 static void
-msix_table_write(struct vmctx *ctx, int vcpu, struct passthru_softc *sc,
+msix_table_write(struct vmctx *ctx, struct passthru_softc *sc,
 		 uint64_t offset, int size, uint64_t data)
 {
 	struct pci_devinst *pi;
@@ -445,7 +445,7 @@ msix_table_write(struct vmctx *ctx, int vcpu, struct passthru_softc *sc,
 		/* If the entry is masked, don't set it up */
 		if ((entry->vector_control & PCIM_MSIX_VCTRL_MASK) == 0 ||
 		    (vector_control & PCIM_MSIX_VCTRL_MASK) == 0) {
-			(void)vm_setup_pptdev_msix(ctx, vcpu,
+			(void)vm_setup_pptdev_msix(ctx, 0,
 			    sc->psc_sel.pc_bus, sc->psc_sel.pc_dev,
 			    sc->psc_sel.pc_func, index, entry->addr,
 			    entry->msg_data, entry->vector_control);
@@ -903,8 +903,8 @@ msixcap_access(struct passthru_softc *sc, int coff)
 }
 
 static int
-passthru_cfgread(struct vmctx *ctx __unused, int vcpu __unused,
-    struct pci_devinst *pi, int coff, int bytes, uint32_t *rv)
+passthru_cfgread(struct vmctx *ctx __unused, struct pci_devinst *pi, int coff,
+    int bytes, uint32_t *rv)
 {
 	struct passthru_softc *sc;
 
@@ -948,8 +948,8 @@ passthru_cfgread(struct vmctx *ctx __unused, int vcpu __unused,
 }
 
 static int
-passthru_cfgwrite(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-		  int coff, int bytes, uint32_t val)
+passthru_cfgwrite(struct vmctx *ctx, struct pci_devinst *pi, int coff,
+    int bytes, uint32_t val)
 {
 	int error, msix_table_entries, i;
 	struct passthru_softc *sc;
@@ -969,7 +969,7 @@ passthru_cfgwrite(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 	if (msicap_access(sc, coff)) {
 		pci_emul_capwrite(pi, coff, bytes, val, sc->psc_msi.capoff,
 		    PCIY_MSI);
-		error = vm_setup_pptdev_msi(ctx, vcpu, sc->psc_sel.pc_bus,
+		error = vm_setup_pptdev_msi(ctx, 0, sc->psc_sel.pc_bus,
 			sc->psc_sel.pc_dev, sc->psc_sel.pc_func,
 			pi->pi_msi.addr, pi->pi_msi.msg_data,
 			pi->pi_msi.maxmsgnum);
@@ -984,7 +984,7 @@ passthru_cfgwrite(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 		if (pi->pi_msix.enabled) {
 			msix_table_entries = pi->pi_msix.table_count;
 			for (i = 0; i < msix_table_entries; i++) {
-				error = vm_setup_pptdev_msix(ctx, vcpu,
+				error = vm_setup_pptdev_msix(ctx, 0,
 				    sc->psc_sel.pc_bus, sc->psc_sel.pc_dev,
 				    sc->psc_sel.pc_func, i,
 				    pi->pi_msix.table[i].addr,
@@ -1029,8 +1029,8 @@ passthru_cfgwrite(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 }
 
 static void
-passthru_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
-	       uint64_t offset, int size, uint64_t value)
+passthru_write(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
+    uint64_t offset, int size, uint64_t value)
 {
 	struct passthru_softc *sc;
 	struct pci_bar_ioreq pio;
@@ -1038,7 +1038,7 @@ passthru_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
 	sc = pi->pi_arg;
 
 	if (baridx == pci_msix_table_bar(pi)) {
-		msix_table_write(ctx, vcpu, sc, offset, size, value);
+		msix_table_write(ctx, sc, offset, size, value);
 	} else {
 		assert(pi->pi_bar[baridx].type == PCIBAR_IO);
 		assert(size == 1 || size == 2 || size == 4);
@@ -1057,8 +1057,8 @@ passthru_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
 }
 
 static uint64_t
-passthru_read(struct vmctx *ctx __unused, int vcpu __unused,
-    struct pci_devinst *pi, int baridx, uint64_t offset, int size)
+passthru_read(struct vmctx *ctx __unused, struct pci_devinst *pi, int baridx,
+    uint64_t offset, int size)
 {
 	struct passthru_softc *sc;
 	struct pci_bar_ioreq pio;

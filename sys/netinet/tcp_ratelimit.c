@@ -36,7 +36,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_tcpdebug.h"
 #include "opt_ratelimit.h"
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -1317,14 +1316,15 @@ const struct tcp_hwrate_limit_table *
 tcp_set_pacing_rate(struct tcpcb *tp, struct ifnet *ifp,
     uint64_t bytes_per_sec, int flags, int *error, uint64_t *lower_rate)
 {
+	struct inpcb *inp = tptoinpcb(tp);
 	const struct tcp_hwrate_limit_table *rte;
 #ifdef KERN_TLS
 	struct ktls_session *tls;
 #endif
 
-	INP_WLOCK_ASSERT(tp->t_inpcb);
+	INP_WLOCK_ASSERT(inp);
 
-	if (tp->t_inpcb->inp_snd_tag == NULL) {
+	if (inp->inp_snd_tag == NULL) {
 		/*
 		 * We are setting up a rate for the first time.
 		 */
@@ -1336,8 +1336,8 @@ tcp_set_pacing_rate(struct tcpcb *tp, struct ifnet *ifp,
 		}
 #ifdef KERN_TLS
 		tls = NULL;
-		if (tp->t_inpcb->inp_socket->so_snd.sb_flags & SB_TLS_IFNET) {
-			tls = tp->t_inpcb->inp_socket->so_snd.sb_tls_info;
+		if (tptosocket(tp)->so_snd.sb_flags & SB_TLS_IFNET) {
+			tls = tptosocket(tp)->so_snd.sb_tls_info;
 
 			if ((ifp->if_capenable & IFCAP_TXTLS_RTLMT) == 0 ||
 			    tls->mode != TCP_TLS_MODE_IFNET) {
@@ -1347,7 +1347,7 @@ tcp_set_pacing_rate(struct tcpcb *tp, struct ifnet *ifp,
 			}
 		}
 #endif
-		rte = rt_setup_rate(tp->t_inpcb, ifp, bytes_per_sec, flags, error, lower_rate);
+		rte = rt_setup_rate(inp, ifp, bytes_per_sec, flags, error, lower_rate);
 		if (rte)
 			rl_increment_using(rte);
 #ifdef KERN_TLS
@@ -1358,7 +1358,7 @@ tcp_set_pacing_rate(struct tcpcb *tp, struct ifnet *ifp,
 			 * tag to a TLS ratelimit tag.
 			 */
 			MPASS(tls->snd_tag->sw->type == IF_SND_TAG_TYPE_TLS);
-			ktls_output_eagain(tp->t_inpcb, tls);
+			ktls_output_eagain(inp, tls);
 		}
 #endif
 	} else {
@@ -1381,6 +1381,7 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
     struct tcpcb *tp, struct ifnet *ifp,
     uint64_t bytes_per_sec, int flags, int *error, uint64_t *lower_rate)
 {
+	struct inpcb *inp = tptoinpcb(tp);
 	const struct tcp_hwrate_limit_table *nrte;
 	const struct tcp_rate_set *rs;
 #ifdef KERN_TLS
@@ -1388,7 +1389,7 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 #endif
 	int err;
 
-	INP_WLOCK_ASSERT(tp->t_inpcb);
+	INP_WLOCK_ASSERT(inp);
 
 	if (crte == NULL) {
 		/* Wrong interface */
@@ -1398,8 +1399,8 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 	}
 
 #ifdef KERN_TLS
-	if (tp->t_inpcb->inp_socket->so_snd.sb_flags & SB_TLS_IFNET) {
-		tls = tp->t_inpcb->inp_socket->so_snd.sb_tls_info;
+	if (tptosocket(tp)->so_snd.sb_flags & SB_TLS_IFNET) {
+		tls = tptosocket(tp)->so_snd.sb_tls_info;
 		if (tls->mode != TCP_TLS_MODE_IFNET)
 			tls = NULL;
 		else if (tls->snd_tag != NULL &&
@@ -1427,7 +1428,7 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 		}
 	}
 #endif
-	if (tp->t_inpcb->inp_snd_tag == NULL) {
+	if (inp->inp_snd_tag == NULL) {
 		/* Wrong interface */
 		tcp_rel_pacing_rate(crte, tp);
 		if (error)
@@ -1466,7 +1467,7 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 		err = ktls_modify_txrtlmt(tls, nrte->rate);
 	else
 #endif
-		err = in_pcbmodify_txrtlmt(tp->t_inpcb, nrte->rate);
+		err = in_pcbmodify_txrtlmt(inp, nrte->rate);
 	if (err) {
 		struct tcp_rate_set *lrs;
 		uint64_t pre;
@@ -1475,8 +1476,8 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 		lrs = __DECONST(struct tcp_rate_set *, rs);
 		pre = atomic_fetchadd_64(&lrs->rs_flows_using, -1);
 		/* Do we still have a snd-tag attached? */
-		if (tp->t_inpcb->inp_snd_tag)
-			in_pcbdetach_txrtlmt(tp->t_inpcb);
+		if (inp->inp_snd_tag)
+			in_pcbdetach_txrtlmt(inp);
 
 		if (pre == 1) {
 			struct epoch_tracker et;
@@ -1508,11 +1509,12 @@ tcp_chg_pacing_rate(const struct tcp_hwrate_limit_table *crte,
 void
 tcp_rel_pacing_rate(const struct tcp_hwrate_limit_table *crte, struct tcpcb *tp)
 {
+	struct inpcb *inp = tptoinpcb(tp);
 	const struct tcp_rate_set *crs;
 	struct tcp_rate_set *rs;
 	uint64_t pre;
 
-	INP_WLOCK_ASSERT(tp->t_inpcb);
+	INP_WLOCK_ASSERT(inp);
 
 	tp->t_pacing_rate = -1;
 	crs = crte->ptbl;
@@ -1543,7 +1545,7 @@ tcp_rel_pacing_rate(const struct tcp_hwrate_limit_table *crte, struct tcpcb *tp)
 	 * ktls_output_eagain() to reset the send tag to a plain
 	 * TLS tag?
 	 */
-	in_pcbdetach_txrtlmt(tp->t_inpcb);
+	in_pcbdetach_txrtlmt(inp);
 }
 
 #define ONE_POINT_TWO_MEG 150000 /* 1.2 megabits in bytes */
@@ -1573,8 +1575,8 @@ tcp_log_pacing_size(struct tcpcb *tp, uint64_t bw, uint32_t segsiz, uint32_t new
 		log.u_bbr.cur_del_rate = bw;
 		log.u_bbr.delRate = hw_rate;
 		TCP_LOG_EVENTP(tp, NULL,
-		    &tp->t_inpcb->inp_socket->so_rcv,
-		    &tp->t_inpcb->inp_socket->so_snd,
+		    &tptosocket(tp)->so_rcv,
+		    &tptosocket(tp)->so_snd,
 		    TCP_HDWR_PACE_SIZE, 0,
 		    0, &log, false, &tv);
 	}

@@ -52,6 +52,29 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20221214: TCPDEBUG removed
+OLD_FILES+=usr/include/netinet/tcp_debug.h
+
+# 20221213: remove sync serial drivers and utilities
+OLD_FILES+=sbin/sconfig
+OLD_FILES+=usr/share/man/man4/ce.4
+OLD_FILES+=usr/share/man/man4/cp.4
+OLD_FILES+=usr/share/man/man8/sconfig.8.gz
+
+# 20221202: remove trpt(8)
+OLD_FILES+=usr/sbin/trpt
+OLD_FILES+=usr/share/man/man8/trpt.8.gz
+
+# 20221117: remove typo'd man page link
+OLD_FILES+=usr/share/man/man9/vm_map_wire_mapped.9.gz
+
+# 20221114: remove othermta
+OLD_FILES+=etc/rc.d/othermta
+
+# 20221109: remove rc.sendmail(8)
+OLD_FILES+=etc/rc.sendmail
+OLD_FILES+=usr/share/man/man8/rc.sendmail.8.gz
+
 # 20221015: update the ithread(9) man page
 OLD_FILES+=usr/share/man/man9/ithread.9.gz
 OLD_FILES+=usr/share/man/man9/ithread_add_handler.9.gz
@@ -80,7 +103,6 @@ OLD_FILES+=usr/lib/libopie.a
 OLD_FILES+=usr/lib/libopie.so
 OLD_LIBS+=usr/lib/libopie.so.8
 OLD_FILES+=usr/lib/libopie_p.a
-OLD_FILES+=usr/bin/opieinfo
 OLD_FILES+=usr/lib/pam_opie.so
 OLD_LIBS+=usr/lib/pam_opie.so.6
 OLD_FILES+=usr/lib/pam_opieaccess.so
@@ -5253,10 +5275,6 @@ OLD_FILES+=usr/include/crypto/xform_auth.h
 OLD_FILES+=usr/include/crypto/xform_comp.h
 OLD_FILES+=usr/include/crypto/xform_enc.h
 
-# 20210315: if_wg(4) removed
-OLD_FILES+=usr/share/man/man4/if_wg.4.gz
-OLD_FILES+=usr/share/man/man4/wg.4.gz
-
 # 20210305: removed Poly1305_* symbols
 OLD_FILES+=usr/include/crypto/xform_poly1305.h
 
@@ -7894,8 +7912,6 @@ OLD_FILES+=usr/bin/mklocale
 OLD_FILES+=usr/share/man/man1/mklocale.1.gz
 OLD_FILES+=usr/bin/colldef
 OLD_FILES+=usr/share/man/man1/colldef.1.gz
-# 20190909: vm_map_unwire(9) removed
-OLD_FILES+=usr/share/man/man9/vm_map_unwire.9.gz
 # 20190904: Remove boot1.efifat and gptboot.efifat (which never should have been)
 OLD_FILES+=boot/boot1.efifat
 OLD_FILES+=boot/gptboot.efifat

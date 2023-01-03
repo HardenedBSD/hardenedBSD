@@ -76,6 +76,7 @@ static int harden_rtld_global = PAX_FEATURE_SIMPLE_DISABLED;
 #endif
 
 static int pax_kmod_load_disable = PAX_FEATURE_SIMPLE_DISABLED;
+static int prohibit_ptrace_syscall_global = PAX_FEATURE_SIMPLE_ENABLED;
 
 static int pax_tpe_gid = 0;
 static int pax_tpe_negate = 0;
@@ -93,6 +94,7 @@ TUNABLE_INT("hardening.tpe.negate", &pax_tpe_negate);
 TUNABLE_INT("hardening.tpe.all", &pax_tpe_all);
 TUNABLE_INT("hardening.tpe.root_owned", &pax_tpe_root_owned);
 TUNABLE_INT("hardening.harden_rtld", &harden_rtld_global);
+TUNABLE_INT("hardening.prohibit_ptrace_syscall", &prohibit_ptrace_syscall_global);
 
 #ifdef PAX_SYSCTLS
 SYSCTL_DECL(_hardening_pax);
@@ -108,6 +110,11 @@ SYSCTL_HBSD_2STATE(harden_rtld_global, pr_hbsd.hardening.harden_rtld,
     _hardening, harden_rtld,
     CTLTYPE_INT|CTLFLAG_PRISON|CTLFLAG_RWTUN|CTLFLAG_SECURE,
     "Harden RTLD");
+SYSCTL_HBSD_2STATE(prohibit_ptrace_syscall_global,
+    pr_hbsd.hardening.prohibit_ptrace_syscall,
+    _hardening, prohibit_ptrace_syscall,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE,
+    "Prohibit syscall over ptrace boundary");
 
 SYSCTL_DECL(_hardening_pax);
 SYSCTL_NODE(_hardening_pax, OID_AUTO, tpe, CTLFLAG_RD, 0,
@@ -208,6 +215,12 @@ pax_hardening_sysinit(void)
 		printf("[HBSD HARDENING] unset insecure init variables: %s\n",
 		    pax_status_simple_str[pax_init_hardening_global]);
 	}
+
+	old_state = prohibit_ptrace_syscall_global;
+	if (!pax_feature_simple_validate_state(&prohibit_ptrace_syscall_global)) {
+		printf("[HBSD HARDENING] WARNING, invalid settings in loader.conf!"
+		    " (hardening.prohibit_ptrace_syscall = %d)\n", old_state);
+	}
 }
 SYSINIT(pax_hardening, SI_SUB_PAX, SI_ORDER_SECOND, pax_hardening_sysinit, NULL);
 
@@ -228,6 +241,8 @@ pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		pr->pr_hbsd.hardening.tpe = pax_tpe_global;
 		pr->pr_hbsd.hardening.harden_rtld = harden_rtld_global;
 		pr->pr_allow &= ~(PR_ALLOW_UNPRIV_DEBUG);
+		pr->pr_hbsd.hardening.prohibit_ptrace_syscall =
+		    prohibit_ptrace_syscall_global;
 	} else {
 		KASSERT(pr->pr_parent != NULL,
 		   ("%s: pr->pr_parent == NULL", __func__));
@@ -238,6 +253,8 @@ pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		pr->pr_hbsd.hardening.tpe = pr_p->pr_hbsd.hardening.tpe;
 		pr->pr_hbsd.hardening.harden_rtld =
 		    pr_p->pr_hbsd.hardening.harden_rtld;
+		pr->pr_hbsd.hardening.prohibit_ptrace_syscall =
+		    pr_p->pr_hbsd.hardening.prohibit_ptrace_syscall;
 		error = pax_handle_prison_param(opts, "hardening.harden_rtld",
 		    &(pr->pr_hbsd.hardening.harden_rtld));
 	}
@@ -304,6 +321,15 @@ pax_procfs_harden(struct thread *td)
 	pr = pax_get_prison_td(td);
 
 	return (pr->pr_hbsd.hardening.procfs_harden ? EPERM : 0);
+}
+
+int
+pax_ptrace_syscall_prohibit(struct thread *td)
+{
+	struct prison *pr;
+
+	pr = pax_get_prison_td(td);
+	return (pr->pr_hbsd.hardening.prohibit_ptrace_syscall ? EPERM : 0);
 }
 
 int

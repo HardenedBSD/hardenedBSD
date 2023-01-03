@@ -45,6 +45,18 @@ main() {
 		caroot)
 			pkgdeps="openssl"
 			;;
+
+		# -dev packages that have no corresponding non-dev package
+		# as a dependency.
+		liby-dev)
+			outname=${outname%%-dev}
+			_descr="Development Files"
+			;;
+		liby-lib32_dev)
+			outname=${outname%%-lib32_dev}
+			_descr="32-bit Libraries, Development Files"
+			;;
+
 		utilities)
 			uclfile="${uclfile}"
 			;;
@@ -84,7 +96,6 @@ main() {
 			pkgdeps="${outname}"
 			;;
 		${origname})
-			pkgdeps="runtime"
 			;;
 		*)
 			uclfile="${outname##*}${origname}"

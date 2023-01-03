@@ -43,6 +43,7 @@
  * allocate and release resources.
  */
 
+#include "opt_ddb.h"
 #include "opt_tmpfs.h"
 
 #include <sys/cdefs.h>
@@ -245,7 +246,7 @@ again:
 				VM_OBJECT_RUNLOCK(object);
 				continue;
 			}
-			vp = object->un_pager.swp.swp_tmpfs;
+			vp = VM_TO_TMPFS_VP(object);
 			if (vp->v_mount != mp) {
 				VM_OBJECT_RUNLOCK(object);
 				continue;
@@ -556,7 +557,11 @@ tmpfs_free_tmp(struct tmpfs_mount *tmp)
 	TMPFS_UNLOCK(tmp);
 
 	mtx_destroy(&tmp->tm_allnode_lock);
-	MPASS(tmp->tm_pages_used == 0);
+	/*
+	 * We cannot assert that tmp->tm_pages_used == 0 there,
+	 * because tmpfs vm_objects might be still mapped by some
+	 * process and outlive the mount due to reference counting.
+	 */
 	MPASS(tmp->tm_nodes_inuse == 0);
 
 	free(tmp, M_TMPFSMNT);
@@ -696,3 +701,44 @@ struct vfsops tmpfs_vfsops = {
 	.vfs_uninit =			tmpfs_uninit,
 };
 VFS_SET(tmpfs_vfsops, tmpfs, VFCF_JAIL);
+
+#ifdef DDB
+#include <ddb/ddb.h>
+
+static void
+db_print_tmpfs(struct mount *mp, struct tmpfs_mount *tmp)
+{
+	db_printf("mp %p (%s) tmp %p\n", mp,
+	    mp->mnt_stat.f_mntonname, tmp);
+	db_printf(
+	    "\tsize max %ju pages max %lu pages used %lu\n"
+	    "\tinodes max %ju inodes inuse %ju refcount %ju\n"
+	    "\tmaxfilesize %ju r%c %snamecache %smtime\n",
+	    (uintmax_t)tmp->tm_size_max, tmp->tm_pages_max, tmp->tm_pages_used,
+	    (uintmax_t)tmp->tm_nodes_max, (uintmax_t)tmp->tm_nodes_inuse,
+	    (uintmax_t)tmp->tm_refcount, (uintmax_t)tmp->tm_maxfilesize,
+	    tmp->tm_ronly ? 'o' : 'w', tmp->tm_nonc ? "no" : "",
+	    tmp->tm_nomtime ? "no" : "");
+}
+
+DB_SHOW_COMMAND(tmpfs, db_show_tmpfs)
+{
+	struct mount *mp;
+	struct tmpfs_mount *tmp;
+
+	if (have_addr) {
+		mp = (struct mount *)addr;
+		tmp = VFS_TO_TMPFS(mp);
+		db_print_tmpfs(mp, tmp);
+		return;
+	}
+
+	TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+		if (strcmp(mp->mnt_stat.f_fstypename, tmpfs_vfsconf.vfc_name) ==
+		    0) {
+			tmp = VFS_TO_TMPFS(mp);
+			db_print_tmpfs(mp, tmp);
+		}
+	}
+}
+#endif	/* DDB */

@@ -40,7 +40,6 @@ SRCS+=		sanitizer_common/sanitizer_type_traits.cpp
 CFLAGS+=	-flto
 CXXFLAGS+=	-flto
 LDFLAGS+=	-flto
-.endif
 
 FILESDIR=	${SANITIZER_SHAREDIR}
 FILES+=		cfi/cfi_ignorelist.txt

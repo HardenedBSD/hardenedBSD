@@ -1007,8 +1007,23 @@ send_print_verbose(FILE *fout, const char *tosnap, const char *fromsnap,
 			(void) fprintf(fout, dgettext(TEXT_DOMAIN,
 			    "incremental\t%s\t%s"), fromsnap, tosnap);
 		} else {
+/*
+ * Workaround for GCC 12+ with UBSan enabled deficencies.
+ *
+ * GCC 12+ invoked with -fsanitize=undefined incorrectly reports the code
+ * below as violating -Wformat-overflow.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && \
+	defined(ZFS_UBSAN_ENABLED) && defined(HAVE_FORMAT_OVERFLOW)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow"
+#endif
 			(void) fprintf(fout, dgettext(TEXT_DOMAIN,
 			    "full\t%s"), tosnap);
+#if defined(__GNUC__) && !defined(__clang__) && \
+	defined(ZFS_UBSAN_ENABLED) && defined(HAVE_FORMAT_OVERFLOW)
+#pragma GCC diagnostic pop
+#endif
 		}
 		(void) fprintf(fout, "\t%llu", (longlong_t)size);
 	} else {
@@ -1028,8 +1043,23 @@ send_print_verbose(FILE *fout, const char *tosnap, const char *fromsnap,
 		if (size != 0) {
 			char buf[16];
 			zfs_nicebytes(size, buf, sizeof (buf));
+/*
+ * Workaround for GCC 12+ with UBSan enabled deficencies.
+ *
+ * GCC 12+ invoked with -fsanitize=undefined incorrectly reports the code
+ * below as violating -Wformat-overflow.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && \
+	defined(ZFS_UBSAN_ENABLED) && defined(HAVE_FORMAT_OVERFLOW)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow"
+#endif
 			(void) fprintf(fout, dgettext(TEXT_DOMAIN,
 			    " estimated size is %s"), buf);
+#if defined(__GNUC__) && !defined(__clang__) && \
+	defined(ZFS_UBSAN_ENABLED) && defined(HAVE_FORMAT_OVERFLOW)
+#pragma GCC diagnostic pop
+#endif
 		}
 	}
 	(void) fprintf(fout, "\n");
@@ -2117,9 +2147,9 @@ send_prelim_records(zfs_handle_t *zhp, const char *from, int fd,
 			fnvlist_add_boolean(hdrnv, "raw");
 		}
 
-		if ((err = gather_nvlist(zhp->zfs_hdl, tofs,
+		if (gather_nvlist(zhp->zfs_hdl, tofs,
 		    from, tosnap, recursive, raw, doall, replicate, skipmissing,
-		    verbose, backup, holds, props, &fss, fsavlp)) != 0) {
+		    verbose, backup, holds, props, &fss, fsavlp) != 0) {
 			return (zfs_error(zhp->zfs_hdl, EZFS_BADBACKUP,
 			    errbuf));
 		}
@@ -4387,7 +4417,7 @@ zfs_receive_one(libzfs_handle_t *hdl, int infd, const char *tosnap,
 			 * prepend a path separator.
 			 */
 			int len = strlen(drrb->drr_toname);
-			cp = malloc(len + 2);
+			cp = umem_alloc(len + 2, UMEM_NOFAIL);
 			cp[0] = '/';
 			(void) strcpy(&cp[1], drrb->drr_toname);
 			chopprefix = cp;
@@ -4440,7 +4470,8 @@ zfs_receive_one(libzfs_handle_t *hdl, int infd, const char *tosnap,
 	 */
 	(void) strlcpy(destsnap, tosnap, sizeof (destsnap));
 	(void) strlcat(destsnap, chopprefix, sizeof (destsnap));
-	free(cp);
+	if (cp != NULL)
+		umem_free(cp, strlen(cp) + 1);
 	if (!zfs_name_valid(destsnap, ZFS_TYPE_SNAPSHOT)) {
 		err = zfs_error(hdl, EZFS_INVALIDNAME, errbuf);
 		goto out;

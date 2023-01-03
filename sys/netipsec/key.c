@@ -592,6 +592,7 @@ static struct supported_ealgs {
 	{ SADB_X_EALG_AESCTR,		&enc_xform_aes_icm },
 	{ SADB_X_EALG_AESGCM16,		&enc_xform_aes_nist_gcm },
 	{ SADB_X_EALG_AESGMAC,		&enc_xform_aes_nist_gmac },
+	{ SADB_X_EALG_CHACHA20POLY1305,	&enc_xform_chacha20_poly1305 },
 };
 
 static struct supported_aalgs {
@@ -606,6 +607,7 @@ static struct supported_aalgs {
 	{ SADB_X_AALG_AES128GMAC,	&auth_hash_nist_gmac_aes_128 },
 	{ SADB_X_AALG_AES192GMAC,	&auth_hash_nist_gmac_aes_192 },
 	{ SADB_X_AALG_AES256GMAC,	&auth_hash_nist_gmac_aes_256 },
+	{ SADB_X_AALG_CHACHA20POLY1305,	&auth_hash_poly1305 },
 };
 
 static struct supported_calgs {
@@ -804,8 +806,16 @@ int
 key_havesp(u_int dir)
 {
 
-	return (dir == IPSEC_DIR_INBOUND || dir == IPSEC_DIR_OUTBOUND ?
-		TAILQ_FIRST(&V_sptree[dir]) != NULL : 1);
+	IPSEC_ASSERT(dir == IPSEC_DIR_INBOUND || dir == IPSEC_DIR_OUTBOUND,
+		("invalid direction %u", dir));
+	return (TAILQ_FIRST(&V_sptree[dir]) != NULL);
+}
+
+int
+key_havesp_any(void)
+{
+
+	return (V_spd_size != 0);
 }
 
 /* %%% IPsec policy management */

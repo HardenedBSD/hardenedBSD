@@ -108,5 +108,7 @@ device		mmcsd			# mmc/sd flash cards
 options 	HID_DEBUG		# enable debug msgs
 device		hid			# Generic HID support
 
-#hyper-v support
-device		hyperv
+# Firmware
+device		scmi			# System Control Management Interface
+
+device		mmio_sram		# Generic on-chip SRAM

@@ -27,8 +27,8 @@
 __FBSDID("$FreeBSD$");
 
 #include <stand.h>
-#include <sys/endian.h>
 #include <sys/param.h>
+#include <sys/boot.h>
 #include <fdt_platform.h>
 
 #include <machine/cpufunc.h>
@@ -49,49 +49,101 @@ static void kboot_kseg_get(int *nseg, void **ptr);
 
 extern int command_fdt_internal(int argc, char *argv[]);
 
+/*
+ * NB: getdev should likely be identical to this most places, except maybe
+ * we should move to storing the length of the platform devdesc.
+ */
 int
 kboot_getdev(void **vdev, const char *devspec, const char **path)
 {
-	int i, rv;
-	const char *devpath, *filepath;
-	struct devsw *dv;
-	struct devdesc *desc;
+	int rv;
+	struct devdesc **dev = (struct devdesc **)vdev;
 
-	if (devspec == NULL) {
-		rv = kboot_getdev(vdev, getenv("currdev"), NULL);
-		if (rv == 0 && path != NULL)
+	/*
+	 * If it looks like this is just a path and no device, go with the
+	 * current device.
+	 */
+	if (devspec == NULL || strchr(devspec, ':') == NULL) {
+		if (((rv = devparse(dev, getenv("currdev"), NULL)) == 0) &&
+		    (path != NULL))
 			*path = devspec;
 		return (rv);
 	}
-	if (strchr(devspec, ':') != NULL) {
-		devpath = devspec;
-		filepath = strchr(devspec, ':') + 1;
-	} else {
-		devpath = getenv("currdev");
-		filepath = devspec;
+
+	/*
+	 * Try to parse the device name off the beginning of the devspec
+	 */
+	return (devparse(dev, devspec, path));
+}
+
+static int
+parse_args(int argc, const char **argv)
+{
+	int howto = 0;
+
+	/*
+	 * When run as init, sometimes argv[0] is a EFI-ESP path, other times
+	 * it's the name of the init program, and sometimes it's a placeholder
+	 * string, so we exclude it here. For the other args, look for DOS-like
+	 * and Unix-like absolte paths and exclude parsing it if we find that,
+	 * otherwise parse it as a command arg (so looking for '-X', 'foo' or
+	 * 'foo=bar'). This is a little different than EFI where it argv[0]
+	 * often times is the first argument passed in. There are cases when
+	 * linux-booting via EFI that we have the EFI path we used to run
+	 * bootXXX.efi as the arguments to init, so we need to exclude the paths
+	 * there as well.
+	 */
+	for (int i = 1; i < argc; i++) {
+		if (argv[i][0] != '\\' && argv[i][0] != '/') {
+			howto |= boot_parse_arg(argv[i]);
+		}
 	}
 
-	for (i = 0; (dv = devsw[i]) != NULL; i++) {
-		if (strncmp(dv->dv_name, devpath, strlen(dv->dv_name)) == 0)
-			goto found;
+	return (howto);
+}
+
+static vm_offset_t rsdp;
+
+static vm_offset_t
+kboot_rsdp_from_efi(void)
+{
+	char buffer[512 + 1];
+	char *walker, *ep;
+
+	if (!file2str("/sys/firmware/efi/systab", buffer, sizeof(buffer)))
+		return (0);	/* Not an EFI system */
+	ep = buffer + strlen(buffer);
+	walker = buffer;
+	while (walker < ep) {
+		if (strncmp("ACPI20=", walker, 7) == 0)
+			return((vm_offset_t)strtoull(walker + 7, NULL, 0));
+		if (strncmp("ACPI=", walker, 5) == 0)
+			return((vm_offset_t)strtoull(walker + 5, NULL, 0));
+		walker += strcspn(walker, "\n");
 	}
-	return (ENOENT);
-
-found:
-	if (path != NULL && filepath != NULL)
-		*path = filepath;
-	else if (path != NULL)
-		*path = strchr(devspec, ':') + 1;
-
-	if (vdev != NULL) {
-		desc = malloc(sizeof(*desc));
-		desc->d_dev = dv;
-		desc->d_unit = 0;
-		desc->d_opendata = strdup(devpath);
-		*vdev = desc;
-	}
-
 	return (0);
+}
+
+static void
+find_acpi(void)
+{
+	rsdp = kboot_rsdp_from_efi();
+#if 0	/* maybe for amd64 */
+	if (rsdp == 0)
+		rsdp = find_rsdp_arch();
+#endif
+}
+
+vm_offset_t
+acpi_rsdp(void)
+{
+	return (rsdp);
+}
+
+bool
+has_acpi(void)
+{
+	return rsdp != 0;
 }
 
 int
@@ -100,6 +152,14 @@ main(int argc, const char **argv)
 	void *heapbase;
 	const size_t heapsize = 15*1024*1024;
 	const char *bootdev;
+
+	archsw.arch_getdev = kboot_getdev;
+	archsw.arch_copyin = kboot_copyin;
+	archsw.arch_copyout = kboot_copyout;
+	archsw.arch_readin = kboot_readin;
+	archsw.arch_autoload = kboot_autoload;
+	archsw.arch_loadaddr = kboot_loadaddr;
+	archsw.arch_kexec_kseg_get = kboot_kseg_get;
 
 	/* Give us a sane world if we're running as init */
 	do_init();
@@ -115,23 +175,13 @@ main(int argc, const char **argv)
 	 */
 	cons_probe();
 
-	/* Choose bootdev if provided */
-	if (argc > 1)
-		bootdev = argv[1];
-	else
-		bootdev = "";
-	if (argc > 2)
-		hostfs_root = argv[2];
+	/* Initialize all the devices */
+	devinit();
+
+	/* Parse the command line args -- ignoring for now the console selection */
+	parse_args(argc, argv);
 
 	printf("Boot device: %s with hostfs_root %s\n", bootdev, hostfs_root);
-
-	archsw.arch_getdev = kboot_getdev;
-	archsw.arch_copyin = kboot_copyin;
-	archsw.arch_copyout = kboot_copyout;
-	archsw.arch_readin = kboot_readin;
-	archsw.arch_autoload = kboot_autoload;
-	archsw.arch_loadaddr = kboot_loadaddr;
-	archsw.arch_kexec_kseg_get = kboot_kseg_get;
 
 	printf("\n%s", bootprog_info);
 
@@ -139,6 +189,11 @@ main(int argc, const char **argv)
 	setenv("loaddev", bootdev, 1);
 	setenv("LINES", "24", 1);
 	setenv("usefdt", "1", 1);
+
+	/*
+	 * Find acpi, if it exists
+	 */
+	find_acpi();
 
 	interact();			/* doesn't return */
 

@@ -236,4 +236,25 @@ memset_p(void **p, void *v, size_t n)
 		return (memset64((uint64_t *)p, (uintptr_t)v, n));
 }
 
+static inline void
+memcpy_and_pad(void *dst, size_t dstlen, const void *src, size_t len, int ch)
+{
+
+	if (len >= dstlen) {
+		memcpy(dst, src, dstlen);
+	} else {
+		memcpy(dst, src, len);
+		/* Pad with given padding character. */
+		memset((char *)dst + len, ch, dstlen - len);
+	}
+}
+
+#define	memset_startat(ptr, bytepat, smember)				\
+({									\
+	uint8_t *_ptr = (uint8_t *)(ptr);				\
+	int _c = (int)(bytepat);					\
+	size_t _o = offsetof(typeof(*(ptr)), smember);			\
+	memset(_ptr + _o, _c, sizeof(*(ptr)) - _o);			\
+})
+
 #endif	/* _LINUXKPI_LINUX_STRING_H_ */

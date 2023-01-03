@@ -132,6 +132,7 @@ static void linux_cdev_deref(struct linux_cdev *ldev);
 static struct vm_area_struct *linux_cdev_handle_find(void *handle);
 
 cpumask_t cpu_online_mask;
+static cpumask_t static_single_cpu_mask[MAXCPU];
 struct kobject linux_class_root;
 struct device linux_root_device;
 struct class linux_class_misc;
@@ -831,6 +832,18 @@ zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 		pmap_remove_all(m);
 	VM_OBJECT_RUNLOCK(obj);
 	return (0);
+}
+
+void
+vma_set_file(struct vm_area_struct *vma, struct linux_file *file)
+{
+	struct linux_file *tmp;
+
+	/* Changing an anonymous vma with this is illegal */
+	get_file(file);
+	tmp = vma->vm_file;
+	vma->vm_file = file;
+	fput(tmp);
 }
 
 static struct file_operations dummy_ldev_ops = {
@@ -2734,6 +2747,16 @@ bool linux_cpu_has_clflush;
 struct cpuinfo_x86 boot_cpu_data;
 #endif
 
+cpumask_t *
+lkpi_get_static_single_cpu_mask(int cpuid)
+{
+
+	KASSERT((cpuid >= 0 && cpuid < MAXCPU), ("%s: invalid cpuid %d\n",
+	    __func__, cpuid));
+
+	return (&static_single_cpu_mask[cpuid]);
+}
+
 static void
 linux_compat_init(void *arg)
 {
@@ -2743,6 +2766,7 @@ linux_compat_init(void *arg)
 #if defined(__i386__) || defined(__amd64__)
 	linux_cpu_has_clflush = (cpu_feature & CPUID_CLFSH);
 	boot_cpu_data.x86_clflush_size = cpu_clflush_line_size;
+	boot_cpu_data.x86_max_cores = mp_ncpus;
 	boot_cpu_data.x86 = ((cpu_id & 0xf0000) >> 12) | ((cpu_id & 0xf0) >> 4);
 #endif
 	rw_init(&linux_vma_lock, "lkpi-vma-lock");
@@ -2771,6 +2795,15 @@ linux_compat_init(void *arg)
 	init_waitqueue_head(&linux_var_waitq);
 
 	CPU_COPY(&all_cpus, &cpu_online_mask);
+	/*
+	 * Generate a single-CPU cpumask_t for each CPU (possibly) in the system.
+	 * CPUs are indexed from 0..(MAXCPU-1).  The entry for cpuid 0 will only
+	 * have itself in the cpumask, cupid 1 only itself on entry 1, and so on.
+	 * This is used by cpumask_of() (and possibly others in the future) for,
+	 * e.g., drivers to pass hints to irq_set_affinity_hint().
+	 */
+	for (i = 0; i < MAXCPU; i++)
+		CPU_SET(i, &static_single_cpu_mask[i]);
 }
 SYSINIT(linux_compat, SI_SUB_DRIVERS, SI_ORDER_SECOND, linux_compat_init, NULL);
 

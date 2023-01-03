@@ -96,8 +96,6 @@ ptov(uintptr_t x)
 int
 main(void)
 {
-	int	i;
-
 	/* Pick up arguments */
 	kargs = (void *)__args;
 	initial_howto = kargs->howto;
@@ -115,7 +113,7 @@ main(void)
 	 */
 	bios_getmem();
 
-#if defined(LOADER_BZIP2_SUPPORT) || defined(LOADER_FIREWIRE_SUPPORT) || \
+#if defined(LOADER_BZIP2_SUPPORT) || \
     defined(LOADER_GPT_SUPPORT) || defined(LOADER_ZFS_SUPPORT)
 	if (high_heap_size > 0) {
 		heap_top = PTOV(high_heap_base + high_heap_size);
@@ -244,12 +242,7 @@ main(void)
 		import_geli_boot_data(gbdata);
 #endif /* LOADER_GELI_SUPPORT */
 
-	/*
-	 * March through the device switch probing for things.
-	 */
-	for (i = 0; devsw[i] != NULL; i++)
-		if (devsw[i]->dv_init != NULL)
-			(devsw[i]->dv_init)();
+	devinit();
 
 	printf("BIOS %dkB/%dkB available memory\n", bios_basemem / 1024,
 	    bios_extmem / 1024);

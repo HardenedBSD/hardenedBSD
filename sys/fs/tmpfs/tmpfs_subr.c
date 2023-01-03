@@ -113,7 +113,7 @@ tmpfs_pager_writecount_recalc(vm_object_t object, vm_offset_t old,
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
 
-	vp = object->un_pager.swp.swp_tmpfs;
+	vp = VM_TO_TMPFS_VP(object);
 
 	/*
 	 * Forced unmount?
@@ -194,15 +194,14 @@ tmpfs_pager_getvp(vm_object_t object, struct vnode **vpp, bool *vp_heldp)
 
 	/*
 	 * Tmpfs VREG node, which was reclaimed, has tmpfs_pager_type
-	 * type, but not OBJ_TMPFS flag.  In this case there is no
-	 * v_writecount to adjust.
+	 * type.  In this case there is no v_writecount to adjust.
 	 */
 	if (vp_heldp != NULL)
 		VM_OBJECT_RLOCK(object);
 	else
 		VM_OBJECT_ASSERT_LOCKED(object);
 	if ((object->flags & OBJ_TMPFS) != 0) {
-		vp = object->un_pager.swp.swp_tmpfs;
+		vp = VM_TO_TMPFS_VP(object);
 		if (vp != NULL) {
 			*vpp = vp;
 			if (vp_heldp != NULL) {
@@ -215,6 +214,87 @@ tmpfs_pager_getvp(vm_object_t object, struct vnode **vpp, bool *vp_heldp)
 		VM_OBJECT_RUNLOCK(object);
 }
 
+static void
+tmpfs_pager_freespace(vm_object_t obj, vm_pindex_t start, vm_size_t size)
+{
+	struct tmpfs_node *node;
+	struct tmpfs_mount *tm;
+	vm_size_t c;
+
+	swap_pager_freespace(obj, start, size, &c);
+	if ((obj->flags & OBJ_TMPFS) == 0 || c == 0)
+		return;
+
+	node = obj->un_pager.swp.swp_priv;
+	MPASS(node->tn_type == VREG);
+	tm = node->tn_reg.tn_tmp;
+
+	KASSERT(tm->tm_pages_used >= c,
+	    ("tmpfs tm %p pages %jd free %jd", tm,
+	    (uintmax_t)tm->tm_pages_used, (uintmax_t)c));
+	atomic_add_long(&tm->tm_pages_used, -c);
+	KASSERT(node->tn_reg.tn_pages >= c,
+	    ("tmpfs node %p pages %jd free %jd", node,
+	    (uintmax_t)node->tn_reg.tn_pages, (uintmax_t)c));
+	node->tn_reg.tn_pages -= c;
+}
+
+static void
+tmpfs_page_inserted(vm_object_t obj, vm_page_t m)
+{
+	struct tmpfs_node *node;
+	struct tmpfs_mount *tm;
+
+	if ((obj->flags & OBJ_TMPFS) == 0)
+		return;
+
+	node = obj->un_pager.swp.swp_priv;
+	MPASS(node->tn_type == VREG);
+	tm = node->tn_reg.tn_tmp;
+
+	if (!vm_pager_has_page(obj, m->pindex, NULL, NULL)) {
+		atomic_add_long(&tm->tm_pages_used, 1);
+		node->tn_reg.tn_pages += 1;
+	}
+}
+
+static void
+tmpfs_page_removed(vm_object_t obj, vm_page_t m)
+{
+	struct tmpfs_node *node;
+	struct tmpfs_mount *tm;
+
+	if ((obj->flags & OBJ_TMPFS) == 0)
+		return;
+
+	node = obj->un_pager.swp.swp_priv;
+	MPASS(node->tn_type == VREG);
+	tm = node->tn_reg.tn_tmp;
+
+	if (!vm_pager_has_page(obj, m->pindex, NULL, NULL)) {
+		KASSERT(tm->tm_pages_used >= 1,
+		    ("tmpfs tm %p pages %jd free 1", tm,
+		    (uintmax_t)tm->tm_pages_used));
+		atomic_add_long(&tm->tm_pages_used, -1);
+		KASSERT(node->tn_reg.tn_pages >= 1,
+		    ("tmpfs node %p pages %jd free 1", node,
+		    (uintmax_t)node->tn_reg.tn_pages));
+		node->tn_reg.tn_pages -= 1;
+	}
+}
+
+static boolean_t
+tmpfs_can_alloc_page(vm_object_t obj, vm_pindex_t pindex)
+{
+	struct tmpfs_mount *tm;
+
+	tm = VM_TO_TMPFS_MP(obj);
+	if (tm == NULL || vm_pager_has_page(obj, pindex, NULL, NULL) ||
+	    tm->tm_pages_max == 0)
+		return (true);
+	return (tm->tm_pages_max > atomic_load_long(&tm->tm_pages_used));
+}
+
 struct pagerops tmpfs_pager_ops = {
 	.pgo_kvme_type = KVME_TYPE_VNODE,
 	.pgo_alloc = tmpfs_pager_alloc,
@@ -223,6 +303,10 @@ struct pagerops tmpfs_pager_ops = {
 	.pgo_release_writecount = tmpfs_pager_release_writecount,
 	.pgo_mightbedirty = vm_object_mightbedirty_,
 	.pgo_getvp = tmpfs_pager_getvp,
+	.pgo_freespace = tmpfs_pager_freespace,
+	.pgo_page_inserted = tmpfs_page_inserted,
+	.pgo_page_removed = tmpfs_page_removed,
+	.pgo_can_alloc_page = tmpfs_can_alloc_page,
 };
 
 static int
@@ -573,10 +657,12 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 		LIST_INIT(&(nnode->tn_reg.tn_extattr_list));
 		nnode->tn_reg.tn_aobj =
 		    vm_pager_allocate(tmpfs_pager_type, NULL, 0,
-			VM_PROT_DEFAULT, 0,
-			NULL /* XXXKIB - tmpfs needs swap reservation */);
-		/* OBJ_TMPFS is set together with the setting of vp->v_object */
+		    VM_PROT_DEFAULT, 0,
+		    NULL /* XXXKIB - tmpfs needs swap reservation */);
+		nnode->tn_reg.tn_aobj->un_pager.swp.swp_priv = nnode;
+		vm_object_set_flag(nnode->tn_reg.tn_aobj, OBJ_TMPFS);
 		nnode->tn_reg.tn_tmp = tmp;
+		nnode->tn_reg.tn_pages = 0;
 		break;
 
 	default:
@@ -672,16 +758,31 @@ tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 			free(attr, M_TEMP);
 		}
 		uobj = node->tn_reg.tn_aobj;
-		if (uobj != NULL && uobj->size != 0)
-			atomic_subtract_long(&tmp->tm_pages_used, uobj->size);
-
+		node->tn_reg.tn_aobj = NULL;
+		if (uobj != NULL) {
+			VM_OBJECT_WLOCK(uobj);
+			KASSERT((uobj->flags & OBJ_TMPFS) != 0,
+			    ("tmpfs node %p uobj %p not tmpfs", node, uobj));
+			vm_object_clear_flag(uobj, OBJ_TMPFS);
+			KASSERT(tmp->tm_pages_used >= node->tn_reg.tn_pages,
+			    ("tmpfs tmp %p node %p pages %jd free %jd", tmp,
+			    node, (uintmax_t)tmp->tm_pages_used,
+			    (uintmax_t)node->tn_reg.tn_pages));
+			atomic_add_long(&tmp->tm_pages_used,
+			    -node->tn_reg.tn_pages);
+			VM_OBJECT_WUNLOCK(uobj);
+		}
 		tmpfs_free_tmp(tmp);
 
-		if (uobj != NULL) {
-			KASSERT((uobj->flags & OBJ_TMPFS) == 0,
-			    ("leaked OBJ_TMPFS node %p vm_obj %p", node, uobj));
+		/*
+		 * vm_object_deallocate() must not be called while
+		 * owning tm_allnode_lock, because deallocate might
+		 * sleep.  Call it after tmpfs_free_tmp() does the
+		 * unlock.
+		 */
+		if (uobj != NULL)
 			vm_object_deallocate(uobj);
-		}
+
 		break;
 	case VLNK:
 		tmpfs_free_tmp(tmp);
@@ -823,8 +924,6 @@ tmpfs_destroy_vobject(struct vnode *vp, vm_object_t obj)
 		want_vrele = true;
 	}
 
-	vm_object_clear_flag(obj, OBJ_TMPFS);
-	obj->un_pager.swp.swp_tmpfs = NULL;
 	if (vp->v_writecount < 0)
 		vp->v_writecount = 0;
 	VI_UNLOCK(vp);
@@ -962,8 +1061,6 @@ loop:
 		VI_LOCK(vp);
 		KASSERT(vp->v_object == NULL, ("Not NULL v_object in tmpfs"));
 		vp->v_object = object;
-		object->un_pager.swp.swp_tmpfs = vp;
-		vm_object_set_flag(object, OBJ_TMPFS);
 		vn_irflag_set_locked(vp, VIRF_PGREAD | VIRF_TEXT_REF);
 		VI_UNLOCK(vp);
 		VM_OBJECT_WUNLOCK(object);
@@ -990,6 +1087,8 @@ loop:
 		vgone(vp);
 		vput(vp);
 		vp = NULL;
+	} else {
+		vn_set_state(vp, VSTATE_CONSTRUCTED);
 	}
 
 unlock:
@@ -1713,7 +1812,6 @@ tmpfs_dir_whiteout_remove(struct vnode *dvp, struct componentname *cnp)
 int
 tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 {
-	struct tmpfs_mount *tmp;
 	struct tmpfs_node *node;
 	vm_object_t uobj;
 	vm_pindex_t idx, newpages, oldpages;
@@ -1725,7 +1823,6 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 
 	node = VP_TO_TMPFS_NODE(vp);
 	uobj = node->tn_reg.tn_aobj;
-	tmp = VFS_TO_TMPFS(vp->v_mount);
 
 	/*
 	 * Convert the old and new sizes to the number of pages needed to
@@ -1742,10 +1839,6 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 		node->tn_size = newsize;
 		return (0);
 	}
-
-	if (newpages > oldpages &&
-	    !tmpfs_pages_check_avail(tmp, newpages - oldpages))
-		return (ENOSPC);
 
 	VM_OBJECT_WLOCK(uobj);
 	if (newsize < oldsize) {
@@ -1771,8 +1864,6 @@ tmpfs_reg_resize(struct vnode *vp, off_t newsize, boolean_t ignerr)
 	}
 	uobj->size = newpages;
 	VM_OBJECT_WUNLOCK(uobj);
-
-	atomic_add_long(&tmp->tm_pages_used, newpages - oldpages);
 
 	node->tn_size = newsize;
 	return (0);
@@ -2243,29 +2334,19 @@ tmpfs_itimes(struct vnode *vp, const struct timespec *acc,
 int
 tmpfs_truncate(struct vnode *vp, off_t length)
 {
-	int error;
 	struct tmpfs_node *node;
+	int error;
 
-	node = VP_TO_TMPFS_NODE(vp);
-
-	if (length < 0) {
-		error = EINVAL;
-		goto out;
-	}
-
-	if (node->tn_size == length) {
-		error = 0;
-		goto out;
-	}
-
+	if (length < 0)
+		return (EINVAL);
 	if (length > VFS_TO_TMPFS(vp->v_mount)->tm_maxfilesize)
 		return (EFBIG);
 
-	error = tmpfs_reg_resize(vp, length, FALSE);
+	node = VP_TO_TMPFS_NODE(vp);
+	error = node->tn_size == length ? 0 : tmpfs_reg_resize(vp, length,
+	    FALSE);
 	if (error == 0)
 		node->tn_status |= TMPFS_NODE_CHANGED | TMPFS_NODE_MODIFIED;
-
-out:
 	tmpfs_update(vp);
 
 	return (error);

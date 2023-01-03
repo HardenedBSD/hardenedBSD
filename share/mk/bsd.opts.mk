@@ -86,6 +86,8 @@ __DEFAULT_DEPENDENT_OPTIONS = \
     STAGING_PROG/STAGING \
     STALE_STAGED/STAGING \
 
+.-include <local.opts.mk>
+
 .include <bsd.mkopt.mk>
 
 #

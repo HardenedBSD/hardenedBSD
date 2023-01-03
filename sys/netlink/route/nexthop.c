@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_route.h"
 #include <sys/types.h>
 #include <sys/ck.h>
+#include <sys/epoch.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/rmlock.h>
@@ -47,7 +48,6 @@ __FBSDID("$FreeBSD$");
 #include <netinet6/scope6_var.h>
 #include <netlink/netlink.h>
 #include <netlink/netlink_ctl.h>
-#include <netlink/netlink_var.h>
 #include <netlink/netlink_route.h>
 #include <netlink/route/route_var.h>
 
@@ -553,8 +553,7 @@ delete_unhop(struct unhop_ctl *ctl, struct nlmsghdr *hdr, uint32_t uidx)
 
 	while (unhop_base != NULL) {
 		unhop_chain = unhop_base->un_nextchild;
-		epoch_call(net_epoch_preempt, destroy_unhop_epoch,
-		    &unhop_base->un_epoch_ctx);
+		NET_EPOCH_CALL(destroy_unhop_epoch, &unhop_base->un_epoch_ctx);
 		unhop_base = unhop_chain;
 	}
 
@@ -632,7 +631,7 @@ vnet_destroy_unhops(const void *unused __unused)
 	V_un_ctl = NULL;
 
 	/* Wait till all unhop users finish their reads */
-	epoch_wait_preempt(net_epoch_preempt);
+	NET_EPOCH_WAIT();
 
 	UN_WLOCK(ctl);
 	CHT_SLIST_FOREACH_SAFE(&ctl->un_head, unhop, unhop, tmp) {

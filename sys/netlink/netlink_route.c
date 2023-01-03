@@ -29,6 +29,7 @@
 __FBSDID("$FreeBSD$");
 #include <sys/types.h>
 #include <sys/ck.h>
+#include <sys/epoch.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/socket.h>
@@ -37,7 +38,6 @@ __FBSDID("$FreeBSD$");
 #include <net/route/route_ctl.h>
 #include <netlink/netlink.h>
 #include <netlink/netlink_ctl.h>
-#include <netlink/netlink_var.h>
 #include <netlink/netlink_route.h>
 #include <netlink/route/route_var.h>
 
@@ -106,7 +106,10 @@ rtnl_handle_message(struct nlmsghdr *hdr, struct nl_pstate *npt)
 	return (error);
 }
 
-static struct rtbridge nlbridge = { .route_f = rtnl_handle_route_event };
+static struct rtbridge nlbridge = {
+	.route_f = rtnl_handle_route_event,
+	.ifmsg_f = rtnl_handle_ifnet_event,
+};
 static struct rtbridge *nlbridge_orig_p;
 
 static void
@@ -131,6 +134,6 @@ rtnl_unload(void *u __unused)
 	rtnl_neighs_destroy();
 
 	/* Wait till all consumers read nlbridge data */
-	epoch_wait_preempt(net_epoch_preempt);
+	NET_EPOCH_WAIT();
 }
 SYSUNINIT(rtnl_unload, SI_SUB_PROTO_DOMAIN, SI_ORDER_THIRD, rtnl_unload, NULL);

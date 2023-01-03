@@ -190,7 +190,6 @@ typedef struct znode {
 	boolean_t	z_is_sa;	/* are we native sa? */
 	boolean_t	z_is_mapped;	/* are we mmap'ed */
 	boolean_t	z_is_ctldir;	/* are we .zfs entry */
-	boolean_t	z_is_stale;	/* are we stale due to rollback? */
 	boolean_t	z_suspended;	/* extra ref from a suspend? */
 	uint_t		z_blksz;	/* block size in bytes */
 	uint_t		z_seq;		/* modification sequence number */
@@ -243,9 +242,9 @@ zfs_enter_verify_zp(zfsvfs_t *zfsvfs, znode_t *zp, const char *tag)
 
 typedef struct znode_hold {
 	uint64_t	zh_obj;		/* object id */
-	kmutex_t	zh_lock;	/* lock serializing object access */
 	avl_node_t	zh_node;	/* avl tree linkage */
-	zfs_refcount_t	zh_refcount;	/* active consumer reference count */
+	kmutex_t	zh_lock;	/* lock serializing object access */
+	int		zh_refcount;	/* active consumer reference count */
 } znode_hold_t;
 
 static inline uint64_t
@@ -300,6 +299,12 @@ extern void zfs_log_symlink(zilog_t *zilog, dmu_tx_t *tx, uint64_t txtype,
 extern void zfs_log_rename(zilog_t *zilog, dmu_tx_t *tx, uint64_t txtype,
     znode_t *sdzp, const char *sname, znode_t *tdzp, const char *dname,
     znode_t *szp);
+extern void zfs_log_rename_exchange(zilog_t *zilog, dmu_tx_t *tx,
+    uint64_t txtype, znode_t *sdzp, const char *sname, znode_t *tdzp,
+    const char *dname, znode_t *szp);
+extern void zfs_log_rename_whiteout(zilog_t *zilog, dmu_tx_t *tx,
+    uint64_t txtype, znode_t *sdzp, const char *sname, znode_t *tdzp,
+    const char *dname, znode_t *szp, znode_t *wzp);
 extern void zfs_log_write(zilog_t *zilog, dmu_tx_t *tx, int txtype,
     znode_t *zp, offset_t off, ssize_t len, int ioflag,
     zil_callback_t callback, void *callback_data);
