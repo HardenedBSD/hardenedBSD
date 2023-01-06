@@ -104,7 +104,7 @@ SYSCTL_HBSD_2STATE(pax_procfs_harden_global, pr_hbsd.hardening.procfs_harden,
     "Harden procfs, disabling write of /proc/pid/mem");
 SYSCTL_HBSD_2STATE_GLOBAL(pax_insecure_kmod_global, _hardening, insecure_kmod,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_SECURE,
-    "Enable loading of inecure kernel modules");
+    "Enable loading of insecure kernel modules");
 SYSCTL_HBSD_2STATE(harden_rtld_global, pr_hbsd.hardening.harden_rtld,
     _hardening, harden_rtld,
     CTLTYPE_INT|CTLFLAG_PRISON|CTLFLAG_RWTUN|CTLFLAG_SECURE,
