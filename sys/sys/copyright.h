@@ -30,7 +30,6 @@
 /* Add a FreeBSD vendor copyright here */
 #define	COPYRIGHT_Vendor \
 	""
-#endif
 
 #define COPYRIGHT_HardenedBSD \
 	"Copyright (c) 2013-2023 The HardenedBSD Project.\n"
