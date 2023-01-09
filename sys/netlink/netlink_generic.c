@@ -51,6 +51,7 @@ _DECLARE_DEBUG(LOG_DEBUG3);
 
 #define	MIN_GROUP_NUM	48
 
+int __insecure_kmod = 1;
 static struct sx sx_lock;
 
 #define	GENL_LOCK_INIT()	sx_init(&sx_lock, "genetlink lock")
