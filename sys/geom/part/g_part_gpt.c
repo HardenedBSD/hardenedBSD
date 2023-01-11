@@ -515,7 +515,8 @@ gpt_read_hdr(struct g_part_gpt_table *table, struct g_consumer *cp,
 	    hdr->hdr_lba_table <= hdr->hdr_lba_end)
 		goto fail;
 	lba = hdr->hdr_lba_table +
-	    howmany(hdr->hdr_entries * hdr->hdr_entsz, pp->sectorsize) - 1;
+	    howmany((uint64_t)hdr->hdr_entries * hdr->hdr_entsz,
+	        pp->sectorsize) - 1;
 	if (lba >= last)
 		goto fail;
 	if (lba >= hdr->hdr_lba_start && lba <= hdr->hdr_lba_end)
@@ -533,8 +534,7 @@ gpt_read_hdr(struct g_part_gpt_table *table, struct g_consumer *cp,
 	return (hdr);
 
  fail:
-	if (hdr != NULL)
-		g_free(hdr);
+	g_free(hdr);
 	g_free(buf);
 	return (NULL);
 }
@@ -982,14 +982,10 @@ g_part_gpt_read(struct g_part_table *basetable, struct g_consumer *cp)
 		    "GEOM: %s: GPT rejected -- may not be recoverable.\n",
 			    pp->name);
 		}
-		if (prihdr != NULL)
-			g_free(prihdr);
-		if (pritbl != NULL)
-			g_free(pritbl);
-		if (sechdr != NULL)
-			g_free(sechdr);
-		if (sectbl != NULL)
-			g_free(sectbl);
+		g_free(prihdr);
+		g_free(pritbl);
+		g_free(sechdr);
+		g_free(sectbl);
 		return (EINVAL);
 	}
 
@@ -1021,11 +1017,9 @@ g_part_gpt_read(struct g_part_table *basetable, struct g_consumer *cp)
 		    "strongly advised.\n", pp->name);
 		table->hdr = sechdr;
 		basetable->gpt_corrupt = 1;
-		if (prihdr != NULL)
-			g_free(prihdr);
+		g_free(prihdr);
 		tbl = sectbl;
-		if (pritbl != NULL)
-			g_free(pritbl);
+		g_free(pritbl);
 	} else {
 		if (table->state[GPT_ELT_SECTBL] != GPT_STATE_OK) {
 			printf("GEOM: %s: the secondary GPT table is corrupt "
@@ -1039,11 +1033,9 @@ g_part_gpt_read(struct g_part_table *basetable, struct g_consumer *cp)
 			basetable->gpt_corrupt = 1;
 		}
 		table->hdr = prihdr;
-		if (sechdr != NULL)
-			g_free(sechdr);
+		g_free(sechdr);
 		tbl = pritbl;
-		if (sectbl != NULL)
-			g_free(sectbl);
+		g_free(sectbl);
 	}
 
 	basetable->gpt_first = table->hdr->hdr_lba_start;
