@@ -440,6 +440,9 @@ rtnl_handle_getlink(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 	struct ifnet **match_array;
 	int offset = 0, base_count = 16; /* start with 128 bytes */
 	match_array = malloc(base_count * sizeof(void *), M_TEMP, M_NOWAIT);
+	if (match_array == NULL) {
+		return (ENOMEM);
+	}
 
 	NLP_LOG(LOG_DEBUG3, nlp, "MATCHING: index=%u type=%d name=%s",
 	    attrs.ifi_index, attrs.ifi_type, attrs.ifla_ifname);
