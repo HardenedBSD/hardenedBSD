@@ -44,6 +44,29 @@ struct rib_cmd_info {
 	struct nhop_object	*rc_nh_new;	/* Target nhop OR mpath */
 };
 
+struct route_nhop_data {
+	union {
+		struct nhop_object *rnd_nhop;
+		struct nhgrp_object *rnd_nhgrp;
+	};
+	uint32_t rnd_weight;
+};
+
+int rib_add_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
+    struct route_nhop_data *rnd, int op_flags, struct rib_cmd_info *rc);
+int rib_del_route_px(uint32_t fibnum, struct sockaddr *dst, int plen,
+    rib_filter_f_t *filter_func, void *filter_arg, int op_flags,
+    struct rib_cmd_info *rc);
+int rib_del_route_px_gw(uint32_t fibnum, struct sockaddr *dst, int plen,
+    const struct sockaddr *gw, int op_flags, struct rib_cmd_info *rc);
+
+/* operation flags */
+#define	RTM_F_CREATE	0x01
+#define	RTM_F_EXCL	0x02
+#define	RTM_F_REPLACE	0x04
+#define	RTM_F_APPEND	0x08
+#define	RTM_F_FORCE	0x10
+
 int rib_add_route(uint32_t fibnum, struct rt_addrinfo *info,
   struct rib_cmd_info *rc);
 int rib_del_route(uint32_t fibnum, struct rt_addrinfo *info,
@@ -52,10 +75,15 @@ int rib_change_route(uint32_t fibnum, struct rt_addrinfo *info,
   struct rib_cmd_info *rc);
 int rib_action(uint32_t fibnum, int action, struct rt_addrinfo *info,
   struct rib_cmd_info *rc);
+int rib_match_gw(const struct rtentry *rt, const struct nhop_object *nh,
+    void *_data);
 int rib_handle_ifaddr_info(uint32_t fibnum, int cmd, struct rt_addrinfo *info);
 
-typedef void route_notification_t(struct rib_cmd_info *rc, void *);
-void rib_decompose_notification(struct rib_cmd_info *rc,
+int rib_add_default_route(uint32_t fibnum, int family, struct ifnet *ifp,
+    struct sockaddr *gw, struct rib_cmd_info *rc);
+
+typedef void route_notification_t(const struct rib_cmd_info *rc, void *);
+void rib_decompose_notification(const struct rib_cmd_info *rc,
     route_notification_t *cb, void *cbdata);
 
 int rib_add_redirect(u_int fibnum, struct sockaddr *dst,
@@ -85,7 +113,7 @@ void rib_walk_from(uint32_t fibnum, int family, uint32_t flags, struct sockaddr 
     struct sockaddr *mask, rib_walktree_f_t *wa_f, void *arg);
 
 void rib_walk_del(u_int fibnum, int family, rib_filter_f_t *filter_f,
-    void *arg, bool report);
+    void *filter_arg, bool report);
 
 void rib_foreach_table_walk(int family, bool wlock, rib_walktree_f_t *wa_f,
     rib_walk_hook_f_t *hook_f, void *arg);
@@ -93,13 +121,6 @@ void rib_foreach_table_walk_del(int family, rib_filter_f_t *filter_f, void *arg)
 
 struct nhop_object;
 struct nhgrp_object;
-struct route_nhop_data {
-	union {
-		struct nhop_object *rnd_nhop;
-		struct nhgrp_object *rnd_nhgrp;
-	};
-	uint32_t rnd_weight;
-};
 
 const struct rtentry *rib_lookup_prefix(uint32_t fibnum, int family,
     const struct sockaddr *dst, const struct sockaddr *netmask,
@@ -111,6 +132,7 @@ const struct rtentry *rib_lookup_lpm(uint32_t fibnum, int family,
 bool rt_is_host(const struct rtentry *rt);
 sa_family_t rt_get_family(const struct rtentry *);
 struct nhop_object *rt_get_raw_nhop(const struct rtentry *rt);
+void rt_get_rnd(const struct rtentry *rt, struct route_nhop_data *rnd);
 #ifdef INET
 struct in_addr;
 void rt_get_inet_prefix_plen(const struct rtentry *rt, struct in_addr *paddr,
@@ -127,6 +149,9 @@ void rt_get_inet6_prefix_pmask(const struct rtentry *rt, struct in6_addr *paddr,
     struct in6_addr *pmask, uint32_t *pscopeid);
 struct rtentry *rt_get_inet6_parent(uint32_t fibnum, const struct in6_addr *paddr,
     int plen);
+
+struct in6_addr;
+void ip6_writemask(struct in6_addr *addr6, uint8_t mask);
 #endif
 
 /* Nexthops */
@@ -135,9 +160,11 @@ uint32_t nhops_get_count(struct rib_head *rh);
 /* Multipath */
 struct weightened_nhop;
 
-struct weightened_nhop *nhgrp_get_nhops(struct nhgrp_object *nhg,
+const struct weightened_nhop *nhgrp_get_nhops(const struct nhgrp_object *nhg,
     uint32_t *pnum_nhops);
 uint32_t nhgrp_get_count(struct rib_head *rh);
+int nhgrp_get_group(struct rib_head *rh, struct weightened_nhop *wn, int num_nhops,
+    uint32_t uidx, struct nhgrp_object **pnhg);
 
 /* Route subscriptions */
 enum rib_subscription_type {
@@ -159,5 +186,7 @@ struct rib_subscription *rib_subscribe_locked(struct rib_head *rnh,
     rib_subscription_cb_t *f, void *arg, enum rib_subscription_type type);
 void rib_unsubscribe(struct rib_subscription *rs);
 void rib_unsubscribe_locked(struct rib_subscription *rs);
+void rib_notify(struct rib_head *rnh, enum rib_subscription_type type,
+    struct rib_cmd_info *rc);
 
 #endif

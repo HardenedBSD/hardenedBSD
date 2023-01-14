@@ -35,9 +35,13 @@
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 
-
 /* DEBUG logic */
 #if defined(DEBUG_MOD_NAME) && defined(DEBUG_MAX_LEVEL)
+
+#ifndef	_DEBUG_SYSCTL_OID
+#define	_DEBUG_SYSCTL_OID	_net_route_debug
+SYSCTL_DECL(_net_route_debug);
+#endif
 
 #define DEBUG_VAR_NAME                  	_DEBUG_VAR_NAME(DEBUG_MOD_NAME)
 #define _DEBUG_VAR_NAME(a)			_DEBUG_VAR_NAME_INDIRECT(a)
@@ -48,9 +52,8 @@
 #define __DEBUG_PREFIX_NAME(n)			#n
 
 #define	_DECLARE_DEBUG(_default_level)  	        		\
-	SYSCTL_DECL(_net_route_debug);					\
 	static int DEBUG_VAR_NAME = _default_level;	                \
-        SYSCTL_INT(_net_route_debug, OID_AUTO, DEBUG_VAR_NAME,          \
+        SYSCTL_INT(_DEBUG_SYSCTL_OID, OID_AUTO, DEBUG_VAR_NAME,          \
 		CTLFLAG_RW | CTLFLAG_RWTUN,				\
                 &(DEBUG_VAR_NAME), 0, "debuglevel")
 
@@ -62,8 +65,28 @@
 #define LOG_DEBUG3      9
 #endif
 
+/*
+ * Severity usage guidelines:
+ *
+ * LOG_WARNING - subsystem-global errors ("multipath init failed")
+ *
+ * LOG_INFO - subsystem non-transient errors ("Failed to unlink nexhop").
+ *  All logging <= LOG_INFO by default will be written to syslog.
+ *
+ * LOG_DEBUG - subsystem debug. Not-too often events (hash resizes, recoverable failures).
+ *  These are compiled in by default on production. Turning it it should NOT notable affect
+ *  performance
+ * LOG_DEBUG2 - more debug. Per-item level (nhg,nh,route) debug, up to multiple lines per item.
+ *  This is NOT compiled in by default. Turning it on should NOT seriously impact performance
+ * LOG_DEBUG3 - last debug level. Per-item large debug outputs.
+ *  This is NOT compiled in by default. All performance bets are off.
+ *
+ */
+
 #define _output			printf
 #define	_DEBUG_PASS_MSG(_l)	(DEBUG_VAR_NAME >= (_l))
+
+#define	IF_DEBUG_LEVEL(_l)	if ((DEBUG_MAX_LEVEL >= (_l)) && (__predict_false(DEBUG_VAR_NAME >= (_l))))
 
 /*
  * Logging for events specific for particular family and fib
@@ -76,6 +99,10 @@
 
 /* Same as FIB_LOG, but uses nhop to get fib and family */
 #define FIB_NH_LOG(_l, _nh, _fmt, ...)  FIB_LOG_##_l(_l, nhop_get_fibnum(_nh), nhop_get_upper_family(_nh), _fmt, ## __VA_ARGS__)
+/* Same as FIB_LOG, but uses rib_head to get fib and family */
+#define FIB_RH_LOG(_l, _rh, _fmt, ...)  FIB_LOG_##_l(_l, (_rh)->rib_fibnum, (_rh)->rib_family, _fmt, ## __VA_ARGS__)
+/* Same as FIB_LOG, but uses nh_control to get fib and family from linked rib */
+#define FIB_CTL_LOG(_l, _ctl, _fmt, ...)  FIB_LOG_##_l(_l, (_ctl)->ctl_rh->rib_fibnum, (_ctl)->ctl_rh->rib_family, _fmt, ## __VA_ARGS__)
 
 /*
  * Generic logging for routing subsystem
@@ -90,7 +117,7 @@
 /*
  * Wrapper logic to avoid compiling high levels of debugging messages for production systems.
  */
-#if DEBUG_MAX_LEVEL>=LOG_DEBUG2
+#if DEBUG_MAX_LEVEL>=LOG_DEBUG3
 #define	FIB_LOG_LOG_DEBUG3	_FIB_LOG
 #define	RT_LOG_LOG_DEBUG3	_RT_LOG
 #else
@@ -129,13 +156,21 @@
 
 /* Helpers for fancy-printing various objects */
 struct nhop_object;
+struct nhgrp_object;
 struct llentry;
 struct nhop_neigh;
+struct rtentry;
+struct ifnet;
 
+#define	NHOP_PRINT_BUFSIZE	48
 char *nhop_print_buf(const struct nhop_object *nh, char *buf, size_t bufsize);
+char *nhop_print_buf_any(const struct nhop_object *nh, char *buf, size_t bufsize);
+char *nhgrp_print_buf(const struct nhgrp_object *nhg, char *buf, size_t bufsize);
 char *llentry_print_buf(const struct llentry *lle, struct ifnet *ifp, int family, char *buf,
     size_t bufsize);
 char *llentry_print_buf_lltable(const struct llentry *lle, char *buf, size_t bufsize);
 char *neigh_print_buf(const struct nhop_neigh *nn, char *buf, size_t bufsize);
+char *rt_print_buf(const struct rtentry *rt, char *buf, size_t bufsize);
+const char *rib_print_cmd(int rib_cmd);
 
 #endif

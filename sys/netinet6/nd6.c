@@ -71,6 +71,7 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in_kdtrace.h>
 #include <net/if_llatbl.h>
 #include <netinet/if_ether.h>
+#include <netinet6/in6_fib.h>
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -129,7 +130,7 @@ VNET_DEFINE(int, nd6_recalc_reachtm_interval) = ND6_RECALC_REACHTM_INTERVAL;
 
 int	(*send_sendso_input_hook)(struct mbuf *, struct ifnet *, int, int);
 
-static int nd6_is_new_addr_neighbor(const struct sockaddr_in6 *,
+static bool nd6_is_new_addr_neighbor(const struct sockaddr_in6 *,
 	struct ifnet *);
 static void nd6_setmtu0(struct ifnet *, struct nd_ifinfo *);
 static void nd6_slowtimo(void *);
@@ -1225,20 +1226,11 @@ nd6_alloc(const struct in6_addr *addr6, int flags, struct ifnet *ifp)
 }
 
 /*
- * Test whether a given IPv6 address is a neighbor or not, ignoring
- * the actual neighbor cache.  The neighbor cache is ignored in order
- * to not reenter the routing code from within itself.
+ * Test whether a given IPv6 address can be a neighbor.
  */
-static int
+static bool
 nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 {
-	struct nd_prefix *pr;
-	struct ifaddr *ifa;
-	struct rt_addrinfo info;
-	struct sockaddr_in6 rt_key;
-	const struct sockaddr *dst6;
-	uint64_t genid;
-	int error, fibnum;
 
 	/*
 	 * A link-local address is always a neighbor.
@@ -1262,89 +1254,51 @@ nd6_is_new_addr_neighbor(const struct sockaddr_in6 *addr, struct ifnet *ifp)
 		else
 			return (0);
 	}
+	/* Checking global unicast */
 
-	bzero(&rt_key, sizeof(rt_key));
-	bzero(&info, sizeof(info));
-	info.rti_info[RTAX_DST] = (struct sockaddr *)&rt_key;
+	/* If an address is directly reachable, it is a neigbor */
+	struct nhop_object *nh;
+	nh = fib6_lookup(ifp->if_fib, &addr->sin6_addr, 0, NHR_NONE, 0);
+	if (nh != NULL && nh->nh_aifp == ifp && (nh->nh_flags & NHF_GATEWAY) == 0)
+		return (true);
 
 	/*
-	 * If the address matches one of our addresses,
-	 * it should be a neighbor.
-	 * If the address matches one of our on-link prefixes, it should be a
-	 * neighbor.
+	 * Check prefixes with desired on-link state, as some may be not
+	 * installed in the routing table.
 	 */
+	bool matched = false;
+	struct nd_prefix *pr;
 	ND6_RLOCK();
-restart:
 	LIST_FOREACH(pr, &V_nd_prefix, ndpr_entry) {
 		if (pr->ndpr_ifp != ifp)
 			continue;
-
-		if ((pr->ndpr_stateflags & NDPRF_ONLINK) == 0) {
-			dst6 = (const struct sockaddr *)&pr->ndpr_prefix;
-
-			/*
-			 * We only need to check all FIBs if add_addr_allfibs
-			 * is unset. If set, checking any FIB will suffice.
-			 */
-			fibnum = V_rt_add_addr_allfibs ? rt_numfibs - 1 : 0;
-			for (; fibnum < rt_numfibs; fibnum++) {
-				genid = V_nd6_list_genid;
-				ND6_RUNLOCK();
-
-				/*
-				 * Restore length field before
-				 * retrying lookup
-				 */
-				rt_key.sin6_len = sizeof(rt_key);
-				error = rib_lookup_info(fibnum, dst6, 0, 0,
-						        &info);
-
-				ND6_RLOCK();
-				if (genid != V_nd6_list_genid)
-					goto restart;
-				if (error == 0)
-					break;
-			}
-			if (error != 0)
-				continue;
-
-			/*
-			 * This is the case where multiple interfaces
-			 * have the same prefix, but only one is installed 
-			 * into the routing table and that prefix entry
-			 * is not the one being examined here.
-			 */
-			if (!IN6_ARE_ADDR_EQUAL(&pr->ndpr_prefix.sin6_addr,
-			    &rt_key.sin6_addr))
-				continue;
-		}
-
+		if ((pr->ndpr_stateflags & NDPRF_ONLINK) == 0)
+			continue;
 		if (IN6_ARE_MASKED_ADDR_EQUAL(&pr->ndpr_prefix.sin6_addr,
 		    &addr->sin6_addr, &pr->ndpr_mask)) {
-			ND6_RUNLOCK();
-			return (1);
+			matched = true;
+			break;
 		}
 	}
 	ND6_RUNLOCK();
+	if (matched)
+		return (true);
 
 	/*
 	 * If the address is assigned on the node of the other side of
 	 * a p2p interface, the address should be a neighbor.
 	 */
 	if (ifp->if_flags & IFF_POINTOPOINT) {
-		struct epoch_tracker et;
+		struct ifaddr *ifa;
 
-		NET_EPOCH_ENTER(et);
 		CK_STAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 			if (ifa->ifa_addr->sa_family != addr->sin6_family)
 				continue;
 			if (ifa->ifa_dstaddr != NULL &&
 			    sa_equal(addr, ifa->ifa_dstaddr)) {
-				NET_EPOCH_EXIT(et);
-				return 1;
+				return (true);
 			}
 		}
-		NET_EPOCH_EXIT(et);
 	}
 
 	/*
@@ -1621,18 +1575,15 @@ nd6_free_redirect(const struct llentry *ln)
 {
 	int fibnum;
 	struct sockaddr_in6 sin6;
-	struct rt_addrinfo info;
 	struct rib_cmd_info rc;
 	struct epoch_tracker et;
 
 	lltable_fill_sa_entry(ln, (struct sockaddr *)&sin6);
-	memset(&info, 0, sizeof(info));
-	info.rti_info[RTAX_DST] = (struct sockaddr *)&sin6;
-	info.rti_filter = nd6_isdynrte;
 
 	NET_EPOCH_ENTER(et);
 	for (fibnum = 0; fibnum < rt_numfibs; fibnum++)
-		rib_action(fibnum, RTM_DELETE, &info, &rc);
+		rib_del_route_px(fibnum, (struct sockaddr *)&sin6, 128,
+		    nd6_isdynrte, NULL, 0, &rc);
 	NET_EPOCH_EXIT(et);
 }
 
@@ -1640,7 +1591,7 @@ nd6_free_redirect(const struct llentry *ln)
  * Updates status of the default router route.
  */
 static void
-check_release_defrouter(struct rib_cmd_info *rc, void *_cbdata)
+check_release_defrouter(const struct rib_cmd_info *rc, void *_cbdata)
 {
 	struct nd_defrouter *dr;
 	struct nhop_object *nh;
@@ -1832,9 +1783,8 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 
 		ND6_WLOCK();
 		LIST_FOREACH_SAFE(pr, &V_nd_prefix, ndpr_entry, next) {
-			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
-				continue; /* XXX */
-			nd6_prefix_unlink(pr, &prl);
+			if (pr->ndpr_raf_ra_derived)
+				nd6_prefix_unlink(pr, &prl);
 		}
 		ND6_WUNLOCK();
 
@@ -2739,6 +2689,8 @@ nd6_sysctl_prlist(SYSCTL_HANDLER_ARGS)
 
 	ND6_RLOCK();
 	LIST_FOREACH(pr, &V_nd_prefix, ndpr_entry) {
+		if (!pr->ndpr_raf_ra_derived)
+			continue;
 		p.prefix = pr->ndpr_prefix;
 		if (sa6_recoverscope(&p.prefix)) {
 			log(LOG_ERR, "scope error in prefix list (%s)\n",
