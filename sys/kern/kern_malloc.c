@@ -49,6 +49,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_ddb.h"
+#include "opt_pax.h"
 #include "opt_vm.h"
 
 #include <sys/param.h>
@@ -645,6 +646,10 @@ void *
 	va = NULL;
 	if (malloc_dbg(&va, &size, mtp, flags) != 0)
 		return (va);
+#endif
+
+#ifdef PAX_HARDEN_KMALLOC
+	flags |= M_ZERO;
 #endif
 
 	if (__predict_false(size > kmem_zmax))

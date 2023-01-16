@@ -972,6 +972,7 @@ PAX_ASLR	opt_pax.h
 PAX_SYSCTLS	opt_pax.h
 PAX_SEGVGUARD	opt_pax.h
 PAX_HARDENING	opt_pax.h
+PAX_HARDEN_KMALLOC	opt_pax.h
 PAX_NOEXEC	opt_pax.h
 PAX_INSECURE_MODE	opt_pax.h
 PAX_CONTROL_ACL		opt_pax.h
