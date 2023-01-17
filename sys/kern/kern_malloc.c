@@ -61,6 +61,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/mutex.h>
 #include <sys/vmmeter.h>
+#include <sys/pax.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sbuf.h>
@@ -252,6 +253,22 @@ SYSCTL_INT(_debug_malloc, OID_AUTO, failure_rate, CTLFLAG_RWTUN,
     &malloc_failure_rate, 0, "Every (n) mallocs with M_NOWAIT will fail");
 SYSCTL_INT(_debug_malloc, OID_AUTO, failure_count, CTLFLAG_RD,
     &malloc_failure_count, 0, "Number of imposed M_NOWAIT malloc failures");
+#endif
+
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+static int kmalloc_zero = PAX_FEATURE_SIMPLE_ENABLED;
+#else
+static int kmalloc_zero = PAX_FEATURE_SIMPLE_DISABLED;
+#endif
+
+TUNABLE_INT("hardening.kmalloc_zero", &kmalloc_zero);
+
+#ifdef PAX_SYSCTLS
+SYSCTL_DECL(_hardening);
+SYSCTL_INT(_hardening, OID_AUTO, kmalloc_zero, CTLFLAG_RWTUN | CTLFLAG_SECURE,
+    &kmalloc_zero, 0, "Zero all malloc(9) allocations");
+#endif
 #endif
 
 static int
@@ -648,8 +665,16 @@ void *
 		return (va);
 #endif
 
+#ifdef PAX_HARDENING
 #ifdef PAX_HARDEN_KMALLOC
-	flags |= M_ZERO;
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
 #endif
 
 	if (__predict_false(size > kmem_zmax))
