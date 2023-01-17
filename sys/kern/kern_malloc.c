@@ -741,6 +741,18 @@ malloc_domainset(size_t size, struct malloc_type *mtp, struct domainset *ds,
 
 	MPASS((flags & M_EXEC) == 0);
 
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
+#endif
+
 #ifdef MALLOC_DEBUG
 	va = NULL;
 	if (malloc_dbg(&va, &size, mtp, flags) != 0)
@@ -790,6 +802,18 @@ malloc_domainset_exec(size_t size, struct malloc_type *mtp, struct domainset *ds
 #endif
 #ifdef MALLOC_DEBUG
 	caddr_t va;
+#endif
+
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
 #endif
 
 	flags |= M_EXEC;
