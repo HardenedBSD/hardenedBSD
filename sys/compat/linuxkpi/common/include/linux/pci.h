@@ -163,6 +163,11 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 #define	PCI_EXP_LNKCTL2_ENTER_COMP	0x0010	/* Enter Compliance */
 #define	PCI_EXP_LNKCTL2_TX_MARGIN	0x0380	/* Transmit Margin */
 
+#define	PCI_MSI_ADDRESS_LO	PCIR_MSI_ADDR
+#define	PCI_MSI_ADDRESS_HI	PCIR_MSI_ADDR_HIGH
+#define	PCI_MSI_FLAGS		PCIR_MSI_CTRL
+#define	PCI_MSI_FLAGS_ENABLE	PCIM_MSICTRL_MSI_ENABLE
+
 #define PCI_EXP_LNKCAP_CLKPM	0x00040000
 #define PCI_EXP_DEVSTA_TRPND	0x0020
 
@@ -353,6 +358,7 @@ void lkpi_pci_devres_release(struct device *, void *);
 struct resource *_lkpi_pci_iomap(struct pci_dev *pdev, int bar, int mmio_size);
 struct pcim_iomap_devres *lkpi_pcim_iomap_devres_find(struct pci_dev *pdev);
 void lkpi_pcim_iomap_table_release(struct device *, void *);
+struct pci_dev *lkpi_pci_get_device(uint16_t, uint16_t, struct pci_dev *);
 
 static inline bool
 dev_is_pci(struct device *dev)
@@ -1574,6 +1580,19 @@ err:
 	return (-EINVAL);
 }
 
+/*
+ * We cannot simply re-define pci_get_device() as we would normally do
+ * and then hide it in linux_pci.c as too many semi-native drivers still
+ * inlucde linux/pci.h and run into the conflict with native PCI. Linux drivers
+ * using pci_get_device() need to be changed to call linuxkpi_pci_get_device().
+ */
+static inline struct pci_dev *
+linuxkpi_pci_get_device(uint16_t vendor, uint16_t device, struct pci_dev *odev)
+{
+
+	return (lkpi_pci_get_device(vendor, device, odev));
+}
+
 /* This is a FreeBSD extension so we can use bus_*(). */
 static inline void
 linuxkpi_pcim_want_to_use_bus_functions(struct pci_dev *pdev)
@@ -1609,6 +1628,14 @@ pcie_get_readrq(struct pci_dev *dev)
 		return (-EINVAL);
 
 	return (128 << ((ctl & PCI_EXP_DEVCTL_READRQ) >> 12));
+}
+
+static inline bool
+pci_is_enabled(struct pci_dev *pdev)
+{
+
+	return ((pci_read_config(pdev->dev.bsddev, PCIR_COMMAND, 2) &
+	    PCIM_CMD_BUSMASTEREN) != 0);
 }
 
 #endif	/* _LINUXKPI_LINUX_PCI_H_ */
