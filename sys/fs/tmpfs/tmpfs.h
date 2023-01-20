@@ -322,16 +322,13 @@ struct tmpfs_node {
 			 */
 			vm_object_t		tn_aobj;	/* (c) */
 			struct tmpfs_mount	*tn_tmp;	/* (c) */
-<<<<<<< HEAD
 
 			/*
 			 * The extended attributes list, which may be
 			 * empty.
 			 */
 			struct tmpfs_extattr_list_head	 tn_extattr_list; /* (i) */
-=======
 			vm_pindex_t		tn_pages;	/* (v) */
->>>>>>> freebsd/stable/13
 		} tn_reg;
 	} tn_spec;	/* (v) */
 };

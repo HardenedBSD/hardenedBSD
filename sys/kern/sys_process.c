@@ -1603,16 +1603,11 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 #ifndef PAX_HARDENING
 		if ((pc->pc_flags & PC_ALL) != 0)
 			tcq->tc_flags |= SVC_ALL;
-<<<<<<< HEAD
 #else
 		tcq->tc_flags &= (~SVC_ALL);
 #endif
-		td2->td_coredump = tcq;
-		td2->td_dbgflags |= TDB_COREDUMPRQ;
-=======
 		td2->td_remotereq = tcq;
 		td2->td_dbgflags |= TDB_COREDUMPREQ;
->>>>>>> freebsd/stable/13
 		thread_run_flash(td2);
 		while ((td2->td_dbgflags & TDB_COREDUMPREQ) != 0)
 			msleep(p, &p->p_mtx, PPAUSE, "crdmp", 0);
