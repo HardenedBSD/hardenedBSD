@@ -419,15 +419,9 @@ main(int argc, char *argv[])
 	size_t iflen;
 	int flags;
 
-	all = downonly = uponly = namesonly = verbose = 0;
+	all = downonly = uponly = namesonly = noload = verbose = 0;
 	f_inet = f_inet6 = f_ether = f_addr = NULL;
 	matchgroup = nogroup = NULL;
-
-#ifdef HARDENEDBSD
-	noload = 1;
-#else
-	noload = 0;
-#endif
 
 	lifh = ifconfig_open();
 	if (lifh == NULL)
