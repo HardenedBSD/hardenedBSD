@@ -954,6 +954,18 @@ free(void *addr, struct malloc_type *mtp)
 	uma_slab_t slab;
 	u_long size;
 
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	zfree(addr, mtp);
+	return;
+#else
+	if (kmalloc_zero) {
+		zfree(addr, mtp);
+		return;
+	}
+#endif
+#endif
+
 #ifdef MALLOC_DEBUG
 	if (free_dbg(&addr, mtp) != 0)
 		return;
