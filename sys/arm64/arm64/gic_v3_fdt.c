@@ -53,11 +53,11 @@ __FBSDID("$FreeBSD$");
  */
 static int gic_v3_fdt_probe(device_t);
 static int gic_v3_fdt_attach(device_t);
-static int gic_v3_fdt_print_child(device_t, device_t);
 
 static struct resource *gic_v3_ofw_bus_alloc_res(device_t, device_t, int, int *,
     rman_res_t, rman_res_t, rman_res_t, u_int);
 static const struct ofw_bus_devinfo *gic_v3_ofw_get_devinfo(device_t, device_t);
+static bus_get_resource_list_t gic_v3_fdt_get_resource_list;
 
 static device_method_t gic_v3_fdt_methods[] = {
 	/* Device interface */
@@ -65,9 +65,9 @@ static device_method_t gic_v3_fdt_methods[] = {
 	DEVMETHOD(device_attach,	gic_v3_fdt_attach),
 
 	/* Bus interface */
-	DEVMETHOD(bus_print_child,		gic_v3_fdt_print_child),
 	DEVMETHOD(bus_alloc_resource,		gic_v3_ofw_bus_alloc_res),
 	DEVMETHOD(bus_activate_resource,	bus_generic_activate_resource),
+	DEVMETHOD(bus_get_resource_list,	gic_v3_fdt_get_resource_list),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	gic_v3_ofw_get_devinfo),
@@ -210,20 +210,6 @@ struct gic_v3_ofw_devinfo {
 	struct resource_list	di_rl;
 };
 
-static int
-gic_v3_fdt_print_child(device_t bus, device_t child)
-{
-	struct gic_v3_ofw_devinfo *di = device_get_ivars(child);
-	struct resource_list *rl = &di->di_rl;
-	int retval = 0;
-
-	retval += bus_print_child_header(bus, child);
-	retval += resource_list_print_type(rl, "mem", SYS_RES_MEMORY, "%#jx");
-	retval += bus_print_child_footer(bus, child);
-
-	return (retval);
-}
-
 static const struct ofw_bus_devinfo *
 gic_v3_ofw_get_devinfo(device_t bus __unused, device_t child)
 {
@@ -237,18 +223,21 @@ static struct resource *
 gic_v3_ofw_bus_alloc_res(device_t bus, device_t child, int type, int *rid,
     rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
-	struct gic_v3_ofw_devinfo *di;
 	struct resource_list_entry *rle;
+	struct resource_list *rl;
 	int ranges_len;
 
+	/* We only allocate memory */
+	if (type != SYS_RES_MEMORY)
+		return (NULL);
+
 	if (RMAN_IS_DEFAULT_RANGE(start, end)) {
-		if ((di = device_get_ivars(child)) == NULL)
-			return (NULL);
-		if (type != SYS_RES_MEMORY)
+		rl = BUS_GET_RESOURCE_LIST(bus, child);
+		if (rl == NULL)
 			return (NULL);
 
 		/* Find defaults for this rid */
-		rle = resource_list_find(&di->di_rl, type, *rid);
+		rle = resource_list_find(rl, type, *rid);
 		if (rle == NULL)
 			return (NULL);
 
@@ -355,4 +344,15 @@ gic_v3_ofw_bus_attach(device_t dev)
 	}
 
 	return (bus_generic_attach(dev));
+}
+
+static struct resource_list *
+gic_v3_fdt_get_resource_list(device_t bus, device_t child)
+{
+	struct gic_v3_ofw_devinfo *di;
+
+	di = device_get_ivars(child);
+	KASSERT(di != NULL, ("%s: No devinfo", __func__));
+
+	return (&di->di_rl);
 }
