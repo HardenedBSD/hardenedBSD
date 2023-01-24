@@ -682,7 +682,7 @@ ktls_create_session(struct socket *so, struct tls_enable *en,
 	return (0);
 
 out:
-	ktls_cleanup(tls);
+	ktls_free(tls);
 	return (error);
 }
 
@@ -1099,7 +1099,7 @@ ktls_enable_rx(struct socket *so, struct tls_enable *en)
 		error = ktls_try_sw(so, tls, KTLS_RX);
 
 	if (error) {
-		ktls_cleanup(tls);
+		ktls_free(tls);
 		return (error);
 	}
 
@@ -1170,13 +1170,13 @@ ktls_enable_tx(struct socket *so, struct tls_enable *en)
 		error = ktls_try_sw(so, tls, KTLS_TX);
 
 	if (error) {
-		ktls_cleanup(tls);
+		ktls_free(tls);
 		return (error);
 	}
 
 	error = SOCK_IO_SEND_LOCK(so, SBL_WAIT);
 	if (error) {
-		ktls_cleanup(tls);
+		ktls_free(tls);
 		return (error);
 	}
 
@@ -1866,6 +1866,31 @@ tls13_find_record_type(struct ktls_session *tls, struct mbuf *m, int tls_len,
 }
 
 static void
+ktls_drop(struct socket *so, int error)
+{
+	struct epoch_tracker et;
+	struct inpcb *inp = sotoinpcb(so);
+	struct tcpcb *tp;
+
+	NET_EPOCH_ENTER(et);
+	INP_WLOCK(inp);
+	if (!(inp->inp_flags & INP_DROPPED)) {
+		tp = intotcpcb(inp);
+		CURVNET_SET(inp->inp_vnet);
+		tp = tcp_drop(tp, error);
+		CURVNET_RESTORE();
+		if (tp != NULL)
+			INP_WUNLOCK(inp);
+	} else {
+		so->so_error = error;
+		SOCKBUF_LOCK(&so->so_rcv);
+		sorwakeup_locked(so);
+		INP_WUNLOCK(inp);
+	}
+	NET_EPOCH_EXIT(et);
+}
+
+static void
 ktls_decrypt(struct socket *so)
 {
 	char tls_header[MBUF_PEXT_HDR_LEN];
@@ -1921,10 +1946,7 @@ ktls_decrypt(struct socket *so)
 			SOCKBUF_UNLOCK(sb);
 			counter_u64_add(ktls_offload_corrupted_records, 1);
 
-			CURVNET_SET(so->so_vnet);
-			so->so_proto->pr_usrreqs->pru_abort(so);
-			so->so_error = error;
-			CURVNET_RESTORE();
+			ktls_drop(so, error);
 			goto deref;
 		}
 
@@ -2331,8 +2353,7 @@ retry_page:
 	if (error == 0) {
 		(void)(*so->so_proto->pr_usrreqs->pru_ready)(so, top, npages);
 	} else {
-		so->so_proto->pr_usrreqs->pru_abort(so);
-		so->so_error = EIO;
+		ktls_drop(so, EIO);
 		mb_free_notready(top, total_pages);
 	}
 

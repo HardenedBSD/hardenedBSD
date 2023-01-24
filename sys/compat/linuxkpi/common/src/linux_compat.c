@@ -834,6 +834,18 @@ zap_vma_ptes(struct vm_area_struct *vma, unsigned long address,
 	return (0);
 }
 
+void
+vma_set_file(struct vm_area_struct *vma, struct linux_file *file)
+{
+	struct linux_file *tmp;
+
+	/* Changing an anonymous vma with this is illegal */
+	get_file(file);
+	tmp = vma->vm_file;
+	vma->vm_file = file;
+	fput(tmp);
+}
+
 static struct file_operations dummy_ldev_ops = {
 	/* XXXKIB */
 };
@@ -2756,6 +2768,7 @@ linux_compat_init(void *arg)
 #if defined(__i386__) || defined(__amd64__)
 	linux_cpu_has_clflush = (cpu_feature & CPUID_CLFSH);
 	boot_cpu_data.x86_clflush_size = cpu_clflush_line_size;
+	boot_cpu_data.x86_max_cores = mp_ncpus;
 	boot_cpu_data.x86 = ((cpu_id & 0xf0000) >> 12) | ((cpu_id & 0xf0) >> 4);
 #endif
 	rw_init(&linux_vma_lock, "lkpi-vma-lock");
