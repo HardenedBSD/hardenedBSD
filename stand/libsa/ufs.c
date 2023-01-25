@@ -81,7 +81,6 @@ __FBSDID("$FreeBSD$");
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
 #include "stand.h"
-#include "disk.h"
 #include "string.h"
 
 static int	ufs_open(const char *path, struct open_file *f);
@@ -525,7 +524,7 @@ ufs_open(const char *upath, struct open_file *f)
 		return (errno);
 	f->f_fsdata = (void *)fp;
 
-	dev = disk_fmtdev(f->f_devdata);
+	dev = devformat((struct devdesc *)f->f_devdata);
 	/* Is this device mounted? */
 	STAILQ_FOREACH(mnt, &mnt_list, um_link) {
 		if (strcmp(dev, mnt->um_dev) == 0)
@@ -643,11 +642,8 @@ ufs_open(const char *upath, struct open_file *f)
 			bcopy(cp, &namebuf[link_len], len + 1);
 
 			if (link_len < fs->fs_maxsymlinklen) {
-				if (fp->f_fs->fs_magic == FS_UFS1_MAGIC)
-					cp = (caddr_t)(fp->f_di.di1.di_db);
-				else
-					cp = (caddr_t)(fp->f_di.di2.di_db);
-				bcopy(cp, namebuf, (unsigned) link_len);
+				bcopy(DIP(fp, di_shortlink), namebuf,
+				    (unsigned) link_len);
 			} else {
 				/*
 				 * Read file for symbolic link
@@ -747,7 +743,7 @@ ufs_close(struct open_file *f)
 	}
 	free(fp->f_buf);
 
-	dev = disk_fmtdev(f->f_devdata);
+	dev = devformat((struct devdesc *)f->f_devdata);
 	STAILQ_FOREACH(mnt, &mnt_list, um_link) {
 		if (strcmp(dev, mnt->um_dev) == 0)
 			break;

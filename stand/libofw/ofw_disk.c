@@ -39,7 +39,7 @@ __FBSDID("$FreeBSD$");
 #include <stand.h>
 #include <sys/disk.h>
 
-#include "bootstrap.h"
+#include "disk.h"
 #include "libofw.h"
 
 static int	ofwd_init(void);
@@ -49,16 +49,23 @@ static int	ofwd_open(struct open_file *f, ...);
 static int	ofwd_close(struct open_file *f);
 static int	ofwd_ioctl(struct open_file *f, u_long cmd, void *data);
 static int	ofwd_print(int verbose);
+static char *	ofwd_fmtdev(struct devdesc *);
+static int	ofwd_parsedev(struct devdesc **, const char *, const char **);
+static bool	ofwd_match(struct devsw *, const char *);
 
 struct devsw ofwdisk = {
-	"block",
-	DEVT_DISK,
-	ofwd_init,
-	ofwd_strategy,
-	ofwd_open,
-	ofwd_close,
-	ofwd_ioctl,
-	ofwd_print
+	.dv_name = "block",
+	.dv_type = DEVT_OFDISK,
+	.dv_init = ofwd_init,
+	.dv_strategy = ofwd_strategy,
+	.dv_open = ofwd_open,
+	.dv_close = ofwd_close,
+	.dv_ioctl = ofwd_ioctl,
+	.dv_print = ofwd_print,
+	.dv_cleanup = nullsys,
+	.dv_match = ofwd_match,
+	.dv_fmtdev = ofwd_fmtdev,
+	.dv_parsedev = ofwd_parsedev,
 };
 
 /*
@@ -180,5 +187,52 @@ ofwd_ioctl(struct open_file *f, u_long cmd, void *data)
 static int
 ofwd_print(int verbose __unused)
 {
+	uintmax_t block_size, n;
+	int ret;
+	char line[80];
+
+	/*
+	 * We don't have a list of devices since we don't parse the whole OFW
+	 * tree to find them. Instead, if we have an open device print info
+	 * about it. Otherwise say we can't. Makes lsdev nicer.
+	 */
+	if ((ret = pager_output("block devices:\n")) != 0)
+		return (ret);
+	if (kdp != NULL) {
+		block_size = OF_block_size(kdp->d_handle);
+		n = OF_blocks(kdp->d_handle);
+		snprintf(line, sizeof(line),
+		    "    %s:   OFW block device (%ju X %ju): %ju bytes\n",
+		    kdp->d_path, n, block_size, n * block_size);
+		if ((ret = pager_output(line)) != 0)
+			return (ret);
+	} else {
+		if ((ret = pager_output("  none are open, so no info\n")) != 0)
+			return (ret);
+	}
+
 	return (0);
+}
+
+
+static bool
+ofwd_match(struct devsw *devsw, const char *devspec)
+{
+	const char *path;
+
+	return (ofw_path_to_handle(devspec, devsw->dv_name, &path) != -1);
+}
+
+static char *
+ofwd_fmtdev(struct devdesc *idev)
+{
+	struct ofw_devdesc *dev = (struct ofw_devdesc *)idev;
+
+	return (dev->d_path);
+}
+
+static int
+ofwd_parsedev(struct devdesc **dev, const char *devspec, const char **path)
+{
+	return (ofw_common_parsedev(dev, devspec, path, ofwdisk.dv_name));
 }

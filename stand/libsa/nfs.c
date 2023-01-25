@@ -133,14 +133,14 @@ static int	nfs_readdir(struct open_file *f, struct dirent *d);
 struct	nfs_iodesc nfs_root_node;
 
 struct fs_ops nfs_fsops = {
-	"nfs",
-	nfs_open,
-	nfs_close,
-	nfs_read,
-	null_write,
-	nfs_seek,
-	nfs_stat,
-	nfs_readdir
+	.fs_name = "nfs",
+	.fo_open = nfs_open,
+	.fo_close = nfs_close,
+	.fo_read = nfs_read,
+	.fo_write = null_write,
+	.fo_seek = nfs_seek,
+	.fo_stat = nfs_stat,
+	.fo_readdir = nfs_readdir,
 };
 
 static int nfs_read_size = NFSREAD_MIN_SIZE;
@@ -464,6 +464,7 @@ nfs_readdata(struct nfs_iodesc *d, off_t off, void *addr, size_t len)
 int
 nfs_open(const char *upath, struct open_file *f)
 {
+	struct devdesc *dev;
 	struct iodesc *desc;
 	struct nfs_iodesc *currfd = NULL;
 	char buf[2 * NFS_V3MAXFHSIZE + 3];
@@ -484,6 +485,7 @@ nfs_open(const char *upath, struct open_file *f)
 	if (netproto != NET_NFS)
 		return (EINVAL);
 
+	dev = f->f_devdata;
 #ifdef NFS_DEBUG
  	if (debug)
 		printf("nfs_open: %s (rootip=%s rootpath=%s)\n", upath,
@@ -497,7 +499,7 @@ nfs_open(const char *upath, struct open_file *f)
 	if (f->f_dev->dv_type != DEVT_NET)
 		return (EINVAL);
 
-	if (!(desc = socktodesc(*(int *)(f->f_devdata))))
+	if (!(desc = socktodesc(*(int *)(dev->d_opendata))))
 		return (EINVAL);
 
 	/* Bind to a reserved port. */

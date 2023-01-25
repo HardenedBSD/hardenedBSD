@@ -170,6 +170,7 @@ MAN=	aac.4 \
 	gdb.4 \
 	gem.4 \
 	genet.4 \
+	genetlink.4 \
 	geom.4 \
 	geom_linux_lvm.4 \
 	geom_map.4 \
@@ -342,6 +343,7 @@ MAN=	aac.4 \
 	netgdb.4 \
 	netgraph.4 \
 	netintro.4 \
+	netlink.4 \
 	netmap.4 \
 	${_nfe.4} \
 	${_nfsmb.4} \
@@ -476,6 +478,7 @@ MAN=	aac.4 \
 	rl.4 \
 	rndtest.4 \
 	route.4 \
+	rtnetlink.4 \
 	rtsx.4 \
 	rtw88.4 \
 	rtw88fw.4 \

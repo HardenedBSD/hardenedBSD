@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD$");
 #include <stdarg.h>
 #include <bootstrap.h>
 #include <part.h>
+#include <assert.h>
 
 #include "disk.h"
 
@@ -385,12 +386,14 @@ disk_close(struct disk_devdesc *dev)
 	return (0);
 }
 
-char*
-disk_fmtdev(struct disk_devdesc *dev)
+char *
+disk_fmtdev(struct devdesc *vdev)
 {
+	struct disk_devdesc *dev = (struct disk_devdesc *)vdev;
 	static char buf[128];
 	char *cp;
 
+	assert(vdev->d_dev->dv_type == DEVT_DISK);
 	cp = buf + sprintf(buf, "%s%d", dev->dd.d_dev->dv_name, dev->dd.d_unit);
 	if (dev->d_slice > D_SLICENONE) {
 #ifdef LOADER_GPT_SUPPORT
@@ -410,13 +413,14 @@ disk_fmtdev(struct disk_devdesc *dev)
 }
 
 int
-disk_parsedev(struct disk_devdesc *dev, const char *devspec, const char **path)
+disk_parsedev(struct devdesc **idev, const char *devspec, const char **path)
 {
 	int unit, slice, partition;
 	const char *np;
 	char *cp;
+	struct disk_devdesc *dev;
 
-	np = devspec;
+	np = devspec + 4;	/* Skip the leading 'disk' */
 	unit = -1;
 	/*
 	 * If there is path/file info after the device info, then any missing
@@ -467,9 +471,13 @@ disk_parsedev(struct disk_devdesc *dev, const char *devspec, const char **path)
 
 	if (*cp != '\0' && *cp != ':')
 		return (EINVAL);
+	dev = malloc(sizeof(*dev));
+	if (dev == NULL)
+		return (ENOMEM);
 	dev->dd.d_unit = unit;
 	dev->d_slice = slice;
 	dev->d_partition = partition;
+	*idev = &dev->dd;
 	if (path != NULL)
 		*path = (*cp == '\0') ? cp: cp + 1;
 	return (0);

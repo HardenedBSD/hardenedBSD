@@ -96,8 +96,6 @@ ptov(uintptr_t x)
 int
 main(void)
 {
-	int	i;
-
 	/* Pick up arguments */
 	kargs = (void *)__args;
 	initial_howto = kargs->howto;
@@ -166,7 +164,7 @@ main(void)
 
 	/* Set up currdev variable to have hooks in place. */
 	env_setenv("currdev", EV_VOLATILE | EV_NOHOOK, "",
-	    i386_setcurrdev, env_nounset);
+	    gen_setcurrdev, env_nounset);
 
 	/*
 	 * Initialise the block cache. Set the upper limit.
@@ -244,12 +242,7 @@ main(void)
 		import_geli_boot_data(gbdata);
 #endif /* LOADER_GELI_SUPPORT */
 
-	/*
-	 * March through the device switch probing for things.
-	 */
-	for (i = 0; devsw[i] != NULL; i++)
-		if (devsw[i]->dv_init != NULL)
-			(devsw[i]->dv_init)();
+	devinit();
 
 	printf("BIOS %dkB/%dkB available memory\n", bios_basemem / 1024,
 	    bios_extmem / 1024);
@@ -308,8 +301,8 @@ extract_currdev(void)
 			new_currdev.dd.d_unit = 0;
 		} else {
 			/* we don't know what our boot device is */
-			new_currdev.d_kind.biosdisk.slice = -1;
-			new_currdev.d_kind.biosdisk.partition = 0;
+			new_currdev.disk.d_slice = -1;
+			new_currdev.disk.d_partition = 0;
 			biosdev = -1;
 		}
 #ifdef LOADER_ZFS_SUPPORT
@@ -322,8 +315,8 @@ extract_currdev(void)
 		    zargs->size >=
 		    offsetof(struct zfs_boot_args, primary_pool)) {
 			/* sufficient data is provided */
-			new_currdev.d_kind.zfs.pool_guid = zargs->pool;
-			new_currdev.d_kind.zfs.root_guid = zargs->root;
+			new_currdev.zfs.pool_guid = zargs->pool;
+			new_currdev.zfs.root_guid = zargs->root;
 			if (zargs->size >= sizeof(*zargs) &&
 			    zargs->primary_vdev != 0) {
 				sprintf(buf, "%llu", zargs->primary_pool);
@@ -333,8 +326,8 @@ extract_currdev(void)
 			}
 		} else {
 			/* old style zfsboot block */
-			new_currdev.d_kind.zfs.pool_guid = kargs->zfspool;
-			new_currdev.d_kind.zfs.root_guid = 0;
+			new_currdev.zfs.pool_guid = kargs->zfspool;
+			new_currdev.zfs.root_guid = 0;
 		}
 		new_currdev.dd.d_dev = &zfs_dev;
 
@@ -350,14 +343,12 @@ extract_currdev(void)
 #endif
 	} else if ((initial_bootdev & B_MAGICMASK) != B_DEVMAGIC) {
 		/* The passed-in boot device is bad */
-		new_currdev.d_kind.biosdisk.slice = -1;
-		new_currdev.d_kind.biosdisk.partition = 0;
+		new_currdev.disk.d_slice = -1;
+		new_currdev.disk.d_partition = 0;
 		biosdev = -1;
 	} else {
-		new_currdev.d_kind.biosdisk.slice =
-		    B_SLICE(initial_bootdev) - 1;
-		new_currdev.d_kind.biosdisk.partition =
-		    B_PARTITION(initial_bootdev);
+		new_currdev.disk.d_slice = B_SLICE(initial_bootdev) - 1;
+		new_currdev.disk.d_partition = B_PARTITION(initial_bootdev);
 		biosdev = initial_bootinfo->bi_bios_dev;
 
 		/*
@@ -389,13 +380,10 @@ extract_currdev(void)
 
 #ifdef LOADER_ZFS_SUPPORT
 	if (new_currdev.dd.d_dev->dv_type == DEVT_ZFS)
-		init_zfs_boot_options(zfs_fmtdev(&new_currdev));
+		init_zfs_boot_options(devformat(&new_currdev.dd));
 #endif
 
-	env_setenv("currdev", EV_VOLATILE, i386_fmtdev(&new_currdev),
-	    i386_setcurrdev, env_nounset);
-	env_setenv("loaddev", EV_VOLATILE, i386_fmtdev(&new_currdev),
-	    env_noset, env_nounset);
+	set_currdev(devformat(&new_currdev.dd));
 }
 
 COMMAND_SET(reboot, "reboot", "reboot the system", command_reboot);
@@ -462,7 +450,7 @@ i386_zfs_probe(void)
 	for (dev.dd.d_unit = 0; bd_unit2bios(&dev) >= 0; dev.dd.d_unit++) {
 		snprintf(devname, sizeof(devname), "%s%d:", bioshd.dv_name,
 		    dev.dd.d_unit);
-		zfs_probe_dev(devname, NULL);
+		zfs_probe_dev(devname, NULL, true);
 	}
 }
 #endif

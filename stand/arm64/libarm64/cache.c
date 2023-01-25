@@ -1,6 +1,5 @@
 /*-
  * Copyright (c) 2014 The FreeBSD Foundation
- * All rights reserved.
  *
  * This software was developed by Semihalf under
  * the sponsorship of the FreeBSD Foundation.
@@ -35,7 +34,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/atomic.h>
 
 #include <stand.h>
-#include <efi.h>
 
 #include "bootstrap.h"
 #include "cache.h"

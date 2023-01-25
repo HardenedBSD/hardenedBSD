@@ -53,6 +53,8 @@ CFLAGS+=	-DEFI_UFS_BOOT
 CFLAGS+=	-DEFI_DEBUG
 .endif
 
+.include	"${BOOTSRC}/veriexec.mk"
+
 # Always add MI sources and REGULAR efi loader bits
 .PATH:		${EFISRC}/loader/arch/${MACHINE}
 .PATH:		${EFISRC}/loader
@@ -80,7 +82,7 @@ LDFLAGS+=	-Wl,-znocombreloc
 LIBEFI=		${BOOTOBJ}/efi/libefi/libefi.a
 
 #
-# Add libstand for the runtime functions used by the compiler - for example
+# Add libsa for the runtime functions used by the compiler - for example
 # __aeabi_* (arm) or __divdi3 (i386).
 # as well as required string and memory functions for all platforms.
 #

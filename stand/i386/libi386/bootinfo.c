@@ -41,7 +41,7 @@ __FBSDID("$FreeBSD$");
 void
 bi_load_vbe_data(struct preloaded_file *kfp)
 {
-	if (!gfx_state.tg_kernel_supported) {
+	if (!kfp->f_tg_kernel_support) {
 		/*
 		 * Loaded kernel does not have vt/vbe backend,
 		 * switch console to text mode.
@@ -102,32 +102,4 @@ bi_setboothowto(int howto)
 {
 
     boot_howto_to_env(howto);
-}
-
-/*
- * Copy the environment into the load area starting at (addr).
- * Each variable is formatted as <name>=<value>, with a single nul
- * separating each variable, and a double nul terminating the environment.
- */
-vm_offset_t
-bi_copyenv(vm_offset_t addr)
-{
-    struct env_var	*ep;
-    
-    /* traverse the environment */
-    for (ep = environ; ep != NULL; ep = ep->ev_next) {
-	i386_copyin(ep->ev_name, addr, strlen(ep->ev_name));
-	addr += strlen(ep->ev_name);
-	i386_copyin("=", addr, 1);
-	addr++;
-	if (ep->ev_value != NULL) {
-	    i386_copyin(ep->ev_value, addr, strlen(ep->ev_value));
-	    addr += strlen(ep->ev_value);
-	}
-	i386_copyin("", addr, 1);
-	addr++;
-    }
-    i386_copyin("", addr, 1);
-    addr++;
-    return(addr);
 }

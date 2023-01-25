@@ -27,25 +27,23 @@
  */
 
 
+#include "disk.h"
+#ifdef LOADER_ZFS_SUPPORT
+#include "libzfs.h"
+#endif
 /*
  * i386 fully-qualified device descriptor.
  */
-struct i386_devdesc {
-    struct devdesc	dd;		/* Must be first. */
-    union 
-    {
-	struct 
+struct i386_devdesc
+{
+	union
 	{
-	    int		slice;
-	    int		partition;
-	    off_t	offset;
-	} biosdisk;
-	struct
-	{
-	    uint64_t	pool_guid;
-	    uint64_t	root_guid;
-	} zfs;
-    } d_kind;
+		struct devdesc dd;
+		struct disk_devdesc disk;
+#ifdef LOADER_ZFS_SUPPORT
+		struct zfs_devdesc zfs;
+#endif
+	};
 };
 
 /*
@@ -82,7 +80,6 @@ extern uint16_t relocator_a20_enabled;
 
 int	i386_getdev(void **vdev, const char *devspec, const char **path);
 char	*i386_fmtdev(void *vdev);
-int	i386_setcurrdev(struct env_var *ev, int flags, const void *value);
 
 extern struct devdesc	currdev;	/* our current device */
 
@@ -148,10 +145,9 @@ int	i386_autoload(void);
 void	bi_load_vbe_data(struct preloaded_file *kfp);
 int	bi_getboothowto(char *kargs);
 void	bi_setboothowto(int howto);
-vm_offset_t	bi_copyenv(vm_offset_t addr);
 int	bi_load32(char *args, int *howtop, int *bootdevp, vm_offset_t *bip,
 	    vm_offset_t *modulep, vm_offset_t *kernend);
-int	bi_load64(char *args, vm_offset_t addr, vm_offset_t *modulep,
+int	bi_load64(char *args, vm_offset_t *modulep,
 	    vm_offset_t *kernend, int add_smap);
 
 void	pxe_enable(void *pxeinfo);

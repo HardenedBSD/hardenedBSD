@@ -54,7 +54,8 @@ __FBSDID("$FreeBSD$");
 static EFI_GUID acpi_guid = ACPI_TABLE_GUID;
 static EFI_GUID acpi20_guid = ACPI_20_TABLE_GUID;
 
-extern int bi_load(char *args, vm_offset_t *modulep, vm_offset_t *kernendp);
+extern int bi_load(char *args, vm_offset_t *modulep, vm_offset_t *kernendp,
+    bool exit_bs);
 
 static int	elf64_exec(struct preloaded_file *amp);
 static int	elf64_obj_exec(struct preloaded_file *amp);
@@ -68,7 +69,12 @@ static struct file_format amd64_elf_obj = {
 	.l_exec = elf64_obj_exec,
 };
 
+extern struct file_format multiboot2;
+extern struct file_format multiboot2_obj;
+
 struct file_format *file_formats[] = {
+	&multiboot2,
+	&multiboot2_obj,
 	&amd64_elf,
 	&amd64_elf_obj,
 	NULL
@@ -113,12 +119,6 @@ elf64_exec(struct preloaded_file *fp)
 	/*
 	 * Report the RSDP to the kernel. While this can be found with
 	 * a BIOS boot, the RSDP may be elsewhere when booted from UEFI.
-	 * The old code used the 'hints' method to communite this to
-	 * the kernel. However, while convenient, the 'hints' method
-	 * is fragile and does not work when static hints are compiled
-	 * into the kernel. Instead, move to setting different tunables
-	 * that start with acpi. The old 'hints' can be removed before
-	 * we branch for FreeBSD 12.
 	 */
 
 	rsdp = efi_get_table(&acpi20_guid);
@@ -127,29 +127,23 @@ elf64_exec(struct preloaded_file *fp)
 	}
 	if (rsdp != NULL) {
 		sprintf(buf, "0x%016llx", (unsigned long long)rsdp);
-		setenv("hint.acpi.0.rsdp", buf, 1);
 		setenv("acpi.rsdp", buf, 1);
 		revision = rsdp->Revision;
 		if (revision == 0)
 			revision = 1;
 		sprintf(buf, "%d", revision);
-		setenv("hint.acpi.0.revision", buf, 1);
 		setenv("acpi.revision", buf, 1);
 		strncpy(buf, rsdp->OemId, sizeof(rsdp->OemId));
 		buf[sizeof(rsdp->OemId)] = '\0';
-		setenv("hint.acpi.0.oem", buf, 1);
 		setenv("acpi.oem", buf, 1);
 		sprintf(buf, "0x%016x", rsdp->RsdtPhysicalAddress);
-		setenv("hint.acpi.0.rsdt", buf, 1);
 		setenv("acpi.rsdt", buf, 1);
 		if (revision >= 2) {
 			/* XXX extended checksum? */
 			sprintf(buf, "0x%016llx",
 			    (unsigned long long)rsdp->XsdtPhysicalAddress);
-			setenv("hint.acpi.0.xsdt", buf, 1);
 			setenv("acpi.xsdt", buf, 1);
 			sprintf(buf, "%d", rsdp->Length);
-			setenv("hint.acpi.0.xsdt_length", buf, 1);
 			setenv("acpi.xsdt_length", buf, 1);
 		}
 	}
@@ -269,7 +263,7 @@ elf64_exec(struct preloaded_file *fp)
 	printf("Start @ 0x%lx ...\n", ehdr->e_entry);
 
 	efi_time_fini();
-	err = bi_load(fp->f_args, &modulep, &kernend);
+	err = bi_load(fp->f_args, &modulep, &kernend, true);
 	if (err != 0) {
 		efi_time_init();
 		if (copy_auto)

@@ -60,6 +60,10 @@ local function bootenvSet(env)
 	config.reload()
 end
 
+local function multiUserPrompt()
+	return loader.getenv("loader_menu_multi_user_prompt") or "Multi user"
+end
+
 -- Module exports
 menu.handlers = {
 	-- Menu handlers take the current menu and selected entry as parameters,
@@ -257,16 +261,22 @@ menu.welcome = {
 			menu_entries.zpool_checkpoints,
 			menu_entries.boot_envs,
 			menu_entries.chainload,
+			menu_entries.vendor,
 		}
 	end,
 	all_entries = {
 		multi_user = {
 			entry_type = core.MENU_ENTRY,
-			name = color.highlight("B") .. "oot Multi user " ..
-			    color.highlight("[Enter]"),
+			name = function()
+				return color.highlight("B") .. "oot " ..
+				    multiUserPrompt() .. " " ..
+				    color.highlight("[Enter]")
+			end,
 			-- Not a standard menu entry function!
-			alternate_name = color.highlight("B") ..
-			    "oot Multi user",
+			alternate_name = function()
+				return color.highlight("B") .. "oot " ..
+				    multiUserPrompt()
+			end,
 			func = function()
 				core.setSingleUser(false)
 				core.boot()
@@ -399,6 +409,12 @@ menu.welcome = {
 				return loader.getenv('chain_disk') ~= nil
 			end,
 			alias = {"l", "L"},
+		},
+		vendor = {
+			entry_type = core.MENU_ENTRY,
+			visible = function()
+				return false
+			end
 		},
 	},
 }

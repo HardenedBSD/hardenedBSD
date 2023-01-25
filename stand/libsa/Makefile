@@ -15,7 +15,7 @@ LIB?=		sa
 # standalone components and stuff we have modified locally
 SRCS+=	gzguts.h zutil.h __main.c abort.c assert.c bcd.c environment.c \
 	getopt.c gets.c globals.c \
-	hexdump.c pager.c panic.c printf.c strdup.c strerror.c \
+	hexdump.c nvstore.c pager.c panic.c printf.c strdup.c strerror.c \
 	random.c sbrk.c tslog.c twiddle.c zalloc.c zalloc_malloc.c
 
 # private (pruned) versions of libc string functions
@@ -89,15 +89,20 @@ SRCS+=	_setjmp.S
 # NOTE: to actually test this functionality after libbz2 upgrade compile
 # loader(8) with LOADER_BZIP2_SUPPORT defined
 .PATH: ${SRCTOP}/contrib/bzip2
-CFLAGS+= -DBZ_NO_STDIO -DBZ_NO_COMPRESS
-
-SRCS+=bzlib.c crctable.c decompress.c huffman.c randtable.c
+.for i in bzlib.c crctable.c decompress.c huffman.c randtable.c
+CFLAGS.${i}+= -DBZ_NO_STDIO -DBZ_NO_COMPRESS
+SRCS+=${i}
+.endfor
 
 # decompression functionality from zlib
+# https://github.com/madler/zlib/issues/633 documents why we suppress deprecated
+# prototype warnings.
 .PATH: ${SRCTOP}/sys/contrib/zlib
-CFLAGS+=-DHAVE_MEMCPY -I${SRCTOP}/sys/contrib/zlib
-SRCS+=	adler32.c crc32.c
-SRCS+=	infback.c inffast.c inflate.c inftrees.c zutil.c
+ZLIB_CFLAGS=-DHAVE_MEMCPY -I${SRCTOP}/sys/contrib/zlib ${NO_WDEPRECATED_NON_PROTOTYPE}
+.for i in adler32.c crc32.c infback.c inffast.c inflate.c inftrees.c zutil.c
+CFLAGS.${i}+=${ZLIB_CFLAGS}
+SRCS+=	${i}
+.endfor
 
 # lz4 decompression functionality
 .PATH: ${SRCTOP}/sys/cddl/contrib/opensolaris/common/lz4
@@ -107,7 +112,7 @@ CFLAGS.lz4.c+= -I${SRCTOP}/sys/cddl/contrib/opensolaris/common/lz4
 # Create a subset of includes that are safe, as well as adjusting those that aren't
 # The lists may drive people nuts, but they are explicitly opt-in
 FAKE_DIRS=xlocale arpa
-SAFE_INCS=a.out.h assert.h elf.h limits.h nlist.h setjmp.h stddef.h stdbool.h string.h strings.h time.h unistd.h uuid.h
+SAFE_INCS=a.out.h assert.h elf.h inttypes.h limits.h nlist.h setjmp.h stddef.h stdbool.h string.h strings.h time.h unistd.h uuid.h
 STAND_H_INC=ctype.h fcntl.h signal.h stdio.h stdlib.h
 OTHER_INC=stdarg.h errno.h stdint.h
 
@@ -179,9 +184,10 @@ CFLAGS.ffs_subr.c+= -DSTANDALONE_SMALL
 .endif
 
 CFLAGS.dosfs.c+= -I${LDRSRC}
-CFLAGS.tftp.c+= -I${LDRSRC}
 CFLAGS.ufs.c+= -I${LDRSRC}
-CFLAGS.bzipfs.c+= -I${SRCTOP}/contrib/bzip2
+CFLAGS.gzipfs.c+= ${ZLIB_CFLAGS}
+CFLAGS.pkgfs.c+= ${ZLIB_CFLAGS}
+CFLAGS.bzipfs.c+= -I${SRCTOP}/contrib/bzip2  -DBZ_NO_STDIO -DBZ_NO_COMPRESS
 
 # explicit_bzero and calculate_crc32c
 .PATH: ${SYSDIR}/libkern
@@ -193,6 +199,7 @@ SRCS+=  explicit_bzero.c crc32_libkern.c
 .endif
 
 .if ${MK_LOADER_VERIEXEC} == "yes" && ${MK_BEARSSL} == "yes"
+# XXX Note that these pollutes CFLAGS in a way that's not easy to fix
 .include "${SRCTOP}/lib/libbearssl/Makefile.libsa.inc"
 .include "${SRCTOP}/lib/libsecureboot/Makefile.libsa.inc"
 .endif
@@ -200,6 +207,10 @@ SRCS+=  explicit_bzero.c crc32_libkern.c
 # Maybe ZFS
 .if ${MK_LOADER_ZFS} == "yes"
 .include "${SASRC}/zfs/Makefile.inc"
+.endif
+
+.if ${DO32:U0} == 0
+MAN=libsa.3
 .endif
 
 .include <bsd.lib.mk>

@@ -40,8 +40,6 @@
 #include <geom/eli/g_eli.h>
 #include <geom/eli/pkcs5v2.h>
 
-#include <bootstrap.h>
-
 /* Pull in the md5, sha256, and sha512 implementations */
 #include <sys/md5.h>
 #include <crypto/sha2/sha256.h>
@@ -68,6 +66,6 @@ struct geli_dev {
 };
 
 int geliboot_crypt(u_int algo, geli_op_t  enc, u_char *data, size_t datasize,
-    const u_char *key, size_t keysize, u_char *iv, size_t ivlen);
+    const u_char *key, size_t keysize, u_char *iv);
 
 #endif /* _GELIBOOT_INTERNAL_H_ */

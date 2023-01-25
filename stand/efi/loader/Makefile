@@ -43,6 +43,8 @@ CFLAGS.bootinfo.c += -I$(SRCTOP)/sys/teken
 CFLAGS.bootinfo.c += -I${SRCTOP}/contrib/pnglite
 CFLAGS.framebuffer.c += -I$(SRCTOP)/sys/teken
 CFLAGS.framebuffer.c += -I${SRCTOP}/contrib/pnglite
+CFLAGS.main.c += -I$(SRCTOP)/sys/teken
+CFLAGS.main.c += -I${SRCTOP}/contrib/pnglite
 CFLAGS.gfx_fb.c += -I$(SRCTOP)/sys/teken
 CFLAGS.gfx_fb.c += -I${SRCTOP}/sys/cddl/contrib/opensolaris/common/lz4
 CFLAGS.gfx_fb.c += -I${SRCTOP}/contrib/pnglite
@@ -107,7 +109,7 @@ LDFLAGS+=	-Wl,-T${LDSCRIPT},-Bsymbolic,-znotext -pie
 LDFLAGS+=	-Wl,--no-dynamic-linker
 .endif
 
-CLEANFILES+=	loader.efi
+CLEANFILES+=	${LOADER}.efi
 
 ${LOADER}.efi: ${PROG}
 	if ${NM} ${.ALLSRC} | grep ' U '; then \

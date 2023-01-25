@@ -135,12 +135,6 @@ host_dev_print(int verbose)
 static int
 host_dev_open(struct open_file *f, ...)
 {
-	va_list		args;
-	struct devdesc	*dev;
-
-	va_start(args, f);
-	dev = va_arg(args, struct devdesc*);
-	va_end(args);
 
 	return (0);
 }
@@ -161,14 +155,14 @@ host_dev_strategy(void *devdata, int rw, daddr_t dblk, size_t size,
 }
 
 struct fs_ops host_fsops = {
-	"host",
-	host_open,
-	host_close,
-	host_read,
-	null_write,
-	host_seek,
-	host_stat,
-	host_readdir
+	.fs_name = "host",
+	.fo_open = host_open,
+	.fo_close = host_close,
+	.fo_read = host_read,
+	.fo_write = null_write,
+	.fo_seek = host_seek,
+	.fo_stat = host_stat,
+	.fo_readdir = host_readdir,
 };
 
 struct devsw host_dev = {
@@ -180,5 +174,5 @@ struct devsw host_dev = {
 	.dv_close = host_dev_close,
 	.dv_ioctl = noioctl,
 	.dv_print = host_dev_print,
-	.dv_cleanup = NULL
+	.dv_cleanup = nullsys,
 };
