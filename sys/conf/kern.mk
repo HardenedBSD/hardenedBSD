@@ -235,7 +235,9 @@ CFLAGS+=	-fstack-protector
 CFLAGS+=	-mretpoline
 .endif
 
+.if !defined(TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE)
 CFLAGS+=	-ftrivial-auto-var-init=uninitialized
+.endif
 
 CFLAGS+= ${CWARNFLAGS:M*} ${CWARNFLAGS.${.IMPSRC:T}}
 CFLAGS+= ${CWARNFLAGS.${COMPILER_TYPE}}
