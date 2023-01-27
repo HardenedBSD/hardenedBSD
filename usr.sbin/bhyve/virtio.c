@@ -558,8 +558,7 @@ vi_find_cr(int offset) {
  * Otherwise dispatch to the actual driver.
  */
 uint64_t
-vi_pci_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-	    int baridx, uint64_t offset, int size)
+vi_pci_read(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 {
 	struct virtio_softc *vs = pi->pi_arg;
 	struct virtio_consts *vc;
@@ -678,8 +677,8 @@ done:
  * Otherwise dispatch to the actual driver.
  */
 void
-vi_pci_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
-	     int baridx, uint64_t offset, int size, uint64_t value)
+vi_pci_write(struct pci_devinst *pi, int baridx, uint64_t offset, int size,
+    uint64_t value)
 {
 	struct virtio_softc *vs = pi->pi_arg;
 	struct vqueue_info *vq;
@@ -771,7 +770,7 @@ bad:
 		vs->vs_curq = value;
 		break;
 	case VIRTIO_PCI_QUEUE_NOTIFY:
-		if (value >= vc->vc_nvq) {
+		if (value >= (unsigned int)vc->vc_nvq) {
 			EPRINTLN("%s: queue %d notify out of range",
 				name, (int)value);
 			goto done;
@@ -814,7 +813,7 @@ done:
 
 #ifdef BHYVE_SNAPSHOT
 int
-vi_pci_pause(struct vmctx *ctx, struct pci_devinst *pi)
+vi_pci_pause(struct pci_devinst *pi)
 {
 	struct virtio_softc *vs;
 	struct virtio_consts *vc;
@@ -830,7 +829,7 @@ vi_pci_pause(struct vmctx *ctx, struct pci_devinst *pi)
 }
 
 int
-vi_pci_resume(struct vmctx *ctx, struct pci_devinst *pi)
+vi_pci_resume(struct pci_devinst *pi)
 {
 	struct virtio_softc *vs;
 	struct virtio_consts *vc;

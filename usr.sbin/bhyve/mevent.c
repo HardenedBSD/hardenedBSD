@@ -29,7 +29,7 @@
  */
 
 /*
- * Micro event library for FreeBSD, designed for a single i/o thread 
+ * Micro event library for FreeBSD, designed for a single i/o thread
  * using kqueue, and having events be persistent by default.
  */
 
@@ -99,7 +99,7 @@ mevent_qunlock(void)
 }
 
 static void
-mevent_pipe_read(int fd, enum ev_type type, void *param)
+mevent_pipe_read(int fd, enum ev_type type __unused, void *param __unused)
 {
 	char buf[MEVENT_MAX];
 	int status;
@@ -117,7 +117,7 @@ static void
 mevent_notify(void)
 {
 	char c = '\0';
-	
+
 	/*
 	 * If calling from outside the i/o thread, write a byte on the
 	 * pipe to force the i/o thread to exit the blocking kevent call.
@@ -546,10 +546,10 @@ mevent_dispatch(void)
 		if (ret == -1 && errno != EINTR) {
 			perror("Error return from kevent monitor");
 		}
-		
+
 		/*
 		 * Handle reported events
 		 */
 		mevent_handle(eventlist, ret);
-	}			
+	}
 }

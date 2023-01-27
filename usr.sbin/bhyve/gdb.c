@@ -958,7 +958,6 @@ static void
 gdb_read_regs(void)
 {
 	uint64_t regvals[nitems(gdb_regset)];
-	int i;
 
 	if (vm_get_register_set(ctx, cur_vcpu, nitems(gdb_regset),
 	    gdb_regset, regvals) == -1) {
@@ -966,7 +965,7 @@ gdb_read_regs(void)
 		return;
 	}
 	start_packet();
-	for (i = 0; i < nitems(regvals); i++)
+	for (size_t i = 0; i < nitems(regvals); i++)
 		append_unsigned_native(regvals[i], gdb_regsize[i]);
 	finish_packet();
 }
@@ -1704,15 +1703,18 @@ check_command(int fd)
 }
 
 static void
-gdb_readable(int fd, enum ev_type event, void *arg)
+gdb_readable(int fd, enum ev_type event __unused, void *arg __unused)
 {
+	size_t pending;
 	ssize_t nread;
-	int pending;
+	int n;
 
-	if (ioctl(fd, FIONREAD, &pending) == -1) {
+	if (ioctl(fd, FIONREAD, &n) == -1) {
 		warn("FIONREAD on GDB socket");
 		return;
 	}
+	assert(n >= 0);
+	pending = n;
 
 	/*
 	 * 'pending' might be zero due to EOF.  We need to call read
@@ -1743,14 +1745,14 @@ gdb_readable(int fd, enum ev_type event, void *arg)
 }
 
 static void
-gdb_writable(int fd, enum ev_type event, void *arg)
+gdb_writable(int fd, enum ev_type event __unused, void *arg __unused)
 {
 
 	send_pending_data(fd);
 }
 
 static void
-new_connection(int fd, enum ev_type event, void *arg)
+new_connection(int fd, enum ev_type event __unused, void *arg)
 {
 	int optval, s;
 
@@ -1840,11 +1842,7 @@ init_gdb(struct vmctx *_ctx)
 
 	saddr = get_config_value("gdb.address");
 	if (saddr == NULL) {
-#if defined(INET)
-		saddr = "0.0.0.0";
-#elif defined(INET6)
-		saddr = "[::]";
-#endif
+		saddr = "localhost";
 	}
 
 	debug("==> starting on %s:%s, %swaiting\n",
@@ -1860,10 +1858,11 @@ init_gdb(struct vmctx *_ctx)
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV | AI_PASSIVE;
+	hints.ai_flags = AI_NUMERICSERV | AI_PASSIVE;
 
-	if (getaddrinfo(saddr, sport, &hints, &gdbaddr) != 0)
-		err(1, "gdb address resolve");
+	error = getaddrinfo(saddr, sport, &hints, &gdbaddr);
+	if (error != 0)
+		errx(1, "gdb address resolution: %s", gai_strerror(error));
 
 	ctx = _ctx;
 	s = socket(gdbaddr->ai_family, gdbaddr->ai_socktype, 0);

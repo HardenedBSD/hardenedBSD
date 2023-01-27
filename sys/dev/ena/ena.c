@@ -3019,19 +3019,19 @@ check_missing_comp_in_tx_queue(struct ena_adapter *adapter,
 		/* Check again if packet is still waiting */
 		if (unlikely(time_offset > adapter->missing_tx_timeout)) {
 
-			if (!tx_buf->print_once) {
+			if (tx_buf->print_once) {
 				time_since_last_cleanup = TICKS_2_USEC(ticks -
 				    tx_ring->tx_last_cleanup_ticks);
 				missing_tx_comp_to = sbttoms(
 				    adapter->missing_tx_timeout);
 				ena_log(pdev, WARN,
-				    "Found a Tx that wasn't completed on time, qid %d, index %d."
+				    "Found a Tx that wasn't completed on time, qid %d, index %d. "
 				    "%d usecs have passed since last cleanup. Missing Tx timeout value %d msecs.\n",
 				    tx_ring->qid, i, time_since_last_cleanup,
 				    missing_tx_comp_to);
 			}
 
-			tx_buf->print_once = true;
+			tx_buf->print_once = false;
 			missed_tx++;
 		}
 	}
@@ -3449,8 +3449,6 @@ err:
 	ENA_FLAG_CLEAR_ATOMIC(ENA_FLAG_DEVICE_RUNNING, adapter);
 	ENA_FLAG_CLEAR_ATOMIC(ENA_FLAG_ONGOING_RESET, adapter);
 	ena_log(dev, ERR, "Reset attempt failed. Can not reset the device\n");
-
-	ENA_TIMER_RESET(adapter);
 
 	return (rc);
 }
@@ -3925,8 +3923,7 @@ static driver_t ena_driver = {
 	sizeof(struct ena_adapter),
 };
 
-devclass_t ena_devclass;
-DRIVER_MODULE(ena, pci, ena_driver, ena_devclass, 0, 0);
+DRIVER_MODULE(ena, pci, ena_driver, 0, 0);
 MODULE_PNP_INFO("U16:vendor;U16:device", pci, ena, ena_vendor_info_array,
     nitems(ena_vendor_info_array) - 1);
 MODULE_DEPEND(ena, pci, 1, 1, 1);

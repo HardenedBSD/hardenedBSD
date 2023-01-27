@@ -1,8 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2015 Tycho Nightingale <tycho.nightingale@pluribusnetworks.com>
- * All rights reserved.
+ * Copyright (c) 2022 Rob Wing <rew@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +12,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
@@ -25,24 +24,27 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
  */
 
-#ifndef _PS2MOUSE_H_
-#define	_PS2MOUSE_H_
+#ifndef _IPC_H_
+#define _IPC_H_
 
-struct atkbdc_softc;
-struct vm_snapshot_meta;
+#include <sys/cdefs.h>
+#include <sys/linker_set.h>
+#include <sys/nv.h>
 
-struct ps2mouse_softc *ps2mouse_init(struct atkbdc_softc *sc);
+struct ipc_command {
+	const char *name;
+	int (*handler)(struct vmctx *ctx, const nvlist_t *nvl);
+};
 
-int ps2mouse_read(struct ps2mouse_softc *sc, uint8_t *val);
-void ps2mouse_write(struct ps2mouse_softc *sc, uint8_t val, int insert);
-void ps2mouse_toggle(struct ps2mouse_softc *sc, int enable);
-int ps2mouse_fifocnt(struct ps2mouse_softc *sc);
+#define IPC_COMMAND(set, name, function)			\
+	static struct ipc_command name ## _ipc_command =	\
+	{ #name, function };					\
+	DATA_SET(set, name ## _ipc_command);
 
-#ifdef BHYVE_SNAPSHOT
-int ps2mouse_snapshot(struct ps2mouse_softc *sc, struct vm_snapshot_meta *meta);
-#endif
+#define IPC_COMMAND_FOREACH(pvar, set)	SET_FOREACH(pvar, set)
 
-#endif /* _PS2MOUSE_H_ */
+SET_DECLARE(ipc_cmd_set, struct ipc_command);
+
+#endif /* _IPC_H_ */

@@ -143,6 +143,15 @@ err:
 }
 
 void
+vm_close(struct vmctx *vm)
+{
+	assert(vm != NULL);
+
+	close(vm->fd);
+	free(vm);
+}
+
+void
 vm_destroy(struct vmctx *vm)
 {
 	assert(vm != NULL);
@@ -498,14 +507,11 @@ vm_rev_map_gpa(struct vmctx *ctx, void *addr)
 	return ((vm_paddr_t)-1);
 }
 
-/* TODO: maximum size for vmname */
-int
-vm_get_name(struct vmctx *ctx, char *buf, size_t max_len)
+const char *
+vm_get_name(struct vmctx *ctx)
 {
 
-	if (strlcpy(buf, ctx->name, max_len) >= max_len)
-		return (EINVAL);
-	return (0);
+	return (ctx->name);
 }
 
 size_t
@@ -1462,14 +1468,17 @@ vm_copy_setup(struct vmctx *ctx, int vcpu, struct vm_guest_paging *paging,
 }
 
 void
-vm_copy_teardown(struct vmctx *ctx __unused, int vcpu __unused,
-    struct iovec *iov __unused, int iovcnt __unused)
+vm_copy_teardown(struct iovec *iov __unused, int iovcnt __unused)
 {
+	/*
+	 * Intentionally empty.  This is used by the instruction
+	 * emulation code shared with the kernel.  The in-kernel
+	 * version of this is non-empty.
+	 */
 }
 
 void
-vm_copyin(struct vmctx *ctx __unused, int vcpu __unused, struct iovec *iov,
-    void *vp, size_t len)
+vm_copyin(struct iovec *iov, void *vp, size_t len)
 {
 	const char *src;
 	char *dst;
@@ -1489,8 +1498,7 @@ vm_copyin(struct vmctx *ctx __unused, int vcpu __unused, struct iovec *iov,
 }
 
 void
-vm_copyout(struct vmctx *ctx __unused, int vcpu __unused, const void *vp,
-    struct iovec *iov, size_t len)
+vm_copyout(const void *vp, struct iovec *iov, size_t len)
 {
 	const char *src;
 	char *dst;
@@ -1663,9 +1671,8 @@ vm_rtc_gettime(struct vmctx *ctx, time_t *secs)
 }
 
 int
-vm_restart_instruction(void *arg, int vcpu)
+vm_restart_instruction(struct vmctx *ctx, int vcpu)
 {
-	struct vmctx *ctx = arg;
 
 	return (ioctl(ctx->fd, VM_RESTART_INSTRUCTION, &vcpu));
 }

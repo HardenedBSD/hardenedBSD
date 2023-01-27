@@ -187,6 +187,8 @@
 #define	VMCB_OFF_EXC_INTERCEPT		VMCB_OFF_CTRL(0x8)
 #define	VMCB_OFF_INST1_INTERCEPT	VMCB_OFF_CTRL(0xC)
 #define	VMCB_OFF_INST2_INTERCEPT	VMCB_OFF_CTRL(0x10)
+#define	VMCB_OFF_PAUSE_FILTHRESH	VMCB_OFF_CTRL(0x3C)
+#define	VMCB_OFF_PAUSE_FILCNT		VMCB_OFF_CTRL(0x3E)
 #define	VMCB_OFF_IO_PERM		VMCB_OFF_CTRL(0x40)
 #define	VMCB_OFF_MSR_PERM		VMCB_OFF_CTRL(0x48)
 #define	VMCB_OFF_TSC_OFFSET		VMCB_OFF_CTRL(0x50)
@@ -197,15 +199,28 @@
 #define	VMCB_OFF_EXITINFO1		VMCB_OFF_CTRL(0x78)
 #define	VMCB_OFF_EXITINFO2		VMCB_OFF_CTRL(0x80)
 #define	VMCB_OFF_EXITINTINFO		VMCB_OFF_CTRL(0x88)
+#define	VMCB_OFF_NP_ENABLE		VMCB_OFF_CTRL(0x90)
 #define	VMCB_OFF_AVIC_BAR		VMCB_OFF_CTRL(0x98)
 #define	VMCB_OFF_NPT_BASE		VMCB_OFF_CTRL(0xB0)
 #define	VMCB_OFF_AVIC_PAGE		VMCB_OFF_CTRL(0xE0)
 #define	VMCB_OFF_AVIC_LT		VMCB_OFF_CTRL(0xF0)
 #define	VMCB_OFF_AVIC_PT		VMCB_OFF_CTRL(0xF8)
+
+#define	VMCB_OFF_CPL			VMCB_OFF_STATE(0xCB)
+#define	VMCB_OFF_STAR			VMCB_OFF_STATE(0x200)
+#define	VMCB_OFF_LSTAR			VMCB_OFF_STATE(0x208)
+#define	VMCB_OFF_CSTAR			VMCB_OFF_STATE(0x210)
+#define	VMCB_OFF_SFMASK			VMCB_OFF_STATE(0x218)
+#define	VMCB_OFF_KERNELGBASE		VMCB_OFF_STATE(0x220)
 #define	VMCB_OFF_SYSENTER_CS		VMCB_OFF_STATE(0x228)
 #define	VMCB_OFF_SYSENTER_ESP		VMCB_OFF_STATE(0x230)
 #define	VMCB_OFF_SYSENTER_EIP		VMCB_OFF_STATE(0x238)
 #define	VMCB_OFF_GUEST_PAT		VMCB_OFF_STATE(0x268)
+#define	VMCB_OFF_DBGCTL			VMCB_OFF_STATE(0x270)
+#define	VMCB_OFF_BR_FROM		VMCB_OFF_STATE(0x278)
+#define	VMCB_OFF_BR_TO			VMCB_OFF_STATE(0x280)
+#define	VMCB_OFF_INT_FROM		VMCB_OFF_STATE(0x288)
+#define	VMCB_OFF_INT_TO			VMCB_OFF_STATE(0x290)
 
 /*
  * Encode the VMCB offset and bytes that we want to read from VMCB.
@@ -219,6 +234,7 @@
 #ifdef _KERNEL
 
 struct svm_softc;
+struct svm_vcpu;
 struct vm_snapshot_meta;
 
 /* VMCB save state area segment format */
@@ -338,17 +354,17 @@ struct vmcb {
 CTASSERT(sizeof(struct vmcb) == PAGE_SIZE);
 CTASSERT(offsetof(struct vmcb, state) == 0x400);
 
-int	vmcb_read(struct svm_softc *sc, int vcpu, int ident, uint64_t *retval);
-int	vmcb_write(struct svm_softc *sc, int vcpu, int ident, uint64_t val);
-int	vmcb_setdesc(void *arg, int vcpu, int ident, struct seg_desc *desc);
-int	vmcb_getdesc(void *arg, int vcpu, int ident, struct seg_desc *desc);
+int	vmcb_read(struct svm_vcpu *vcpu, int ident, uint64_t *retval);
+int	vmcb_write(struct svm_vcpu *vcpu, int ident, uint64_t val);
+int	vmcb_setdesc(struct svm_vcpu *vcpu, int ident, struct seg_desc *desc);
+int	vmcb_getdesc(struct svm_vcpu *vcpu, int ident, struct seg_desc *desc);
 int	vmcb_seg(struct vmcb *vmcb, int ident, struct vmcb_segment *seg);
 #ifdef BHYVE_SNAPSHOT
-int	vmcb_getany(struct svm_softc *sc, int vcpu, int ident, uint64_t *val);
-int	vmcb_setany(struct svm_softc *sc, int vcpu, int ident, uint64_t val);
-int	vmcb_snapshot_desc(void *arg, int vcpu, int reg,
+int	vmcb_getany(struct svm_vcpu *vcpu, int ident, uint64_t *val);
+int	vmcb_setany(struct svm_vcpu *vcpu, int ident, uint64_t val);
+int	vmcb_snapshot_desc(struct svm_vcpu *vcpu, int reg,
 			   struct vm_snapshot_meta *meta);
-int	vmcb_snapshot_any(struct svm_softc *sc, int vcpu, int ident,
+int	vmcb_snapshot_any(struct svm_vcpu*vcpu, int ident,
 			  struct vm_snapshot_meta *meta);
 #endif
 

@@ -245,18 +245,17 @@ static void pci_vtscsi_eventq_notify(void *, struct vqueue_info *);
 static void pci_vtscsi_requestq_notify(void *, struct vqueue_info *);
 static int  pci_vtscsi_init_queue(struct pci_vtscsi_softc *,
     struct pci_vtscsi_queue *, int);
-static int pci_vtscsi_init(struct vmctx *, struct pci_devinst *, nvlist_t *);
+static int pci_vtscsi_init(struct pci_devinst *, nvlist_t *);
 
 static struct virtio_consts vtscsi_vi_consts = {
-	"vtscsi",				/* our name */
-	VTSCSI_MAXQ,				/* we support 2+n virtqueues */
-	sizeof(struct pci_vtscsi_config),	/* config reg size */
-	pci_vtscsi_reset,			/* reset */
-	NULL,					/* device-wide qnotify */
-	pci_vtscsi_cfgread,			/* read virtio config */
-	pci_vtscsi_cfgwrite,			/* write virtio config */
-	pci_vtscsi_neg_features,		/* apply negotiated features */
-	0,					/* our capabilities */
+	.vc_name =	"vtscsi",
+	.vc_nvq =	VTSCSI_MAXQ,
+	.vc_cfgsize =	sizeof(struct pci_vtscsi_config),
+	.vc_reset =	pci_vtscsi_reset,
+	.vc_cfgread =	pci_vtscsi_cfgread,
+	.vc_cfgwrite =	pci_vtscsi_cfgwrite,
+	.vc_apply_features = pci_vtscsi_neg_features,
+	.vc_hv_caps =	0,
 };
 
 static void *
@@ -343,9 +342,9 @@ pci_vtscsi_cfgread(void *vsc, int offset, int size, uint32_t *retval)
 }
 
 static int
-pci_vtscsi_cfgwrite(void *vsc, int offset, int size, uint32_t val)
+pci_vtscsi_cfgwrite(void *vsc __unused, int offset __unused, int size __unused,
+    uint32_t val __unused)
 {
-
 	return (0);
 }
 
@@ -460,10 +459,9 @@ pci_vtscsi_tmf_handle(struct pci_vtscsi_softc *sc,
 }
 
 static int
-pci_vtscsi_an_handle(struct pci_vtscsi_softc *sc,
-    struct pci_vtscsi_ctrl_an *an)
+pci_vtscsi_an_handle(struct pci_vtscsi_softc *sc __unused,
+    struct pci_vtscsi_ctrl_an *an __unused)
 {
-
 	return (0);
 }
 
@@ -592,7 +590,7 @@ pci_vtscsi_controlq_notify(void *vsc, struct vqueue_info *vq)
 
 		bufsize = iov_to_buf(iov, n, &buf);
 		iolen = pci_vtscsi_control_handle(sc, buf, bufsize);
-		buf_to_iov(buf + bufsize - iolen, iolen, iov, n,
+		buf_to_iov((uint8_t *)buf + bufsize - iolen, iolen, iov, n,
 		    bufsize - iolen);
 
 		/*
@@ -605,9 +603,8 @@ pci_vtscsi_controlq_notify(void *vsc, struct vqueue_info *vq)
 }
 
 static void
-pci_vtscsi_eventq_notify(void *vsc, struct vqueue_info *vq)
+pci_vtscsi_eventq_notify(void *vsc __unused, struct vqueue_info *vq)
 {
-
 	vq_kick_disable(vq);
 }
 
@@ -648,7 +645,7 @@ pci_vtscsi_requestq_notify(void *vsc, struct vqueue_info *vq)
 }
 
 static int
-pci_vtscsi_init_queue(struct pci_vtscsi_softc *sc, 
+pci_vtscsi_init_queue(struct pci_vtscsi_softc *sc,
     struct pci_vtscsi_queue *queue, int num)
 {
 	struct pci_vtscsi_worker *worker;
@@ -699,7 +696,7 @@ pci_vtscsi_legacy_config(nvlist_t *nvl, const char *opts)
 }
 
 static int
-pci_vtscsi_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
+pci_vtscsi_init(struct pci_devinst *pi, nvlist_t *nvl)
 {
 	struct pci_vtscsi_softc *sc;
 	const char *devname, *value;
@@ -719,6 +716,8 @@ pci_vtscsi_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 		free(sc);
 		return (1);
 	}
+
+	pthread_mutex_init(&sc->vss_mtx, NULL);
 
 	vi_softc_linkup(&sc->vss_vs, &vtscsi_vi_consts, sc, pi, sc->vss_vq);
 	sc->vss_vs.vs_mtx = &sc->vss_mtx;

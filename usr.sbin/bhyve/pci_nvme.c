@@ -5,7 +5,7 @@
  * Copyright (c) 2018 Leon Dang
  * Copyright (c) 2020 Chuck Tuffli
  *
- * Function crc16 Copyright (c) 2017, Fedor Uporov 
+ * Function crc16 Copyright (c) 2017, Fedor Uporov
  *     Obtained from function ext2_crc16() in sys/fs/ext2fs/ext2_csum.c
  *
  * Redistribution and use in source and binary forms, with or without
@@ -398,6 +398,7 @@ static void pci_nvme_io_done(struct blockif_req *, int);
 	((sts) >> NVME_CSTS_REG_RDY_SHIFT & NVME_CSTS_REG_RDY_MASK)
 
 #define	NVME_CSTS_RDY	(1 << NVME_CSTS_REG_RDY_SHIFT)
+#define	NVME_CSTS_CFS	(1 << NVME_CSTS_REG_CFS_SHIFT)
 
 /* Completion Queue status word utils */
 #define	NVME_STATUS_P	(1 << NVME_STATUS_P_SHIFT)
@@ -485,7 +486,7 @@ pci_nvme_init_queues(struct pci_nvme_softc *sc, uint32_t nsq, uint32_t ncq)
 	} else {
 		struct nvme_submission_queue *sq = sc->submit_queues;
 
-		for (i = 0; i < sc->num_squeues; i++)
+		for (i = 0; i < sc->num_squeues + 1; i++)
 			pthread_mutex_init(&sq[i].mtx, NULL);
 	}
 
@@ -508,7 +509,7 @@ pci_nvme_init_queues(struct pci_nvme_softc *sc, uint32_t nsq, uint32_t ncq)
 	} else {
 		struct nvme_completion_queue *cq = sc->compl_queues;
 
-		for (i = 0; i < sc->num_cqueues; i++)
+		for (i = 0; i < sc->num_cqueues + 1; i++)
 			pthread_mutex_init(&cq[i].mtx, NULL);
 	}
 }
@@ -797,7 +798,7 @@ pci_nvme_aer_limit_reached(struct pci_nvme_softc *sc)
 	struct nvme_controller_data *cd = &sc->ctrldata;
 
 	/* AERL is a zero based value while aer_count is one's based */
-	return (sc->aer_count == (cd->aerl + 1));
+	return (sc->aer_count == (cd->aerl + 1U));
 }
 
 /*
@@ -846,7 +847,7 @@ pci_nvme_aer_get(struct pci_nvme_softc *sc)
 		sc->aer_count--;
 	}
 	pthread_mutex_unlock(&sc->aer_mtx);
-	
+
 	return (aer);
 }
 
@@ -968,6 +969,7 @@ pci_nvme_aen_process(struct pci_nvme_softc *sc)
 				EPRINTLN("%s unknown AEN notice type %u",
 				    __func__, aen->event_data);
 				status = NVME_SC_INTERNAL_DEVICE_ERROR;
+				lid = 0;
 				break;
 			}
 			if ((PCI_NVME_AEI_NOTICE_MASK(aen->event_data) & mask) == 0)
@@ -1002,6 +1004,7 @@ pci_nvme_aen_process(struct pci_nvme_softc *sc)
 			/* bad type?!? */
 			EPRINTLN("%s unknown AEN type %u", __func__, atype);
 			status = NVME_SC_INTERNAL_DEVICE_ERROR;
+			lid = 0;
 			break;
 		}
 
@@ -1096,30 +1099,61 @@ pci_nvme_reset(struct pci_nvme_softc *sc)
 	pthread_mutex_unlock(&sc->mtx);
 }
 
-static void
-pci_nvme_init_controller(struct vmctx *ctx, struct pci_nvme_softc *sc)
+static int
+pci_nvme_init_controller(struct pci_nvme_softc *sc)
 {
 	uint16_t acqs, asqs;
 
 	DPRINTF("%s", __func__);
 
-	asqs = (sc->regs.aqa & NVME_AQA_REG_ASQS_MASK) + 1;
+	/*
+	 * NVMe 2.0 states that "enabling a controller while this field is
+	 * cleared to 0h produces undefined results" for both ACQS and
+	 * ASQS. If zero, set CFS and do not become ready.
+	 */
+	asqs = ONE_BASED(sc->regs.aqa & NVME_AQA_REG_ASQS_MASK);
+	if (asqs < 2) {
+		EPRINTLN("%s: illegal ASQS value %#x (aqa=%#x)", __func__,
+		    asqs - 1, sc->regs.aqa);
+		sc->regs.csts |= NVME_CSTS_CFS;
+		return (-1);
+	}
 	sc->submit_queues[0].size = asqs;
-	sc->submit_queues[0].qbase = vm_map_gpa(ctx, sc->regs.asq,
-	            sizeof(struct nvme_command) * asqs);
+	sc->submit_queues[0].qbase = vm_map_gpa(sc->nsc_pi->pi_vmctx,
+	    sc->regs.asq, sizeof(struct nvme_command) * asqs);
+	if (sc->submit_queues[0].qbase == NULL) {
+		EPRINTLN("%s: ASQ vm_map_gpa(%lx) failed", __func__,
+		    sc->regs.asq);
+		sc->regs.csts |= NVME_CSTS_CFS;
+		return (-1);
+	}
 
 	DPRINTF("%s mapping Admin-SQ guest 0x%lx, host: %p",
 	        __func__, sc->regs.asq, sc->submit_queues[0].qbase);
 
-	acqs = ((sc->regs.aqa >> NVME_AQA_REG_ACQS_SHIFT) & 
-	    NVME_AQA_REG_ACQS_MASK) + 1;
+	acqs = ONE_BASED((sc->regs.aqa >> NVME_AQA_REG_ACQS_SHIFT) &
+	    NVME_AQA_REG_ACQS_MASK);
+	if (acqs < 2) {
+		EPRINTLN("%s: illegal ACQS value %#x (aqa=%#x)", __func__,
+		    acqs - 1, sc->regs.aqa);
+		sc->regs.csts |= NVME_CSTS_CFS;
+		return (-1);
+	}
 	sc->compl_queues[0].size = acqs;
-	sc->compl_queues[0].qbase = vm_map_gpa(ctx, sc->regs.acq,
-	         sizeof(struct nvme_completion) * acqs);
+	sc->compl_queues[0].qbase = vm_map_gpa(sc->nsc_pi->pi_vmctx,
+	    sc->regs.acq, sizeof(struct nvme_completion) * acqs);
+	if (sc->compl_queues[0].qbase == NULL) {
+		EPRINTLN("%s: ACQ vm_map_gpa(%lx) failed", __func__,
+		    sc->regs.acq);
+		sc->regs.csts |= NVME_CSTS_CFS;
+		return (-1);
+	}
 	sc->compl_queues[0].intr_en = NVME_CQ_INTEN;
 
 	DPRINTF("%s mapping Admin-CQ guest 0x%lx, host: %p",
 	        __func__, sc->regs.acq, sc->compl_queues[0].qbase);
+
+	return (0);
 }
 
 static int
@@ -1292,7 +1326,7 @@ nvme_opc_create_io_sq(struct pci_nvme_softc* sc, struct nvme_command* command,
 		DPRINTF("%s completed creating IOSQ qid %u",
 		         __func__, qid);
 	} else {
-		/* 
+		/*
 		 * Guest sent non-cont submission queue request.
 		 * This setting is unsupported by this emulation.
 		 */
@@ -1498,6 +1532,7 @@ nvme_opc_identify(struct pci_nvme_softc* sc, struct nvme_command* command,
 	DPRINTF("%s identify 0x%x nsid 0x%x", __func__,
 	        command->cdw10 & 0xFF, command->nsid);
 
+	status = 0;
 	pci_nvme_status_genc(&status, NVME_SC_SUCCESS);
 
 	switch (command->cdw10 & 0xFF) {
@@ -2039,7 +2074,7 @@ pci_nvme_handle_admin_cmd(struct pci_nvme_softc* sc, uint64_t value)
 
 	sqhead = sq->head;
 	DPRINTF("sqhead %u, tail %u", sqhead, sq->tail);
-	
+
 	while (sqhead != atomic_load_acq_short(&sq->tail)) {
 		cmd = &(sq->qbase)[sqhead];
 		compl.cdw0 = 0;
@@ -2206,8 +2241,8 @@ pci_nvme_out_of_range(struct pci_nvme_blockstore *nvstore, uint64_t slba,
 }
 
 static int
-pci_nvme_append_iov_req(struct pci_nvme_softc *sc, struct pci_nvme_ioreq *req,
-	uint64_t gpaddr, size_t size, int do_write, uint64_t offset)
+pci_nvme_append_iov_req(struct pci_nvme_softc *sc __unused,
+    struct pci_nvme_ioreq *req, uint64_t gpaddr, size_t size, uint64_t offset)
 {
 	int iovidx;
 	bool range_is_contiguous;
@@ -2351,6 +2386,7 @@ pci_nvme_io_done(struct blockif_req *br, int err)
 
 	/* TODO return correct error */
 	code = err ? NVME_SC_DATA_TRANSFER_ERROR : NVME_SC_SUCCESS;
+	status = 0;
 	pci_nvme_status_genc(&status, code);
 
 	pci_nvme_set_completion(req->sc, sq, req->sqid, req->cid, status);
@@ -2415,6 +2451,7 @@ nvme_write_read_ram(struct pci_nvme_softc *sc,
 	else
 		dir = NVME_COPY_FROM_PRP;
 
+	status = 0;
 	if (nvme_prp_memcpy(sc->nsc_pi->pi_vmctx, prp1, prp2,
 	    buf + offset, bytes, dir))
 		pci_nvme_status_genc(&status,
@@ -2438,8 +2475,7 @@ nvme_write_read_blockif(struct pci_nvme_softc *sc,
 	uint16_t status = NVME_NO_STATUS;
 
 	size = MIN(PAGE_SIZE - (prp1 % PAGE_SIZE), bytes);
-	if (pci_nvme_append_iov_req(sc, req, prp1,
-	    size, is_write, offset)) {
+	if (pci_nvme_append_iov_req(sc, req, prp1, size, offset)) {
 		err = -1;
 		goto out;
 	}
@@ -2451,8 +2487,7 @@ nvme_write_read_blockif(struct pci_nvme_softc *sc,
 		;
 	} else if (bytes <= PAGE_SIZE) {
 		size = bytes;
-		if (pci_nvme_append_iov_req(sc, req, prp2,
-		    size, is_write, offset)) {
+		if (pci_nvme_append_iov_req(sc, req, prp2, size, offset)) {
 			err = -1;
 			goto out;
 		}
@@ -2478,8 +2513,8 @@ nvme_write_read_blockif(struct pci_nvme_softc *sc,
 
 			size = MIN(bytes, PAGE_SIZE);
 
-			if (pci_nvme_append_iov_req(sc, req, *prp_list,
-			    size, is_write, offset)) {
+			if (pci_nvme_append_iov_req(sc, req, *prp_list, size,
+			    offset)) {
 				err = -1;
 				goto out;
 			}
@@ -2564,6 +2599,7 @@ pci_nvme_dealloc_sm(struct blockif_req *br, int err)
 	bool done = true;
 	uint16_t status;
 
+	status = 0;
 	if (err) {
 		pci_nvme_status_genc(&status, NVME_SC_INTERNAL_DEVICE_ERROR);
 	} else if ((req->prev_gpaddr + 1) == (req->prev_size)) {
@@ -2800,7 +2836,7 @@ complete:
 }
 
 static void
-pci_nvme_handle_doorbell(struct vmctx *ctx __unused, struct pci_nvme_softc* sc,
+pci_nvme_handle_doorbell(struct pci_nvme_softc* sc,
 	uint64_t idx, int is_sq, uint64_t value)
 {
 	DPRINTF("nvme doorbell %lu, %s, val 0x%lx",
@@ -2894,8 +2930,8 @@ pci_nvme_bar0_reg_dumps(const char *func, uint64_t offset, int iswrite)
 }
 
 static void
-pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
-	uint64_t offset, int size, uint64_t value)
+pci_nvme_write_bar_0(struct pci_nvme_softc *sc, uint64_t offset, int size,
+    uint64_t value)
 {
 	uint32_t ccreg;
 
@@ -2904,6 +2940,12 @@ pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
 		uint64_t idx = belloffset / 8; /* door bell size = 2*int */
 		int is_sq = (belloffset % 8) < 4;
 
+		if ((sc->regs.csts & NVME_CSTS_RDY) == 0) {
+			WPRINTF("doorbell write prior to RDY (offset=%#lx)\n",
+			    offset);
+			return;
+		}
+
 		if (belloffset > ((sc->max_queues+1) * 8 - 4)) {
 			WPRINTF("guest attempted an overflow write offset "
 			         "0x%lx, val 0x%lx in %s",
@@ -2911,7 +2953,13 @@ pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
 			return;
 		}
 
-		pci_nvme_handle_doorbell(ctx, sc, idx, is_sq, value);
+		if (is_sq) {
+			if (sc->submit_queues[idx].qbase == NULL)
+				return;
+		} else if (sc->compl_queues[idx].qbase == NULL)
+			return;
+
+		pci_nvme_handle_doorbell(sc, idx, is_sq, value);
 		return;
 	}
 
@@ -2966,7 +3014,7 @@ pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
 				/* transition 1-> causes controller reset */
 				pci_nvme_reset_locked(sc);
 			else
-				pci_nvme_init_controller(ctx, sc);
+				pci_nvme_init_controller(sc);
 		}
 
 		/* Insert the iocqes, iosqes and en bits from the write */
@@ -2977,7 +3025,8 @@ pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
 			sc->regs.cc &= ~NVME_CC_NEN_WRITE_MASK;
 			sc->regs.cc |= ccreg & NVME_CC_NEN_WRITE_MASK;
 			sc->regs.csts &= ~NVME_CSTS_RDY;
-		} else if (sc->pending_ios == 0) {
+		} else if ((sc->pending_ios == 0) &&
+		    !(sc->regs.csts & NVME_CSTS_CFS)) {
 			sc->regs.csts |= NVME_CSTS_RDY;
 		}
 		break;
@@ -3013,8 +3062,8 @@ pci_nvme_write_bar_0(struct vmctx *ctx, struct pci_nvme_softc* sc,
 }
 
 static void
-pci_nvme_write(struct vmctx *ctx, int vcpu __unused, struct pci_devinst *pi,
-    int baridx, uint64_t offset, int size, uint64_t value)
+pci_nvme_write(struct pci_devinst *pi, int baridx, uint64_t offset, int size,
+    uint64_t value)
 {
 	struct pci_nvme_softc* sc = pi->pi_arg;
 
@@ -3029,7 +3078,7 @@ pci_nvme_write(struct vmctx *ctx, int vcpu __unused, struct pci_devinst *pi,
 
 	switch (baridx) {
 	case 0:
-		pci_nvme_write_bar_0(ctx, sc, offset, size, value);
+		pci_nvme_write_bar_0(sc, offset, size, value);
 		break;
 
 	default:
@@ -3076,8 +3125,7 @@ static uint64_t pci_nvme_read_bar_0(struct pci_nvme_softc* sc,
 
 
 static uint64_t
-pci_nvme_read(struct vmctx *ctx __unused, int vcpu __unused,
-    struct pci_devinst *pi, int baridx, uint64_t offset, int size)
+pci_nvme_read(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 {
 	struct pci_nvme_softc* sc = pi->pi_arg;
 
@@ -3103,7 +3151,7 @@ pci_nvme_read(struct vmctx *ctx __unused, int vcpu __unused,
 static int
 pci_nvme_parse_config(struct pci_nvme_softc *sc, nvlist_t *nvl)
 {
-	char bident[sizeof("XX:X:X")];
+	char bident[sizeof("XXX:XXX")];
 	const char *value;
 	uint32_t sectsz;
 
@@ -3177,7 +3225,7 @@ pci_nvme_parse_config(struct pci_nvme_softc *sc, nvlist_t *nvl)
 			return (-1);
 		}
 	} else {
-		snprintf(bident, sizeof(bident), "%d:%d",
+		snprintf(bident, sizeof(bident), "%u:%u",
 		    sc->nsc_pi->pi_slot, sc->nsc_pi->pi_func);
 		sc->nvstore.ctx = blockif_open(nvl, bident);
 		if (sc->nvstore.ctx == NULL) {
@@ -3194,7 +3242,7 @@ pci_nvme_parse_config(struct pci_nvme_softc *sc, nvlist_t *nvl)
 	else if (sc->nvstore.type != NVME_STOR_RAM)
 		sc->nvstore.sectsz = blockif_sectsz(sc->nvstore.ctx);
 	for (sc->nvstore.sectsz_bits = 9;
-	     (1 << sc->nvstore.sectsz_bits) < sc->nvstore.sectsz;
+	     (1U << sc->nvstore.sectsz_bits) < sc->nvstore.sectsz;
 	     sc->nvstore.sectsz_bits++);
 
 	if (sc->max_queues <= 0 || sc->max_queues > NVME_QUEUES)
@@ -3227,7 +3275,7 @@ pci_nvme_resized(struct blockif_ctxt *bctxt __unused, void *arg,
 }
 
 static int
-pci_nvme_init(struct vmctx *ctx __unused, struct pci_devinst *pi, nvlist_t *nvl)
+pci_nvme_init(struct pci_devinst *pi, nvlist_t *nvl)
 {
 	struct pci_nvme_softc *sc;
 	uint32_t pci_membar_sz;
@@ -3247,7 +3295,7 @@ pci_nvme_init(struct vmctx *ctx __unused, struct pci_devinst *pi, nvlist_t *nvl)
 
 	STAILQ_INIT(&sc->ioreqs_free);
 	sc->ioreqs = calloc(sc->ioslots, sizeof(struct pci_nvme_ioreq));
-	for (int i = 0; i < sc->ioslots; i++) {
+	for (uint32_t i = 0; i < sc->ioslots; i++) {
 		STAILQ_INSERT_TAIL(&sc->ioreqs_free, &sc->ioreqs[i], link);
 	}
 

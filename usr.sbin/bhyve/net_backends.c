@@ -222,14 +222,14 @@ tap_cleanup(struct net_backend *be)
 
 static int
 tap_init(struct net_backend *be, const char *devname,
-	 nvlist_t *nvl, net_be_rxeof_t cb, void *param)
+    nvlist_t *nvl __unused, net_be_rxeof_t cb, void *param)
 {
 	struct tap_priv *priv = NET_BE_PRIV(be);
 	char tbuf[80];
 	int opt = 1;
 #if defined(INET6) || defined(INET)
 	struct ifreq ifrq;
-	int i, s;
+	int s;
 #endif
 #ifndef WITHOUT_CAPSICUM
 	cap_rights_t rights;
@@ -270,7 +270,7 @@ tap_init(struct net_backend *be, const char *devname,
 	}
 
 	s = -1;
-	for (i = 0; s == -1 && i < nitems(pf_list); i++)
+	for (size_t i = 0; s == -1 && i < nitems(pf_list); i++)
 		s = socket(pf_list[i], SOCK_DGRAM, 0);
 	if (s == -1) {
 		WPRINTF(("Could open socket"));
@@ -397,15 +397,15 @@ tap_recv_disable(struct net_backend *be)
 }
 
 static uint64_t
-tap_get_cap(struct net_backend *be)
+tap_get_cap(struct net_backend *be __unused)
 {
 
 	return (0); /* no capabilities for now */
 }
 
 static int
-tap_set_cap(struct net_backend *be, uint64_t features,
-		unsigned vnet_hdr_len)
+tap_set_cap(struct net_backend *be __unused, uint64_t features,
+    unsigned vnet_hdr_len)
 {
 
 	return ((features || vnet_hdr_len) ? -1 : 0);
@@ -452,7 +452,7 @@ DATA_SET(net_backend_set, vmnet_backend);
 #define NG_SBUF_MAX_SIZE (4 * 1024 * 1024)
 
 static int
-ng_init(struct net_backend *be, const char *devname,
+ng_init(struct net_backend *be, const char *devname __unused,
 	 nvlist_t *nvl, net_be_rxeof_t cb, void *param)
 {
 	struct tap_priv *p = NET_BE_PRIV(be);
@@ -527,7 +527,7 @@ ng_init(struct net_backend *be, const char *devname,
 	/*
 	 * The default ng_socket(4) buffer's size is too low.
 	 * Calculate the minimum value between NG_SBUF_MAX_SIZE
-	 * and kern.ipc.maxsockbuf. 
+	 * and kern.ipc.maxsockbuf.
 	 */
 	msbsz = sizeof(maxsbsz);
 	if (sysctlbyname("kern.ipc.maxsockbuf", &maxsbsz, &msbsz,
@@ -651,7 +651,7 @@ netmap_set_vnet_hdr_len(struct net_backend *be, int vnet_hdr_len)
 static int
 netmap_has_vnet_hdr_len(struct net_backend *be, unsigned vnet_hdr_len)
 {
-	int prev_hdr_len = be->be_vnet_hdr_len;
+	unsigned prev_hdr_len = be->be_vnet_hdr_len;
 	int ret;
 
 	if (vnet_hdr_len == prev_hdr_len) {
@@ -677,8 +677,8 @@ netmap_get_cap(struct net_backend *be)
 }
 
 static int
-netmap_set_cap(struct net_backend *be, uint64_t features,
-	       unsigned vnet_hdr_len)
+netmap_set_cap(struct net_backend *be, uint64_t features __unused,
+    unsigned vnet_hdr_len)
 {
 
 	return (netmap_set_vnet_hdr_len(be, vnet_hdr_len));
@@ -686,7 +686,7 @@ netmap_set_cap(struct net_backend *be, uint64_t features,
 
 static int
 netmap_init(struct net_backend *be, const char *devname,
-	    nvlist_t *nvl, net_be_rxeof_t cb, void *param)
+    nvlist_t *nvl __unused, net_be_rxeof_t cb, void *param)
 {
 	struct netmap_priv *priv = NET_BE_PRIV(be);
 
@@ -754,8 +754,8 @@ netmap_send(struct net_backend *be, const struct iovec *iov,
 	nm_buf_len = 0;
 
 	for (j = 0; j < iovcnt; j++) {
+		uint8_t *iov_frag_buf = iov[j].iov_base;
 		int iov_frag_size = iov[j].iov_len;
-		void *iov_frag_buf = iov[j].iov_base;
 
 		totlen += iov_frag_size;
 
@@ -836,7 +836,7 @@ netmap_recv(struct net_backend *be, const struct iovec *iov, int iovcnt)
 	struct netmap_priv *priv = NET_BE_PRIV(be);
 	struct netmap_slot *slot = NULL;
 	struct netmap_ring *ring;
-	void *iov_frag_buf;
+	uint8_t *iov_frag_buf;
 	int iov_frag_size;
 	ssize_t totlen = 0;
 	uint32_t head;
@@ -849,8 +849,8 @@ netmap_recv(struct net_backend *be, const struct iovec *iov, int iovcnt)
 	iov_frag_size = iov->iov_len;
 
 	do {
+		uint8_t *nm_buf;
 		int nm_buf_len;
-		void *nm_buf;
 
 		if (head == ring->tail) {
 			return (0);
