@@ -304,12 +304,7 @@ topology_parse(const char *opt)
 	return (0);
 
 out:
-<<<<<<< HEAD
-	if (str != NULL)
-		free(str);
-=======
 	free(tofree);
->>>>>>> freebsd/stable/13
 	return (-1);
 }
 

@@ -483,13 +483,6 @@ int vcpu_trace_exceptions(struct vcpu *vcpu);
 int vcpu_trap_wbinvd(struct vcpu *vcpu);
 #endif	/* KERNEL */
 
-<<<<<<< HEAD
-#ifdef _KERNEL
-#define	VM_MAXCPU	48			/* maximum virtual cpus */
-#endif
-
-=======
->>>>>>> freebsd/stable/13
 /*
  * Identifiers for optional vmm capabilities
  */
