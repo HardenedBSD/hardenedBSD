@@ -175,12 +175,8 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	/*
 	 * Signal trampoline code is at base of user stack.
 	 */
-<<<<<<< HEAD
-	regs->ra = (register_t)(intptr_t)p->p_psstrings - *(p->p_sysent->sv_szsigcode);
-=======
 	regs->ra = (register_t)(intptr_t)PROC_PS_STRINGS(p) -
 	    *(p->p_sysent->sv_szsigcode);
->>>>>>> freebsd/stable/13
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
 }
