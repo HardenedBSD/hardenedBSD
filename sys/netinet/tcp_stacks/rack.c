@@ -7737,8 +7737,6 @@ tcp_rack_xmit_timer_commit(struct tcp_rack *rack, struct tcpcb *tp)
 		tp->t_rttvar += (delta >> 3);
 		if (tp->t_rttvar <= 0)
 			tp->t_rttvar = 1;
-		if (tp->t_rttbest > tp->t_srtt + tp->t_rttvar)
-			tp->t_rttbest = tp->t_srtt + tp->t_rttvar;
 	} else {
 		/*
 		 * No rtt measurement yet - use the unsmoothed rtt. Set the
@@ -7747,7 +7745,6 @@ tcp_rack_xmit_timer_commit(struct tcp_rack *rack, struct tcpcb *tp)
 		 */
 		tp->t_srtt = rtt;
 		tp->t_rttvar = rtt >> 1;
-		tp->t_rttbest = tp->t_srtt + tp->t_rttvar;
 	}
 	rack->rc_srtt_measure_made = 1;
 	KMOD_TCPSTAT_INC(tcps_rttupdated);
@@ -12283,19 +12280,13 @@ rack_init(struct tcpcb *tp)
 		rsm->r_tim_lastsent[0] = rack_to_usec_ts(&rack->r_ctl.act_rcv_time);
 		rsm->r_rtr_cnt = 1;
 		rsm->r_rtr_bytes = 0;
-		if (tp->t_flags & TF_SENTFIN) {
-			rsm->r_end = tp->snd_max - 1;
+		if (tp->t_flags & TF_SENTFIN)
 			rsm->r_flags |= RACK_HAS_FIN;
-		} else {
-			rsm->r_end = tp->snd_max;
-		}
-		if (tp->snd_una == tp->iss) {
-			/* The data space is one beyond snd_una */
+		if ((tp->snd_una == tp->iss) &&
+		    !TCPS_HAVEESTABLISHED(tp->t_state))
 			rsm->r_flags |= RACK_HAS_SYN;
-			rsm->r_start = tp->iss;
-			rsm->r_end = rsm->r_start + (tp->snd_max - tp->snd_una);
-		} else
-			rsm->r_start = tp->snd_una;
+		rsm->r_start = tp->snd_una;
+		rsm->r_end = tp->snd_max;
 		rsm->r_dupack = 0;
 		if (rack->rc_inp->inp_socket->so_snd.sb_mb != NULL) {
 			rsm->m = sbsndmbuf(&rack->rc_inp->inp_socket->so_snd, 0, &rsm->soff);

@@ -179,6 +179,8 @@ sctp_is_there_unsent_data(struct sctp_tcb *stcb, int so_locked)
 	struct sctp_stream_queue_pending *sp;
 	struct sctp_association *asoc;
 
+	SCTP_TCB_LOCK_ASSERT(stcb);
+
 	/*
 	 * This function returns if any stream has true unsent data on it.
 	 * Note that as it looks through it will clean up any places that
@@ -186,7 +188,6 @@ sctp_is_there_unsent_data(struct sctp_tcb *stcb, int so_locked)
 	 */
 	asoc = &stcb->asoc;
 	unsent_data = 0;
-	SCTP_TCB_SEND_LOCK(stcb);
 	if (!stcb->asoc.ss_functions.sctp_ss_is_empty(stcb, asoc)) {
 		/* Check to see if some data queued */
 		for (i = 0; i < stcb->asoc.streamoutcnt; i++) {
@@ -234,7 +235,6 @@ sctp_is_there_unsent_data(struct sctp_tcb *stcb, int so_locked)
 			}
 		}
 	}
-	SCTP_TCB_SEND_UNLOCK(stcb);
 	return (unsent_data);
 }
 
@@ -245,6 +245,8 @@ sctp_process_init(struct sctp_init_chunk *cp, struct sctp_tcb *stcb)
 	struct sctp_association *asoc;
 	struct sctp_nets *lnet;
 	unsigned int i;
+
+	SCTP_TCB_LOCK_ASSERT(stcb);
 
 	init = &cp->init;
 	asoc = &stcb->asoc;
@@ -263,7 +265,6 @@ sctp_process_init(struct sctp_init_chunk *cp, struct sctp_tcb *stcb)
 			}
 		}
 	}
-	SCTP_TCB_SEND_LOCK(stcb);
 	if (asoc->pre_open_streams > ntohs(init->num_inbound_streams)) {
 		unsigned int newcnt;
 		struct sctp_stream_out *outs;
@@ -323,7 +324,6 @@ sctp_process_init(struct sctp_init_chunk *cp, struct sctp_tcb *stcb)
 		/* cut back the count */
 		asoc->pre_open_streams = newcnt;
 	}
-	SCTP_TCB_SEND_UNLOCK(stcb);
 	asoc->streamoutcnt = asoc->pre_open_streams;
 	if (asoc->strmout) {
 		for (i = 0; i < asoc->streamoutcnt; i++) {
@@ -412,7 +412,10 @@ sctp_process_init_ack(struct mbuf *m, int iphlen, int offset,
 	    &nat_friendly, &cookie_found);
 	if (abort_flag) {
 		/* Send an abort and notify peer */
-		sctp_abort_an_association(stcb->sctp_ep, stcb, op_err, false, SCTP_SO_NOT_LOCKED);
+		sctp_abort_association(stcb->sctp_ep, stcb, m, iphlen,
+		    src, dst, sh, op_err,
+		    mflowtype, mflowid,
+		    vrf_id, net->port);
 		*abort_no_unlock = 1;
 		return (-1);
 	}
@@ -620,7 +623,7 @@ sctp_handle_heartbeat_ack(struct sctp_heartbeat_chunk *cp,
 	/* Now lets do a RTO with this */
 	sctp_calculate_rto(stcb, &stcb->asoc, r_net, &tv,
 	    SCTP_RTT_FROM_NON_DATA);
-	if (!(r_net->dest_state & SCTP_ADDR_REACHABLE)) {
+	if ((r_net->dest_state & SCTP_ADDR_REACHABLE) == 0) {
 		r_net->dest_state |= SCTP_ADDR_REACHABLE;
 		sctp_ulp_notify(SCTP_NOTIFY_INTERFACE_UP, stcb,
 		    0, (void *)r_net, SCTP_SO_NOT_LOCKED);
@@ -992,7 +995,7 @@ sctp_handle_shutdown_ack(struct sctp_shutdown_ack_chunk *cp SCTP_UNUSED,
 	if (stcb->sctp_socket) {
 		if ((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) ||
 		    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL)) {
-			stcb->sctp_socket->so_snd.sb_cc = 0;
+			SCTP_SB_CLEAR(stcb->sctp_socket->so_snd);
 		}
 		sctp_ulp_notify(SCTP_NOTIFY_ASSOC_DOWN, stcb, 0, NULL, SCTP_SO_NOT_LOCKED);
 	}
@@ -1491,8 +1494,7 @@ sctp_process_cookie_existing(struct mbuf *m, int iphlen, int offset,
 				 * init/init-ack/cookie done before the
 				 * init-ack came back..
 				 */
-				stcb->sctp_ep->sctp_flags |=
-				    SCTP_PCB_FLAGS_CONNECTED;
+				sctp_pcb_add_flags(stcb->sctp_ep, SCTP_PCB_FLAGS_CONNECTED);
 				soisconnected(stcb->sctp_socket);
 			}
 			/* notify upper layer */
@@ -1596,14 +1598,14 @@ sctp_process_cookie_existing(struct mbuf *m, int iphlen, int offset,
 			 * random number generator returned the same vtag
 			 * when we first sent our INIT-ACK and when we later
 			 * sent our INIT. The side with the seq numbers that
-			 * are different will be the one that normnally
-			 * would have hit case C. This in effect "extends"
-			 * our vtags in this collision case to be 64 bits.
-			 * The same collision could occur aka you get both
-			 * vtag and seq number the same twice in a row.. but
-			 * is much less likely. If it did happen then we
-			 * would proceed through and bring up the assoc.. we
-			 * may end up with the wrong stream setup however..
+			 * are different will be the one that normally would
+			 * have hit case C. This in effect "extends" our
+			 * vtags in this collision case to be 64 bits. The
+			 * same collision could occur aka you get both vtag
+			 * and seq number the same twice in a row.. but is
+			 * much less likely. If it did happen then we would
+			 * proceed through and bring up the assoc.. we may
+			 * end up with the wrong stream setup however..
 			 * which would be bad.. but there is no way to
 			 * tell.. until we send on a stream that does not
 			 * exist :-)
@@ -1689,7 +1691,7 @@ sctp_process_cookie_existing(struct mbuf *m, int iphlen, int offset,
 			if (((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) ||
 			    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL)) &&
 			    (!SCTP_IS_LISTENING(inp))) {
-				stcb->sctp_ep->sctp_flags |= SCTP_PCB_FLAGS_CONNECTED;
+				sctp_pcb_add_flags(stcb->sctp_ep, SCTP_PCB_FLAGS_CONNECTED);
 				soisconnected(stcb->sctp_socket);
 			}
 			if (SCTP_GET_STATE(stcb) == SCTP_STATE_COOKIE_ECHOED)
@@ -1808,8 +1810,6 @@ sctp_process_cookie_existing(struct mbuf *m, int iphlen, int offset,
 		SCTP_TCB_LOCK(stcb);
 		atomic_subtract_int(&stcb->asoc.refcnt, 1);
 		/* send up all the data */
-		SCTP_TCB_SEND_LOCK(stcb);
-
 		sctp_report_all_outbound(stcb, 0, SCTP_SO_LOCKED);
 		for (i = 0; i < stcb->asoc.streamoutcnt; i++) {
 			stcb->asoc.strmout[i].chunks_on_queues = 0;
@@ -1896,7 +1896,6 @@ sctp_process_cookie_existing(struct mbuf *m, int iphlen, int offset,
 		 */
 		LIST_INSERT_HEAD(head, stcb, sctp_asocs);
 
-		SCTP_TCB_SEND_UNLOCK(stcb);
 		SCTP_INP_WUNLOCK(stcb->sctp_ep);
 		SCTP_INP_INFO_WUNLOCK();
 		asoc->total_flight = 0;
@@ -2023,7 +2022,7 @@ sctp_process_cookie_new(struct mbuf *m, int iphlen, int offset,
 
 	/*
 	 * now that we know the INIT/INIT-ACK are in place, create a new TCB
-	 * and popluate
+	 * and populate
 	 */
 
 	/*
@@ -2185,7 +2184,7 @@ sctp_process_cookie_new(struct mbuf *m, int iphlen, int offset,
 		 *
 		 * XXXMJ unlocked
 		 */
-		stcb->sctp_ep->sctp_flags |= SCTP_PCB_FLAGS_CONNECTED;
+		sctp_pcb_add_flags(stcb->sctp_ep, SCTP_PCB_FLAGS_CONNECTED);
 		soisconnected(stcb->sctp_socket);
 	} else if ((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) &&
 	    (SCTP_IS_LISTENING(inp))) {
@@ -2238,7 +2237,7 @@ sctp_process_cookie_new(struct mbuf *m, int iphlen, int offset,
 	head = &SCTP_BASE_INFO(sctp_asochash)[SCTP_PCBHASH_ASOC(tag,
 							    SCTP_BASE_INFO(hashasocmark))];
 	LIST_FOREACH(stcb, head, sctp_asocs) {
-	        if ((stcb->asoc.my_vtag == tag) && (stcb->rport == rport) && (inp == stcb->sctp_ep))  {
+	        if ((stcb->asoc.my_vtag == tag) && (stcb->rport == rport) && (inp == stcb->sctp_ep)) {
 		       -- SEND ABORT - TRY AGAIN --
 		}
 	}
@@ -2329,15 +2328,22 @@ sctp_handle_cookie_echo(struct mbuf *m, int iphlen, int offset,
 	/*
 	 * compute the signature/digest for the cookie
 	 */
-	ep = &(*inp_p)->sctp_ep;
-	l_inp = *inp_p;
-	if (l_stcb) {
+	if (l_stcb != NULL) {
+		atomic_add_int(&l_stcb->asoc.refcnt, 1);
 		SCTP_TCB_UNLOCK(l_stcb);
 	}
+	l_inp = *inp_p;
 	SCTP_INP_RLOCK(l_inp);
-	if (l_stcb) {
+	if (l_stcb != NULL) {
 		SCTP_TCB_LOCK(l_stcb);
+		atomic_subtract_int(&l_stcb->asoc.refcnt, 1);
 	}
+	if (l_inp->sctp_flags & (SCTP_PCB_FLAGS_SOCKET_GONE | SCTP_PCB_FLAGS_SOCKET_ALLGONE)) {
+		SCTP_INP_RUNLOCK(l_inp);
+		sctp_m_freem(m_sig);
+		return (NULL);
+	}
+	ep = &(*inp_p)->sctp_ep;
 	/* which cookie is it? */
 	if ((cookie->time_entered.tv_sec < (long)ep->time_of_secret_change) &&
 	    (ep->current_secret_number != ep->last_secret_number)) {
@@ -2789,7 +2795,7 @@ sctp_handle_cookie_ack(struct sctp_cookie_ack_chunk *cp SCTP_UNUSED,
 		sctp_ulp_notify(SCTP_NOTIFY_ASSOC_UP, stcb, 0, NULL, SCTP_SO_NOT_LOCKED);
 		if ((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) ||
 		    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL)) {
-			stcb->sctp_ep->sctp_flags |= SCTP_PCB_FLAGS_CONNECTED;
+			sctp_pcb_add_flags(stcb->sctp_ep, SCTP_PCB_FLAGS_CONNECTED);
 			if ((stcb->asoc.state & SCTP_STATE_CLOSED_SOCKET) == 0) {
 				soisconnected(stcb->sctp_socket);
 			}
@@ -3612,7 +3618,7 @@ sctp_handle_str_reset_request_in(struct sctp_tcb *stcb,
 	seq = ntohl(req->request_seq);
 	if (asoc->str_reset_seq_in == seq) {
 		asoc->last_reset_action[1] = asoc->last_reset_action[0];
-		if (!(asoc->local_strreset_support & SCTP_ENABLE_RESET_STREAM_REQ)) {
+		if ((asoc->local_strreset_support & SCTP_ENABLE_RESET_STREAM_REQ) == 0) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
 		} else if (trunc) {
 			/* Can't do it, since they exceeded our buffer size  */
@@ -3678,7 +3684,7 @@ sctp_handle_str_reset_request_tsn(struct sctp_tcb *stcb,
 	seq = ntohl(req->request_seq);
 	if (asoc->str_reset_seq_in == seq) {
 		asoc->last_reset_action[1] = stcb->asoc.last_reset_action[0];
-		if (!(asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ)) {
+		if ((asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ) == 0) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
 		} else {
 			fwdtsn.ch.chunk_length = htons(sizeof(struct sctp_forward_tsn_chunk));
@@ -3750,7 +3756,7 @@ sctp_handle_str_reset_request_out(struct sctp_tcb *stcb,
 
 		/* move the reset action back one */
 		asoc->last_reset_action[1] = asoc->last_reset_action[0];
-		if (!(asoc->local_strreset_support & SCTP_ENABLE_RESET_STREAM_REQ)) {
+		if ((asoc->local_strreset_support & SCTP_ENABLE_RESET_STREAM_REQ) == 0) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
 		} else if (trunc) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
@@ -3821,7 +3827,7 @@ sctp_handle_str_reset_add_strm(struct sctp_tcb *stcb, struct sctp_tmit_chunk *ch
 	if (asoc->str_reset_seq_in == seq) {
 		num_stream += stcb->asoc.streamincnt;
 		stcb->asoc.last_reset_action[1] = stcb->asoc.last_reset_action[0];
-		if (!(asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ)) {
+		if ((asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ) == 0) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
 		} else if ((num_stream > stcb->asoc.max_inbound_streams) ||
 		    (num_stream > 0xffff)) {
@@ -3911,7 +3917,7 @@ sctp_handle_str_reset_add_out_strm(struct sctp_tcb *stcb, struct sctp_tmit_chunk
 	/* Now what would be the new total? */
 	if (asoc->str_reset_seq_in == seq) {
 		stcb->asoc.last_reset_action[1] = stcb->asoc.last_reset_action[0];
-		if (!(asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ)) {
+		if ((asoc->local_strreset_support & SCTP_ENABLE_CHANGE_ASSOC_REQ) == 0) {
 			asoc->last_reset_action[0] = SCTP_STREAM_RESET_RESULT_DENIED;
 		} else if (stcb->asoc.stream_reset_outstanding) {
 			/* We must reject it we have something pending */
@@ -4128,7 +4134,7 @@ strres_nochunk:
  * Handle a router or endpoints report of a packet loss, there are two ways
  * to handle this, either we get the whole packet and must disect it
  * ourselves (possibly with truncation and or corruption) or it is a summary
- * from a middle box that did the disectting for us.
+ * from a middle box that did the disecting for us.
  */
 static void
 sctp_handle_packet_dropped(struct sctp_pktdrop_chunk *cp,
@@ -4878,7 +4884,7 @@ process_control_chunks:
 			 */
 			if ((stcb == NULL) &&
 			    (!SCTP_IS_LISTENING(inp) ||
-			    (!(inp->sctp_flags & SCTP_PCB_FLAGS_UDPTYPE) &&
+			    (((inp->sctp_flags & SCTP_PCB_FLAGS_UDPTYPE) == 0) &&
 			    inp->sctp_socket->sol_qlen >= inp->sctp_socket->sol_qlimit))) {
 				if ((inp->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) &&
 				    (SCTP_BASE_SYSCTL(sctp_abort_if_one_2_one_hits_limit))) {

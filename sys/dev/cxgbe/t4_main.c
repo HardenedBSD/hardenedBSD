@@ -631,6 +631,10 @@ static int t4_reset_on_fatal_err = 0;
 SYSCTL_INT(_hw_cxgbe, OID_AUTO, reset_on_fatal_err, CTLFLAG_RWTUN,
     &t4_reset_on_fatal_err, 0, "reset adapter on fatal errors");
 
+static int t4_clock_gate_on_suspend = 0;
+SYSCTL_INT(_hw_cxgbe, OID_AUTO, clock_gate_on_suspend, CTLFLAG_RWTUN,
+    &t4_clock_gate_on_suspend, 0, "gate the clock on suspend");
+
 static int t4_tx_vm_wr = 0;
 SYSCTL_INT(_hw_cxgbe, OID_AUTO, tx_vm_wr, CTLFLAG_RWTUN, &t4_tx_vm_wr, 0,
     "Use VM work requests to transmit packets.");
@@ -2073,6 +2077,12 @@ t4_suspend(device_t dev)
 	sc->flags &= ~(FW_OK | MASTER_PF);
 	sc->reset_thread = NULL;
 	mtx_unlock(&sc->reg_lock);
+
+	if (t4_clock_gate_on_suspend) {
+		t4_set_reg_field(sc, A_PMU_PART_CG_PWRMODE, F_MA_PART_CGEN |
+		    F_LE_PART_CGEN | F_EDC1_PART_CGEN | F_EDC0_PART_CGEN |
+		    F_TP_PART_CGEN | F_PDP_PART_CGEN | F_SGE_PART_CGEN, 0);
+	}
 
 	CH_ALERT(sc, "suspend completed.\n");
 done:
@@ -5251,6 +5261,17 @@ set_params__pre_init(struct adapter *sc)
 			device_printf(sc->dev,
 			    "failed to enable high priority filters :%d.\n",
 			    rc);
+		}
+
+		param = FW_PARAM_DEV(PPOD_EDRAM);
+		rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 1, &param, &val);
+		if (rc == 0 && val == 1) {
+			rc = -t4_set_params(sc, sc->mbox, sc->pf, 0, 1, &param,
+			    &val);
+			if (rc != 0) {
+				device_printf(sc->dev,
+				    "failed to set PPOD_EDRAM: %d.\n", rc);
+			}
 		}
 	}
 
@@ -9809,16 +9830,23 @@ sysctl_linkdnrc(SYSCTL_HANDLER_ARGS)
 }
 
 struct mem_desc {
-	unsigned int base;
-	unsigned int limit;
-	unsigned int idx;
+	u_int base;
+	u_int limit;
+	u_int idx;
 };
 
 static int
 mem_desc_cmp(const void *a, const void *b)
 {
-	return ((const struct mem_desc *)a)->base -
-	       ((const struct mem_desc *)b)->base;
+	const u_int v1 = ((const struct mem_desc *)a)->base;
+	const u_int v2 = ((const struct mem_desc *)b)->base;
+
+	if (v1 < v2)
+		return (-1);
+	else if (v1 > v2)
+		return (1);
+
+	return (0);
 }
 
 static void
@@ -9844,7 +9872,7 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 	struct adapter *sc = arg1;
 	struct sbuf *sb;
 	int rc, i, n;
-	uint32_t lo, hi, used, alloc;
+	uint32_t lo, hi, used, free, alloc;
 	static const char *memory[] = {
 		"EDC0:", "EDC1:", "MC:", "MC0:", "MC1:", "HMA:"
 	};
@@ -9854,8 +9882,8 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 		"Tx payload:", "Rx payload:", "LE hash:", "iSCSI region:",
 		"TDDP region:", "TPT region:", "STAG region:", "RQ region:",
 		"RQUDP region:", "PBL region:", "TXPBL region:",
-		"DBVFIFO region:", "ULPRX state:", "ULPTX state:",
-		"On-chip queues:", "TLS keys:",
+		"TLSKey region:", "DBVFIFO region:", "ULPRX state:",
+		"ULPTX state:", "On-chip queues:",
 	};
 	struct mem_desc avail[4];
 	struct mem_desc mem[nitems(region) + 3];	/* up to 3 holes */
@@ -9970,6 +9998,9 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 	ulp_region(RX_RQUDP);
 	ulp_region(RX_PBL);
 	ulp_region(TX_PBL);
+	if (sc->cryptocaps & FW_CAPS_CONFIG_TLSKEYS) {
+		ulp_region(RX_TLS_KEY);
+	}
 #undef ulp_region
 
 	md->base = 0;
@@ -10008,13 +10039,6 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 		md->idx = nitems(region);  /* hide it */
 	md++;
 
-	md->base = sc->vres.key.start;
-	if (sc->vres.key.size)
-		md->limit = md->base + sc->vres.key.size - 1;
-	else
-		md->idx = nitems(region);  /* hide it */
-	md++;
-
 	/* add any address-space holes, there can be up to 3 */
 	for (n = 0; n < i - 1; n++)
 		if (avail[n].limit < avail[n + 1].base)
@@ -10023,6 +10047,7 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 		(md++)->base = avail[n].limit;
 
 	n = md - mem;
+	MPASS(n <= nitems(mem));
 	qsort(mem, n, sizeof(struct mem_desc), mem_desc_cmp);
 
 	for (lo = 0; lo < i; lo++)
@@ -10049,19 +10074,24 @@ sysctl_meminfo(SYSCTL_HANDLER_ARGS)
 	mem_region_show(sb, "uP Extmem2:", lo, hi);
 
 	lo = t4_read_reg(sc, A_TP_PMM_RX_MAX_PAGE);
-	sbuf_printf(sb, "\n%u Rx pages of size %uKiB for %u channels\n",
-		   G_PMRXMAXPAGE(lo),
+	for (i = 0, free = 0; i < 2; i++)
+		free += G_FREERXPAGECOUNT(t4_read_reg(sc, A_TP_FLM_FREE_RX_CNT));
+	sbuf_printf(sb, "\n%u Rx pages (%u free) of size %uKiB for %u channels\n",
+		   G_PMRXMAXPAGE(lo), free,
 		   t4_read_reg(sc, A_TP_PMM_RX_PAGE_SIZE) >> 10,
 		   (lo & F_PMRXNUMCHN) ? 2 : 1);
 
 	lo = t4_read_reg(sc, A_TP_PMM_TX_MAX_PAGE);
 	hi = t4_read_reg(sc, A_TP_PMM_TX_PAGE_SIZE);
-	sbuf_printf(sb, "%u Tx pages of size %u%ciB for %u channels\n",
-		   G_PMTXMAXPAGE(lo),
+	for (i = 0, free = 0; i < 4; i++)
+		free += G_FREETXPAGECOUNT(t4_read_reg(sc, A_TP_FLM_FREE_TX_CNT));
+	sbuf_printf(sb, "%u Tx pages (%u free) of size %u%ciB for %u channels\n",
+		   G_PMTXMAXPAGE(lo), free,
 		   hi >= (1 << 20) ? (hi >> 20) : (hi >> 10),
 		   hi >= (1 << 20) ? 'M' : 'K', 1 << G_PMTXNUMCHN(lo));
-	sbuf_printf(sb, "%u p-structs\n",
-		   t4_read_reg(sc, A_TP_CMM_MM_MAX_PSTRUCT));
+	sbuf_printf(sb, "%u p-structs (%u free)\n",
+		   t4_read_reg(sc, A_TP_CMM_MM_MAX_PSTRUCT),
+		   G_FREEPSTRUCTCOUNT(t4_read_reg(sc, A_TP_FLM_FREE_PS_CNT)));
 
 	for (i = 0; i < 4; i++) {
 		if (chip_id(sc) > CHELSIO_T5)

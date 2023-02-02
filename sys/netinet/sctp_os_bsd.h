@@ -381,6 +381,8 @@ typedef struct callout sctp_os_timer_t;
 #define SCTP_SORESERVE(so, send, recv)	soreserve(so, send, recv)
 /* wakeup a socket */
 #define SCTP_SOWAKEUP(so)	wakeup(&(so)->so_timeo)
+/* number of bytes ready to read */
+#define SCTP_SBAVAIL(sb)	sbavail(sb)
 /* clear the socket buffer state */
 #define SCTP_SB_CLEAR(sb)	\
 	(sb).sb_cc = 0;		\
@@ -428,9 +430,11 @@ typedef struct route sctp_route_t;
 	                                                                     \
 	m_clrprotoflags(o_pak);                                              \
 	if (local_inp != NULL) {                                             \
+		INP_RLOCK(&local_inp->ip_inp.inp);                           \
 		result = ip6_output(o_pak,                                   \
 		                    local_inp->ip_inp.inp.in6p_outputopts,   \
 		                    (ro), 0, 0, ifp, NULL);                  \
+		INP_RUNLOCK(&local_inp->ip_inp.inp);                         \
 	} else {                                                             \
 		result = ip6_output(o_pak, NULL, (ro), 0, 0, ifp, NULL);     \
 	}                                                                    \
