@@ -290,7 +290,7 @@ static int osreldate;
 size_t *pagesizes;
 size_t page_size;
 
-static int stack_prot = PROT_READ | PROT_WRITE | RTLD_DEFAULT_STACK_EXEC;
+static int stack_prot = PROT_READ | PROT_WRITE;
 static int max_stack_flags;
 
 /*

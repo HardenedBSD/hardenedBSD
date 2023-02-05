@@ -651,6 +651,9 @@ vm_cleanup(struct vm *vm, bool destroy)
 	struct mem_map *mm;
 	int i;
 
+	if (destroy)
+		vm_xlock_memsegs(vm);
+
 	ppt_unassign_all(vm);
 
 	if (vm->iommu != NULL)
@@ -690,6 +693,7 @@ vm_cleanup(struct vm *vm, bool destroy)
 	if (destroy) {
 		for (i = 0; i < VM_MAX_MEMSEGS; i++)
 			vm_free_memseg(vm, i);
+		vm_unlock_memsegs(vm);
 
 		vmmops_vmspace_free(vm->vmspace);
 		vm->vmspace = NULL;
@@ -1434,6 +1438,7 @@ vm_handle_rendezvous(struct vcpu *vcpu)
 		if (CPU_CMP(&vm->rendezvous_req_cpus,
 		    &vm->rendezvous_done_cpus) == 0) {
 			VMM_CTR0(vcpu, "Rendezvous completed");
+			CPU_ZERO(&vm->rendezvous_req_cpus);
 			vm->rendezvous_func = NULL;
 			wakeup(&vm->rendezvous_func);
 			break;
@@ -1854,7 +1859,7 @@ vm_run(struct vcpu *vcpu, struct vm_exit *vme_user)
 
 	pmap = vmspace_pmap(vm->vmspace);
 	vme = &vcpu->exitinfo;
-	evinfo.rptr = &vm->rendezvous_func;
+	evinfo.rptr = &vm->rendezvous_req_cpus;
 	evinfo.sptr = &vm->suspend;
 	evinfo.iptr = &vcpu->reqidle;
 restart:

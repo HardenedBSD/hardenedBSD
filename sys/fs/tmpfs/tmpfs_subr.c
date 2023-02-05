@@ -434,7 +434,7 @@ tmpfs_pages_used(struct tmpfs_mount *tmp)
 	return (meta_pages + tmp->tm_pages_used);
 }
 
-static bool
+bool
 tmpfs_pages_check_avail(struct tmpfs_mount *tmp, size_t req_pages)
 {
 	if (tmpfs_mem_avail() < req_pages)
@@ -587,6 +587,7 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 	nnode->tn_mode = mode;
 	nnode->tn_id = alloc_unr64(&tmp->tm_ino_unr);
 	nnode->tn_refcount = 1;
+	LIST_INIT(&nnode->tn_extattrs);
 
 	/* Type-specific initialization. */
 	switch (nnode->tn_type) {
@@ -654,7 +655,6 @@ tmpfs_alloc_node(struct mount *mp, struct tmpfs_mount *tmp, enum vtype type,
 		break;
 
 	case VREG:
-		LIST_INIT(&(nnode->tn_reg.tn_extattr_list));
 		nnode->tn_reg.tn_aobj =
 		    vm_pager_allocate(tmpfs_pager_type, NULL, 0,
 		    VM_PROT_DEFAULT, 0,
@@ -703,7 +703,7 @@ bool
 tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
     bool detach)
 {
-	struct tmpfs_extattr_list_entry *attr, *tattr;
+	struct tmpfs_extattr *ea;
 	vm_object_t uobj;
 	char *symlink;
 	bool last;
@@ -750,13 +750,13 @@ tmpfs_free_node_locked(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 	}
 #endif
 
+	while ((ea = LIST_FIRST(&node->tn_extattrs)) != NULL) {
+		LIST_REMOVE(ea, ea_extattrs);
+		tmpfs_extattr_free(ea);
+	}
+
 	switch (node->tn_type) {
 	case VREG:
-		LIST_FOREACH_SAFE(attr, &(node->tn_reg.tn_extattr_list),
-		    tele_entries, tattr) {
-			free(attr->tele_value, M_TEMP);
-			free(attr, M_TEMP);
-		}
 		uobj = node->tn_reg.tn_aobj;
 		node->tn_reg.tn_aobj = NULL;
 		if (uobj != NULL) {

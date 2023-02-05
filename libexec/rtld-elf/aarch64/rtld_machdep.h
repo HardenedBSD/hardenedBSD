@@ -87,9 +87,6 @@ typedef struct {
 
 extern void *__tls_get_addr(tls_index *ti);
 
-#define	RTLD_DEFAULT_STACK_PF_EXEC	0
-#define	RTLD_DEFAULT_STACK_EXEC		0
-
 #define md_abi_variant_hook(x)
 
 #endif

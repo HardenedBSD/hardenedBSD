@@ -72,6 +72,7 @@ CFLAGS+=	-DEFI
 .if defined(HAVE_FDT) && ${MK_FDT} != "no"
 .include	"${BOOTSRC}/fdt.mk"
 LIBEFI_FDT=	${BOOTOBJ}/efi/fdt/libefi_fdt.a
+HELP_FILES+=	${FDTSRC}/help.fdt
 .endif
 
 # Include bcache code.
@@ -87,6 +88,7 @@ CFLAGS+= -DEFI_SECUREBOOT
 
 NEWVERSWHAT=	"EFI loader" ${MACHINE}
 VERSION_FILE=	${.CURDIR}/../loader/version
+HELP_FILENAME=	loader.help.efi
 
 # Always add MI sources
 .include	"${BOOTSRC}/loader.mk"

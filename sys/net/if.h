@@ -651,6 +651,12 @@ struct ifdownreason {
 
 #endif /* __BSD_VISIBLE */
 
+/*
+ * Opaque interface structure.
+ */
+
+typedef struct ifnet * if_t;
+
 #ifdef _KERNEL
 #ifdef MALLOC_DECLARE
 MALLOC_DECLARE(M_IFADDR);

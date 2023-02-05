@@ -2,10 +2,4 @@ include HARDENEDBSD
 
 ident LATT-SEC
 
-options		DEBUG_MEMGUARD
-options		DEBUG_REDZONE
-
-# evdev interface
-options 	EVDEV_SUPPORT		# evdev support in legacy drivers
-device		evdev			# input event device support
-device		uinput			# install /dev/uinput cdev
+options	PAX_HARDEN_KMALLOC

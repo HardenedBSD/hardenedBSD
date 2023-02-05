@@ -51,7 +51,7 @@ esac
 exec 3>&1
 MIRROR=`bsddialog --backtitle "$OSNAME Installer" \
     --title "Mirror Selection" --extra-button --extra-label "Other" \
-    --menu "Please select the site closest to you or \"other\" if you'd like to specify a different choice.  Also note that not every site listed here carries more than the base distribution kits. Only Primary sites are guaranteed to carry the full range of possible distributions. Select a site that's close!" \
+    --menu "Please select the best suitable site for you or \"other\" if you want to specify a different choice. The \"Main Site\" directs users to the nearest project managed mirror via GeoDNS (they carry the full range of possible distributions and support both IPv4 and IPv6). All other sites are known as \"Community Mirrors\"; not every site listed here carries more than the base distribution kits. Select a site!" \
     0 0 16 \
 	https://ci-01.nyi.hardenedbsd.org	"Main Site (NYI)"\
 	http://qspcqclhifj3tcpojsbwoxgwanlo2wakti2ia4wozxjcldkxmw2yj3yd.onion "Onion Service" \

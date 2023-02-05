@@ -101,6 +101,7 @@ SUBDIR=	adduser \
 	wake \
 	watch \
 	watchdogd \
+	zdump \
 	zic \
 	zonectl
 
@@ -141,6 +142,7 @@ SUBDIR.${MK_GSSAPI}+=	gssd
 SUBDIR.${MK_GPIO}+=	gpioctl
 SUBDIR.${MK_HBSD_UPDATE}+=	hbsd-update
 SUBDIR.${MK_HBSDCONTROL}+=	hbsdcontrol
+SUBDIR.${MK_HYPERV}+=	hyperv
 SUBDIR.${MK_INET6}+=	ip6addrctl
 SUBDIR.${MK_INET6}+=	mld6query
 SUBDIR.${MK_INET6}+=	ndp

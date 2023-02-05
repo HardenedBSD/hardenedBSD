@@ -57,6 +57,7 @@
 
 #include <net/if.h>
 #include <net/if_var.h>
+#include <net/if_private.h>
 #include <net/if_dl.h>
 #include <net/if_llatbl.h>
 #include <net/if_types.h>
@@ -444,6 +445,13 @@ rts_detach(struct socket *so)
 	RTSOCK_UNLOCK();
 	free(rcb, M_PCB);
 	so->so_pcb = NULL;
+}
+
+static int
+rts_disconnect(struct socket *so)
+{
+
+	return (ENOTCONN);
 }
 
 static int
@@ -2702,6 +2710,7 @@ static struct protosw routesw = {
 	.pr_detach =		rts_detach,
 	.pr_send =		rts_send,
 	.pr_shutdown =		rts_shutdown,
+	.pr_disconnect =	rts_disconnect,
 	.pr_close =		rts_close,
 };
 

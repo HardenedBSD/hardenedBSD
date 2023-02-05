@@ -67,7 +67,7 @@
 #define NEW_HANDSHAKE_TIMEOUT	(REKEY_TIMEOUT + KEEPALIVE_TIMEOUT)
 #define UNDERLOAD_TIMEOUT	1
 
-#define DPRINTF(sc, ...) if (sc->sc_ifp->if_flags & IFF_DEBUG) if_printf(sc->sc_ifp, ##__VA_ARGS__)
+#define DPRINTF(sc, ...) if (if_getflags(sc->sc_ifp) & IFF_DEBUG) if_printf(sc->sc_ifp, ##__VA_ARGS__)
 
 /* First byte indicating packet type on the wire */
 #define WG_PKT_INITIATION htole32(1)
@@ -219,7 +219,7 @@ struct wg_socket {
 
 struct wg_softc {
 	LIST_ENTRY(wg_softc)	 sc_entry;
-	struct ifnet		*sc_ifp;
+	if_t			 sc_ifp;
 	int			 sc_flags;
 
 	struct ucred		*sc_ucred;
@@ -357,21 +357,23 @@ static struct wg_packet *wg_queue_dequeue_serial(struct wg_queue *);
 static struct wg_packet *wg_queue_dequeue_parallel(struct wg_queue *);
 static bool wg_input(struct mbuf *, int, struct inpcb *, const struct sockaddr *, void *);
 static void wg_peer_send_staged(struct wg_peer *);
-static int wg_clone_create(struct if_clone *, int, caddr_t);
-static void wg_qflush(struct ifnet *);
+static int wg_clone_create(struct if_clone *ifc, char *name, size_t len,
+	struct ifc_data *ifd, if_t *ifpp);
+static void wg_qflush(if_t);
 static inline int determine_af_and_pullup(struct mbuf **m, sa_family_t *af);
-static int wg_xmit(struct ifnet *, struct mbuf *, sa_family_t, uint32_t);
-static int wg_transmit(struct ifnet *, struct mbuf *);
-static int wg_output(struct ifnet *, struct mbuf *, const struct sockaddr *, struct route *);
-static void wg_clone_destroy(struct ifnet *);
+static int wg_xmit(if_t, struct mbuf *, sa_family_t, uint32_t);
+static int wg_transmit(if_t, struct mbuf *);
+static int wg_output(if_t, struct mbuf *, const struct sockaddr *, struct route *);
+static int wg_clone_destroy(struct if_clone *ifc, if_t ifp,
+	uint32_t flags);
 static bool wgc_privileged(struct wg_softc *);
 static int wgc_get(struct wg_softc *, struct wg_data_io *);
 static int wgc_set(struct wg_softc *, struct wg_data_io *);
 static int wg_up(struct wg_softc *);
 static void wg_down(struct wg_softc *);
-static void wg_reassign(struct ifnet *, struct vnet *, char *unused);
+static void wg_reassign(if_t, struct vnet *, char *unused);
 static void wg_init(void *);
-static int wg_ioctl(struct ifnet *, u_long, caddr_t);
+static int wg_ioctl(if_t, u_long, caddr_t);
 static void vnet_wg_init(const void *);
 static void vnet_wg_uninit(const void *);
 static int wg_module_init(void);
@@ -1306,7 +1308,7 @@ wg_handshake(struct wg_softc *sc, struct wg_packet *pkt)
 		res = cookie_checker_validate_macs(&sc->sc_cookie, &init->m,
 				init, sizeof(*init) - sizeof(init->m),
 				underload, &e->e_remote.r_sa,
-				sc->sc_ifp->if_vnet);
+				if_getvnet(sc->sc_ifp));
 
 		if (res == EINVAL) {
 			DPRINTF(sc, "Invalid initiation MAC\n");
@@ -1340,7 +1342,7 @@ wg_handshake(struct wg_softc *sc, struct wg_packet *pkt)
 		res = cookie_checker_validate_macs(&sc->sc_cookie, &resp->m,
 				resp, sizeof(*resp) - sizeof(resp->m),
 				underload, &e->e_remote.r_sa,
-				sc->sc_ifp->if_vnet);
+				if_getvnet(sc->sc_ifp));
 
 		if (res == EINVAL) {
 			DPRINTF(sc, "Invalid response MAC\n");
@@ -1675,7 +1677,7 @@ static void
 wg_deliver_in(struct wg_peer *peer)
 {
 	struct wg_softc		*sc = peer->p_sc;
-	struct ifnet		*ifp = sc->sc_ifp;
+	if_t			 ifp = sc->sc_ifp;
 	struct wg_packet	*pkt;
 	struct mbuf		*m;
 	struct epoch_tracker	 et;
@@ -1712,8 +1714,8 @@ wg_deliver_in(struct wg_peer *peer)
 		NET_EPOCH_ENTER(et);
 		BPF_MTAP2_AF(ifp, m, pkt->p_af);
 
-		CURVNET_SET(ifp->if_vnet);
-		M_SETFIB(m, ifp->if_fib);
+		CURVNET_SET(if_getvnet(ifp));
+		M_SETFIB(m, if_getfib(ifp));
 		if (pkt->p_af == AF_INET)
 			netisr_dispatch(NETISR_IP, m);
 		if (pkt->p_af == AF_INET6)
@@ -2048,7 +2050,7 @@ error:
 }
 
 static inline void
-xmit_err(struct ifnet *ifp, struct mbuf *m, struct wg_packet *pkt, sa_family_t af)
+xmit_err(if_t ifp, struct mbuf *m, struct wg_packet *pkt, sa_family_t af)
 {
 	if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 	switch (af) {
@@ -2076,16 +2078,16 @@ xmit_err(struct ifnet *ifp, struct mbuf *m, struct wg_packet *pkt, sa_family_t a
 }
 
 static int
-wg_xmit(struct ifnet *ifp, struct mbuf *m, sa_family_t af, uint32_t mtu)
+wg_xmit(if_t ifp, struct mbuf *m, sa_family_t af, uint32_t mtu)
 {
 	struct wg_packet	*pkt = NULL;
-	struct wg_softc		*sc = ifp->if_softc;
+	struct wg_softc		*sc = if_getsoftc(ifp);
 	struct wg_peer		*peer;
 	int			 rc = 0;
 	sa_family_t		 peer_af;
 
 	/* Work around lifetime issue in the ipv6 mld code. */
-	if (__predict_false((ifp->if_flags & IFF_DYING) || !sc)) {
+	if (__predict_false((if_getflags(ifp) & IFF_DYING) || !sc)) {
 		rc = ENXIO;
 		goto err_xmit;
 	}
@@ -2162,7 +2164,7 @@ determine_af_and_pullup(struct mbuf **m, sa_family_t *af)
 }
 
 static int
-wg_transmit(struct ifnet *ifp, struct mbuf *m)
+wg_transmit(if_t ifp, struct mbuf *m)
 {
 	sa_family_t af;
 	int ret;
@@ -2182,11 +2184,11 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 		xmit_err(ifp, m, NULL, AF_UNSPEC);
 		return (ret);
 	}
-	return (wg_xmit(ifp, m, af, ifp->if_mtu));
+	return (wg_xmit(ifp, m, af, if_getmtu(ifp)));
 }
 
 static int
-wg_output(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst, struct route *ro)
+wg_output(if_t ifp, struct mbuf *m, const struct sockaddr *dst, struct route *ro)
 {
 	sa_family_t parsed_af;
 	uint32_t af, mtu;
@@ -2220,7 +2222,7 @@ wg_output(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst, struct 
 		xmit_err(ifp, m, NULL, AF_UNSPEC);
 		return (EAFNOSUPPORT);
 	}
-	mtu = (ro != NULL && ro->ro_mtu > 0) ? ro->ro_mtu : ifp->if_mtu;
+	mtu = (ro != NULL && ro->ro_mtu > 0) ? ro->ro_mtu : if_getmtu(ifp);
 	return (wg_xmit(ifp, m, parsed_af, mtu));
 }
 
@@ -2330,7 +2332,7 @@ wg_peer_add(struct wg_softc *sc, const nvlist_t *nvl)
 			goto out;
 		TAILQ_INSERT_TAIL(&sc->sc_peers, peer, p_entry);
 		sc->sc_peers_num++;
-		if (sc->sc_ifp->if_link_state == LINK_STATE_UP)
+		if (if_getlinkstate(sc->sc_ifp) == LINK_STATE_UP)
 			wg_timers_enable(peer);
 	}
 	if (remote != NULL)
@@ -2348,7 +2350,7 @@ static int
 wgc_set(struct wg_softc *sc, struct wg_data_io *wgd)
 {
 	uint8_t public[WG_KEY_SIZE], private[WG_KEY_SIZE];
-	struct ifnet *ifp;
+	if_t ifp;
 	void *nvlpacked;
 	nvlist_t *nvl;
 	ssize_t size;
@@ -2384,7 +2386,7 @@ wgc_set(struct wg_softc *sc, struct wg_data_io *wgd)
 			goto out_locked;
 		}
 		if (new_port != sc->sc_socket.so_port) {
-			if ((ifp->if_drv_flags & IFF_DRV_RUNNING) != 0) {
+			if ((if_getdrvflags(ifp) & IFF_DRV_RUNNING) != 0) {
 				if ((err = wg_socket_init(sc, new_port)) != 0)
 					goto out_locked;
 			} else
@@ -2582,7 +2584,7 @@ err:
 }
 
 static int
-wg_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
+wg_ioctl(if_t ifp, u_long cmd, caddr_t data)
 {
 	struct wg_data_io *wgd = (struct wg_data_io *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
@@ -2590,7 +2592,7 @@ wg_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int ret = 0;
 
 	sx_slock(&wg_sx);
-	sc = ifp->if_softc;
+	sc = if_getsoftc(ifp);
 	if (!sc) {
 		ret = ENXIO;
 		goto out;
@@ -2613,7 +2615,7 @@ wg_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		 */
 		break;
 	case SIOCSIFFLAGS:
-		if (ifp->if_flags & IFF_UP)
+		if (if_getflags(ifp) & IFF_UP)
 			ret = wg_up(sc);
 		else
 			wg_down(sc);
@@ -2622,7 +2624,7 @@ wg_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifr->ifr_mtu <= 0 || ifr->ifr_mtu > MAX_MTU)
 			ret = EINVAL;
 		else
-			ifp->if_mtu = ifr->ifr_mtu;
+			if_setmtu(ifp, ifr->ifr_mtu);
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
@@ -2653,7 +2655,7 @@ out:
 static int
 wg_up(struct wg_softc *sc)
 {
-	struct ifnet *ifp = sc->sc_ifp;
+	if_t ifp = sc->sc_ifp;
 	struct wg_peer *peer;
 	int rc = EBUSY;
 
@@ -2664,9 +2666,9 @@ wg_up(struct wg_softc *sc)
 
 	/* Silent success if we're already running. */
 	rc = 0;
-	if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+	if (if_getdrvflags(ifp) & IFF_DRV_RUNNING)
 		goto out;
-	ifp->if_drv_flags |= IFF_DRV_RUNNING;
+	if_setdrvflagbits(ifp, IFF_DRV_RUNNING, 0);
 
 	rc = wg_socket_init(sc, sc->sc_socket.so_port);
 	if (rc == 0) {
@@ -2674,7 +2676,7 @@ wg_up(struct wg_softc *sc)
 			wg_timers_enable(peer);
 		if_link_state_change(sc->sc_ifp, LINK_STATE_UP);
 	} else {
-		ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+		if_setdrvflagbits(ifp, 0, IFF_DRV_RUNNING);
 		DPRINTF(sc, "Unable to initialize sockets: %d\n", rc);
 	}
 out:
@@ -2685,15 +2687,15 @@ out:
 static void
 wg_down(struct wg_softc *sc)
 {
-	struct ifnet *ifp = sc->sc_ifp;
+	if_t ifp = sc->sc_ifp;
 	struct wg_peer *peer;
 
 	sx_xlock(&sc->sc_lock);
-	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
+	if (!(if_getdrvflags(ifp) & IFF_DRV_RUNNING)) {
 		sx_xunlock(&sc->sc_lock);
 		return;
 	}
-	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+	if_setdrvflagbits(ifp, 0, IFF_DRV_RUNNING);
 
 	TAILQ_FOREACH(peer, &sc->sc_peers, p_entry) {
 		wg_queue_purge(&peer->p_stage_queue);
@@ -2714,10 +2716,11 @@ wg_down(struct wg_softc *sc)
 }
 
 static int
-wg_clone_create(struct if_clone *ifc, int unit, caddr_t params)
+wg_clone_create(struct if_clone *ifc, char *name, size_t len,
+    struct ifc_data *ifd, struct ifnet **ifpp)
 {
 	struct wg_softc *sc;
-	struct ifnet *ifp;
+	if_t ifp;
 
 	sc = malloc(sizeof(*sc), M_WG, M_WAITOK | M_ZERO);
 
@@ -2766,18 +2769,19 @@ wg_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 
 	sx_init(&sc->sc_lock, "wg softc lock");
 
-	ifp->if_softc = sc;
-	ifp->if_capabilities = ifp->if_capenable = WG_CAPS;
-	if_initname(ifp, wgname, unit);
+	if_setsoftc(ifp, sc);
+	if_setcapabilities(ifp, WG_CAPS);
+	if_setcapenable(ifp, WG_CAPS);
+	if_initname(ifp, wgname, ifd->unit);
 
 	if_setmtu(ifp, DEFAULT_MTU);
-	ifp->if_flags = IFF_NOARP | IFF_MULTICAST;
-	ifp->if_init = wg_init;
-	ifp->if_reassign = wg_reassign;
-	ifp->if_qflush = wg_qflush;
-	ifp->if_transmit = wg_transmit;
-	ifp->if_output = wg_output;
-	ifp->if_ioctl = wg_ioctl;
+	if_setflags(ifp, IFF_NOARP | IFF_MULTICAST);
+	if_setinitfn(ifp, wg_init);
+	if_setreassignfn(ifp, wg_reassign);
+	if_setqflushfn(ifp, wg_qflush);
+	if_settransmitfn(ifp, wg_transmit);
+	if_setoutputfn(ifp, wg_output);
+	if_setioctlfn(ifp, wg_ioctl);
 	if_attach(ifp);
 	bpfattach(ifp, DLT_NULL, sizeof(uint32_t));
 #ifdef INET6
@@ -2787,6 +2791,7 @@ wg_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	sx_xlock(&wg_sx);
 	LIST_INSERT_HEAD(&wg_list, sc, sc_entry);
 	sx_xunlock(&wg_sx);
+	*ifpp = ifp;
 	return (0);
 free_aip4:
 	RADIX_NODE_HEAD_DESTROY(sc->sc_aip4);
@@ -2808,14 +2813,14 @@ wg_clone_deferred_free(struct noise_local *l)
 	atomic_add_int(&clone_count, -1);
 }
 
-static void
-wg_clone_destroy(struct ifnet *ifp)
+static int
+wg_clone_destroy(struct if_clone *ifc, if_t ifp, uint32_t flags)
 {
-	struct wg_softc *sc = ifp->if_softc;
+	struct wg_softc *sc = if_getsoftc(ifp);
 	struct ucred *cred;
 
 	sx_xlock(&wg_sx);
-	ifp->if_softc = NULL;
+	if_setsoftc(ifp, NULL);
 	sx_xlock(&sc->sc_lock);
 	sc->sc_flags |= WGF_DYING;
 	cred = sc->sc_ucred;
@@ -2825,7 +2830,7 @@ wg_clone_destroy(struct ifnet *ifp)
 	sx_xunlock(&wg_sx);
 
 	if_link_state_change(sc->sc_ifp, LINK_STATE_DOWN);
-	CURVNET_SET(sc->sc_ifp->if_vnet);
+	CURVNET_SET(if_getvnet(sc->sc_ifp));
 	if_purgeaddrs(sc->sc_ifp);
 	CURVNET_RESTORE();
 
@@ -2869,10 +2874,12 @@ wg_clone_destroy(struct ifnet *ifp)
 	if_free(sc->sc_ifp);
 
 	noise_local_free(sc->sc_local, wg_clone_deferred_free);
+
+	return (0);
 }
 
 static void
-wg_qflush(struct ifnet *ifp __unused)
+wg_qflush(if_t ifp __unused)
 {
 }
 
@@ -2890,12 +2897,12 @@ wgc_privileged(struct wg_softc *sc)
 }
 
 static void
-wg_reassign(struct ifnet *ifp, struct vnet *new_vnet __unused,
+wg_reassign(if_t ifp, struct vnet *new_vnet __unused,
     char *unused __unused)
 {
 	struct wg_softc *sc;
 
-	sc = ifp->if_softc;
+	sc = if_getsoftc(ifp);
 	wg_down(sc);
 }
 
@@ -2911,8 +2918,12 @@ wg_init(void *xsc)
 static void
 vnet_wg_init(const void *unused __unused)
 {
-	V_wg_cloner = if_clone_simple(wgname, wg_clone_create, wg_clone_destroy,
-				      0);
+	struct if_clone_addreq req = {
+		.create_f = wg_clone_create,
+		.destroy_f = wg_clone_destroy,
+		.flags = IFC_F_AUTOUNIT,
+	};
+	V_wg_cloner = ifc_attach_cloner(wgname, &req);
 }
 VNET_SYSINIT(vnet_wg_init, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
 	     vnet_wg_init, NULL);
@@ -2921,7 +2932,7 @@ static void
 vnet_wg_uninit(const void *unused __unused)
 {
 	if (V_wg_cloner)
-		if_clone_detach(V_wg_cloner);
+		ifc_detach_cloner(V_wg_cloner);
 }
 VNET_SYSUNINIT(vnet_wg_uninit, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
 	       vnet_wg_uninit, NULL);
@@ -3015,7 +3026,7 @@ wg_module_deinit(void)
 	VNET_FOREACH(vnet_iter) {
 		struct if_clone *clone = VNET_VNET(vnet_iter, wg_cloner);
 		if (clone) {
-			if_clone_detach(clone);
+			ifc_detach_cloner(clone);
 			VNET_VNET(vnet_iter, wg_cloner) = NULL;
 		}
 	}

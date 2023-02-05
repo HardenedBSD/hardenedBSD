@@ -336,6 +336,8 @@ SRCS+=	zfs_zstd.c \
 	zstd_ldm.c \
 	zstd_opt.c
 
+TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
+
 .include <bsd.kmod.mk>
 
 CFLAGS+= -include ${SRCTOP}/sys/cddl/compat/opensolaris/sys/debug_compat.h

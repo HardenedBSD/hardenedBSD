@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 #include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/if_var.h>
+#include <net/if_private.h>
 #include <net/bpf.h>
 #include <net/route.h>
 #include <net/vnet.h>
@@ -82,6 +83,10 @@ __FBSDID("$FreeBSD$");
  * should be more generalized?
  */
 extern void	nd6_setmtu(struct ifnet *);
+#endif
+
+#ifdef DEV_NETMAP
+MODULE_DEPEND(if_lagg, netmap, 1, 1, 1);
 #endif
 
 #define	LAGG_SX_INIT(_sc)	sx_init(&(_sc)->sc_sx, "if_lagg sx")
@@ -2200,6 +2205,13 @@ lagg_input_ethernet(struct ifnet *ifp, struct mbuf *m)
 		m_freem(m);
 		m = NULL;
 	}
+
+#ifdef DEV_NETMAP
+	if (m != NULL && scifp->if_capenable & IFCAP_NETMAP) {
+		scifp->if_input(scifp, m);
+		m = NULL;
+	}
+#endif	/* DEV_NETMAP */
 
 	NET_EPOCH_EXIT(et);
 	return (m);

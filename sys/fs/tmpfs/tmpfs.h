@@ -133,26 +133,18 @@ RB_HEAD(tmpfs_dir, tmpfs_dirent);
 	(TMPFS_DIRCOOKIE_DUP | TMPFS_DIRCOOKIE_MASK)
 
 /*
- * Extended attribute support.
- *
- * A good portion of this support is based upon the UFS
- * implementation. Stand on the shoulders of giants. This
- * implementation aims to only provide support for applying extended
- * attributes to files (VREG).
+ * Internal representation of a tmpfs extended attribute entry.
  */
+LIST_HEAD(tmpfs_extattr_list, tmpfs_extattr);
 
-#define	TMPFS_EXTATTR_MAXNAME		33 /* Includes terminating NUL */
-#define	TMPFS_EXTATTR_MAXVALUESIZE	64
-
-struct tmpfs_extattr_list_entry {
-	LIST_ENTRY(tmpfs_extattr_list_entry)	 tele_entries;
-	int					 tele_attrnamespace;
-	char					 tele_attrname[TMPFS_EXTATTR_MAXNAME];
-	void					*tele_value;
-	size_t					 tele_value_size;
+struct tmpfs_extattr {
+	LIST_ENTRY(tmpfs_extattr)	ea_extattrs;
+	int			ea_namespace;	/* attr namespace */
+	char			*ea_name;	/* attr name */
+	unsigned char		ea_namelen;	/* attr name length */
+	char			*ea_value;	/* attr value buffer */
+	ssize_t			ea_size;	/* attr value size */
 };
-
-LIST_HEAD(tmpfs_extattr_list_head, tmpfs_extattr_list_entry);
 
 /*
  * Internal representation of a tmpfs file system node.
@@ -261,6 +253,9 @@ struct tmpfs_node {
 	/* Transient refcounter on this node. */
 	u_int		tn_refcount;		/* 0<->1 (m) + (i) */
 
+	/* Extended attributes of this node. */
+	struct tmpfs_extattr_list	tn_extattrs;	/* (v) */
+
 	/* misc data field for different tn_type node */
 	union {
 		/* Valid when tn_type == VBLK || tn_type == VCHR. */
@@ -323,12 +318,6 @@ struct tmpfs_node {
 			vm_object_t		tn_aobj;	/* (c) */
 			struct tmpfs_mount	*tn_tmp;	/* (c) */
 			vm_pindex_t		tn_pages;	/* (v) */
-
-			/*
-			 * The extended attributes list, which may be
-			 * empty.
-			 */
-			struct tmpfs_extattr_list_head	 tn_extattr_list; /* (i) */
 		} tn_reg;
 	} tn_spec;	/* (v) */
 };
@@ -411,6 +400,12 @@ struct tmpfs_mount {
 
 	/* Number of nodes currently that are in use. */
 	ino_t			tm_nodes_inuse;
+
+	/* Memory used by extended attributes */
+	uint64_t		tm_ea_memory_inuse;
+
+	/* Maximum memory available for extended attributes */
+	uint64_t		tm_ea_memory_max;
 
 	/* Refcounter on this struct tmpfs_mount. */
 	uint64_t		tm_refcount;
@@ -508,6 +503,8 @@ struct tmpfs_dirent *tmpfs_dir_first(struct tmpfs_node *dnode,
 	    struct tmpfs_dir_cursor *dc);
 struct tmpfs_dirent *tmpfs_dir_next(struct tmpfs_node *dnode,
 	    struct tmpfs_dir_cursor *dc);
+bool	tmpfs_pages_check_avail(struct tmpfs_mount *tmp, size_t req_pages);
+void	tmpfs_extattr_free(struct tmpfs_extattr* ea);
 static __inline void
 tmpfs_update(struct vnode *vp)
 {
@@ -544,6 +541,13 @@ tmpfs_update(struct vnode *vp)
  */
 #if !defined(TMPFS_PAGES_MINRESERVED)
 #define TMPFS_PAGES_MINRESERVED		(4 * 1024 * 1024 / PAGE_SIZE)
+#endif
+
+/*
+ * Amount of memory to reserve for extended attributes.
+ */
+#if !defined(TMPFS_EA_MEMORY_RESERVED)
+#define TMPFS_EA_MEMORY_RESERVED	(16 * 1024 * 1024)
 #endif
 
 size_t tmpfs_mem_avail(void);

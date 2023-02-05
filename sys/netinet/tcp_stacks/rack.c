@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_ipsec.h"
 #include "opt_ratelimit.h"
 #include "opt_kern_tls.h"
+#if defined(INET) || defined(INET6)
 #include <sys/param.h>
 #include <sys/arb.h>
 #include <sys/module.h>
@@ -5658,7 +5659,7 @@ rack_start_hpts_timer(struct tcp_rack *rack, struct tcpcb *tp, uint32_t cts,
 		 * (or now) pacing time set. We want to
 		 * slow down the processing of sacks by some
 		 * amount (if it is an attacker). Set the default
-		 * slot for attackers in place (unless the orginal
+		 * slot for attackers in place (unless the original
 		 * interval is longer). Its stored in
 		 * micro-seconds, so lets convert to msecs.
 		 */
@@ -7645,7 +7646,8 @@ tcp_rack_xmit_timer_commit(struct tcp_rack *rack, struct tcpcb *tp)
 	}
 	rack->rc_srtt_measure_made = 1;
 	KMOD_TCPSTAT_INC(tcps_rttupdated);
-	tp->t_rttupdated++;
+	if (tp->t_rttupdated < UCHAR_MAX)
+		tp->t_rttupdated++;
 #ifdef STATS
 	if (rack_stats_gets_ms_rtt == 0) {
 		/* Send in the microsecond rtt used for rxt timeout purposes */
@@ -7973,7 +7975,7 @@ rack_log_sack_passed(struct tcpcb *tp,
 	TAILQ_FOREACH_REVERSE_FROM(nrsm, &rack->r_ctl.rc_tmap,
 	    rack_head, r_tnext) {
 		if (nrsm == rsm) {
-			/* Skip orginal segment he is acked */
+			/* Skip original segment he is acked */
 			continue;
 		}
 		if (nrsm->r_flags & RACK_ACKED) {
@@ -9974,7 +9976,7 @@ rack_adjust_sendmap(struct tcp_rack *rack, struct sockbuf *sb, tcp_seq snd_una)
 	 * beginning mbuf must be adjusted to the correct
 	 * offset. This must be called with:
 	 * 1) The socket buffer locked
-	 * 2) snd_una adjusted to its new postion.
+	 * 2) snd_una adjusted to its new position.
 	 *
 	 * Note that (2) implies rack_ack_received has also
 	 * been called.
@@ -12347,6 +12349,7 @@ rack_init_fsb_block(struct tcpcb *tp, struct tcp_rack *rack)
 				  ip6, rack->r_ctl.fsb.th);
 	} else
 #endif				/* INET6 */
+#ifdef INET
 	{
 		rack->r_ctl.fsb.tcp_ip_hdr_len = sizeof(struct tcpiphdr);
 		ip = (struct ip *)rack->r_ctl.fsb.tcp_ip_hdr;
@@ -12366,6 +12369,7 @@ rack_init_fsb_block(struct tcpcb *tp, struct tcp_rack *rack)
 				  tp->t_port,
 				  ip, rack->r_ctl.fsb.th);
 	}
+#endif
 	rack->r_fsb_inited = 1;
 }
 
@@ -15611,7 +15615,7 @@ rack_fast_rsm_output(struct tcpcb *tp, struct tcp_rack *rack, struct rack_sendma
 	struct tcpopt to;
 	u_char opt[TCP_MAXOLEN];
 	uint32_t hdrlen, optlen;
-	int32_t slot, segsiz, max_val, tso = 0, error, ulen = 0;
+	int32_t slot, segsiz, max_val, tso = 0, error = 0, ulen = 0;
 	uint16_t flags;
 	uint32_t if_hw_tsomaxsegcount = 0, startseq;
 	uint32_t if_hw_tsomaxsegsize;
@@ -15935,8 +15939,6 @@ rack_fast_rsm_output(struct tcpcb *tp, struct tcp_rack *rack, struct rack_sendma
 				   &inp->inp_route6,
 				   0, NULL, NULL, inp);
 	}
-#endif
-#if defined(INET) && defined(INET6)
 	else
 #endif
 #ifdef INET
@@ -16102,7 +16104,9 @@ rack_fast_output(struct tcpcb *tp, struct tcp_rack *rack, uint64_t ts_val,
 	 * the max-burst). We have how much to send and all the info we
 	 * need to just send.
 	 */
+#ifdef INET
 	struct ip *ip = NULL;
+#endif
 	struct udphdr *udp = NULL;
 	struct tcphdr *th = NULL;
 	struct mbuf *m, *s_mb;
@@ -16133,8 +16137,10 @@ rack_fast_output(struct tcpcb *tp, struct tcp_rack *rack, uint64_t ts_val,
 	} else
 #endif				/* INET6 */
 	{
+#ifdef INET
 		ip = (struct ip *)rack->r_ctl.fsb.tcp_ip_hdr;
 		hdrlen = sizeof(struct tcpiphdr);
+#endif
 	}
 	if (tp->t_port && (V_tcp_udp_tunneling_port == 0)) {
 		m = NULL;
@@ -16281,8 +16287,10 @@ again:
 		else
 #endif
 		{
+#ifdef INET
 			ip->ip_tos &= ~IPTOS_ECN_MASK;
 			ip->ip_tos |= ect;
+#endif
 		}
 	}
 	tcp_set_flags(th, flags);
@@ -18346,7 +18354,9 @@ send:
 			ip6 = (struct ip6_hdr *)rack->r_ctl.fsb.tcp_ip_hdr;
 		else
 #endif				/* INET6 */
+#ifdef INET
 			ip = (struct ip *)rack->r_ctl.fsb.tcp_ip_hdr;
+#endif
 		th = rack->r_ctl.fsb.th;
 		udp = rack->r_ctl.fsb.udp;
 		if (udp) {
@@ -18375,6 +18385,7 @@ send:
 		} else
 #endif				/* INET6 */
 		{
+#ifdef INET
 			ip = mtod(m, struct ip *);
 			if (tp->t_port) {
 				udp = (struct udphdr *)((caddr_t)ip + sizeof(struct ip));
@@ -18386,6 +18397,7 @@ send:
 			} else
 				th = (struct tcphdr *)(ip + 1);
 			tcpip_fillheaders(inp, tp->t_port, ip, th);
+#endif
 		}
 	}
 	/*
@@ -18419,8 +18431,10 @@ send:
 		else
 #endif
 		{
+#ifdef INET
 			ip->ip_tos &= ~IPTOS_ECN_MASK;
 			ip->ip_tos |= ect;
+#endif
 		}
 	}
 	/*
@@ -18514,7 +18528,9 @@ send:
 			ip6 = mtod(m, struct ip6_hdr *);
 		else
 #endif				/* INET6 */
+#ifdef INET
 			ip = mtod(m, struct ip *);
+#endif
 		th = (struct tcphdr *)(cpto + ((uint8_t *)rack->r_ctl.fsb.th - rack->r_ctl.fsb.tcp_ip_hdr));
 		/* If we have a udp header lets set it into the mbuf as well */
 		if (udp)
@@ -20834,3 +20850,5 @@ static moduledata_t tcp_rack = {
 MODULE_VERSION(MODNAME, 1);
 DECLARE_MODULE(MODNAME, tcp_rack, SI_SUB_PROTO_DOMAIN, SI_ORDER_ANY);
 MODULE_DEPEND(MODNAME, tcphpts, 1, 1, 1);
+
+#endif /* #if !defined(INET) && !defined(INET6) */

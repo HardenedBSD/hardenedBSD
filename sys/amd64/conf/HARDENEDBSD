@@ -4,4 +4,6 @@
 include GENERIC
 include HARDENEDBSD-CORE
 
+nooptions	NETLINK
+
 ident		HARDENEDBSD

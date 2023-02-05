@@ -295,7 +295,7 @@ dev/ice/irdma_if.m				optional ice pci \
 dev/ice/irdma_di_if.m				optional ice pci \
 	compile-with "${NORMAL_M} -I$S/dev/ice"
 ice_ddp.c					optional ice_ddp	\
-	compile-with	"${AWK} -f $S/tools/fw_stub.awk ice_ddp.fw:ice_ddp:0x01031b00 -mice_ddp -c${.TARGET}"	\
+	compile-with	"${AWK} -f $S/tools/fw_stub.awk ice_ddp.fw:ice_ddp:0x01031e00 -mice_ddp -c${.TARGET}"	\
 	no-ctfconvert no-implicit-rule before-depend local	\
 	clean		"ice_ddp.c"
 ice_ddp.fwo					optional ice_ddp	\
@@ -304,8 +304,8 @@ ice_ddp.fwo					optional ice_ddp	\
 	no-implicit-rule				\
 	clean		"ice_ddp.fwo"
 ice_ddp.fw					optional ice_ddp	\
-	dependency	"$S/contrib/dev/ice/ice-1.3.27.0.pkg" \
-	compile-with	"${CP} $S/contrib/dev/ice/ice-1.3.27.0.pkg ice_ddp.fw" \
+	dependency	"$S/contrib/dev/ice/ice-1.3.30.0.pkg" \
+	compile-with	"${CP} $S/contrib/dev/ice/ice-1.3.30.0.pkg ice_ddp.fw" \
 	no-obj no-implicit-rule				\
 	clean		"ice_ddp.fw"
 
@@ -622,6 +622,9 @@ arm64/qualcomm/qcom_gcc.c			optional qcom_gcc fdt
 # RockChip Drivers
 arm64/rockchip/rk3328_codec.c			optional fdt rk3328codec soc_rockchip_rk3328
 arm64/rockchip/rk3399_emmcphy.c			optional fdt rk_emmcphy soc_rockchip_rk3399
+arm64/rockchip/rk3568_combphy.c			optional fdt rk_combphy soc_rockchip_rk3568
+arm64/rockchip/rk3568_pcie.c			optional fdt pci soc_rockchip_rk3568
+arm64/rockchip/rk3568_pciephy.c			optional fdt pci soc_rockchip_rk3568
 arm64/rockchip/rk_dwc3.c			optional fdt rk_dwc3 soc_rockchip_rk3399 | fdt rk_dwc3 soc_rockchip_rk3568
 arm64/rockchip/rk_i2c.c				optional fdt rk_i2c soc_rockchip_rk3328 | fdt rk_i2c soc_rockchip_rk3399 | fdt rk_i2c soc_rockchip_rk3568
 arm64/rockchip/rk_i2s.c				optional fdt sound soc_rockchip_rk3328 | fdt sound soc_rockchip_rk3399

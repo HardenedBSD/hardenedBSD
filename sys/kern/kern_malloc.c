@@ -49,6 +49,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_ddb.h"
+#include "opt_pax.h"
 #include "opt_vm.h"
 
 #include <sys/param.h>
@@ -61,6 +62,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/msan.h>
 #include <sys/mutex.h>
 #include <sys/vmmeter.h>
+#include <sys/pax.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sbuf.h>
@@ -252,6 +254,22 @@ SYSCTL_INT(_debug_malloc, OID_AUTO, failure_rate, CTLFLAG_RWTUN,
     &malloc_failure_rate, 0, "Every (n) mallocs with M_NOWAIT will fail");
 SYSCTL_INT(_debug_malloc, OID_AUTO, failure_count, CTLFLAG_RD,
     &malloc_failure_count, 0, "Number of imposed M_NOWAIT malloc failures");
+#endif
+
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+static int kmalloc_zero = PAX_FEATURE_SIMPLE_ENABLED;
+#else
+static int kmalloc_zero = PAX_FEATURE_SIMPLE_DISABLED;
+#endif
+
+TUNABLE_INT("hardening.kmalloc_zero", &kmalloc_zero);
+
+#ifdef PAX_SYSCTLS
+SYSCTL_DECL(_hardening);
+SYSCTL_INT(_hardening, OID_AUTO, kmalloc_zero, CTLFLAG_RWTUN | CTLFLAG_SECURE,
+    &kmalloc_zero, 0, "Zero all malloc(9) allocations");
+#endif
 #endif
 
 static int
@@ -644,6 +662,18 @@ void *
 		return (va);
 #endif
 
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
+#endif
+
 	if (__predict_false(size > kmem_zmax))
 		return (malloc_large(size, mtp, DOMAINSET_RR(), flags
 		    DEBUG_REDZONE_ARG));
@@ -713,6 +743,18 @@ malloc_domainset(size_t size, struct malloc_type *mtp, struct domainset *ds,
 
 	MPASS((flags & M_EXEC) == 0);
 
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
+#endif
+
 #ifdef MALLOC_DEBUG
 	va = NULL;
 	if (malloc_dbg(&va, &size, mtp, flags) != 0)
@@ -768,6 +810,18 @@ malloc_domainset_exec(size_t size, struct malloc_type *mtp, struct domainset *ds
 #endif
 #ifdef MALLOC_DEBUG
 	caddr_t va;
+#endif
+
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	if (__predict_true(kmalloc_zero)) {
+		flags |= M_ZERO;
+	}
+#else
+	if (kmalloc_zero) {
+		flags |= M_ZERO;
+	}
+#endif
 #endif
 
 	flags |= M_EXEC;
@@ -907,6 +961,18 @@ free(void *addr, struct malloc_type *mtp)
 	uma_zone_t zone;
 	uma_slab_t slab;
 	u_long size;
+
+#ifdef PAX_HARDENING
+#ifdef PAX_HARDEN_KMALLOC
+	zfree(addr, mtp);
+	return;
+#else
+	if (kmalloc_zero) {
+		zfree(addr, mtp);
+		return;
+	}
+#endif
+#endif
 
 #ifdef MALLOC_DEBUG
 	if (free_dbg(&addr, mtp) != 0)

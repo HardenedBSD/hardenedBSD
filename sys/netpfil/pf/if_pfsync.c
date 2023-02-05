@@ -87,6 +87,7 @@ __FBSDID("$FreeBSD$");
 #include <net/if.h>
 #include <net/if_var.h>
 #include <net/if_clone.h>
+#include <net/if_private.h>
 #include <net/if_types.h>
 #include <net/vnet.h>
 #include <net/pfvar.h>
@@ -604,7 +605,11 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	if (!(flags & PFSYNC_SI_IOCTL)) {
 		st->state_flags &= ~PFSTATE_NOSYNC;
 		if (st->state_flags & PFSTATE_ACK) {
+			struct pfsync_bucket *b = pfsync_get_bucket(sc, st);
+			PFSYNC_BUCKET_LOCK(b);
 			pfsync_q_ins(st, PFSYNC_S_IACK, true);
+			PFSYNC_BUCKET_UNLOCK(b);
+
 			pfsync_push_all(sc);
 		}
 	}
@@ -1819,8 +1824,11 @@ pfsync_defer_tmo(void *arg)
 
 	PFSYNC_BUCKET_LOCK_ASSERT(b);
 
+	if (sc->sc_sync_if == NULL)
+		return;
+
 	NET_EPOCH_ENTER(et);
-	CURVNET_SET(m->m_pkthdr.rcvif->if_vnet);
+	CURVNET_SET(sc->sc_sync_if->if_vnet);
 
 	TAILQ_REMOVE(&b->b_deferrals, pd, pd_entry);
 	b->b_deferred--;

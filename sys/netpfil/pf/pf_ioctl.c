@@ -72,6 +72,7 @@ __FBSDID("$FreeBSD$");
 
 #include <net/if.h>
 #include <net/if_var.h>
+#include <net/if_private.h>
 #include <net/vnet.h>
 #include <net/route.h>
 #include <net/pfil.h>
@@ -311,6 +312,8 @@ pfattach_vnet(void)
 {
 	u_int32_t *my_timeout = V_pf_default_rule.timeout;
 
+	bzero(&V_pf_status, sizeof(V_pf_status));
+
 	pf_initialize();
 	pfr_initialize();
 	pfi_initialize_vnet();
@@ -380,7 +383,6 @@ pfattach_vnet(void)
 	my_timeout[PFTM_ADAPTIVE_START] = PFSTATE_ADAPT_START;
 	my_timeout[PFTM_ADAPTIVE_END] = PFSTATE_ADAPT_END;
 
-	bzero(&V_pf_status, sizeof(V_pf_status));
 	V_pf_status.debug = PF_DEBUG_URGENT;
 
 	V_pf_pfil_hooked = false;

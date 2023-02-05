@@ -5,6 +5,7 @@ LOADER_CD9660_SUPPORT?=	yes
 LOADER_MSDOS_SUPPORT?=	no
 LOADER_EXT2FS_SUPPORT?=	yes
 LOADER_UFS_SUPPORT?=	yes
+LOADER_ZFS_SUPPORT?=	yes
 LOADER_NET_SUPPORT?=	no
 LOADER_NFS_SUPPORT?=	no
 LOADER_TFTP_SUPPORT?=	no
@@ -19,6 +20,7 @@ INSTALLFLAGS=	-b
 
 # Architecture-specific loader code
 SRCS=	\
+		bootinfo.c \
 		conf.c \
 		crt1.c \
 		gfx_fb_stub.c \
@@ -29,13 +31,25 @@ SRCS=	\
 		init.c \
 		kbootfdt.c \
 		main.c \
+		seg.c \
 		termios.c \
 		util.c \
 		vers.c
 
 CFLAGS.gfx_fb_stub.c += -I${SRCTOP}/contrib/pnglite -I${SRCTOP}/sys/teken
+.if ${MK_LOADER_ZFS} != "no"
+CFLAGS+=	-I${ZFSSRC}
+CFLAGS+=        -I${SYSDIR}/contrib/openzfs/include
+CFLAGS+=        -I${SYSDIR}/contrib/openzfs/include/os/freebsd/zfs
+HAVE_ZFS=yes
+.endif
+
+HELP_FILENAME=	loader.help.kboot
 
 .include	"${BOOTSRC}/fdt.mk"
+
+# We share bootinfo.c with efi
+.PATH:		${BOOTSRC}/efi/loader
 
 # Note: Since we're producing a userland binary, we key off of MACHINE_ARCH
 # instead of the more normal MACHINE since the changes between different flavors

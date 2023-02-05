@@ -265,6 +265,7 @@ NULLFS		opt_dontuse.h
 PROCFS		opt_dontuse.h
 PSEUDOFS	opt_dontuse.h
 SMBFS		opt_dontuse.h
+TARFS		opt_dontuse.h
 TMPFS		opt_dontuse.h
 UDF		opt_dontuse.h
 UNIONFS		opt_dontuse.h
@@ -272,6 +273,9 @@ ZFS		opt_dontuse.h
 
 # Pseudofs debugging
 PSEUDOFS_TRACE	opt_pseudofs.h
+
+# Tarfs debugging
+TARFS_DEBUG	opt_tarfs.h
 
 # In-kernel GSS-API
 KGSSAPI		opt_kgssapi.h
@@ -975,6 +979,7 @@ PAX_ASLR	opt_pax.h
 PAX_SYSCTLS	opt_pax.h
 PAX_SEGVGUARD	opt_pax.h
 PAX_HARDENING	opt_pax.h
+PAX_HARDEN_KMALLOC	opt_pax.h
 PAX_NOEXEC	opt_pax.h
 PAX_INSECURE_MODE	opt_pax.h
 PAX_CONTROL_ACL		opt_pax.h

@@ -51,6 +51,7 @@ _DECLARE_DEBUG(LOG_DEBUG3);
 
 #define	MIN_GROUP_NUM	48
 
+int __insecure_kmod = 1;
 static struct sx sx_lock;
 
 #define	GENL_LOCK_INIT()	sx_init(&sx_lock, "genetlink lock")
@@ -160,9 +161,8 @@ genl_unregister_family(const char *family_name)
 	GENL_LOCK();
 	struct genl_family *gf = find_family(family_name);
 
-	nlctrl_notify(gf, CTRL_CMD_DELFAMILY);
-
 	if (gf != NULL) {
+		nlctrl_notify(gf, CTRL_CMD_DELFAMILY);
 		found = true;
 		unregister_groups(gf);
 		/* TODO: zero pointer first */
