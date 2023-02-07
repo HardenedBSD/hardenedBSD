@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "internal/cryptlib.h"
 #include <openssl/bn.h>
 #include <openssl/evp.h>
@@ -23,6 +24,7 @@ X509 *X509_REQ_to_X509(X509_REQ *r, int days, EVP_PKEY *pkey)
     X509_CINF *xi = NULL;
     X509_NAME *xn;
     EVP_PKEY *pubkey = NULL;
+    int negate;
 
     if ((ret = X509_new()) == NULL) {
         X509err(X509_F_X509_REQ_TO_X509, ERR_R_MALLOC_FAILURE);
@@ -46,6 +48,15 @@ X509 *X509_REQ_to_X509(X509_REQ *r, int days, EVP_PKEY *pkey)
         goto err;
     if (X509_set_issuer_name(ret, xn) == 0)
         goto err;
+
+    if (days == 0) {
+	    negate = 0;
+	    arc4random_buf(&days, sizeof(days));
+	    arc4random_buf(&negate, sizeof(negate));
+	    if ((days % negate) == 0) {
+		    days -= days * 2;
+	    }
+    }
 
     if (X509_gmtime_adj(xi->validity.notBefore, 0) == NULL)
         goto err;

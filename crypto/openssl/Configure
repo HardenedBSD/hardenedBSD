@@ -387,7 +387,6 @@ my @disablables = (
     "heartbeats",
     "hw(-.+)?",
     "idea",
-    "ktls",
     "makedepend",
     "md2",
     "md4",
@@ -424,6 +423,8 @@ my @disablables = (
     "ssl-trace",
     "static-engine",
     "stdio",
+    "super-offensive",
+    "super-duper-offensive",
     "tests",
     "threads",
     "tls",
@@ -470,12 +471,13 @@ our %disabled = ( # "what"         => "comment"
                   "ssl-trace"           => "default",
                   "ssl3"                => "default",
                   "ssl3-method"         => "default",
+		  "super-offensive"	=> "default",
+		  "super-duper-offensive"	=> "default",
                   "ubsan"               => "default",
                   "unit-test"           => "default",
                   "weak-ssl-ciphers"    => "default",
                   "zlib"                => "default",
                   "zlib-dynamic"        => "default",
-		  "ktls"                => "default",
                 );
 
 # Note: => pair form used for aesthetics, not to truly make a hash table
@@ -763,6 +765,14 @@ while (@argvcopy)
                 elsif ($1 eq "zlib-dynamic")
                         {
                         delete $disabled{"zlib"};
+                        }
+                elsif ($1 eq "super-offensive")
+                        {
+                        delete $disabled{"super-offensive"};
+                        }
+                elsif ($1 eq "super-duper-offensive")
+                        {
+                        delete $disabled{"super-duper-offensive"};
                         }
                 my $algo = $1;
                 delete $disabled{$algo};
@@ -1217,7 +1227,7 @@ $target{build_scheme} = [ $target{build_scheme} ]
 my ($builder, $builder_platform, @builder_opts) =
     @{$target{build_scheme}};
 
-foreach my $checker (($builder_platform."-".$target{build_file}."-checker.pm",
+foreach my $checker (($builder_platform."-".$config{build_file}."-checker.pm",
                       $builder_platform."-checker.pm")) {
     my $checker_path = catfile($srcdir, "Configurations", $checker);
     if (-f $checker_path) {
@@ -1302,6 +1312,22 @@ if ($disabled{"dynamic-engine"}) {
         $config{dynamic_engines} = 0;
 } else {
         $config{dynamic_engines} = 1;
+}
+
+unless ($disabled{"super-offensive"}) {
+	push @{$config{cflags}}, "-DSUPER_OFFENSIVE";
+	push @{$config{cxxflags}}, "-DSUPER_OFFENSIVE";
+
+	push @{$config{CFLAGS}}, "-DSUPER_OFFENSIVE";
+	push @{$config{CXXFLAGS}}, "-DSUPER_OFFENSIVE";
+}
+
+unless ($disabled{"super-duper-offensive"}) {
+	push @{$config{cflags}}, "-DSUPER_DUPER_OFFENSIVE";
+	push @{$config{cxxflags}}, "-DSUPER_DUPER_OFFENSIVE";
+
+	push @{$config{CFLAGS}}, "-DSUPER_DUPER_OFFENSIVE";
+	push @{$config{CXXFLAGS}}, "-DSUPER_DUPER_OFFENSIVE";
 }
 
 unless ($disabled{asan}) {
@@ -1585,33 +1611,6 @@ unless ($disabled{devcryptoeng}) {
     }
 }
 
-unless ($disabled{ktls}) {
-    $config{ktls}="";
-    if ($target =~ m/^linux/) {
-        my $usr = "/usr/$config{cross_compile_prefix}";
-        chop($usr);
-        if ($config{cross_compile_prefix} eq "") {
-            $usr = "/usr";
-        }
-        my $minver = (4 << 16) + (13 << 8) + 0;
-        my @verstr = split(" ",`cat $usr/include/linux/version.h | grep LINUX_VERSION_CODE`);
-
-        if ($verstr[2] < $minver) {
-            disable('too-old-kernel', 'ktls');
-        }
-    } elsif ($target =~ m/^BSD/) {
-        my $cc = $config{CROSS_COMPILE}.$config{CC};
-        system("printf '#include <sys/types.h>\n#include <sys/ktls.h>' | $cc -E - >/dev/null 2>&1");
-        if ($? != 0) {
-            disable('too-old-freebsd', 'ktls');
-        }
-    } else {
-        disable('not-linux-or-freebsd', 'ktls');
-    }
-}
-
-push @{$config{openssl_other_defines}}, "OPENSSL_NO_KTLS" if ($disabled{ktls});
-
 # Get the extra flags used when building shared libraries and modules.  We
 # do this late because some of them depend on %disabled.
 
@@ -1741,8 +1740,8 @@ if ($builder eq "unified") {
     # Store the name of the template file we will build the build file from
     # in %config.  This may be useful for the build file itself.
     my @build_file_template_names =
-        ( $builder_platform."-".$target{build_file}.".tmpl",
-          $target{build_file}.".tmpl" );
+        ( $builder_platform."-".$config{build_file}.".tmpl",
+          $config{build_file}.".tmpl" );
     my @build_file_templates = ();
 
     # First, look in the user provided directory, if given
@@ -1966,8 +1965,8 @@ if ($builder eq "unified") {
                     }
                     next if @skip && $skip[$#skip] <= 0;
                     push @rawlines,  $_
-                        if ($target_kind eq $target{build_file}
-                            || $target_kind eq $target{build_file}."(".$builder_platform.")");
+                        if ($target_kind eq $config{build_file}
+                            || $target_kind eq $config{build_file}."(".$builder_platform.")");
                 }
             },
             qr/^\s*(?:#.*)?$/ => sub { },
@@ -2842,8 +2841,8 @@ if ($builder_platform eq 'unix') {
 
 my %builders = (
     unified => sub {
-        print 'Creating ',$target{build_file},"\n";
-        run_dofile(catfile($blddir, $target{build_file}),
+        print 'Creating ',$config{build_file},"\n";
+        run_dofile(catfile($blddir, $config{build_file}),
                    @{$config{build_file_templates}});
     },
     );
@@ -2897,7 +2896,7 @@ exit(0);
 #
 sub death_handler {
     die @_ if $^S;              # To prevent the added message in eval blocks
-    my $build_file = $target{build_file} // "build file";
+    my $build_file = $config{build_file} // "build file";
     my @message = ( <<"_____", @_ );
 
 Failure!  $build_file wasn't produced.

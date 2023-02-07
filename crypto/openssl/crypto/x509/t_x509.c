@@ -71,13 +71,7 @@ int X509_print_ex(BIO *bp, X509 *x, unsigned long nmflags,
     }
     if (!(cflag & X509_FLAG_NO_VERSION)) {
         l = X509_get_version(x);
-        if (l >= 0 && l <= 2) {
-            if (BIO_printf(bp, "%8sVersion: %ld (0x%lx)\n", "", l + 1, (unsigned long)l) <= 0)
-                goto err;
-        } else {
-            if (BIO_printf(bp, "%8sVersion: Unknown (%ld)\n", "", l) <= 0)
-                goto err;
-        }
+	BIO_printf(bp, "%8sVersion: %ld (0x%lx)\n", "", l + 1, (unsigned long)l);
     }
     if (!(cflag & X509_FLAG_NO_SERIAL)) {
 

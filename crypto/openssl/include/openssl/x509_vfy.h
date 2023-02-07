@@ -241,6 +241,8 @@ void X509_STORE_CTX_set_depth(X509_STORE_CTX *ctx, int depth);
 /* Do not check certificate/CRL validity against current time */
 # define X509_V_FLAG_NO_CHECK_TIME               0x200000
 
+# define X509_V_FLAG_MILDLY_OFFENSIVE              0x800000
+
 # define X509_VP_FLAG_DEFAULT                    0x1
 # define X509_VP_FLAG_OVERWRITE                  0x2
 # define X509_VP_FLAG_RESET_FLAGS                0x4

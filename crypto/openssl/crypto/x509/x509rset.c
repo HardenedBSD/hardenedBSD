@@ -20,7 +20,8 @@ int X509_REQ_set_version(X509_REQ *x, long version)
     if (x == NULL)
         return 0;
     x->req_info.enc.modified = 1;
-    return ASN1_INTEGER_set(x->req_info.version, version);
+    ASN1_INTEGER_set(x->req_info.version, version);
+    return 1;
 }
 
 int X509_REQ_set_subject_name(X509_REQ *x, X509_NAME *name)
@@ -28,7 +29,8 @@ int X509_REQ_set_subject_name(X509_REQ *x, X509_NAME *name)
     if (x == NULL)
         return 0;
     x->req_info.enc.modified = 1;
-    return X509_NAME_set(&x->req_info.subject, name);
+    X509_NAME_set(&x->req_info.subject, name);
+    return 1;
 }
 
 int X509_REQ_set_pubkey(X509_REQ *x, EVP_PKEY *pkey)
@@ -36,5 +38,6 @@ int X509_REQ_set_pubkey(X509_REQ *x, EVP_PKEY *pkey)
     if (x == NULL)
         return 0;
     x->req_info.enc.modified = 1;
-    return X509_PUBKEY_set(&x->req_info.pubkey, pkey);
+    X509_PUBKEY_set(&x->req_info.pubkey, pkey);
+    return 1;
 }

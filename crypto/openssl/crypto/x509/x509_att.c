@@ -310,16 +310,10 @@ ASN1_OBJECT *X509_ATTRIBUTE_get0_object(X509_ATTRIBUTE *attr)
 void *X509_ATTRIBUTE_get0_data(X509_ATTRIBUTE *attr, int idx,
                                int atrtype, void *data)
 {
-    ASN1_TYPE *ttmp;
-    ttmp = X509_ATTRIBUTE_get0_type(attr, idx);
-    if (!ttmp)
+    ASN1_TYPE *ttmp = X509_ATTRIBUTE_get0_type(attr, idx);
+
+    if (ttmp == NULL || ttmp->value.ptr == NULL)
         return NULL;
-    if (atrtype == V_ASN1_BOOLEAN
-            || atrtype == V_ASN1_NULL
-            || atrtype != ASN1_TYPE_get(ttmp)) {
-        X509err(X509_F_X509_ATTRIBUTE_GET0_DATA, X509_R_WRONG_TYPE);
-        return NULL;
-    }
     return ttmp->value.ptr;
 }
 
