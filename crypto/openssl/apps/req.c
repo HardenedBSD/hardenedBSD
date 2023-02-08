@@ -131,7 +131,7 @@ const OPTIONS req_options[] = {
     {"subject", OPT_SUBJECT, '-', "Output the request's subject"},
     {"multivalue-rdn", OPT_MULTIVALUE_RDN, '-',
      "Enable support for multivalued RDNs"},
-    {"days", OPT_DAYS, 'p', "Number of days cert is valid for"},
+    {"days", OPT_DAYS, 'n', "Number of days cert is valid for"},
     {"set_serial", OPT_SET_SERIAL, 's', "Serial number to use"},
     {"addext", OPT_ADDEXT, 's',
      "Additional cert extension key=value pair (may be given more than once)"},
@@ -583,28 +583,6 @@ int req_main(int argc, char **argv)
                 goto end;
         }
 
-        if (newkey < MIN_KEY_LENGTH
-            && (pkey_type == EVP_PKEY_RSA || pkey_type == EVP_PKEY_DSA)) {
-            BIO_printf(bio_err, "private key length is too short,\n");
-            BIO_printf(bio_err, "it needs to be at least %d bits, not %ld\n",
-                       MIN_KEY_LENGTH, newkey);
-            goto end;
-        }
-
-        if (pkey_type == EVP_PKEY_RSA && newkey > OPENSSL_RSA_MAX_MODULUS_BITS)
-            BIO_printf(bio_err,
-                       "Warning: It is not recommended to use more than %d bit for RSA keys.\n"
-                       "         Your key size is %ld! Larger key size may behave not as expected.\n",
-                       OPENSSL_RSA_MAX_MODULUS_BITS, newkey);
-
-#ifndef OPENSSL_NO_DSA
-        if (pkey_type == EVP_PKEY_DSA && newkey > OPENSSL_DSA_MAX_MODULUS_BITS)
-            BIO_printf(bio_err,
-                       "Warning: It is not recommended to use more than %d bit for DSA keys.\n"
-                       "         Your key size is %ld! Larger key size may behave not as expected.\n",
-                       OPENSSL_DSA_MAX_MODULUS_BITS, newkey);
-#endif
-
         if (genctx == NULL) {
             genctx = set_keygen_ctx(NULL, &pkey_type, &newkey,
                                     &keyalgstr, gen_eng);
@@ -739,10 +717,6 @@ int req_main(int argc, char **argv)
 
             if (!X509_set_issuer_name(x509ss, X509_REQ_get_subject_name(req)))
                 goto end;
-            if (days == 0) {
-                /* set default days if it's not specified */
-                days = 30;
-            }
             if (!set_cert_times(x509ss, NULL, NULL, days))
                 goto end;
             if (!X509_set_subject_name

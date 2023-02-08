@@ -168,7 +168,7 @@ const OPTIONS ca_options[] = {
     {"startdate", OPT_STARTDATE, 's', "Cert notBefore, YYMMDDHHMMSSZ"},
     {"enddate", OPT_ENDDATE, 's',
      "YYMMDDHHMMSSZ cert notAfter (overrides -days)"},
-    {"days", OPT_DAYS, 'p', "Number of days to certify the cert for"},
+    {"days", OPT_DAYS, 'n', "Number of days to certify the cert for"},
     {"md", OPT_MD, 's', "md to use; one of md2, md5, sha or sha1"},
     {"policy", OPT_POLICY, 's', "The CA 'policy' to support"},
     {"keyfile", OPT_KEYFILE, 's', "Private key"},
@@ -189,9 +189,9 @@ const OPTIONS ca_options[] = {
     {"gencrl", OPT_GENCRL, '-', "Generate a new CRL"},
     {"msie_hack", OPT_MSIE_HACK, '-',
      "msie modifications to handle all those universal strings"},
-    {"crldays", OPT_CRLDAYS, 'p', "Days until the next CRL is due"},
-    {"crlhours", OPT_CRLHOURS, 'p', "Hours until the next CRL is due"},
-    {"crlsec", OPT_CRLSEC, 'p', "Seconds until the next CRL is due"},
+    {"crldays", OPT_CRLDAYS, 'n', "Days until the next CRL is due"},
+    {"crlhours", OPT_CRLHOURS, 'n', "Hours until the next CRL is due"},
+    {"crlsec", OPT_CRLSEC, 'n', "Seconds until the next CRL is due"},
     {"infiles", OPT_INFILES, '-', "The last argument, requests to process"},
     {"ss_cert", OPT_SS_CERT, '<', "File contains a self signed cert to sign"},
     {"spkac", OPT_SPKAC, '<',
@@ -827,14 +827,12 @@ end_of_options:
             goto end;
         }
 
-        if (days == 0) {
-            if (!NCONF_get_number(conf, section, ENV_DEFAULT_DAYS, &days))
-                days = 0;
-        }
+#if 0
         if (enddate == NULL && days == 0) {
             BIO_printf(bio_err, "cannot lookup how many days to certify for\n");
             goto end;
         }
+#endif
 
         if (rand_ser) {
             if ((serial = BN_new()) == NULL || !rand_serial(serial, NULL)) {
@@ -1456,6 +1454,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
                        "\nemailAddress type needs to be of type IA5STRING\n");
             goto end;
         }
+#ifndef UNSAFE_OFFENSIVE
         if (str->type != V_ASN1_BMPSTRING && str->type != V_ASN1_UTF8STRING) {
             j = ASN1_PRINTABLE_type(str->data, str->length);
             if ((j == V_ASN1_T61STRING && str->type != V_ASN1_T61STRING) ||
@@ -1466,6 +1465,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
                 goto end;
             }
         }
+#endif
 
         if (default_op)
             old_entry_print(obj, str);
@@ -1492,7 +1492,9 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
             BIO_printf(bio_err,
                        "%s:unknown object type in 'policy' configuration\n",
                        cv->name);
+#ifndef SUPER_OFFENSIVE
             goto end;
+#endif
         }
         obj = OBJ_nid2obj(j);
 
@@ -1542,7 +1544,9 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
                     BIO_printf(bio_err,
                                "The %s field does not exist in the CA certificate,\n"
                                "the 'policy' is misconfigured\n", cv->name);
+#ifndef SUPER_OFFENSIVE
                     goto end;
+#endif
                 }
                 if (j >= 0) {
                     push = X509_NAME_get_entry(CAname, j);
@@ -1617,8 +1621,10 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     if (enddate != NULL) {
         int tdays;
 
-        if (!ASN1_TIME_diff(&tdays, NULL, NULL, X509_get0_notAfter(ret)))
+        if (!ASN1_TIME_diff(&tdays, NULL, NULL, X509_get0_notAfter(ret))) {
+		BIO_printf(bio_err, "%s:%d offensive error here\n", __func__, __LINE__);
             goto end;
+	}
         days = tdays;
     }
 
