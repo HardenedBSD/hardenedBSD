@@ -2654,6 +2654,7 @@ _elftctools=	lib/libelftc \
 
 .if ${MK_CLANG_BOOTSTRAP} != "no"
 _clang=		usr.bin/clang
+_ar=		usr.bin/clang/llvm-ar
 .endif
 .if ${MK_LLD_BOOTSTRAP} != "no"
 _lld=		usr.bin/clang/lld
@@ -2672,10 +2673,10 @@ _ar=usr.bin/ar
 cross-tools: .MAKE .PHONY
 .for _tool in \
     ${LOCAL_XTOOL_DIRS} \
-    ${_ar} \
     ${_clang_libs} \
     ${_clang} \
     ${_lld} \
+    ${_ar} \
     ${_elftctools} \
     ${_dtrace_tools} \
     ${_btxld} \
