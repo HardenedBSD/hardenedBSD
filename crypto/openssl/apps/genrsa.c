@@ -32,7 +32,7 @@ typedef enum OPTION_choice {
     OPT_ERR = -1, OPT_EOF = 0, OPT_HELP,
     OPT_3, OPT_F4, OPT_ENGINE,
     OPT_OUT, OPT_PASSOUT, OPT_CIPHER, OPT_PRIMES,
-    OPT_R_ENUM
+    OPT_R_ENUM, OPT_FSPEC
 } OPTION_CHOICE;
 
 const OPTIONS genrsa_options[] = {
@@ -40,6 +40,7 @@ const OPTIONS genrsa_options[] = {
     {"3", OPT_3, '-', "Use 3 for the E value"},
     {"F4", OPT_F4, '-', "Use F4 (0x10001) for the E value"},
     {"f4", OPT_F4, '-', "Use F4 (0x10001) for the E value"},
+    {"fspec", OPT_FSPEC, 'n', "Specify custom E value"},
     {"out", OPT_OUT, '>', "Output the key to specified file"},
     OPT_R_OPTIONS,
     {"passout", OPT_PASSOUT, 's', "Output file pass phrase source"},
@@ -90,6 +91,11 @@ opthelp:
         case OPT_F4:
             f4 = RSA_F4;
             break;
+	case OPT_FSPEC:
+	    if (!opt_int(opt_arg(), &f4)) {
+		    goto end;
+	    }
+	    break;
         case OPT_OUT:
             outfile = opt_arg();
             break;
