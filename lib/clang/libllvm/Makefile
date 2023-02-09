@@ -643,6 +643,7 @@ SRCS_MIW+=	DebugInfo/Symbolize/Symbolize.cpp
 SRCS_MIW+=	Debuginfod/DIFetcher.cpp
 SRCS_MIW+=	Debuginfod/Debuginfod.cpp
 SRCS_MIW+=	Debuginfod/HTTPClient.cpp
+SRCS_MIW+=	Debuginfod/HTTPServer.cpp
 SRCS_MIN+=	Demangle/DLangDemangle.cpp
 SRCS_MIN+=	Demangle/Demangle.cpp
 SRCS_MIN+=	Demangle/ItaniumDemangle.cpp
