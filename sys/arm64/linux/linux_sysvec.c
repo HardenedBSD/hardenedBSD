@@ -29,11 +29,9 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-<<<<<<< HEAD
 #include "opt_pax.h"
-=======
+
 #define	__ELF_WORD_SIZE	64
->>>>>>> freebsd/stable/13
 
 #include <sys/param.h>
 #include <sys/systm.h>
