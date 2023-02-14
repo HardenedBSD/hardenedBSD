@@ -2673,6 +2673,13 @@ _usb_tools=	stand/usb/tools
 _ar=usr.bin/ar
 .endif
 
+.if ${MK_CROSS_DSO_CFI} != "no"
+_clang_libs+=	lib/librt
+_clang_libs+=	lib/libexecinfo
+_clang_libs+=	lib/msun
+_clang_libs+=	lib/libcompiler_rt
+.endif
+
 cross-tools: .MAKE .PHONY
 .for _tool in \
     ${LOCAL_XTOOL_DIRS} \
@@ -2917,6 +2924,19 @@ _prereq_libs+=	lib/libclang_rt/ubsan_standalone
 _prereq_libs+=	lib/libclang_rt/ubsan_standalone_cxx
 .endif
 
+.if ${MK_CROSS_DSO_CFI} != "no"
+_cdcfi_libs+=	lib/msun
+_cdcfi_libs+=	lib/libexecinfo
+_cdcfi_libs+=	lib/librt
+_cdcfi_libs+=	lib/libthr
+_cdcfi_libs+=	lib/libclang_rt/cfi
+
+lib/libexecinfo__L:	lib/libelf
+lib/librt__L:		lib/libthr
+
+lib/ncurses/tinfo__L:	${_cdcfi_libs}
+.endif
+
 # These dependencies are not automatically generated:
 #
 # lib/csu and lib/libc must be built before
@@ -2943,6 +2963,7 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} \
 		${_kerberos5_lib_libhx509} ${_kerberos5_lib_libkrb5} \
 		${_kerberos5_lib_libroken} \
 		${_kerberos5_lib_libwind} \
+		${_cdcfi_libs} \
 		lib/libbz2 ${_libcom_err} lib/libcrypt \
 		lib/libc++ \
 		lib/libelf lib/libexpat \

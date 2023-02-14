@@ -203,8 +203,7 @@ static Error executeObjcopyOnBinary(const MultiFormatConfig &Config,
     return objcopy::wasm::executeObjcopyOnBinary(Config.getCommonConfig(),
                                                  *WasmConfig, *WasmBinary, Out);
   } else
-    return createStringError(object_error::invalid_file_type,
-                             "unsupported object file format");
+  return Error::success();
 }
 
 namespace llvm {

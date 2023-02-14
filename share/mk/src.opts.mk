@@ -521,6 +521,9 @@ MK_CROSS_DSO_CFI:=	no
 #     frame #1: 0x0000000000215089 devd`_start(ap=<unavailable>, cleanup=<unavailable>) at crt1.c:65
 MK_DEVD_PIE:=	yes
 
+# ctfmerge segfaults
+MK_CTF:=	no
+
 # libpmc and friends are receiving a lot of code churn right now.
 # Disable building libpmc and friends due to build issues.
 MK_PMC:=	no

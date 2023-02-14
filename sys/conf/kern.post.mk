@@ -30,10 +30,6 @@ MKMODULESENV+=  MODULE_TIED=yes
 MKMODULESENV+=	CONF_CFLAGS="${CONF_CFLAGS}"
 .endif
 
-.if defined(WITH_CTF)
-MKMODULESENV+=	WITH_CTF="${WITH_CTF}"
-.endif
-
 .if defined(WITH_EXTRA_TCP_STACKS)
 MKMODULESENV+=	WITH_EXTRA_TCP_STACKS="${WITH_EXTRA_TCP_STACKS}"
 .endif
@@ -197,10 +193,6 @@ ${FULLKERNEL}: ${SYSTEM_DEP} vers.o
 	${SYSTEM_LD}
 .if !empty(MD_ROOT_SIZE_CONFIGURED) && defined(MFS_IMAGE)
 	@sh ${S}/tools/embed_mfs.sh ${.TARGET} ${MFS_IMAGE}
-.endif
-.if ${MK_CTF} != "no"
-	@echo ${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ...
-	@${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${SYSTEM_OBJS} vers.o
 .endif
 .if !defined(DEBUG)
 	${OBJCOPY} --strip-debug ${.TARGET}

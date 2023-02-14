@@ -43,6 +43,8 @@ CLEANFILES+=	${TGHDRS} ${TGHDRS:C/$/.d/}
 LIBADD+=	z
 
 LINKS=		${BINDIR}/llvm-objcopy ${BINDIR}/llvm-strip
+LINKS+=		${BINDIR}/llvm-objcopy ${BINDIR}/llvm-bitcode-strip
+LINKS+=		${BINDIR}/llvm-bitcode-strip ${BINDIR}/bitcode-strip
 
 .if ${MK_LLVM_BINUTILS} != "no"
 LINKS+=		${BINDIR}/llvm-objcopy ${BINDIR}/objcopy \
