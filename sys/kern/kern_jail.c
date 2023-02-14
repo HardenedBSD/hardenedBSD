@@ -120,7 +120,6 @@ struct prison prison0 = {
 	.pr_flags	= PR_HOST|_PR_IP_SADDRSEL,
 #endif
 	.pr_allow	= PR_ALLOW_ALL_STATIC,
-	.pr_permid	= 1,
 };
 MTX_SYSINIT(prison0, &prison0.pr_mtx, "jail mutex", MTX_DEF);
 
@@ -780,7 +779,7 @@ prison_ip_set(struct prison *pr, const pr_family_t af, struct prison_ip *new)
 	mem = &pr->pr_addrs[af];
 
 	old = *mem;
-	ck_pr_store_ptr(mem, new);
+	atomic_store_ptr(mem, new);
 	prison_ip_free(old);
 }
 
@@ -906,7 +905,7 @@ prison_ip_check(const struct prison *pr, const pr_family_t af,
 	    in_epoch(net_epoch_preempt) ||
 	    sx_xlocked(&allprison_lock));
 
-	pip = ck_pr_load_ptr(&pr->pr_addrs[af]);
+	pip = atomic_load_ptr(&pr->pr_addrs[af]);
 	if (__predict_false(pip == NULL))
 		return (EAFNOSUPPORT);
 
@@ -997,7 +996,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 	uint64_t pr_allow_diff;
 	unsigned tallow;
 	char numbuf[12];
-	static uint64_t init_permid = 2;
 
 	error = priv_check(td, PRIV_JAIL_SET);
 	if (!error && (flags & JAIL_ATTACH))
@@ -1627,7 +1625,6 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 		TASK_INIT(&pr->pr_task, 0, prison_complete, pr);
 
 		pr->pr_id = jid;
-		pr->pr_permid = init_permid++;
 		if (inspr != NULL)
 			TAILQ_INSERT_BEFORE(inspr, pr, pr_list);
 		else
@@ -3557,35 +3554,6 @@ prison_isalive(const struct prison *pr)
 	if (__predict_false(pr->pr_state != PRISON_STATE_ALIVE))
 		return (false);
 	return (true);
-}
-
-/*
- * Return true if the prison is currently alive.  Identified by pr_permid.
- */
-bool
-prison_isalive_permid(const uint64_t prison_permid)
-{
-	struct prison *pr;
-	bool alive;
-
-	/*
-	 * permid == 0 --> never assigned to a prison
-	 * permid == 1 --> assigned to prison0, always alive
-	 */
-	if (prison_permid == 0)
-		return (false);
-	else if (prison_permid == 1)
-		return (true);
-	sx_slock(&allprison_lock);
-	TAILQ_FOREACH(pr, &allprison, pr_list) {
-		if (pr->pr_permid == prison_permid) {
-			alive = prison_isalive(pr);
-			sx_unlock(&allprison_lock);
-			return (alive);
-		}
-	}
-	sx_unlock(&allprison_lock);
-	return (false);
 }
 
 /*

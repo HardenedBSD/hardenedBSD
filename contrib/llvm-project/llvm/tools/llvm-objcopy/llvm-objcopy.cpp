@@ -6,23 +6,22 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm-objcopy.h"
-#include "COFF/COFFConfig.h"
-#include "COFF/COFFObjcopy.h"
-#include "CommonConfig.h"
-#include "ConfigManager.h"
-#include "ELF/ELFConfig.h"
-#include "ELF/ELFObjcopy.h"
-#include "MachO/MachOConfig.h"
-#include "MachO/MachOObjcopy.h"
-#include "wasm/WasmConfig.h"
-#include "wasm/WasmObjcopy.h"
-
+#include "ObjcopyOptions.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/ObjCopy/COFF/COFFConfig.h"
+#include "llvm/ObjCopy/COFF/COFFObjcopy.h"
+#include "llvm/ObjCopy/CommonConfig.h"
+#include "llvm/ObjCopy/ELF/ELFConfig.h"
+#include "llvm/ObjCopy/ELF/ELFObjcopy.h"
+#include "llvm/ObjCopy/MachO/MachOConfig.h"
+#include "llvm/ObjCopy/MachO/MachOObjcopy.h"
+#include "llvm/ObjCopy/ObjCopy.h"
+#include "llvm/ObjCopy/wasm/WasmConfig.h"
+#include "llvm/ObjCopy/wasm/WasmObjcopy.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/Binary.h"
@@ -42,6 +41,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Memory.h"
@@ -87,47 +87,13 @@ static Expected<DriverConfig> getDriverConfig(ArrayRef<const char *> Args) {
   };
 
   if (Is("bitcode-strip") || Is("bitcode_strip"))
-    return parseBitcodeStripOptions(Args);
+    return parseBitcodeStripOptions(Args, reportWarning);
   else if (Is("strip"))
     return parseStripOptions(Args, reportWarning);
   else if (Is("install-name-tool") || Is("install_name_tool"))
     return parseInstallNameToolOptions(Args);
   else
     return parseObjcopyOptions(Args, reportWarning);
-}
-
-// For regular archives this function simply calls llvm::writeArchive,
-// For thin archives it writes the archive file itself as well as its members.
-static Error deepWriteArchive(StringRef ArcName,
-                              ArrayRef<NewArchiveMember> NewMembers,
-                              bool WriteSymtab, object::Archive::Kind Kind,
-                              bool Deterministic, bool Thin) {
-  if (Error E = writeArchive(ArcName, NewMembers, WriteSymtab, Kind,
-                             Deterministic, Thin))
-    return createFileError(ArcName, std::move(E));
-
-  if (!Thin)
-    return Error::success();
-
-  for (const NewArchiveMember &Member : NewMembers) {
-    // For regular files (as is the case for deepWriteArchive),
-    // FileOutputBuffer::create will return OnDiskBuffer.
-    // OnDiskBuffer uses a temporary file and then renames it. So in reality
-    // there is no inefficiency / duplicated in-memory buffers in this case. For
-    // now in-memory buffers can not be completely avoided since
-    // NewArchiveMember still requires them even though writeArchive does not
-    // write them on disk.
-    Expected<std::unique_ptr<FileOutputBuffer>> FB =
-        FileOutputBuffer::create(Member.MemberName, Member.Buf->getBufferSize(),
-                                 FileOutputBuffer::F_executable);
-    if (!FB)
-      return FB.takeError();
-    std::copy(Member.Buf->getBufferStart(), Member.Buf->getBufferEnd(),
-              (*FB)->getBufferStart());
-    if (Error E = (*FB)->commit())
-      return E;
-  }
-  return Error::success();
 }
 
 /// The function executeObjcopyOnIHex does the dispatch based on the format
@@ -166,6 +132,7 @@ static Error executeObjcopyOnRawBinary(ConfigManager &ConfigMgr,
   llvm_unreachable("unsupported output format");
 }
 
+<<<<<<< HEAD
 /// The function executeObjcopyOnBinary does the dispatch based on the format
 /// of the input binary (ELF, MachO or COFF).
 static Error executeObjcopyOnBinary(const MultiFormatConfig &Config,
@@ -308,19 +275,18 @@ static Error restoreStatOnFile(StringRef Filename,
   return Error::success();
 }
 
+=======
+>>>>>>> internal/hardened/current/master
 /// The function executeObjcopy does the higher level dispatch based on the type
 /// of input (raw binary, archive or single object file) and takes care of the
 /// format-agnostic modifications, i.e. preserving dates.
 static Error executeObjcopy(ConfigManager &ConfigMgr) {
   CommonConfig &Config = ConfigMgr.Common;
 
-  sys::fs::file_status Stat;
-  if (Config.InputFilename != "-") {
-    if (auto EC = sys::fs::status(Config.InputFilename, Stat))
-      return createFileError(Config.InputFilename, EC);
-  } else {
-    Stat.permissions(static_cast<sys::fs::perms>(0777));
-  }
+  Expected<FilePermissionsApplier> PermsApplierOrErr =
+      FilePermissionsApplier::create(Config.InputFilename);
+  if (!PermsApplierOrErr)
+    return PermsApplierOrErr.takeError();
 
   std::function<Error(raw_ostream & OutFile)> ObjcopyFunc;
 
@@ -389,19 +355,20 @@ static Error executeObjcopy(ConfigManager &ConfigMgr) {
     }
   }
 
-  if (Error E = restoreStatOnFile(Config.OutputFilename, Stat, ConfigMgr))
+  if (Error E =
+          PermsApplierOrErr->apply(Config.OutputFilename, Config.PreserveDates))
     return E;
 
-  if (!Config.SplitDWO.empty()) {
-    Stat.permissions(static_cast<sys::fs::perms>(0666));
-    if (Error E = restoreStatOnFile(Config.SplitDWO, Stat, ConfigMgr))
+  if (!Config.SplitDWO.empty())
+    if (Error E =
+            PermsApplierOrErr->apply(Config.SplitDWO, Config.PreserveDates,
+                                     static_cast<sys::fs::perms>(0666)))
       return E;
-  }
 
   return Error::success();
 }
 
-int main(int argc, char **argv) {
+int llvm_objcopy_main(int argc, char **argv) {
   InitLLVM X(argc, argv);
   ToolName = argv[0];
 

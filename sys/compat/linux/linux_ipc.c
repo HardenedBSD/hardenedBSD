@@ -30,17 +30,15 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/syscallsubr.h>
-#include <sys/sysproto.h>
-#include <sys/proc.h>
 #include <sys/limits.h>
 #include <sys/msg.h>
+#include <sys/proc.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
-
-#include "opt_compat.h"
+#include <sys/syscallsubr.h>
+#include <sys/sysent.h>
+#include <sys/sysproto.h>
 
 #ifdef COMPAT_LINUX32
 #include <machine/../linux32/linux.h>
@@ -51,7 +49,7 @@ __FBSDID("$FreeBSD$");
 #endif
 #include <compat/linux/linux_ipc.h>
 #include <compat/linux/linux_ipc64.h>
-#include <compat/linux/linux_timer.h>
+#include <compat/linux/linux_time.h>
 #include <compat/linux/linux_util.h>
 
 /*
