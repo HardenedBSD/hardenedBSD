@@ -341,9 +341,9 @@ static void
 report_operation(uint32_t fibnum, struct rib_cmd_info *rc,
     struct nlpcb *nlp, struct nlmsghdr *hdr)
 {
-	struct nl_writer nw;
-
+	struct nl_writer nw = {};
 	uint32_t group_id = family_to_group(rt_get_family(rc->rc_rt));
+
 	if (nlmsg_get_group_writer(&nw, NLMSG_SMALL, NETLINK_ROUTE, group_id)) {
 		struct route_nhop_data rnd = {
 			.rnd_nhop = rc_get_nhop(rc),
@@ -840,6 +840,11 @@ rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (EINVAL);
 	}
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	if (attrs.rta_nh_id != 0) {
 		/* Referenced uindex */
 		int pxflag = get_pxflag(&attrs);
@@ -898,6 +903,11 @@ rtnl_handle_delroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (ESRCH);
 	}
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	error = rib_del_route_px(attrs.rta_table, attrs.rta_dst,
 	    attrs.rtm_dst_len, path_match_func, &attrs, 0, &rc);
 	if (error == 0)
@@ -915,6 +925,11 @@ rtnl_handle_getroute(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *
 	if (error != 0)
 		return (error);
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	if (hdr->nlmsg_flags & NLM_F_DUMP)
 		error = handle_rtm_dump(nlp, attrs.rta_table, attrs.rtm_family, hdr, npt->nw);
 	else
@@ -926,9 +941,8 @@ rtnl_handle_getroute(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *
 void
 rtnl_handle_route_event(uint32_t fibnum, const struct rib_cmd_info *rc)
 {
+	struct nl_writer nw = {};
 	int family, nlm_flags = 0;
-
-	struct nl_writer nw;
 
 	family = rt_get_family(rc->rc_rt);
 
