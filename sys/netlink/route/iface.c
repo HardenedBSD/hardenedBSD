@@ -458,25 +458,29 @@ rtnl_handle_getlink(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 					error = ENOMEM;
 					break;
 				}
-				memcpy(new_array, match_array, offset * sizeof(void *));
-				free(match_array, M_TEMP);
+				if (match_array != NULL) {
+					memcpy(new_array, match_array, offset * sizeof(void *));
+					free(match_array, M_TEMP);
+				}
 				match_array = new_array;
 			}
 
-			if (if_try_ref(ifp))
+			if (match_array != NULL && if_try_ref(ifp))
 				match_array[offset++] = ifp;
                 }
         }
 	NET_EPOCH_EXIT(et);
 
 	NL_LOG(LOG_DEBUG2, "Matched %d interface(s), dumping", offset);
-	for (int i = 0; error == 0 && i < offset; i++) {
-		if (!dump_iface(wa.nw, match_array[i], &wa.hdr, 0))
-			error = ENOMEM;
+	if (match_array != NULL) {
+		for (int i = 0; error == 0 && i < offset; i++) {
+			if (!dump_iface(wa.nw, match_array[i], &wa.hdr, 0))
+				error = ENOMEM;
+		}
+		for (int i = 0; i < offset; i++)
+			if_rele(match_array[i]);
+		free(match_array, M_TEMP);
 	}
-	for (int i = 0; i < offset; i++)
-		if_rele(match_array[i]);
-	free(match_array, M_TEMP);
 
 	NL_LOG(LOG_DEBUG2, "End dump, iterated %d dumped %d", wa.count, wa.dumped);
 
