@@ -60,7 +60,7 @@
  *		in the range 5 to 9.
  */
 #undef __FreeBSD_version
-#define __FreeBSD_version 1302502	/* Master, propagated to newvers */
+#define __FreeBSD_version 1302503	/* Master, propagated to newvers */
 
 /*
  * __FreeBSD_kernel__ indicates that this system uses the kernel of FreeBSD,
@@ -92,6 +92,7 @@
 #define	P_OSREL_CK_INODE		1300005
 #define	P_OSREL_POWERPC_NEW_AUX_ARGS	1300070
 #define	P_OSREL_TIDPID			1400079
+#define	P_OSREL_TIDPID_13		1302501
 
 #define	P_OSREL_MAJOR(x)		((x) / 100000)
 #endif
