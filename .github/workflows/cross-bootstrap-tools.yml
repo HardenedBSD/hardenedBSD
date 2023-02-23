@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.target_arch }} ${{ matrix.os }} (${{ matrix.compiler }})
@@ -27,14 +30,14 @@ jobs:
             pkgs: bmake libarchive-dev clang-14 lld-14
           - os: macos-latest
             compiler: clang-13
-            cross-bindir: /usr/local/opt/llvm/bin
-            pkgs: bmake libarchive
+            cross-bindir: /usr/local/opt/llvm@13/bin
+            pkgs: bmake libarchive llvm@13
           - target_arch: amd64
             target: amd64
           - target_arch: aarch64
             target: arm64
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: install packages (Ubuntu)
         if: runner.os == 'Linux'
         run: |
