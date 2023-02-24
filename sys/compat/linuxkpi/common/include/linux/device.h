@@ -48,13 +48,13 @@
 #include <linux/pm.h>
 #include <linux/idr.h>
 #include <linux/ratelimit.h>	/* via linux/dev_printk.h */
+#include <linux/fwnode.h>
 #include <asm/atomic.h>
 
 #include <sys/bus.h>
 #include <sys/backlight.h>
 
 struct device;
-struct fwnode_handle;
 
 struct class {
 	const char	*name;
@@ -70,6 +70,7 @@ struct class {
 
 struct dev_pm_ops {
 	int (*prepare)(struct device *dev);
+	void (*complete)(struct device *dev);
 	int (*suspend)(struct device *dev);
 	int (*suspend_late)(struct device *dev);
 	int (*resume)(struct device *dev);
@@ -230,6 +231,12 @@ show_class_attr_string(struct class *class,
 	static linux_ratelimit_t __ratelimited;	\
 	if (linux_ratelimited(&__ratelimited))	\
 		dev_warn(dev, __VA_ARGS__);	\
+} while (0)
+
+#define	dev_dbg_ratelimited(dev, ...) do {	\
+	static linux_ratelimit_t __ratelimited;	\
+	if (linux_ratelimited(&__ratelimited))	\
+		dev_dbg(dev, __VA_ARGS__);	\
 } while (0)
 
 /* Public and LinuxKPI internal devres functions. */
@@ -534,6 +541,24 @@ device_reprobe(struct device *dev)
 	mtx_unlock(&Giant);
 
 	return (-error);
+}
+
+static inline void
+device_set_wakeup_enable(struct device *dev __unused, bool enable __unused)
+{
+
+	/*
+	 * XXX-BZ TODO This is used by wireless drivers supporting WoWLAN which
+	 * we currently do not support.
+	 */
+}
+
+static inline int
+device_wakeup_enable(struct device *dev)
+{
+
+	device_set_wakeup_enable(dev, true);
+	return (0);
 }
 
 #define	dev_pm_set_driver_flags(dev, flags) do { \

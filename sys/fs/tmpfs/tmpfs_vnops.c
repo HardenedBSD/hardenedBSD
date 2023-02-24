@@ -240,11 +240,18 @@ tmpfs_lookup1(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 		cache_enter(dvp, *vpp, cnp);
 
 out:
+#ifdef INVARIANTS
 	/*
 	 * If there were no errors, *vpp cannot be null and it must be
 	 * locked.
 	 */
-	MPASS(IFF(error == 0, *vpp != NULLVP && VOP_ISLOCKED(*vpp)));
+	if (error == 0) {
+		MPASS(*vpp != NULLVP);
+		ASSERT_VOP_LOCKED(*vpp, __func__);
+	} else {
+		MPASS(*vpp == NULL);
+	}
+#endif
 
 	return (error);
 }
@@ -567,7 +574,6 @@ tmpfs_setattr(struct vop_setattr_args *v)
 
 	int error;
 
-	MPASS(VOP_ISLOCKED(vp));
 	ASSERT_VOP_IN_SEQC(vp);
 
 	error = 0;
@@ -609,8 +615,6 @@ tmpfs_setattr(struct vop_setattr_args *v)
 	 * from tmpfs_update.
 	 */
 	tmpfs_update(vp);
-
-	MPASS(VOP_ISLOCKED(vp));
 
 	return (error);
 }
@@ -741,8 +745,6 @@ tmpfs_fsync(struct vop_fsync_args *v)
 {
 	struct vnode *vp = v->a_vp;
 
-	MPASS(VOP_ISLOCKED(vp));
-
 	tmpfs_check_mtime(vp);
 	tmpfs_update(vp);
 
@@ -760,9 +762,6 @@ tmpfs_remove(struct vop_remove_args *v)
 	struct tmpfs_mount *tmp;
 	struct tmpfs_node *dnode;
 	struct tmpfs_node *node;
-
-	MPASS(VOP_ISLOCKED(dvp));
-	MPASS(VOP_ISLOCKED(vp));
 
 	if (vp->v_type == VDIR) {
 		error = EISDIR;
@@ -812,7 +811,6 @@ tmpfs_link(struct vop_link_args *v)
 	struct tmpfs_dirent *de;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(dvp));
 	MPASS(cnp->cn_flags & HASBUF);
 	MPASS(dvp != vp); /* XXX When can this be false? */
 	node = VP_TO_TMPFS_NODE(vp);
@@ -1004,8 +1002,6 @@ tmpfs_rename(struct vop_rename_args *v)
 	int error;
 	bool want_seqc_end;
 
-	MPASS(VOP_ISLOCKED(tdvp));
-	MPASS(IMPLIES(tvp != NULL, VOP_ISLOCKED(tvp)));
 	MPASS(fcnp->cn_flags & HASBUF);
 	MPASS(tcnp->cn_flags & HASBUF);
 
@@ -1319,9 +1315,6 @@ tmpfs_rmdir(struct vop_rmdir_args *v)
 	struct tmpfs_mount *tmp;
 	struct tmpfs_node *dnode;
 	struct tmpfs_node *node;
-
-	MPASS(VOP_ISLOCKED(dvp));
-	MPASS(VOP_ISLOCKED(vp));
 
 	tmp = VFS_TO_TMPFS(dvp->v_mount);
 	dnode = VP_TO_TMPFS_DIR(dvp);

@@ -1438,6 +1438,7 @@ vm_handle_rendezvous(struct vcpu *vcpu)
 		if (CPU_CMP(&vm->rendezvous_req_cpus,
 		    &vm->rendezvous_done_cpus) == 0) {
 			VMM_CTR0(vcpu, "Rendezvous completed");
+			CPU_ZERO(&vm->rendezvous_req_cpus);
 			vm->rendezvous_func = NULL;
 			wakeup(&vm->rendezvous_func);
 			break;
@@ -1858,7 +1859,7 @@ vm_run(struct vcpu *vcpu, struct vm_exit *vme_user)
 
 	pmap = vmspace_pmap(vm->vmspace);
 	vme = &vcpu->exitinfo;
-	evinfo.rptr = &vm->rendezvous_func;
+	evinfo.rptr = &vm->rendezvous_req_cpus;
 	evinfo.sptr = &vm->suspend;
 	evinfo.iptr = &vcpu->reqidle;
 restart:
@@ -1929,10 +1930,8 @@ restart:
 	 * VM_EXITCODE_INST_EMUL could access the apic which could transform the
 	 * exit code into VM_EXITCODE_IPI.
 	 */
-	if (error == 0 && vme->exitcode == VM_EXITCODE_IPI) {
-		retu = false;
+	if (error == 0 && vme->exitcode == VM_EXITCODE_IPI)
 		error = vm_handle_ipi(vcpu, vme, &retu);
-	}
 
 	if (error == 0 && retu == false)
 		goto restart;

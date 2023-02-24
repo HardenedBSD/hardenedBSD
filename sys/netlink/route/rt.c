@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 #include <net/route/nhop.h>
 #include <net/route/route_ctl.h>
 #include <net/route/route_var.h>
+#include <netinet6/scope6_var.h>
 #include <netlink/netlink.h>
 #include <netlink/netlink_ctl.h>
 #include <netlink/netlink_route.h>
@@ -123,7 +124,9 @@ rc_get_nhop(const struct rib_cmd_info *rc)
 static void
 dump_rc_nhop_gw(struct nl_writer *nw, const struct nhop_object *nh)
 {
+#ifdef INET6
 	int upper_family;
+#endif
 
 	switch (nhop_get_neigh_family(nh)) {
 	case AF_LINK:
@@ -132,19 +135,27 @@ dump_rc_nhop_gw(struct nl_writer *nw, const struct nhop_object *nh)
 	case AF_INET:
 		nlattr_add(nw, NL_RTA_GATEWAY, 4, &nh->gw4_sa.sin_addr);
 		break;
+#ifdef INET6
 	case AF_INET6:
 		upper_family = nhop_get_upper_family(nh);
 		if (upper_family == AF_INET6) {
-			nlattr_add(nw, NL_RTA_GATEWAY, 16, &nh->gw6_sa.sin6_addr);
+			struct in6_addr gw6 = nh->gw6_sa.sin6_addr;
+			in6_clearscope(&gw6);
+
+			nlattr_add(nw, NL_RTA_GATEWAY, 16, &gw6);
 		} else if (upper_family == AF_INET) {
 			/* IPv4 over IPv6 */
+			struct in6_addr gw6 = nh->gw6_sa.sin6_addr;
+			in6_clearscope(&gw6);
+
 			char buf[20];
 			struct rtvia *via = (struct rtvia *)&buf[0];
 			via->rtvia_family = AF_INET6;
-			memcpy(via->rtvia_addr, &nh->gw6_sa.sin6_addr, 16);
+			memcpy(via->rtvia_addr, &gw6, 16);
 			nlattr_add(nw, NL_RTA_VIA, 17, via);
 		}
 		break;
+#endif
 	}
 }
 
@@ -175,6 +186,7 @@ dump_rc_nhg(struct nl_writer *nw, const struct nhgrp_object *nhg, struct rtmsg *
 
 	if (uidx != 0)
 		nlattr_add_u32(nw, NL_RTA_NH_ID, uidx);
+	nlattr_add_u32(nw, NL_RTA_KNH_ID, nhgrp_get_idx(nhg));
 
 	nlattr_add_u32(nw, NL_RTA_RTFLAGS, base_rtflags);
 	int off = nlattr_add_nested(nw, NL_RTA_MULTIPATH);
@@ -207,14 +219,15 @@ dump_rc_nhg(struct nl_writer *nw, const struct nhgrp_object *nhg, struct rtmsg *
 #endif
 
 static void
-dump_rc_nhop(struct nl_writer *nw, const struct nhop_object *nh, struct rtmsg *rtm)
+dump_rc_nhop(struct nl_writer *nw, const struct route_nhop_data *rnd, struct rtmsg *rtm)
 {
 #ifdef ROUTE_MPATH
-	if (NH_IS_NHGRP(nh)) {
-		dump_rc_nhg(nw, (const struct nhgrp_object *)nh, rtm);
+	if (NH_IS_NHGRP(rnd->rnd_nhop)) {
+		dump_rc_nhg(nw, rnd->rnd_nhgrp, rtm);
 		return;
 	}
 #endif
+	const struct nhop_object *nh = rnd->rnd_nhop;
 	uint32_t rtflags = nhop_get_rtflags(nh);
 
 	/*
@@ -242,6 +255,9 @@ dump_rc_nhop(struct nl_writer *nw, const struct nhop_object *nh, struct rtmsg *r
 
 	/* In any case, fill outgoing interface */
 	nlattr_add_u32(nw, NL_RTA_OIF, nh->nh_ifp->if_index);
+
+	if (rnd->rnd_weight != RT_DEFAULT_WEIGHT)
+		nlattr_add_u32(nw, NL_RTA_WEIGHT, rnd->rnd_weight);
 }
 
 /*
@@ -308,7 +324,7 @@ dump_px(uint32_t fibnum, const struct nlmsghdr *hdr,
 	rtm = nlattr_restore_offset(nw, rtm_off, struct rtmsg);
 	if (plen > 0)
 		rtm->rtm_dst_len = plen;
-	dump_rc_nhop(nw, rnd->rnd_nhop, rtm);
+	dump_rc_nhop(nw, rnd, rtm);
 
 	if (nlmsg_end(nw))
 		return (0);
@@ -336,9 +352,9 @@ static void
 report_operation(uint32_t fibnum, struct rib_cmd_info *rc,
     struct nlpcb *nlp, struct nlmsghdr *hdr)
 {
-	struct nl_writer nw;
-
+	struct nl_writer nw = {};
 	uint32_t group_id = family_to_group(rt_get_family(rc->rc_rt));
+
 	if (nlmsg_get_group_writer(&nw, NLMSG_SMALL, NETLINK_ROUTE, group_id)) {
 		struct route_nhop_data rnd = {
 			.rnd_nhop = rc_get_nhop(rc),
@@ -437,6 +453,7 @@ struct nl_parsed_route {
 	uint32_t		rta_table;
 	uint32_t		rta_rtflags;
 	uint32_t		rta_nh_id;
+	uint32_t		rta_weight;
 	uint32_t		rtax_mtu;
 	uint8_t			rtm_family;
 	uint8_t			rtm_dst_len;
@@ -456,6 +473,7 @@ static const struct nlattr_parser nla_p_rtmsg[] = {
 	{ .type = NL_RTA_GATEWAY, .off = _OUT(rta_gw), .cb = nlattr_get_ip },
 	{ .type = NL_RTA_METRICS, .arg = &metrics_parser, .cb = nlattr_get_nested },
 	{ .type = NL_RTA_MULTIPATH, .off = _OUT(rta_multipath), .cb = nlattr_get_multipath },
+	{ .type = NL_RTA_WEIGHT, .off = _OUT(rta_weight), .cb = nlattr_get_uint32 },
 	{ .type = NL_RTA_RTFLAGS, .off = _OUT(rta_rtflags), .cb = nlattr_get_uint32 },
 	{ .type = NL_RTA_TABLE, .off = _OUT(rta_table), .cb = nlattr_get_uint32 },
 	{ .type = NL_RTA_VIA, .off = _OUT(rta_gw), .cb = nlattr_get_ipvia },
@@ -729,7 +747,11 @@ create_nexthop_one(struct nl_parsed_route *attrs, struct rta_mpath_nh *mpnh,
 	if (nh == NULL)
 		return (ENOMEM);
 
-	nhop_set_gw(nh, mpnh->gw, true);
+	error = nl_set_nexthop_gw(nh, mpnh->gw, mpnh->ifp, npt);
+	if (error != 0) {
+		nhop_free(nh);
+		return (error);
+	}
 	if (mpnh->ifp != NULL)
 		nhop_set_transmit_ifp(nh, mpnh->ifp);
 	nhop_set_rtflags(nh, attrs->rta_rtflags);
@@ -793,8 +815,13 @@ create_nexthop_from_attrs(struct nl_parsed_route *attrs,
 			*perror = ENOMEM;
 			return (NULL);
 		}
-		if (attrs->rta_gw != NULL)
-			nhop_set_gw(nh, attrs->rta_gw, true);
+		if (attrs->rta_gw != NULL) {
+			*perror = nl_set_nexthop_gw(nh, attrs->rta_gw, attrs->rta_oif, npt);
+			if (*perror != 0) {
+				nhop_free(nh);
+				return (NULL);
+			}
+		}
 		if (attrs->rta_oif != NULL)
 			nhop_set_transmit_ifp(nh, attrs->rta_oif);
 		if (attrs->rtax_mtu != 0)
@@ -833,6 +860,11 @@ rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (EINVAL);
 	}
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	if (attrs.rta_nh_id != 0) {
 		/* Referenced uindex */
 		int pxflag = get_pxflag(&attrs);
@@ -848,8 +880,9 @@ rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		}
 	}
 
-	int weight = NH_IS_NHGRP(nh) ? 0 : RT_DEFAULT_WEIGHT;
-	struct route_nhop_data rnd = { .rnd_nhop = nh, .rnd_weight = weight };
+	if (!NH_IS_NHGRP(nh) && attrs.rta_weight == 0)
+		attrs.rta_weight = RT_DEFAULT_WEIGHT;
+	struct route_nhop_data rnd = { .rnd_nhop = nh, .rnd_weight = attrs.rta_weight };
 	int op_flags = get_op_flags(hdr->nlmsg_flags);
 
 	error = rib_add_route_px(attrs.rta_table, attrs.rta_dst, attrs.rtm_dst_len,
@@ -890,6 +923,11 @@ rtnl_handle_delroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (ESRCH);
 	}
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	error = rib_del_route_px(attrs.rta_table, attrs.rta_dst,
 	    attrs.rtm_dst_len, path_match_func, &attrs, 0, &rc);
 	if (error == 0)
@@ -907,6 +945,11 @@ rtnl_handle_getroute(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *
 	if (error != 0)
 		return (error);
 
+	if (attrs.rta_table >= V_rt_numfibs) {
+		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
 	if (hdr->nlmsg_flags & NLM_F_DUMP)
 		error = handle_rtm_dump(nlp, attrs.rta_table, attrs.rtm_family, hdr, npt->nw);
 	else
@@ -918,9 +961,8 @@ rtnl_handle_getroute(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *
 void
 rtnl_handle_route_event(uint32_t fibnum, const struct rib_cmd_info *rc)
 {
+	struct nl_writer nw = {};
 	int family, nlm_flags = 0;
-
-	struct nl_writer nw;
 
 	family = rt_get_family(rc->rc_rt);
 

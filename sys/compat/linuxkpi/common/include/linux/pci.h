@@ -108,6 +108,7 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 
 #define	to_pci_dev(n)	container_of(n, struct pci_dev, dev)
 
+#define	PCI_STD_NUM_BARS	6
 #define	PCI_VENDOR_ID		PCIR_VENDOR
 #define	PCI_DEVICE_ID		PCIR_DEVICE
 #define	PCI_COMMAND		PCIR_COMMAND
@@ -172,6 +173,8 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 #define	PCI_MSI_ADDRESS_HI	PCIR_MSI_ADDR_HIGH
 #define	PCI_MSI_FLAGS		PCIR_MSI_CTRL
 #define	PCI_MSI_FLAGS_ENABLE	PCIM_MSICTRL_MSI_ENABLE
+#define	PCI_MSIX_FLAGS		PCIR_MSIX_CTRL
+#define	PCI_MSIX_FLAGS_ENABLE	PCIM_MSIXCTRL_MSIX_ENABLE
 
 #define PCI_EXP_LNKCAP_CLKPM	0x00040000
 #define PCI_EXP_DEVSTA_TRPND	0x0020
@@ -303,6 +306,17 @@ _pci_exit(void)								\
 module_init(_pci_init);							\
 module_exit(_pci_exit)
 
+struct msi_msg {
+	uint32_t			data;
+};
+
+struct msi_desc {
+	struct msi_msg			msg;
+	struct {
+		bool			is_64;
+	} msi_attrib;
+};
+
 /*
  * If we find drivers accessing this from multiple KPIs we may have to
  * refcount objects of this structure.
@@ -327,6 +341,7 @@ struct pci_dev {
 	unsigned int		devfn;
 	uint32_t		class;
 	uint8_t			revision;
+	uint8_t			msix_cap;
 	bool			msi_enabled;
 
 	TAILQ_HEAD(, pci_mmio_region)	mmio;
@@ -338,6 +353,9 @@ struct pci_dev {
 	bool			managed;	/* devres "pcim_*(). */
 	bool			want_iomap_res;
 	bool			msix_enabled;
+	uint8_t			msi_cap;
+	struct msi_desc		**msi_desc;
+	char			*path_name;
 };
 
 /* XXX add kassert here on the mmio offset */
@@ -357,6 +375,7 @@ struct pcim_iomap_devres {
 int pci_request_region(struct pci_dev *pdev, int bar, const char *res_name);
 int pci_alloc_irq_vectors(struct pci_dev *pdev, int minv, int maxv,
     unsigned int flags);
+bool pci_device_is_present(struct pci_dev *pdev);
 
 /* Internal helper function(s). */
 struct pci_dev *lkpinew_pci_dev(device_t);
@@ -366,6 +385,7 @@ struct resource *_lkpi_pci_iomap(struct pci_dev *pdev, int bar, int mmio_size);
 struct pcim_iomap_devres *lkpi_pcim_iomap_devres_find(struct pci_dev *pdev);
 void lkpi_pcim_iomap_table_release(struct device *, void *);
 struct pci_dev *lkpi_pci_get_device(uint16_t, uint16_t, struct pci_dev *);
+struct msi_desc *lkpi_pci_msi_desc_alloc(int);
 
 static inline bool
 dev_is_pci(struct device *dev)
@@ -456,8 +476,7 @@ pci_resource_flags(struct pci_dev *pdev, int bar)
 static inline const char *
 pci_name(struct pci_dev *d)
 {
-
-	return device_get_desc(d->dev.bsddev);
+	return d->path_name;
 }
 
 static inline void *
@@ -887,26 +906,42 @@ pci_enable_msix_range(struct pci_dev *dev, struct msix_entry *entries,
   linux_pci_enable_msi(pdev)
 
 static inline int
-pci_enable_msi(struct pci_dev *pdev)
+_lkpi_pci_enable_msi_range(struct pci_dev *pdev, int minvec, int maxvec)
 {
 	struct resource_list_entry *rle;
 	int error;
-	int avail;
+	int nvec;
 
-	avail = pci_msi_count(pdev->dev.bsddev);
-	if (avail < 1)
-		return -EINVAL;
+	if (maxvec < minvec)
+		return (-EINVAL);
 
-	avail = 1;	/* this function only enable one MSI IRQ */
-	if ((error = -pci_alloc_msi(pdev->dev.bsddev, &avail)) != 0)
+	nvec = pci_msi_count(pdev->dev.bsddev);
+	if (nvec < 1 || nvec < minvec)
+		return (-ENOSPC);
+
+	nvec = min(nvec, maxvec);
+	if ((error = -pci_alloc_msi(pdev->dev.bsddev, &nvec)) != 0)
 		return error;
+
+	/* Native PCI might only ever ask for 32 vectors. */
+	if (nvec < minvec) {
+		pci_release_msi(pdev->dev.bsddev);
+		return (-ENOSPC);
+	}
 
 	rle = linux_pci_get_rle(pdev, SYS_RES_IRQ, 1, false);
 	pdev->dev.irq_start = rle->start;
-	pdev->dev.irq_end = rle->start + avail;
+	pdev->dev.irq_end = rle->start + nvec;
 	pdev->irq = rle->start;
 	pdev->msi_enabled = true;
 	return (0);
+}
+
+static inline int
+pci_enable_msi(struct pci_dev *pdev)
+{
+
+	return (_lkpi_pci_enable_msi_range(pdev, 1, 1));
 }
 
 static inline int
@@ -1609,7 +1644,7 @@ err:
 /*
  * We cannot simply re-define pci_get_device() as we would normally do
  * and then hide it in linux_pci.c as too many semi-native drivers still
- * inlucde linux/pci.h and run into the conflict with native PCI. Linux drivers
+ * include linux/pci.h and run into the conflict with native PCI. Linux drivers
  * using pci_get_device() need to be changed to call linuxkpi_pci_get_device().
  */
 static inline struct pci_dev *
@@ -1662,6 +1697,39 @@ pci_is_enabled(struct pci_dev *pdev)
 
 	return ((pci_read_config(pdev->dev.bsddev, PCIR_COMMAND, 2) &
 	    PCIM_CMD_BUSMASTEREN) != 0);
+}
+
+static inline int
+pci_wait_for_pending_transaction(struct pci_dev *pdev)
+{
+
+	return (0);
+}
+
+static inline int
+pci_assign_resource(struct pci_dev *pdev, int bar)
+{
+
+	return (0);
+}
+
+static inline int
+pci_irq_vector(struct pci_dev *pdev, unsigned int vector)
+{
+
+	if (!pdev->msix_enabled && !pdev->msi_enabled) {
+		if (vector != 0)
+			return (-EINVAL);
+		return (pdev->irq);
+	}
+
+	if (pdev->msix_enabled || pdev->msi_enabled) {
+		if ((pdev->dev.irq_start + vector) >= pdev->dev.irq_end)
+			return (-EINVAL);
+		return (pdev->dev.irq_start + vector);
+	}
+
+        return (-ENXIO);
 }
 
 #endif	/* _LINUXKPI_LINUX_PCI_H_ */

@@ -284,6 +284,13 @@ struct ifinfomsg {
 Creates a new interface.
 The only mandatory TLV is
 .Dv IFLA_IFNAME .
+The following attributes are returned inside the nested
+.Dv NLMSGERR_ATTR_COOKIE :
+.Pp
+.Bd -literal -offset indent -compact
+IFLA_NEW_IFINDEX	(uint32) created interface index
+IFLA_IFNAME		(string) created interface name
+.Ed
 .Ss RTM_DELLINK
 Deletes the interface specified by
 .Dv IFLA_IFNAME .
@@ -525,7 +532,7 @@ RTNLGRP_NEIGH	Notifies on ARP/NDP neighbor  arrival/removal/change
 The
 .Dv NETLINK_ROUTE
 protocol family appeared in
-.Fx 14.0 .
+.Fx 13.2 .
 .Sh AUTHORS
 The netlink was implementated by
 .An -nosplit

@@ -26,16 +26,31 @@
  * SUCH DAMAGE.
  */
 
+#define	_WANT_P_OSREL
+#include <sys/param.h>
 #include <errno.h>
 #include <sched.h>
 #include <string.h>
 
+#include "libc_private.h"
+
 int
 sched_getaffinity(pid_t pid, size_t cpusetsz, cpuset_t *cpuset)
 {
-	int error;
+	cpuwhich_t which;
+	int error, osrel;
 
-	error = cpuset_getaffinity(CPU_LEVEL_WHICH, CPU_WHICH_TIDPID,
+	osrel = __getosreldate();
+	if (osrel < P_OSREL_TIDPID_13 || (osrel < P_OSREL_TIDPID &&
+	    P_OSREL_MAJOR(osrel) == P_OSREL_MAJOR(P_OSREL_TIDPID))) {
+		if (pid == 0 || pid > _PID_MAX)
+			which = CPU_WHICH_TID;
+		else
+			which = CPU_WHICH_PID;
+	} else
+		which = CPU_WHICH_TIDPID;
+
+	error = cpuset_getaffinity(CPU_LEVEL_WHICH, which,
 	    pid == 0 ? -1 : pid, cpusetsz, cpuset);
 	if (error == -1 && errno == ERANGE)
 		errno = EINVAL;

@@ -19,33 +19,6 @@
 # $FreeBSD$
 
 include GENERIC
+include HARDENEDBSD-CORE
 
 ident		HARDENEDBSD-13-STABLE
-
-# GENERIC overrides
-
-options		INVARIANT_SUPPORT
-options		INVARIANTS
-
-nooptions 	RACCT_DEFAULT_TO_DISABLED # Set kern.racct.enable=0 by default
-nooptions	COMPAT_FREEBSD4
-nooptions	COMPAT_FREEBSD5
-nooptions	COMPAT_FREEBSD6
-nooptions	COMPAT_FREEBSD7
-nooptions	COMPAT_FREEBSD9
-nooptions	COMPAT_FREEBSD10
-nooptions	COMPAT_FREEBSD32
-
-# HardenedBSD hardening options
-options 	HARDEN_KLD		# Harden the kernel module interface
-options 	PAX			# PaX framework
-options 	PAX_CONTROL_ACL		# PaX MAC framework, required for secadm
-options 	PAX_CONTROL_ACL_OVERRIDE_SUPPORT # Allow to override hbsdcontrol settings with ACLs
-options 	PAX_CONTROL_EXTATTR	# extattr based control framework for hbsdcontrol
-options 	PAX_JAIL_SUPPORT	# Allow to override PAX settings per jail
-options 	PAX_SYSCTLS		# sysctls for run-time options
-options 	PAX_ASLR		# Address Space Layout Randomization
-options 	PAX_NOEXEC		# Remove WX pages from user-space and enforce W^X
-options 	PAX_HARDENING		# Various hardening options
-options 	PAX_SEGVGUARD		# prevent brute-force attacks
-options 	HBSD_DEBUG
