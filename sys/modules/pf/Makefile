@@ -25,4 +25,6 @@ opt_global.h:
 
 EXPORT_SYMS=	YES
 
+TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
+
 .include <bsd.kmod.mk>

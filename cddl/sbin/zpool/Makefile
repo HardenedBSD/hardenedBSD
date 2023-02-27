@@ -16,6 +16,7 @@ PACKAGE=	zfs
 PROG=	zpool
 MAN= \
 	spl.4 \
+	vdevprops.7 \
 	zfs.4 \
 	zpool.8 \
 	zpool-add.8 \

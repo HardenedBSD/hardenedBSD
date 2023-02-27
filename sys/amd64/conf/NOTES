@@ -627,7 +627,7 @@ options 	COMPAT_FREEBSD32
 # ZFS support
 
 # NB: This depends on crypto, cryptodev and ZSTDIO
-options		ZFS
+options 	ZFS
 
 #####################################################################
 # VM OPTIONS
@@ -661,5 +661,5 @@ options 	VM_KMEM_SIZE_SCALE
 
 # GCOV (code coverage) support
 
-options		LINDEBUGFS
-options		GCOV
+options 	LINDEBUGFS
+options 	GCOV

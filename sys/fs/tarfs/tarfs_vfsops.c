@@ -304,8 +304,8 @@ tarfs_lookup_path(struct tarfs_mount *tmp, char *name, size_t namelen,
 	if (tnp == NULL)
 		panic("%s: root node not yet created", __func__);
 
-	TARFS_DPF(LOOKUP, "%s: Full path: %.*s\n", __func__, (int)namelen,
-	    name);
+	TARFS_DPF(LOOKUP, "%s: full path: %.*s\n", __func__,
+	    (int)namelen, name);
 
 	sep = NULL;
 	for (;;) {
@@ -317,6 +317,14 @@ tarfs_lookup_path(struct tarfs_mount *tmp, char *name, size_t namelen,
 		if (namelen == 0 || name[0] == '\0') {
 			name = do_lookup ? NULL : cn.cn_nameptr;
 			namelen = do_lookup ? 0 : cn.cn_namelen;
+			break;
+		}
+
+		/* we're not at the end, so we must be in a directory */
+		if (tnp != NULL && tnp->type != VDIR) {
+			TARFS_DPF(LOOKUP, "%s: %.*s is not a directory\n", __func__,
+			    (int)tnp->namelen, tnp->name);
+			error = ENOTDIR;
 			break;
 		}
 
@@ -359,8 +367,9 @@ tarfs_lookup_path(struct tarfs_mount *tmp, char *name, size_t namelen,
 		tnp = NULL;
 		cn.cn_nameptr = name;
 		cn.cn_namelen = len;
-		TARFS_DPF(LOOKUP, "%s: Search: %.*s\n", __func__,
-		    (int)cn.cn_namelen, cn.cn_nameptr);
+		TARFS_DPF(LOOKUP, "%s: looking up %.*s in %.*s/\n", __func__,
+		    (int)cn.cn_namelen, cn.cn_nameptr,
+		    (int)parent->namelen, parent->name);
 		if (do_lookup) {
 			tnp = tarfs_lookup_node(parent, NULL, &cn);
 			if (tnp == NULL) {
@@ -373,7 +382,7 @@ tarfs_lookup_path(struct tarfs_mount *tmp, char *name, size_t namelen,
 		namelen -= cn.cn_namelen;
 	}
 
-	TARFS_DPF(LOOKUP, "%s: Parent %p, node %p\n", __func__, parent, tnp);
+	TARFS_DPF(LOOKUP, "%s: parent %p node %p\n", __func__, parent, tnp);
 
 	if (retparent)
 		*retparent = parent;
@@ -685,8 +694,12 @@ again:
 
 	error = tarfs_lookup_path(tmp, name, namelen, &namep,
 	    &sep, &parent, &tnp, true);
-	if (error != 0)
+	if (error != 0) {
+		TARFS_DPF(ALLOC, "%s: failed to look up %.*s\n", __func__,
+		    (int)namelen, name);
+		error = EINVAL;
 		goto bad;
+	}
 	if (tnp != NULL) {
 		if (hdrp->typeflag[0] == TAR_TYPE_DIRECTORY) {
 			/* XXX set attributes? */

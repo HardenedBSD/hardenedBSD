@@ -669,7 +669,6 @@ int	inp_so_options(const struct inpcb *inp);
 #define	INP_REUSEPORT		0x00000008 /* SO_REUSEPORT option is set */
 /*				0x00000010 */
 #define	INP_REUSEADDR		0x00000020 /* SO_REUSEADDR option is set */
-#define	INP_BINDMULTI		0x00000040 /* IP_BINDMULTI option is set */
 #define	INP_RSS_BUCKET_SET	0x00000080 /* IP_RSS_LISTEN_BUCKET is set */
 #define	INP_RECVFLOWID		0x00000100 /* populate recv datagram with flow info */
 #define	INP_RECVRSSBUCKETID	0x00000200 /* populate recv datagram with bucket id */
@@ -734,13 +733,10 @@ void	in_pcbinfo_destroy(struct inpcbinfo *);
 void	in_pcbstorage_init(void *);
 void	in_pcbstorage_destroy(void *);
 
-int	in_pcbbind_check_bindmulti(const struct inpcb *ni,
-	    const struct inpcb *oi);
-
 void	in_pcbpurgeif0(struct inpcbinfo *, struct ifnet *);
 int	in_pcballoc(struct socket *, struct inpcbinfo *);
-int	in_pcbbind(struct inpcb *, struct sockaddr *, struct ucred *);
-int	in_pcbbind_setup(struct inpcb *, struct sockaddr *, in_addr_t *,
+int	in_pcbbind(struct inpcb *, struct sockaddr_in *, struct ucred *);
+int	in_pcbbind_setup(struct inpcb *, struct sockaddr_in *, in_addr_t *,
 	    u_short *, struct ucred *);
 int	in_pcbconnect(struct inpcb *, struct sockaddr_in *, struct ucred *,
 	    bool);

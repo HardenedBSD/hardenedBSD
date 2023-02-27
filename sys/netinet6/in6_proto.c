@@ -208,8 +208,12 @@ VNET_DEFINE(int, icmp6_rediraccept) = 1;/* accept and process redirects */
 VNET_DEFINE(int, icmp6_redirtimeout) = 10 * 60;	/* 10 minutes */
 VNET_DEFINE(int, icmp6errppslim) = 100;		/* 100pps */
 /* control how to respond to NI queries */
+#ifdef PAX_HARDENING
+VNET_DEFINE(int, icmp6_nodeinfo) = 0;
+#else
 VNET_DEFINE(int, icmp6_nodeinfo) =
     (ICMP6_NODEINFO_FQDNOK|ICMP6_NODEINFO_NODEADDROK);
+#endif
 VNET_DEFINE(int, icmp6_nodeinfo_oldmcprefix) = 1;
 
 /*

@@ -2062,7 +2062,8 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 				continue;
 			}
 #endif
-			redo_ip4 = !prison_ip_restrict(tpr, PR_INET, &ip4);
+			if (!prison_ip_restrict(tpr, PR_INET, &ip4))
+				redo_ip4 = true;
 		}
 		mtx_unlock(&pr->pr_mtx);
 	}
@@ -2081,7 +2082,8 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 				continue;
 			}
 #endif
-			redo_ip6 = !prison_ip_restrict(tpr, PR_INET6, &ip6);
+			if (!prison_ip_restrict(tpr, PR_INET6, &ip6))
+				redo_ip6 = true;
 		}
 		mtx_unlock(&pr->pr_mtx);
 	}
@@ -3351,6 +3353,7 @@ prison_cleanup(struct prison *pr)
 {
 	sx_assert(&allprison_lock, SA_XLOCKED);
 	mtx_assert(&pr->pr_mtx, MA_NOTOWNED);
+	vfs_exjail_delete(pr);
 	shm_remove_prison(pr);
 	(void)osd_jail_call(pr, PR_METHOD_REMOVE, NULL);
 }

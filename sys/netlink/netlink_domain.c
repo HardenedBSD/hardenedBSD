@@ -77,6 +77,11 @@ SYSCTL_ULONG(_net_netlink, OID_AUTO, recvspace, CTLFLAG_RW, &nl_recvspace, 0,
 
 extern u_long sb_max_adj;
 static u_long nl_maxsockbuf = 512 * 1024 * 1024; /* 512M, XXX: init based on physmem */
+static int sysctl_handle_nl_maxsockbuf(SYSCTL_HANDLER_ARGS);
+SYSCTL_OID(_net_netlink, OID_AUTO, nl_maxsockbuf,
+    CTLTYPE_ULONG | CTLFLAG_RW | CTLFLAG_MPSAFE, &nl_maxsockbuf, 0,
+    sysctl_handle_nl_maxsockbuf, "LU",
+    "Maximum Netlink socket buffer size");
 
 uint32_t
 nlp_get_pid(const struct nlpcb *nlp)
@@ -384,7 +389,7 @@ nl_autobind_port(struct nlpcb *nlp, uint32_t candidate_id)
 	uint32_t port_id = candidate_id;
 	NLCTL_TRACKER;
 	bool exist;
-	int error;
+	int error = EADDRINUSE;
 
 	for (int i = 0; i < 10; i++) {
 		NL_LOG(LOG_DEBUG3, "socket %p, trying to assign port %d", nlp->nl_socket, port_id);
@@ -612,7 +617,9 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		switch (sopt->sopt_name) {
 		case NETLINK_ADD_MEMBERSHIP:
 		case NETLINK_DROP_MEMBERSHIP:
-			sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
+			error = sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
+			if (error != 0)
+				break;
 			if (optval <= 0 || optval >= NLP_MAX_GROUPS) {
 				error = ERANGE;
 				break;
@@ -629,7 +636,9 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 		case NETLINK_CAP_ACK:
 		case NETLINK_EXT_ACK:
 		case NETLINK_GET_STRICT_CHK:
-			sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
+			error = sooptcopyin(sopt, &optval, sizeof(optval), sizeof(optval));
+			if (error != 0)
+				break;
 
 			flag = nl_getoptflag(sopt->sopt_name);
 
@@ -669,6 +678,22 @@ nl_ctloutput(struct socket *so, struct sockopt *sopt)
 	}
 
 	return (error);
+}
+
+static int
+sysctl_handle_nl_maxsockbuf(SYSCTL_HANDLER_ARGS)
+{
+	int error = 0;
+	u_long tmp_maxsockbuf = nl_maxsockbuf;
+
+	error = sysctl_handle_long(oidp, &tmp_maxsockbuf, arg2, req);
+	if (error || !req->newptr)
+		return (error);
+	if (tmp_maxsockbuf < MSIZE + MCLBYTES)
+		return (EINVAL);
+	nl_maxsockbuf = tmp_maxsockbuf;
+
+	return (0);
 }
 
 static int
