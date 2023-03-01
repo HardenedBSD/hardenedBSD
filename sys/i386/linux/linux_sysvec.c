@@ -43,10 +43,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
-<<<<<<< HEAD
 #include <sys/pax.h>
-=======
->>>>>>> freebsd/stable/13
 #include <sys/proc.h>
 #include <sys/stddef.h>
 #include <sys/syscallsubr.h>
