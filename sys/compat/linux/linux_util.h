@@ -36,13 +36,6 @@
 #ifndef	_LINUX_UTIL_H_
 #define	_LINUX_UTIL_H_
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/pmap.h>
-#include <sys/exec.h>
-#include <sys/sysent.h>
-#include <sys/syslog.h>
-#include <sys/cdefs.h>
 #include <sys/uio.h>
 
 MALLOC_DECLARE(M_LINUX);

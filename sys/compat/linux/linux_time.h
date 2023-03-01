@@ -30,10 +30,8 @@
  * $FreeBSD$
  */
 
-#ifndef	_LINUX_TIMER_H
-#define	_LINUX_TIMER_H
-
-#include <sys/abi_compat.h>
+#ifndef	_LINUX_TIME_H
+#define	_LINUX_TIME_H
 
 #ifndef	__LINUX_ARCH_SIGEV_PREAMBLE_SIZE
 #define	__LINUX_ARCH_SIGEV_PREAMBLE_SIZE	\
@@ -143,4 +141,4 @@ int linux_to_native_itimerspec64(struct itimerspec *,
 
 int linux_to_native_timerflags(int *, int);
 
-#endif	/* _LINUX_TIMER_H */
+#endif	/* _LINUX_TIME_H */
