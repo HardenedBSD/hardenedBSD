@@ -62,7 +62,6 @@ __DEFAULT_YES_OPTIONS = \
     NLS \
     OPENSSH \
     PROFILE \
-    RELRO \
     SSP \
     TESTS \
     TOOLCHAIN \
