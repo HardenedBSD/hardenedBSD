@@ -8,4 +8,6 @@ LIBADD=	rpcsvc devstat
 
 WARNS?=	1
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 .include <bsd.prog.mk>

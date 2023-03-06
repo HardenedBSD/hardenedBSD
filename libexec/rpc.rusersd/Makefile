@@ -6,6 +6,8 @@ MAN =	rpc.rusersd.8
 
 LIBADD=	rpcsvc
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 #.if exists(/usr/X11R6/include/X11/extensions/xidle.h)
 #CFLAGS+= -DXIDLE
 #LDADD+= -L/usr/X11R6/lib -lXext -lX11
