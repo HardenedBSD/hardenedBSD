@@ -459,7 +459,12 @@ rtnl_handle_getlink(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 					break;
 				}
 				if (match_array != NULL) {
+<<<<<<< HEAD
 					memcpy(new_array, match_array, offset * sizeof(void *));
+=======
+					memcpy(new_array, match_array,
+					    offset * sizeof(void *));
+>>>>>>> freebsd/stable/13
 					free(match_array, M_TEMP);
 				}
 				match_array = new_array;
