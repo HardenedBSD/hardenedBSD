@@ -12,4 +12,6 @@ CFLAGS+= -I${SRCTOP}/libexec/ypxfr -I${SRCTOP}/usr.sbin/ypserv
 
 WARNS?=	1
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 .include <bsd.prog.mk>
