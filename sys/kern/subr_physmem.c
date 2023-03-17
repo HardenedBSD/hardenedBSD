@@ -116,7 +116,7 @@ panic(const char *fmt, ...)
  * db_printf).
  */
 static void
-physmem_dump_tables(int (*prfunc)(const char *, ...))
+physmem_dump_tables(int (*prfunc)(const char *, ...) __printflike(1, 2))
 {
 	size_t i;
 	int flags;
@@ -145,10 +145,12 @@ physmem_dump_tables(int (*prfunc)(const char *, ...))
 #ifdef DEBUG
 	prfunc("Avail lists:\n");
 	for (i = 0; phys_avail[i] != 0; ++i) {
-		prfunc("  phys_avail[%d] 0x%08x\n", i, phys_avail[i]);
+		prfunc("  phys_avail[%zu] 0x%08jx\n", i,
+		    (uintmax_t)phys_avail[i]);
 	}
 	for (i = 0; dump_avail[i] != 0; ++i) {
-		prfunc("  dump_avail[%d] 0x%08x\n", i, dump_avail[i]);
+		prfunc("  dump_avail[%zu] 0x%08jx\n", i,
+		    (uintmax_t)dump_avail[i]);
 	}
 #endif
 }
@@ -370,8 +372,8 @@ insert_region(struct region *regions, size_t rcnt, vm_paddr_t addr,
 	nend = addr + size;
 	ep = regions + rcnt;
 	for (i = 0, rp = regions; i < rcnt; ++i, ++rp) {
+		rend = rp->addr + rp->size;
 		if (flags == rp->flags) {
-			rend = rp->addr + rp->size;
 			if (addr <= rp->addr && nend >= rp->addr) {
 				/*
 				 * New mapping overlaps at the beginning, shift
@@ -398,7 +400,20 @@ insert_region(struct region *regions, size_t rcnt, vm_paddr_t addr,
 				}
 				return (rcnt);
 			}
+		} else if ((flags != 0) && (rp->flags != 0)) {
+			/*
+			 * If we're duplicating an entry that already exists
+			 * exactly, just upgrade its flags as needed.  We could
+			 * do more if we find that we have differently specified
+			 * flags clipping existing excluding regions, but that's
+			 * probably rare.
+			 */
+			if (addr == rp->addr && nend == rend) {
+				rp->flags |= flags;
+				return (rcnt);
+			}
 		}
+
 		if (addr < rp->addr) {
 			bcopy(rp, rp + 1, (ep - rp) * sizeof(*rp));
 			break;
