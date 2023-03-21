@@ -250,7 +250,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 			ia32_pause();
 	} else {
 		/*
-		 * Re-initialize console hardware as soon as possibe.
+		 * Re-initialize console hardware as soon as possible.
 		 * No console output (e.g. printf) is allowed before
 		 * this point.
 		 */
@@ -291,8 +291,13 @@ acpi_wakeup_machdep(struct acpi_softc *sc, int state, int sleep_result,
 
 		/*
 		 * Re-read cpu_stdext_feature3, which was zeroed-out
+<<<<<<< HEAD
 		 * in acpi_sleep_machdep, after the microcode was
 		 * reloaded.  Then recalculate the active mitigations
+=======
+		 * in acpi_sleep_machdep(), after the microcode was
+		 * reloaded.  Then recalculate the active mitigation
+>>>>>>> freebsd/stable/13
 		 * knobs that depend on the microcode and
 		 * cpu_stdext_feature3.
 		 */
