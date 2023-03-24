@@ -420,18 +420,10 @@ arm64_get_writable_addr(vm_offset_t addr, vm_offset_t *out)
 	return (false);
 }
 
-typedef struct {
-	uint32_t type;
-	uint64_t phys_start;
-	uint64_t virt_start;
-	uint64_t num_pages;
-	uint64_t attr;
-} EFI_MEMORY_DESCRIPTOR;
-
-typedef void (*efi_map_entry_cb)(struct efi_md *);
+typedef void (*efi_map_entry_cb)(struct efi_md *, void *argp);
 
 static void
-foreach_efi_map_entry(struct efi_map_header *efihdr, efi_map_entry_cb cb)
+foreach_efi_map_entry(struct efi_map_header *efihdr, efi_map_entry_cb cb, void *argp)
 {
 	struct efi_md *map, *p;
 	size_t efisz;
@@ -450,40 +442,29 @@ foreach_efi_map_entry(struct efi_map_header *efihdr, efi_map_entry_cb cb)
 
 	for (i = 0, p = map; i < ndesc; i++,
 	    p = efi_next_descriptor(p, efihdr->descriptor_size)) {
-		cb(p);
+		cb(p, argp);
 	}
 }
 
+/*
+ * Handle the EFI memory map list.
+ *
+ * We will make two passes at this, the first (exclude == false) to populate
+ * physmem with valid physical memory ranges from recognized map entry types.
+ * In the second pass we will exclude memory ranges from physmem which must not
+ * be used for general allocations, either because they are used by runtime
+ * firmware or otherwise reserved.
+ *
+ * Adding the runtime-reserved memory ranges to physmem and excluding them
+ * later ensures that they are included in the DMAP, but excluded from
+ * phys_avail[].
+ *
+ * Entry types not explicitly listed here are ignored and not mapped.
+ */
 static void
-exclude_efi_map_entry(struct efi_md *p)
+handle_efi_map_entry(struct efi_md *p, void *argp)
 {
-
-	switch (p->md_type) {
-	case EFI_MD_TYPE_CODE:
-	case EFI_MD_TYPE_DATA:
-	case EFI_MD_TYPE_BS_CODE:
-	case EFI_MD_TYPE_BS_DATA:
-	case EFI_MD_TYPE_FREE:
-		/*
-		 * We're allowed to use any entry with these types.
-		 */
-		break;
-	default:
-		physmem_exclude_region(p->md_phys, p->md_pages * EFI_PAGE_SIZE,
-		    EXFLAG_NOALLOC);
-	}
-}
-
-static void
-exclude_efi_map_entries(struct efi_map_header *efihdr)
-{
-
-	foreach_efi_map_entry(efihdr, exclude_efi_map_entry);
-}
-
-static void
-add_efi_map_entry(struct efi_md *p)
-{
+	bool exclude = *(bool *)argp;
 
 	switch (p->md_type) {
 	case EFI_MD_TYPE_RECLAIM:
@@ -495,7 +476,7 @@ add_efi_map_entry(struct efi_md *p)
 		/*
 		 * Some UEFI implementations put the system table in the
 		 * runtime code section. Include it in the DMAP, but will
-		 * be excluded from phys_avail later.
+		 * be excluded from phys_avail.
 		 */
 	case EFI_MD_TYPE_RT_DATA:
 		/*
@@ -503,6 +484,12 @@ add_efi_map_entry(struct efi_md *p)
 		 * region is created to stop it from being added
 		 * to phys_avail.
 		 */
+		if (exclude) {
+			physmem_exclude_region(p->md_phys,
+			    p->md_pages * EFI_PAGE_SIZE, EXFLAG_NOALLOC);
+			break;
+		}
+		/* FALLTHROUGH */
 	case EFI_MD_TYPE_CODE:
 	case EFI_MD_TYPE_DATA:
 	case EFI_MD_TYPE_BS_CODE:
@@ -511,8 +498,12 @@ add_efi_map_entry(struct efi_md *p)
 		/*
 		 * We're allowed to use any entry with these types.
 		 */
-		physmem_hardware_region(p->md_phys,
-		    p->md_pages * EFI_PAGE_SIZE);
+		if (!exclude)
+			physmem_hardware_region(p->md_phys,
+			    p->md_pages * EFI_PAGE_SIZE);
+		break;
+	default:
+		/* Other types shall not be handled by physmem. */
 		break;
 	}
 }
@@ -520,12 +511,19 @@ add_efi_map_entry(struct efi_md *p)
 static void
 add_efi_map_entries(struct efi_map_header *efihdr)
 {
-
-	foreach_efi_map_entry(efihdr, add_efi_map_entry);
+	bool exclude = false;
+	foreach_efi_map_entry(efihdr, handle_efi_map_entry, &exclude);
 }
 
 static void
-print_efi_map_entry(struct efi_md *p)
+exclude_efi_map_entries(struct efi_map_header *efihdr)
+{
+	bool exclude = true;
+	foreach_efi_map_entry(efihdr, handle_efi_map_entry, &exclude);
+}
+
+static void
+print_efi_map_entry(struct efi_md *p, void *argp __unused)
 {
 	const char *type;
 	static const char *types[] = {
@@ -585,7 +583,7 @@ print_efi_map_entries(struct efi_map_header *efihdr)
 
 	printf("%23s %12s %12s %8s %4s\n",
 	    "Type", "Physical", "Virtual", "#Pages", "Attr");
-	foreach_efi_map_entry(efihdr, print_efi_map_entry);
+	foreach_efi_map_entry(efihdr, print_efi_map_entry, NULL);
 }
 
 #ifdef FDT

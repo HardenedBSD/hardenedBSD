@@ -340,7 +340,6 @@ MAN=	accept_filter.9 \
 	vaccess.9 \
 	vaccess_acl_nfs4.9 \
 	vaccess_acl_posix1e.9 \
-	vcount.9 \
 	vflush.9 \
 	VFS.9 \
 	vfs_busy.9 \
@@ -1812,7 +1811,9 @@ MLINKS+=pmap_resident_count.9 pmap_wired_count.9
 MLINKS+=pmap_zero_page.9 pmap_zero_area.9
 MLINKS+=printf.9 log.9 \
 	printf.9 tprintf.9 \
-	printf.9 uprintf.9
+	printf.9 uprintf.9 \
+	printf.9 vlog.9 \
+	printf.9 vprintf.9
 MLINKS+=priv.9 priv_check.9 \
 	priv.9 priv_check_cred.9
 MLINKS+=prng.9 prng32.9 \
@@ -2319,7 +2320,6 @@ MLINKS+=usbdi.9 usbd_do_request.9 \
 	usbdi.9 usb_fifo_softc.9 \
 	usbdi.9 usb_fifo_wakeup.9
 .endif
-MLINKS+=vcount.9 count_dev.9
 MLINKS+=vfsconf.9 vfs_modevent.9 \
 	vfsconf.9 vfs_register.9 \
 	vfsconf.9 vfs_unregister.9

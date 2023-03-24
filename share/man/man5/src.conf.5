@@ -902,8 +902,14 @@ and
 On 64-bit platforms, set to build 32-bit library set and a
 .Nm ld-elf32.so.1
 runtime linker.
+<<<<<<< HEAD
 .It Va WITHOUT_LIBCPLUSPLUS
 Set to avoid building libcxxrt and libc++.
+=======
+.Pp
+This is a default setting on
+arm/armv6, arm/armv7, arm64/aarch64, i386/i386, mips/mips, powerpc/powerpc, riscv/riscv64 and riscv/riscv64sf.
+>>>>>>> freebsd/stable/13
 .It Va WITH_LIBSOFT
 On armv6 only, enable soft float ABI compatibility libraries.
 This option is for transitioning to the new hard float ABI.
