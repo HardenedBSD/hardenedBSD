@@ -140,11 +140,7 @@ vncport=${DEFAULT_VNCPORT}
 vncsize=${DEFAULT_VNCSIZE}
 tablet=""
 
-<<<<<<< HEAD
-while getopts aAc:C:d:e:Ef:F:hH:iI:l:L:m:n:p:P:s:St:Tuvw c ; do
-=======
-while getopts aAc:C:d:e:Ef:F:G:hH:iI:l:L:m:n:p:P:t:Tuvw c ; do
->>>>>>> freebsd/stable/13
+while getopts aAc:C:d:e:Ef:F:G:hH:iI:l:L:m:n:p:P:s:St:Tuvw c ; do
 	case $c in
 	a)
 		bhyverun_opt="${bhyverun_opt} -a"
