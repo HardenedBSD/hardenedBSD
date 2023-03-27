@@ -2654,6 +2654,7 @@ _elftctools=	lib/libelftc \
 
 .if ${MK_CLANG_BOOTSTRAP} != "no"
 _clang=		usr.bin/clang
+_ar=		usr.bin/clang/llvm-ar
 .endif
 .if ${MK_LLD_BOOTSTRAP} != "no"
 _lld=		usr.bin/clang/lld
@@ -2672,10 +2673,10 @@ _ar=usr.bin/ar
 cross-tools: .MAKE .PHONY
 .for _tool in \
     ${LOCAL_XTOOL_DIRS} \
-    ${_ar} \
     ${_clang_libs} \
     ${_clang} \
     ${_lld} \
+    ${_ar} \
     ${_elftctools} \
     ${_dtrace_tools} \
     ${_btxld} \
@@ -2909,7 +2910,7 @@ _prereq_libs+= lib/libssp_nonshared
 _startup_libs=	lib/csu
 _startup_libs+=	lib/libc
 _startup_libs+=	lib/libc_nonshared
-.if ${MK_LIBCPLUSPLUS} != "no"
+.if ${MK_CXX} != "no"
 _startup_libs+=	lib/libcxxrt
 .endif
 
@@ -2918,7 +2919,7 @@ _startup_libs+=	lib/libgcc_eh lib/libgcc_s
 
 lib/libgcc_s__L: lib/libc__L
 lib/libgcc_s__L: lib/libc_nonshared__L
-.if ${MK_LIBCPLUSPLUS} != "no"
+.if ${MK_CXX} != "no"
 lib/libcxxrt__L: lib/libgcc_s__L
 .endif
 
@@ -2967,7 +2968,7 @@ gnu/lib/libdialog__L: lib/msun__L lib/ncurses/ncurses__L
 _prebuild_libs+= lib/libregex
 .endif
 
-.if ${MK_LIBCPLUSPLUS} != "no"
+.if ${MK_CXX} != "no"
 _prebuild_libs+= lib/libc++
 .endif
 
@@ -3133,7 +3134,7 @@ lib/libradius__L: lib/libmd__L
 
 lib/libproc__L: \
     ${_cddl_lib_libctf:D${_cddl_lib_libctf}__L} lib/libelf__L lib/librtld_db__L lib/libutil__L
-.if ${MK_CXX} != "no" && ${MK_LIBCPLUSPLUS} != "no"
+.if ${MK_CXX} != "no"
 lib/libproc__L: lib/libcxxrt__L
 .endif
 

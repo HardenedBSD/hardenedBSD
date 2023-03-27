@@ -33,6 +33,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_capsicum.h"
+#include "opt_pax.h"
 #include "opt_printf.h"
 
 #include <sys/param.h>
@@ -50,6 +51,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
+#include <sys/pax.h>
 #include <sys/poll.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
@@ -602,6 +604,12 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case  TIOCSETP:
 	case  TIOCSLTC:
 #endif /* COMPAT_43TTY */
+		if (cmd == TIOCSTI) {
+			error = pax_harden_tty(td);
+			if (error) {
+				goto done;
+			}
+		}
 		/*
 		 * If the ioctl() causes the TTY to be modified, let it
 		 * wait in the background.
@@ -1952,6 +1960,9 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		tty_info(tp);
 		return (0);
 	case TIOCSTI:
+		if (pax_harden_tty(td)) {
+			return (EPERM);
+		}
 		if ((fflag & FREAD) == 0 && priv_check(td, PRIV_TTY_STI))
 			return (EPERM);
 		if (!tty_is_ctty(tp, td->td_proc) &&

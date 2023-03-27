@@ -15,6 +15,7 @@ MAN=	bhyve.8 bhyve_config.5
 BHYVE_SYSDIR?=${SRCTOP}
 
 SRCS=	\
+	acpi_device.c		\
 	atkbdc.c		\
 	acpi.c			\
 	audio.c			\
@@ -62,6 +63,7 @@ SRCS=	\
 	post.c			\
 	ps2kbd.c		\
 	ps2mouse.c		\
+	qemu_fwcfg.c		\
 	rfb.c			\
 	rtc.c			\
 	smbiostbl.c		\

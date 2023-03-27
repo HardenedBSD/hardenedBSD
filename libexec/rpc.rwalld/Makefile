@@ -8,4 +8,6 @@ LIBADD=	util
 
 WARNS?=	2
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 .include <bsd.prog.mk>

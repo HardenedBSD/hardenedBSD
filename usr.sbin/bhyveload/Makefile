@@ -9,8 +9,6 @@ CFI_OVERRIDE=-fno-sanitize=cfi-icall
 
 LIBADD=	vmmapi
 
-WARNS?=	3
-
 CFLAGS+=-I${SRCTOP}/stand/userboot
 
 .include <bsd.prog.mk>

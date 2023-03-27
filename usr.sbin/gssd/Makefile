@@ -18,6 +18,8 @@ LIBADD+=	krb5 roken
 CFLAGS+= -DWITHOUT_KERBEROS
 .endif
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 CLEANFILES= gssd_svc.c gssd_xdr.c gssd.h
 
 RPCSRC=	${SRCTOP}/sys/kgssapi/gssd.x

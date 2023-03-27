@@ -45,7 +45,9 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet6.h"
 
 #include <sys/param.h>
+#include <sys/bus.h>
 #include <sys/hash.h>
+#include <sys/interrupt.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/libkern.h>
@@ -59,10 +61,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/taskqueue.h>
-#include <sys/types.h>
-#include <sys/buf_ring.h>
-#include <sys/bus.h>
-#include <sys/interrupt.h>
 
 #include <net/bpf.h>
 #include <net/ethernet.h>
@@ -104,15 +102,16 @@ static unsigned int next_index = 0;
 #define	EPAIR_LOCK()			mtx_lock(&epair_n_index_mtx)
 #define	EPAIR_UNLOCK()			mtx_unlock(&epair_n_index_mtx)
 
-#define BIT_QUEUE_TASK		0
-#define BIT_MBUF_QUEUED		1
-
 struct epair_softc;
 struct epair_queue {
+	struct mtx		 mtx;
+	struct mbufq		 q;
 	int			 id;
-	struct buf_ring		*rxring[2];
-	volatile int		 ridx;		/* 0 || 1 */
-	volatile long		 state;		/* taskqueue coordination */
+	enum {
+		EPAIR_QUEUE_IDLE,
+		EPAIR_QUEUE_WAKING,
+		EPAIR_QUEUE_RUNNING,
+	}			 state;
 	struct task		 tx_task;
 	struct epair_softc	*sc;
 };
@@ -148,79 +147,59 @@ epair_clear_mbuf(struct mbuf *m)
 }
 
 static void
-epair_if_input(struct epair_softc *sc, struct epair_queue *q, int ridx)
-{
-	struct ifnet *ifp;
-	struct mbuf *m;
-
-	ifp = sc->ifp;
-	CURVNET_SET(ifp->if_vnet);
-	while (! buf_ring_empty(q->rxring[ridx])) {
-		m = buf_ring_dequeue_mc(q->rxring[ridx]);
-		if (m == NULL)
-			continue;
-
-		MPASS((m->m_pkthdr.csum_flags & CSUM_SND_TAG) == 0);
-		(*ifp->if_input)(ifp, m);
-
-	}
-	CURVNET_RESTORE();
-}
-
-static void
 epair_tx_start_deferred(void *arg, int pending)
 {
 	struct epair_queue *q = (struct epair_queue *)arg;
-	struct epair_softc *sc = q->sc;
-	int ridx, nidx;
+	if_t ifp;
+	struct mbuf *m, *n;
+	bool resched;
 
-	if_ref(sc->ifp);
-	ridx = atomic_load_int(&q->ridx);
-	do {
-		nidx = (ridx == 0) ? 1 : 0;
-	} while (!atomic_fcmpset_int(&q->ridx, &ridx, nidx));
-	epair_if_input(sc, q, ridx);
+	ifp = q->sc->ifp;
 
-	atomic_clear_long(&q->state, (1 << BIT_QUEUE_TASK));
-	if (atomic_testandclear_long(&q->state, BIT_MBUF_QUEUED))
+	if_ref(ifp);
+	CURVNET_SET(ifp->if_vnet);
+
+	mtx_lock(&q->mtx);
+	m = mbufq_flush(&q->q);
+	q->state = EPAIR_QUEUE_RUNNING;
+	mtx_unlock(&q->mtx);
+
+	while (m != NULL) {
+		n = STAILQ_NEXT(m, m_stailqpkt);
+		m->m_nextpkt = NULL;
+		if_input(ifp, m);
+		m = n;
+	}
+
+	/*
+	 * Avoid flushing the queue more than once per task.  We can otherwise
+	 * end up starving ourselves in a multi-epair routing configuration.
+	 */
+	mtx_lock(&q->mtx);
+	if (mbufq_len(&q->q) > 0) {
+		resched = true;
+		q->state = EPAIR_QUEUE_WAKING;
+	} else {
+		resched = false;
+		q->state = EPAIR_QUEUE_IDLE;
+	}
+	mtx_unlock(&q->mtx);
+
+	if (resched)
 		taskqueue_enqueue(epair_tasks.tq[q->id], &q->tx_task);
 
-	if_rele(sc->ifp);
+	CURVNET_RESTORE();
+	if_rele(ifp);
 }
 
-static int
-epair_menq(struct mbuf *m, struct epair_softc *osc)
+static struct epair_queue *
+epair_select_queue(struct epair_softc *sc, struct mbuf *m)
 {
-	struct ifnet *ifp, *oifp;
-	int len, ret;
-	int ridx;
-	short mflags;
-	struct epair_queue *q = NULL;
 	uint32_t bucket;
 #ifdef RSS
 	struct ether_header *eh;
-#endif
+	int ret;
 
-	/*
-	 * I know this looks weird. We pass the "other sc" as we need that one
-	 * and can get both ifps from it as well.
-	 */
-	oifp = osc->ifp;
-	ifp = osc->oifp;
-
-	M_ASSERTPKTHDR(m);
-	epair_clear_mbuf(m);
-	if_setrcvif(m, oifp);
-	M_SETFIB(m, oifp->if_fib);
-
-	/* Save values as once the mbuf is queued, it's not ours anymore. */
-	len = m->m_pkthdr.len;
-	mflags = m->m_flags;
-
-	MPASS(m->m_nextpkt == NULL);
-	MPASS((m->m_pkthdr.csum_flags & CSUM_SND_TAG) == 0);
-
-#ifdef RSS
 	ret = rss_m2bucket(m, &bucket);
 	if (ret) {
 		/* Actually hash the packet. */
@@ -242,38 +221,66 @@ epair_menq(struct mbuf *m, struct epair_softc *osc)
 			break;
 		}
 	}
-	bucket %= osc->num_queues;
+	bucket %= sc->num_queues;
 #else
 	bucket = 0;
 #endif
-	q = &osc->queues[bucket];
+	return (&sc->queues[bucket]);
+}
 
-	atomic_set_long(&q->state, (1 << BIT_MBUF_QUEUED));
-	ridx = atomic_load_int(&q->ridx);
-	ret = buf_ring_enqueue(q->rxring[ridx], m);
-	if (ret != 0) {
-		/* Ring is full. */
-		if_inc_counter(ifp, IFCOUNTER_OQDROPS, 1);
-		m_freem(m);
-		return (0);
-	}
+static void
+epair_prepare_mbuf(struct mbuf *m, struct ifnet *src_ifp)
+{
+	M_ASSERTPKTHDR(m);
+	epair_clear_mbuf(m);
+	if_setrcvif(m, src_ifp);
+	M_SETFIB(m, src_ifp->if_fib);
 
-	if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
+	MPASS(m->m_nextpkt == NULL);
+	MPASS((m->m_pkthdr.csum_flags & CSUM_SND_TAG) == 0);
+}
+
+static void
+epair_menq(struct mbuf *m, struct epair_softc *osc)
+{
+	struct epair_queue *q;
+	struct ifnet *ifp, *oifp;
+	int error, len;
+	bool mcast;
+
 	/*
-	 * IFQ_HANDOFF_ADJ/ip_handoff() update statistics,
-	 * but as we bypass all this we have to duplicate
-	 * the logic another time.
+	 * I know this looks weird. We pass the "other sc" as we need that one
+	 * and can get both ifps from it as well.
 	 */
-	if_inc_counter(ifp, IFCOUNTER_OBYTES, len);
-	if (mflags & (M_BCAST|M_MCAST))
-		if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
-	/* Someone else received the packet. */
-	if_inc_counter(oifp, IFCOUNTER_IPACKETS, 1);
+	oifp = osc->ifp;
+	ifp = osc->oifp;
 
-	if (!atomic_testandset_long(&q->state, BIT_QUEUE_TASK))
-		taskqueue_enqueue(epair_tasks.tq[bucket], &q->tx_task);
+	epair_prepare_mbuf(m, oifp);
 
-	return (0);
+	/* Save values as once the mbuf is queued, it's not ours anymore. */
+	len = m->m_pkthdr.len;
+	mcast = (m->m_flags & (M_BCAST | M_MCAST)) != 0;
+
+	q = epair_select_queue(osc, m);
+
+	mtx_lock(&q->mtx);
+	if (q->state == EPAIR_QUEUE_IDLE) {
+		q->state = EPAIR_QUEUE_WAKING;
+		taskqueue_enqueue(epair_tasks.tq[q->id], &q->tx_task);
+	}
+	error = mbufq_enqueue(&q->q, m);
+	mtx_unlock(&q->mtx);
+
+	if (error != 0) {
+		m_freem(m);
+		if_inc_counter(ifp, IFCOUNTER_OQDROPS, 1);
+	} else {
+		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
+		if_inc_counter(ifp, IFCOUNTER_OBYTES, len);
+		if (mcast)
+			if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
+		if_inc_counter(oifp, IFCOUNTER_IPACKETS, 1);
+	}
 }
 
 static void
@@ -317,8 +324,10 @@ epair_transmit(struct ifnet *ifp, struct mbuf *m)
 {
 	struct epair_softc *sc;
 	struct ifnet *oifp;
-	int error, len;
-	short mflags;
+#ifdef ALTQ
+	int len;
+	bool mcast;
+#endif
 
 	if (m == NULL)
 		return (0);
@@ -355,10 +364,12 @@ epair_transmit(struct ifnet *ifp, struct mbuf *m)
 		m_freem(m);
 		return (0);
 	}
-	len = m->m_pkthdr.len;
-	mflags = m->m_flags;
 
 #ifdef ALTQ
+	len = m->m_pkthdr.len;
+	mcast = (m->m_flags & (M_BCAST | M_MCAST)) != 0;
+	int error = 0;
+
 	/* Support ALTQ via the classic if_start() path. */
 	IF_LOCK(&ifp->if_snd);
 	if (ALTQ_IS_ENABLED(&ifp->if_snd)) {
@@ -368,7 +379,7 @@ epair_transmit(struct ifnet *ifp, struct mbuf *m)
 		IF_UNLOCK(&ifp->if_snd);
 		if (!error) {
 			if_inc_counter(ifp, IFCOUNTER_OBYTES, len);
-			if (mflags & (M_BCAST|M_MCAST))
+			if (mcast)
 				if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
 			epair_start(ifp);
 		}
@@ -377,8 +388,8 @@ epair_transmit(struct ifnet *ifp, struct mbuf *m)
 	IF_UNLOCK(&ifp->if_snd);
 #endif
 
-	error = epair_menq(m, oifp->if_softc);
-	return (error);
+	epair_menq(m, oifp->if_softc);
+	return (0);
 }
 
 static int
@@ -548,10 +559,9 @@ epair_clone_create(struct if_clone *ifc, char *name, size_t len, caddr_t params)
 	for (int i = 0; i < sca->num_queues; i++) {
 		struct epair_queue *q = &sca->queues[i];
 		q->id = i;
-		q->rxring[0] = buf_ring_alloc(RXRSIZE, M_EPAIR, M_WAITOK, NULL);
-		q->rxring[1] = buf_ring_alloc(RXRSIZE, M_EPAIR, M_WAITOK, NULL);
-		q->ridx = 0;
-		q->state = 0;
+		q->state = EPAIR_QUEUE_IDLE;
+		mtx_init(&q->mtx, "epaiq", NULL, MTX_DEF | MTX_NEW);
+		mbufq_init(&q->q, RXRSIZE);
 		q->sc = sca;
 		NET_TASK_INIT(&q->tx_task, 0, epair_tx_start_deferred, q);
 	}
@@ -571,10 +581,9 @@ epair_clone_create(struct if_clone *ifc, char *name, size_t len, caddr_t params)
 	for (int i = 0; i < scb->num_queues; i++) {
 		struct epair_queue *q = &scb->queues[i];
 		q->id = i;
-		q->rxring[0] = buf_ring_alloc(RXRSIZE, M_EPAIR, M_WAITOK, NULL);
-		q->rxring[1] = buf_ring_alloc(RXRSIZE, M_EPAIR, M_WAITOK, NULL);
-		q->ridx = 0;
-		q->state = 0;
+		q->state = EPAIR_QUEUE_IDLE;
+		mtx_init(&q->mtx, "epaiq", NULL, MTX_DEF | MTX_NEW);
+		mbufq_init(&q->q, RXRSIZE);
 		q->sc = scb;
 		NET_TASK_INIT(&q->tx_task, 0, epair_tx_start_deferred, q);
 	}
@@ -694,18 +703,18 @@ epair_clone_create(struct if_clone *ifc, char *name, size_t len, caddr_t params)
 static void
 epair_drain_rings(struct epair_softc *sc)
 {
-	int ridx;
-	struct mbuf *m;
+	for (int i = 0; i < sc->num_queues; i++) {
+		struct epair_queue *q;
+		struct mbuf *m, *n;
 
-	for (ridx = 0; ridx < 2; ridx++) {
-		for (int i = 0; i < sc->num_queues; i++) {
-			struct epair_queue *q = &sc->queues[i];
-			do {
-				m = buf_ring_dequeue_sc(q->rxring[ridx]);
-				if (m == NULL)
-					break;
-				m_freem(m);
-			} while (1);
+		q = &sc->queues[i];
+		mtx_lock(&q->mtx);
+		m = mbufq_flush(&q->q);
+		mtx_unlock(&q->mtx);
+
+		for (; m != NULL; m = n) {
+			n = m->m_nextpkt;
+			m_freem(m);
 		}
 	}
 }
@@ -751,8 +760,7 @@ epair_clone_destroy(struct if_clone *ifc, struct ifnet *ifp)
 	ifmedia_removeall(&scb->media);
 	for (int i = 0; i < scb->num_queues; i++) {
 		struct epair_queue *q = &scb->queues[i];
-		buf_ring_free(q->rxring[0], M_EPAIR);
-		buf_ring_free(q->rxring[1], M_EPAIR);
+		mtx_destroy(&q->mtx);
 	}
 	free(scb->queues, M_EPAIR);
 	free(scb, M_EPAIR);
@@ -763,8 +771,7 @@ epair_clone_destroy(struct if_clone *ifc, struct ifnet *ifp)
 	ifmedia_removeall(&sca->media);
 	for (int i = 0; i < sca->num_queues; i++) {
 		struct epair_queue *q = &sca->queues[i];
-		buf_ring_free(q->rxring[0], M_EPAIR);
-		buf_ring_free(q->rxring[1], M_EPAIR);
+		mtx_destroy(&q->mtx);
 	}
 	free(sca->queues, M_EPAIR);
 	free(sca, M_EPAIR);
@@ -795,7 +802,7 @@ VNET_SYSUNINIT(vnet_epair_uninit, SI_SUB_INIT_IF, SI_ORDER_ANY,
     vnet_epair_uninit, NULL);
 
 static int
-epair_mod_init()
+epair_mod_init(void)
 {
 	char name[32];
 	epair_tasks.tasks = 0;
@@ -840,7 +847,7 @@ epair_mod_init()
 }
 
 static void
-epair_mod_cleanup()
+epair_mod_cleanup(void)
 {
 
 	for (int i = 0; i < epair_tasks.tasks; i++) {

@@ -1150,7 +1150,7 @@ pr_pack(char *buf, ssize_t cc, struct sockaddr_in *from, struct timespec *tv)
 	ssize_t icmp_data_raw_len;
 	double triptime;
 	int dupflag, i, j, recv_len;
-	uint8_t hlen;
+	int8_t hlen;
 	uint16_t seq;
 	static int old_rrlen;
 	static char old_rr[MAX_IPOPTLEN];
@@ -1171,7 +1171,7 @@ pr_pack(char *buf, ssize_t cc, struct sockaddr_in *from, struct timespec *tv)
 	hlen = (l & 0x0f) << 2;
 
 	/* Reject IP packets with a short header */
-	if (hlen < sizeof(struct ip)) {
+	if (hlen < (int8_t) sizeof(struct ip)) {
 		if (options & F_VERBOSE)
 			warn("IHL too short (%d bytes) from %s", hlen,
 			     inet_ntoa(from->sin_addr));
@@ -1674,7 +1674,7 @@ pr_iph(struct ip *ip)
 	int hlen;
 
 	hlen = ip->ip_hl << 2;
-	cp = (u_char *)ip + 20;		/* point to options */
+	cp = (u_char *)ip + sizeof(struct ip);		/* point to options */
 
 	(void)printf("Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n");
 	(void)printf(" %1x  %1x  %02x %04x %04x",
@@ -1690,7 +1690,7 @@ pr_iph(struct ip *ip)
 	memcpy(&ina, &ip->ip_dst.s_addr, sizeof ina);
 	(void)printf(" %s ", inet_ntoa(ina));
 	/* dump any option bytes */
-	while (hlen-- > 20) {
+	while (hlen-- > (int)sizeof(struct ip)) {
 		(void)printf("%02x", *cp++);
 	}
 	(void)putchar('\n');
@@ -1710,7 +1710,7 @@ pr_addr(struct in_addr ina)
 	if (options & F_NUMERIC)
 		return inet_ntoa(ina);
 
-	hp = cap_gethostbyaddr(capdns, (char *)&ina, 4, AF_INET);
+	hp = cap_gethostbyaddr(capdns, (char *)&ina, sizeof(ina), AF_INET);
 
 	if (hp == NULL)
 		return inet_ntoa(ina);

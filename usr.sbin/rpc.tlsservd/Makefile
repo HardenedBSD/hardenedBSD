@@ -12,6 +12,8 @@ LIBADD=	ssl crypto util
 
 CLEANFILES= rpctlssd_svc.c rpctlssd_xdr.c rpctlssd.h
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 RPCSRC=	${SRCTOP}/sys/rpc/rpcsec_tls/rpctlssd.x
 RPCGEN= RPCGEN_CPP=${CPP:Q} rpcgen -L -C -M
 

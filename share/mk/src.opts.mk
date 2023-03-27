@@ -127,7 +127,6 @@ __DEFAULT_YES_OPTIONS = \
     LDNS \
     LDNS_UTILS \
     LEGACY_CONSOLE \
-    LIBCPLUSPLUS \
     LLD \
     LLD_BOOTSTRAP \
     LLD_IS_LD \
@@ -165,6 +164,7 @@ __DEFAULT_YES_OPTIONS = \
     QUOTAS \
     RADIUS_SUPPORT \
     RBOOTD \
+    RELRO \
     RESCUE \
     ROUTED \
     SENDMAIL \
