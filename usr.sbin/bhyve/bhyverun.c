@@ -101,6 +101,7 @@ __FBSDID("$FreeBSD$");
 #include "pci_emul.h"
 #include "pci_irq.h"
 #include "pci_lpc.h"
+#include "qemu_fwcfg.h"
 #include "smbiostbl.h"
 #ifdef BHYVE_SNAPSHOT
 #include "snapshot.h"
@@ -910,6 +911,11 @@ vmexit_debug(struct vmctx *ctx __unused, struct vm_exit *vme __unused,
 #ifdef BHYVE_SNAPSHOT
 	checkpoint_cpu_resume(*pvcpu);
 #endif
+	/*
+	 * XXX-MJ sleep for a short period to avoid chewing up the CPU in the
+	 * window between activation of the vCPU thread and the STARTUP IPI.
+	 */
+	usleep(1000);
 	return (VMEXIT_CONTINUE);
 }
 
@@ -1231,6 +1237,7 @@ set_defaults(void)
 	set_config_bool("acpi_tables", false);
 	set_config_value("memory.size", "256M");
 	set_config_bool("x86.strictmsr", true);
+	set_config_value("lpc.fwcfg", "bhyve");
 }
 
 int
@@ -1460,6 +1467,17 @@ main(int argc, char *argv[])
 	rtc_init(ctx);
 	sci_init(ctx);
 
+	if (qemu_fwcfg_init(ctx) != 0) {
+		fprintf(stderr, "qemu fwcfg initialization error");
+		exit(4);
+	}
+
+	if (qemu_fwcfg_add_file("opt/bhyve/hw.ncpu", sizeof(guest_ncpus),
+	    &guest_ncpus) != 0) {
+		fprintf(stderr, "Could not add qemu fwcfg opt/bhyve/hw.ncpu");
+		exit(4);
+	}
+
 	/*
 	 * Exit if a device emulation finds an error in its initilization
 	 */
@@ -1554,8 +1572,9 @@ main(int argc, char *argv[])
 		assert(error == 0);
 	}
 
-	if (lpc_bootrom())
+	if (lpc_bootrom() && strcmp(lpc_fwcfg(), "bhyve") == 0) {
 		fwctl_init();
+	}
 
 	/*
 	 * Change the proc title to include the VM name.
