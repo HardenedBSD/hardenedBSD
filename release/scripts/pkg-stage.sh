@@ -14,6 +14,10 @@ export PORTSDIR="${PORTSDIR:-/usr/ports}"
 
 _DVD_PACKAGES="archivers/unzip
 devel/git
+<<<<<<< HEAD
+=======
+emulators/linux_base-c7
+>>>>>>> freebsd/stable/13
 graphics/drm-legacy-kmod
 graphics/drm-stable-kmod
 misc/freebsd-doc-all
@@ -29,7 +33,7 @@ sysutils/tmux
 www/firefox
 www/links
 x11-drivers/xf86-video-vmware
-x11/gnome3
+x11/gnome
 x11/kde5
 x11/xorg"
 

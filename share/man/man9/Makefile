@@ -926,7 +926,8 @@ MLINKS+=cpuset.9 CPUSET_T_INITIALIZER.9 \
 	cpuset.9 CPU_OR_ATOMIC.9 \
 	cpuset.9 CPU_COPY_STORE_REL.9
 MLINKS+=critical_enter.9 critical.9 \
-	critical_enter.9 critical_exit.9
+	critical_enter.9 critical_exit.9 \
+	critical_enter.9 CRITICAL_ASSERT.9
 MLINKS+=crypto_asym.9 crypto_kdispatch.9 \
 	crypto_asym.9 crypto_kdone.9 \
 	crypto_asym.9 crypto_kregister.9 \
@@ -1337,6 +1338,7 @@ MLINKS+=intr_event.9 intr_event_add_handler.9 \
 	intr_event.9 intr_event_handle.9 \
 	intr_event.9 intr_event_remove_handler.9 \
 	intr_event.9 intr_priority.9
+MLINKS+=KASSERT.9 MPASS.9
 MLINKS+=kernacc.9 useracc.9
 MLINKS+=kernel_mount.9 free_mntarg.9 \
 	kernel_mount.9 kernel_vmount.9 \
@@ -1727,7 +1729,8 @@ MLINKS+=osd.9 osd_call.9 \
 	osd.9 osd_reserve.9 \
 	osd.9 osd_set.9 \
 	osd.9 osd_set_reserved.9
-MLINKS+=panic.9 vpanic.9
+MLINKS+=panic.9 vpanic.9 \
+	panic.9 KERNEL_PANICKED.9
 MLINKS+=PCBGROUP.9 in_pcbgroup_byhash.9 \
 	PCBGROUP.9 in_pcbgroup_byinpcb.9 \
 	PCBGROUP.9 in_pcbgroup_destroy.9 \
