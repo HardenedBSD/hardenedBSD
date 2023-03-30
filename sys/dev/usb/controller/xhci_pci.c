@@ -65,6 +65,7 @@ __FBSDID("$FreeBSD$");
 #define	PCI_XHCI_VENDORID_AMD		0x1022
 #define	PCI_XHCI_VENDORID_INTEL		0x8086
 #define	PCI_XHCI_VENDORID_VMWARE	0x15ad
+#define	PCI_XHCI_VENDORID_ZHAOXIN	0x1d17
 
 static device_probe_t xhci_pci_probe;
 static device_detach_t xhci_pci_detach;
@@ -127,6 +128,8 @@ xhci_pci_match(device_t self)
 
 	case 0x10001b73:
 		return ("Fresco Logic FL1000G USB 3.0 controller");
+	case 0x10091b73:
+		return ("Fresco Logic FL1009 USB 3.0 controller");
 	case 0x11001b73:
 		return ("Fresco Logic FL1100 USB 3.0 controller");
 
@@ -206,6 +209,13 @@ xhci_pci_match(device_t self)
 
 	case 0x1ada10de:
 		return ("NVIDIA TU106 USB 3.1 controller");
+
+	case 0x92021d17:
+		return ("Zhaoxin ZX-100 USB 3.0 controller");
+	case 0x92031d17:
+		return ("Zhaoxin ZX-200 USB 3.0 controller");
+	case 0x92041d17:
+		return ("Zhaoxin ZX-E USB 3.0 controller");
 
 	default:
 		break;
@@ -394,6 +404,9 @@ xhci_pci_attach(device_t self)
 		break;
 	case PCI_XHCI_VENDORID_VMWARE:
 		strlcpy(sc->sc_vendor, "VMware", sizeof(sc->sc_vendor));
+		break;
+	case PCI_XHCI_VENDORID_ZHAOXIN:
+		strlcpy(sc->sc_vendor, "Zhaoxin", sizeof(sc->sc_vendor));
 		break;
 	default:
 		if (bootverbose)

@@ -184,7 +184,6 @@ struct pfsync_upd_req_item {
 struct pfsync_deferral {
 	struct pfsync_softc		*pd_sc;
 	TAILQ_ENTRY(pfsync_deferral)	pd_entry;
-	u_int				pd_refs;
 	struct callout			pd_tmo;
 
 	struct pf_kstate		*pd_st;
@@ -395,7 +394,7 @@ pfsync_clone_destroy(struct ifnet *ifp)
 {
 	struct pfsync_softc *sc = ifp->if_softc;
 	struct pfsync_bucket *b;
-	int c;
+	int c, ret;
 
 	for (c = 0; c < pfsync_buckets; c++) {
 		b = &sc->sc_buckets[c];
@@ -404,22 +403,23 @@ pfsync_clone_destroy(struct ifnet *ifp)
 		 * cleared by pfsync_uninit(), and we have only to
 		 * drain callouts.
 		 */
+		PFSYNC_BUCKET_LOCK(b);
 		while (b->b_deferred > 0) {
 			struct pfsync_deferral *pd =
 			    TAILQ_FIRST(&b->b_deferrals);
 
-			TAILQ_REMOVE(&b->b_deferrals, pd, pd_entry);
-			b->b_deferred--;
-			if (callout_stop(&pd->pd_tmo) > 0) {
-				pf_release_state(pd->pd_st);
-				m_freem(pd->pd_m);
-				free(pd, M_PFSYNC);
+			ret = callout_stop(&pd->pd_tmo);
+			PFSYNC_BUCKET_UNLOCK(b);
+			if (ret > 0) {
+				pfsync_undefer(pd, 1);
 			} else {
-				pd->pd_refs++;
 				callout_drain(&pd->pd_tmo);
-				free(pd, M_PFSYNC);
 			}
+			PFSYNC_BUCKET_LOCK(b);
 		}
+		MPASS(b->b_deferred == 0);
+		MPASS(TAILQ_EMPTY(&b->b_deferrals));
+		PFSYNC_BUCKET_UNLOCK(b);
 
 		callout_drain(&b->b_tmo);
 	}
@@ -1779,7 +1779,6 @@ pfsync_defer(struct pf_kstate *st, struct mbuf *m)
 	st->state_flags |= PFSTATE_ACK;
 
 	pd->pd_sc = sc;
-	pd->pd_refs = 0;
 	pd->pd_st = st;
 	pf_ref_state(st);
 	pd->pd_m = m;
@@ -1830,20 +1829,20 @@ pfsync_defer_tmo(void *arg)
 
 	PFSYNC_BUCKET_LOCK_ASSERT(b);
 
+	TAILQ_REMOVE(&b->b_deferrals, pd, pd_entry);
+	b->b_deferred--;
+	pd->pd_st->state_flags &= ~PFSTATE_ACK;	/* XXX: locking! */
+	PFSYNC_BUCKET_UNLOCK(b);
+	free(pd, M_PFSYNC);
+
 	if (sc->sc_sync_if == NULL) {
-		PFSYNC_BUCKET_UNLOCK(b);
+		pf_release_state(st);
+		m_freem(m);
 		return;
 	}
 
 	NET_EPOCH_ENTER(et);
 	CURVNET_SET(sc->sc_sync_if->if_vnet);
-
-	TAILQ_REMOVE(&b->b_deferrals, pd, pd_entry);
-	b->b_deferred--;
-	pd->pd_st->state_flags &= ~PFSTATE_ACK;	/* XXX: locking! */
-	if (pd->pd_refs == 0)
-		free(pd, M_PFSYNC);
-	PFSYNC_BUCKET_UNLOCK(b);
 
 	pfsync_tx(sc, m);
 
