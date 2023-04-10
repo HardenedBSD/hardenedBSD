@@ -29,6 +29,12 @@ def align4(val: int) -> int:
     return roundup2(val, 4)
 
 
+def enum_or_int(val) -> int:
+    if isinstance(val, Enum):
+        return val.value
+    return val
+
+
 class SockaddrNl(Structure):
     _fields_ = [
         ("nl_len", c_ubyte),
@@ -72,36 +78,38 @@ class NlErrattrType(Enum):
 
 class RtattrType(Enum):
     RTA_UNSPEC = 0
-    RTA_DST = auto()
-    RTA_SRC = auto()
-    RTA_IIF = auto()
-    RTA_OIF = auto()
-    RTA_GATEWAY = auto()
-    RTA_PRIORITY = auto()
-    RTA_PREFSRC = auto()
-    RTA_METRICS = auto()
-    RTA_MULTIPATH = auto()
-    RTA_PROTOINFO = auto()
-    RTA_FLOW = auto()
-    RTA_CACHEINFO = auto()
-    RTA_SESSION = auto()
-    RTA_MP_ALGO = auto()
-    RTA_TABLE = auto()
-    RTA_MARK = auto()
-    RTA_MFC_STATS = auto()
-    RTA_VIA = auto()
-    RTA_NEWDST = auto()
-    RTA_PREF = auto()
-    RTA_ENCAP_TYPE = auto()
-    RTA_ENCAP = auto()
-    RTA_EXPIRES = auto()
-    RTA_PAD = auto()
-    RTA_UID = auto()
-    RTA_TTL_PROPAGATE = auto()
-    RTA_IP_PROTO = auto()
-    RTA_SPORT = auto()
-    RTA_DPORT = auto()
-    RTA_NH_ID = auto()
+    RTA_DST = 1
+    RTA_SRC = 2
+    RTA_IIF = 3
+    RTA_OIF = 4
+    RTA_GATEWAY = 5
+    RTA_PRIORITY = 6
+    RTA_PREFSRC = 7
+    RTA_METRICS = 8
+    RTA_MULTIPATH = 9
+    # RTA_PROTOINFO = 10
+    RTA_KNH_ID = 10
+    RTA_FLOW = 11
+    RTA_CACHEINFO = 12
+    RTA_SESSION = 13
+    # RTA_MP_ALGO = 14
+    RTA_RTFLAGS = 14
+    RTA_TABLE = 15
+    RTA_MARK = 16
+    RTA_MFC_STATS = 17
+    RTA_VIA = 18
+    RTA_NEWDST = 19
+    RTA_PREF = 20
+    RTA_ENCAP_TYPE = 21
+    RTA_ENCAP = 22
+    RTA_EXPIRES = 23
+    RTA_PAD = 24
+    RTA_UID = 25
+    RTA_TTL_PROPAGATE = 26
+    RTA_IP_PROTO = 27
+    RTA_SPORT = 28
+    RTA_DPORT = 29
+    RTA_NH_ID = 30
 
 
 class NlMsgType(Enum):
@@ -123,8 +131,8 @@ class NlRtMsgType(Enum):
     RTM_DELROUTE = 25
     RTM_GETROUTE = 26
     RTM_NEWNEIGH = 28
-    RTM_DELNEIGH = 27
-    RTM_GETNEIGH = 28
+    RTM_DELNEIGH = 29
+    RTM_GETNEIGH = 30
     RTM_NEWRULE = 32
     RTM_DELRULE = 33
     RTM_GETRULE = 34
@@ -314,6 +322,32 @@ class NlRtaxType(Enum):
     RTAX_FASTOPEN_NO_COOKIE = auto()
 
 
+class RtFlagsBSD(Enum):
+    RTF_UP = 0x1
+    RTF_GATEWAY = 0x2
+    RTF_HOST = 0x4
+    RTF_REJECT = 0x8
+    RTF_DYNAMIC = 0x10
+    RTF_MODIFIED = 0x20
+    RTF_DONE = 0x40
+    RTF_XRESOLVE = 0x200
+    RTF_LLINFO = 0x400
+    RTF_LLDATA = 0x400
+    RTF_STATIC = 0x800
+    RTF_BLACKHOLE = 0x1000
+    RTF_PROTO2 = 0x4000
+    RTF_PROTO1 = 0x8000
+    RTF_PROTO3 = 0x40000
+    RTF_FIXEDMTU = 0x80000
+    RTF_PINNED = 0x100000
+    RTF_LOCAL = 0x200000
+    RTF_BROADCAST = 0x400000
+    RTF_MULTICAST = 0x800000
+    RTF_STICKY = 0x10000000
+    RTF_RNH_LOCKED = 0x40000000
+    RTF_GWFLAG_COMPAT = 0x80000000
+
+
 class NlRtGroup(Enum):
     RTNLGRP_NONE = 0
     RTNLGRP_LINK = auto()
@@ -463,6 +497,39 @@ class IfattrType(Enum):
     IFA_TARGET_NETNSID = auto()
 
 
+class NdMsg(Structure):
+    _fields_ = [
+        ("ndm_family", c_ubyte),
+        ("ndm_pad1", c_ubyte),
+        ("ndm_pad2", c_ubyte),
+        ("ndm_ifindex", c_uint),
+        ("ndm_state", c_ushort),
+        ("ndm_flags", c_ubyte),
+        ("ndm_type", c_ubyte),
+    ]
+
+
+class NdAttrType(Enum):
+    NDA_UNSPEC = 0
+    NDA_DST = 1
+    NDA_LLADDR = 2
+    NDA_CACHEINFO = 3
+    NDA_PROBES = 4
+    NDA_VLAN = 5
+    NDA_PORT = 6
+    NDA_VNI = 7
+    NDA_IFINDEX = 8
+    NDA_MASTER = 9
+    NDA_LINK_NETNSID = 10
+    NDA_SRC_VNI = 11
+    NDA_PROTOCOL = 12
+    NDA_NH_ID = 13
+    NDA_FDB_EXT_ATTRS = 14
+    NDA_FLAGS_EXT = 15
+    NDA_NDM_STATE_MASK = 16
+    NDA_NDM_FLAGS_MASK = 17
+
+
 class GenlMsgHdr(Structure):
     _fields_ = [
         ("cmd", c_ubyte),
@@ -496,13 +563,17 @@ class NlHelper:
             cls = AddressFamilyLinux
         return cls
 
+    @staticmethod
+    def build_propmap(cls):
+        ret = {}
+        for prop in dir(cls):
+            if not prop.startswith("_"):
+                ret[getattr(cls, prop).value] = prop
+        return ret
+
     def get_propmap(self, cls):
         if cls not in self._pmap:
-            ret = {}
-            for prop in dir(cls):
-                if not prop.startswith("_"):
-                    ret[getattr(cls, prop).value] = prop
-            self._pmap[cls] = ret
+            self._pmap[cls] = self.build_propmap(cls)
         return self._pmap[cls]
 
     def get_name_propmap(self, cls):
@@ -536,8 +607,8 @@ class NlHelper:
     def get_rta_name(self, val):
         return self.get_attr_byval(RtattrType, val)
 
-    def get_bitmask_map(self, cls, val):
-        propmap = self.get_propmap(cls)
+    @staticmethod
+    def get_bitmask_map(propmap, val):
         v = 1
         ret = {}
         while val:
@@ -551,7 +622,13 @@ class NlHelper:
         return ret
 
     def get_bitmask_str(self, cls, val):
-        bmap = self.get_bitmask_map(cls, val)
+        bmap = self.get_bitmask_map(self.get_propmap(cls), val)
+        return ",".join([v for k, v in bmap.items()])
+
+    @staticmethod
+    def get_bitmask_str_uncached(cls, val):
+        pmap = NlHelper.build_propmap(cls)
+        bmap = NlHelper.get_bitmask_map(pmap, val)
         return ",".join([v for k, v in bmap.items()])
 
     def get_nlm_flags_str(self, msg_str: str, reply: bool, val):
@@ -664,7 +741,7 @@ class NlAttrNested(NlAttr):
 
 class NlAttrU32(NlAttr):
     def __init__(self, nla_type, val):
-        self.u32 = val
+        self.u32 = enum_or_int(val)
         super().__init__(nla_type, b"")
 
     @property
@@ -691,7 +768,7 @@ class NlAttrU32(NlAttr):
 
 class NlAttrU16(NlAttr):
     def __init__(self, nla_type, val):
-        self.u16 = val
+        self.u16 = enum_or_int(val)
         super().__init__(nla_type, b"")
 
     @property
@@ -718,7 +795,7 @@ class NlAttrU16(NlAttr):
 
 class NlAttrU8(NlAttr):
     def __init__(self, nla_type, val):
-        self.u8 = val
+        self.u8 = enum_or_int(val)
         super().__init__(nla_type, b"")
 
     @property
@@ -741,6 +818,12 @@ class NlAttrU8(NlAttr):
 
     def __bytes__(self):
         return self._to_bytes(struct.pack("@B", self.u8))
+
+
+class NlAttrRtFlags(NlAttrU32):
+    def _print_attr_value(self):
+        s = NlHelper.get_bitmask_str_uncached(RtFlagsBSD, self.u32)
+        return " rtflags={}".format(s)
 
 
 class NlAttrIp(NlAttr):
@@ -798,6 +881,11 @@ class NlAttrIfindex(NlAttrU32):
         return " iface=if#{}".format(self.u32)
 
 
+class NlAttrMac(NlAttr):
+    def _print_attr_value(self):
+        return ["{:02}".format(int(d)) for d in data[4:]].join(":")
+
+
 class NlAttrTable(NlAttrU32):
     def _print_attr_value(self):
         return " rtable={}".format(self.u32)
@@ -806,6 +894,11 @@ class NlAttrTable(NlAttrU32):
 class NlAttrNhId(NlAttrU32):
     def _print_attr_value(self):
         return " nh_id={}".format(self.u32)
+
+
+class NlAttrKNhId(NlAttrU32):
+    def _print_attr_value(self):
+        return " knh_id={}".format(self.u32)
 
 
 class NlAttrMac(NlAttr):
@@ -956,9 +1049,13 @@ rtnl_route_attrs = prepare_attrs_map(
         AttrDescr(RtattrType.RTA_SRC, NlAttrIp),
         AttrDescr(RtattrType.RTA_IIF, NlAttrIfindex),
         AttrDescr(RtattrType.RTA_OIF, NlAttrIfindex),
-        AttrDescr(RtattrType.RTA_GATEWAY, NlAttrTable),
+        AttrDescr(RtattrType.RTA_GATEWAY, NlAttrIp),
+        AttrDescr(RtattrType.RTA_TABLE, NlAttrTable),
+        AttrDescr(RtattrType.RTA_PRIORITY, NlAttrU32),
         AttrDescr(RtattrType.RTA_VIA, NlAttrVia),
         AttrDescr(RtattrType.RTA_NH_ID, NlAttrNhId),
+        AttrDescr(RtattrType.RTA_KNH_ID, NlAttrKNhId),
+        AttrDescr(RtattrType.RTA_RTFLAGS, NlAttrRtFlags),
         AttrDescr(
             RtattrType.RTA_METRICS,
             NlAttrNested,
@@ -985,6 +1082,7 @@ rtnl_ifla_attrs = prepare_attrs_map(
         AttrDescr(IflattrType.IFLA_BROADCAST, NlAttrMac),
         AttrDescr(IflattrType.IFLA_IFNAME, NlAttrStr),
         AttrDescr(IflattrType.IFLA_MTU, NlAttrU32),
+        AttrDescr(IflattrType.IFLA_LINK, NlAttrU32),
         AttrDescr(IflattrType.IFLA_PROMISCUITY, NlAttrU32),
         AttrDescr(IflattrType.IFLA_OPERSTATE, NlAttrU8),
         AttrDescr(IflattrType.IFLA_CARRIER, NlAttrU8),
@@ -1014,26 +1112,44 @@ rtnl_ifa_attrs = prepare_attrs_map(
 )
 
 
+rtnl_nd_attrs = prepare_attrs_map(
+    [
+        AttrDescr(NdAttrType.NDA_DST, NlAttrIp),
+        AttrDescr(NdAttrType.NDA_IFINDEX, NlAttrIfindex),
+        AttrDescr(NdAttrType.NDA_FLAGS_EXT, NlAttrU32),
+        AttrDescr(NdAttrType.NDA_LLADDR, NlAttrMac),
+    ]
+)
+
+
 class BaseNetlinkMessage(object):
     def __init__(self, helper, nlmsg_type):
-        self.nlmsg_type = nlmsg_type
+        self.nlmsg_type = enum_or_int(nlmsg_type)
         self.ut = unittest.TestCase()
         self.nla_list = []
         self._orig_data = None
         self.helper = helper
         self.nl_hdr = Nlmsghdr(
-            nlmsg_type=nlmsg_type, nlmsg_seq=helper.get_seq(), nlmsg_pid=helper.pid
+            nlmsg_type=self.nlmsg_type, nlmsg_seq=helper.get_seq(), nlmsg_pid=helper.pid
         )
         self.base_hdr = None
+
+    def set_request(self, need_ack=True):
+        self.add_nlflags([NlmBaseFlags.NLM_F_REQUEST])
+        if need_ack:
+            self.add_nlflags([NlmBaseFlags.NLM_F_ACK])
+
+    def add_nlflags(self, flags: List):
+        int_flags = 0
+        for flag in flags:
+            int_flags |= enum_or_int(flag)
+        self.nl_hdr.nlmsg_flags |= int_flags
 
     def add_nla(self, nla):
         self.nla_list.append(nla)
 
     def _get_nla(self, nla_list, nla_type):
-        if isinstance(nla_type, Enum):
-            nla_type_raw = nla_type.value
-        else:
-            nla_type_raw = nla_type
+        nla_type_raw = enum_or_int(nla_type)
         for nla in nla_list:
             if nla.nla_type == nla_type_raw:
                 return nla
@@ -1049,10 +1165,7 @@ class BaseNetlinkMessage(object):
         return Nlmsghdr.from_buffer_copy(data), sizeof(Nlmsghdr)
 
     def is_type(self, nlmsg_type):
-        if isinstance(nlmsg_type, Enum):
-            nlmsg_type_raw = nlmsg_type.value
-        else:
-            nlmsg_type_raw = nlmsg_type
+        nlmsg_type_raw = enum_or_int(nlmsg_type)
         return nlmsg_type_raw == self.nl_hdr.nlmsg_type
 
     def is_reply(self, hdr):
@@ -1167,8 +1280,8 @@ class StdNetlinkMessage(BaseNetlinkMessage):
                 val = v["ad"].cls.from_bytes(data[off : off + nla_len], v["ad"].val)
                 if "child" in v:
                     # nested
-                    attrs, _ = self.parse_attrs(data[off : off + nla_len], v["child"])
-                    val = NlAttrNested(raw_nla_type, attrs)
+                    attrs, _ = self.parse_attrs(data[off + 4 : off + nla_len], v["child"])
+                    val = NlAttrNested(v["ad"].val, attrs)
             else:
                 # unknown attribute
                 val = NlAttr(raw_nla_type, data[off + 4 : off + nla_len])
@@ -1369,6 +1482,37 @@ class NetlinkIfaMessage(BaseNetlinkRtMessage):
         )
 
 
+class NetlinkNdMessage(BaseNetlinkRtMessage):
+    messages = [
+        NlRtMsgType.RTM_NEWNEIGH.value,
+        NlRtMsgType.RTM_DELNEIGH.value,
+        NlRtMsgType.RTM_GETNEIGH.value,
+    ]
+    nl_attrs_map = rtnl_nd_attrs
+
+    def __init__(self, helper, nlm_type):
+        super().__init__(helper, nlm_type)
+        self.base_hdr = NdMsg()
+
+    def parse_base_header(self, data):
+        if len(data) < sizeof(NdMsg):
+            raise ValueError("length less than NdMsg header")
+        nd_hdr = NdMsg.from_buffer_copy(data)
+        return (nd_hdr, sizeof(NdMsg))
+
+    def print_base_header(self, hdr, prepend=""):
+        family = self.helper.get_af_name(hdr.ndm_family)
+        print(
+            "{}family={}, ndm_ifindex={}, ndm_state={}, ndm_flags={}".format(  # noqa: E501
+                prepend,
+                family,
+                hdr.ndm_ifindex,
+                hdr.ndm_state,
+                hdr.ndm_flags,
+            )
+        )
+
+
 class Nlsock:
     def __init__(self, family, helper):
         self.helper = helper
@@ -1382,6 +1526,7 @@ class Nlsock:
             NetlinkRtMessage,
             NetlinkIflaMessage,
             NetlinkIfaMessage,
+            NetlinkNdMessage,
             NetlinkDoneMessage,
             NetlinkErrorMessage,
         ]
@@ -1556,18 +1701,20 @@ class NetlinkTestTemplate(object):
         self.helper = NlHelper()
         self.nlsock = Nlsock(netlink_family, self.helper)
 
-    def write_message(self, msg):
-        print("")
-        print("============= >> TX MESSAGE =============")
-        msg.print_message()
+    def write_message(self, msg, silent=False):
+        if not silent:
+            print("")
+            print("============= >> TX MESSAGE =============")
+            msg.print_message()
+            msg.print_as_bytes(bytes(msg), "-- DATA --")
         self.nlsock.write_data(bytes(msg))
-        msg.print_as_bytes(bytes(msg), "-- DATA --")
 
-    def read_message(self):
+    def read_message(self, silent=False):
         msg = self.nlsock.read_message()
-        print("")
-        print("============= << RX MESSAGE =============")
-        msg.print_message()
+        if not silent:
+            print("")
+            print("============= << RX MESSAGE =============")
+            msg.print_message()
         return msg
 
     def get_reply(self, tx_msg):

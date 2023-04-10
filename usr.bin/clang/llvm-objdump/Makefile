@@ -8,6 +8,7 @@ SRCDIR=		llvm/tools/llvm-objdump
 SRCS+=		COFFDump.cpp
 SRCS+=		ELFDump.cpp
 SRCS+=		MachODump.cpp
+SRCS+=		OffloadDump.cpp
 SRCS+=		SourcePrinter.cpp
 SRCS+=		WasmDump.cpp
 SRCS+=		XCOFFDump.cpp
@@ -24,8 +25,6 @@ ${hdr}.inc: ${LLVM_BASE}/${SRCDIR}/${hdr}.td
 	    -d ${.TARGET}.d -o ${.TARGET} ${LLVM_BASE}/${SRCDIR}/${hdr}.td
 TGHDRS+=	${hdr}.inc
 .endfor
-
-${TGHDRS}: ${LLVM_TBLGEN_BIN}
 
 DEPENDFILES+=	${TGHDRS:C/$/.d/}
 DPSRCS+=	${TGHDRS}
