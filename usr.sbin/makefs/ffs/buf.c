@@ -78,7 +78,7 @@ bread(struct vnode *vp, daddr_t blkno, int size, struct ucred *u1 __unused,
 	if (lseek((*bpp)->b_fs->fd, offset, SEEK_SET) == -1)
 		err(1, "%s: lseek %lld (%lld)", __func__,
 		    (long long)(*bpp)->b_blkno, (long long)offset);
-	rv = read((*bpp)->b_fs->fd, (*bpp)->b_data, (*bpp)->b_bcount);
+	rv = read((*bpp)->b_fs->fd, (*bpp)->b_data, (size_t)(*bpp)->b_bcount);
 	if (debug & DEBUG_BUF_BREAD)
 		printf("%s: read %ld (%lld) returned %d\n", __func__,
 		    (*bpp)->b_bcount, (long long)offset, (int)rv);
@@ -132,14 +132,14 @@ bwrite(struct buf *bp)
 	assert (bp != NULL);
 	offset = (off_t)bp->b_blkno * fs->sectorsize + fs->offset;
 	if (debug & DEBUG_BUF_BWRITE)
-		printf("bwrite: blkno %lld offset %lld bcount %ld\n",
+		printf("%s: blkno %lld offset %lld bcount %ld\n", __func__,
 		    (long long)bp->b_blkno, (long long) offset,
 		    bp->b_bcount);
 	if (lseek(bp->b_fs->fd, offset, SEEK_SET) == -1)
 		return (errno);
 	rv = write(bp->b_fs->fd, bp->b_data, bp->b_bcount);
 	if (debug & DEBUG_BUF_BWRITE)
-		printf("bwrite: write %ld (offset %lld) returned %lld\n",
+		printf("%s: write %ld (offset %lld) returned %lld\n", __func__,
 		    bp->b_bcount, (long long)offset, (long long)rv);
 	if (rv == bp->b_bcount)
 		return (0);
@@ -163,13 +163,13 @@ bcleanup(void)
 	if (TAILQ_EMPTY(&buftail))
 		return;
 
-	printf("bcleanup: unflushed buffers:\n");
+	printf("%s: unflushed buffers:\n", __func__);
 	TAILQ_FOREACH(bp, &buftail, b_tailq) {
 		printf("\tlblkno %10lld  blkno %10lld  count %6ld  bufsize %6ld\n",
 		    (long long)bp->b_lblkno, (long long)bp->b_blkno,
 		    bp->b_bcount, bp->b_bufsize);
 	}
-	printf("bcleanup: done\n");
+	printf("%s: done\n", __func__);
 }
 
 struct buf *
@@ -181,12 +181,13 @@ getblk(struct vnode *vp, daddr_t blkno, int size, int u1 __unused,
 	void *n;
 
 	if (debug & DEBUG_BUF_GETBLK)
-		printf("getblk: blkno %lld size %d\n", (long long)blkno, size);
+		printf("%s: blkno %lld size %d\n", __func__, (long long)blkno,
+		    size);
 
 	bp = NULL;
 	if (!buftailinitted) {
 		if (debug & DEBUG_BUF_GETBLK)
-			printf("getblk: initialising tailq\n");
+			printf("%s: initialising tailq\n", __func__);
 		TAILQ_INIT(&buftail);
 		buftailinitted = 1;
 	} else {
@@ -206,8 +207,8 @@ getblk(struct vnode *vp, daddr_t blkno, int size, int u1 __unused,
 	}
 	bp->b_bcount = size;
 	if (bp->b_data == NULL || bp->b_bcount > bp->b_bufsize) {
-		n = erealloc(bp->b_data, size);
-		memset(n, 0, size);
+		n = erealloc(bp->b_data, (size_t)size);
+		memset(n, 0, (size_t)size);
 		bp->b_data = n;
 		bp->b_bufsize = size;
 	}
