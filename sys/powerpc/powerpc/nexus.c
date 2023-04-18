@@ -32,56 +32,62 @@
  * 	from: FreeBSD: src/sys/i386/i386/nexus.c,v 1.43 2001/02/09
  */
 
+/*
+ * This code implements a `root nexus' for Power ISA Architecture
+ * machines.  The function of the root nexus is to serve as an
+ * attachment point for both processors and buses, and to manage
+ * resources which are common to all of them.  In particular,
+ * this code implements the core resource managers for interrupt
+ * requests and I/O memory address space.
+ */
+
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <sys/endian.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
-#include <sys/kdb.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
-#include <sys/pcpu.h>
 #include <sys/rman.h>
-#include <sys/smp.h>
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
+
+#include <machine/bus.h>
+#include <machine/endian.h>
+#include <machine/intr_machdep.h>
+#include <machine/resource.h>
 
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 #include <dev/ofw/openfirm.h>
 
-#include <machine/bus.h>
-#include <machine/intr_machdep.h>
-#include <machine/resource.h>
+static struct rman intr_rman;
+static struct rman mem_rman;
 
-/*
- * The nexus handles root-level resource allocation requests and interrupt
- * mapping. All direct subdevices of nexus are attached by DEVICE_IDENTIFY().
- */
+static device_probe_t		nexus_probe;
+static device_attach_t		nexus_attach;
 
-static device_probe_t nexus_probe;
-static device_attach_t nexus_attach;
-static bus_setup_intr_t nexus_setup_intr;
-static bus_teardown_intr_t nexus_teardown_intr;
-static bus_activate_resource_t nexus_activate_resource;
+static bus_activate_resource_t	nexus_activate_resource;
+static bus_adjust_resource_t	nexus_adjust_resource;
+static bus_alloc_resource_t	nexus_alloc_resource;
 static bus_deactivate_resource_t nexus_deactivate_resource;
-static  int nexus_map_resource(device_t bus, device_t child, int type,
-			       struct resource *r,
-			       struct resource_map_request *argsp,
-			       struct resource_map *map);
-static  int nexus_unmap_resource(device_t bus, device_t child, int type,
-			       struct resource *r, struct resource_map *map);
+static bus_map_resource_t	nexus_map_resource;
+static bus_release_resource_t	nexus_release_resource;
+static bus_unmap_resource_t	nexus_unmap_resource;
 
-static bus_space_tag_t nexus_get_bus_tag(device_t, device_t);
 #ifdef SMP
-static bus_bind_intr_t nexus_bind_intr;
+static bus_bind_intr_t		nexus_bind_intr;
 #endif
-static bus_config_intr_t nexus_config_intr;
-static ofw_bus_map_intr_t nexus_ofw_map_intr;
+static bus_config_intr_t	nexus_config_intr;
+static bus_setup_intr_t		nexus_setup_intr;
+static bus_teardown_intr_t	nexus_teardown_intr;
+
+static bus_get_bus_tag_t	nexus_get_bus_tag;
+
+static ofw_bus_map_intr_t	nexus_ofw_map_intr;
 
 static device_method_t nexus_methods[] = {
 	/* Device interface */
@@ -90,16 +96,19 @@ static device_method_t nexus_methods[] = {
 
 	/* Bus interface */
 	DEVMETHOD(bus_add_child,	bus_generic_add_child),
-	DEVMETHOD(bus_activate_resource,	nexus_activate_resource),
-	DEVMETHOD(bus_deactivate_resource,	nexus_deactivate_resource),
+	DEVMETHOD(bus_adjust_resource,	nexus_adjust_resource),
+	DEVMETHOD(bus_activate_resource, nexus_activate_resource),
+	DEVMETHOD(bus_alloc_resource,	nexus_alloc_resource),
+	DEVMETHOD(bus_deactivate_resource, nexus_deactivate_resource),
 	DEVMETHOD(bus_map_resource,	nexus_map_resource),
+	DEVMETHOD(bus_release_resource,	nexus_release_resource),
 	DEVMETHOD(bus_unmap_resource,   nexus_unmap_resource),
-	DEVMETHOD(bus_setup_intr,	nexus_setup_intr),
-	DEVMETHOD(bus_teardown_intr,	nexus_teardown_intr),
 #ifdef SMP
 	DEVMETHOD(bus_bind_intr,	nexus_bind_intr),
 #endif
 	DEVMETHOD(bus_config_intr,	nexus_config_intr),
+	DEVMETHOD(bus_setup_intr,	nexus_setup_intr),
+	DEVMETHOD(bus_teardown_intr,	nexus_teardown_intr),
 	DEVMETHOD(bus_get_bus_tag,	nexus_get_bus_tag),
 
 	/* ofw_bus interface */
@@ -128,6 +137,19 @@ static int
 nexus_attach(device_t dev)
 {
 
+	intr_rman.rm_type = RMAN_ARRAY;
+	intr_rman.rm_descr = "Interrupts";
+	mem_rman.rm_type = RMAN_ARRAY;
+	mem_rman.rm_descr = "I/O memory addresses";
+	if (rman_init(&intr_rman) != 0 || rman_init(&mem_rman) != 0 ||
+	    rman_manage_region(&intr_rman, 0, ~0) != 0 ||
+	    rman_manage_region(&mem_rman, 0, BUS_SPACE_MAXADDR) != 0)
+		panic("%s: failed to set up rmans.", __func__);
+
+	/* Add ofwbus0. */
+	device_add_child(dev, "ofwbus", 0);
+
+	/* Now, probe children. */
 	bus_generic_probe(dev);
 	bus_generic_attach(dev);
 
@@ -203,7 +225,7 @@ nexus_config_intr(device_t dev, int irq, enum intr_trigger trig,
 {
 
 	return (powerpc_config_intr(irq, trig, pol));
-} 
+}
 
 static int
 nexus_ofw_map_intr(device_t dev, device_t child, phandle_t iparent, int icells,
@@ -213,6 +235,44 @@ nexus_ofw_map_intr(device_t dev, device_t child, phandle_t iparent, int icells,
 	if (icells > 1)
 		powerpc_fw_config_intr(intr, irq[1]);
 	return (intr);
+}
+
+/*
+ * Allocate a resource on behalf of child.  NB: child is usually going to be a
+ * child of one of our descendants, not a direct child of nexus0.
+ */
+static struct resource *
+nexus_alloc_resource(device_t bus, device_t child, int type, int *rid,
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
+{
+	struct rman *rm;
+	struct resource *rv;
+
+	switch (type) {
+	case SYS_RES_IRQ:
+		rm = &intr_rman;
+		break;
+	case SYS_RES_MEMORY:
+		rm = &mem_rman;
+		break;
+	default:
+		return (NULL);
+	}
+
+	rv = rman_reserve_resource(rm, start, end, count, flags & ~RF_ACTIVE,
+	    child);
+	if (rv == NULL)
+		return (NULL);
+	rman_set_rid(rv, *rid);
+
+	if ((flags & RF_ACTIVE) != 0) {
+		if (bus_activate_resource(child, type, *rid, rv) != 0) {
+			rman_release_resource(rv);
+			return (NULL);
+		}
+	}
+
+	return (rv);
 }
 
 static int
@@ -257,6 +317,42 @@ nexus_deactivate_resource(device_t bus __unused, device_t child __unused,
 	return (rman_deactivate_resource(r));
 }
 
+static int
+nexus_adjust_resource(device_t bus, device_t child __unused, int type,
+    struct resource *r, rman_res_t start, rman_res_t end)
+{
+	struct rman *rm;
+
+	switch (type) {
+	case SYS_RES_IRQ:
+		rm = &intr_rman;
+		break;
+	case SYS_RES_MEMORY:
+		rm = &mem_rman;
+		break;
+	default:
+		return (EINVAL);
+	}
+	if (rm == NULL)
+		return (ENXIO);
+	if (rman_is_region_manager(r, rm) == 0)
+		return (EINVAL);
+	return (rman_adjust_resource(r, start, end));
+}
+
+static int
+nexus_release_resource(device_t bus, device_t child, int type,
+    int rid, struct resource *r)
+{
+	int error;
+
+	if ((rman_get_flags(r) & RF_ACTIVE) != 0) {
+		error = bus_deactivate_resource(child, type, rid, r);
+		if (error)
+			return (error);
+	}
+	return (rman_release_resource(r));
+}
 
 static int
 nexus_map_resource(device_t bus, device_t child, int type, struct resource *r,
