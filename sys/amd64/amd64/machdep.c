@@ -117,6 +117,8 @@ __FBSDID("$FreeBSD$");
 
 #include <net/netisr.h>
 
+#include <dev/smbios/smbios.h>
+
 #include <machine/clock.h>
 #include <machine/cpu.h>
 #include <machine/cputypes.h>
@@ -1314,6 +1316,7 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 
 	identify_cpu1();
 	identify_hypervisor();
+	identify_hypervisor_smbios();
 	identify_cpu_fixup_bsp();
 	identify_cpu2();
 	initializecpucache();
@@ -1340,6 +1343,11 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	TUNABLE_INT_FETCH("vm.pmap.pcid_invlpg_workaround",
 	    &pmap_pcid_invlpg_workaround_uena);
 	cpu_init_small_core();
+
+	if ((cpu_feature2 & CPUID2_XSAVE) != 0) {
+		use_xsave = 1;
+		TUNABLE_INT_FETCH("hw.use_xsave", &use_xsave);
+	}
 
 	link_elf_ireloc(kmdp);
 

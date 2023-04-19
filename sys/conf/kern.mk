@@ -3,7 +3,7 @@
 #
 # Warning flags for compiling the kernel and components of the kernel:
 #
-CWARNFLAGS?=	-Wall -Wnested-externs -Wstrict-prototypes \
+CWARNFLAGS?=	-Wall -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Wcast-qual \
 		-Wundef -Wno-pointer-sign ${FORMAT_EXTENSIONS} \
 		-Wmissing-include-dirs -fdiagnostics-show-option \
@@ -47,10 +47,9 @@ CWARNEXTRA?=	-Wno-error=tautological-compare -Wno-error=empty-body \
 CWARNEXTRA+=	-Wno-error=shift-negative-value
 CWARNEXTRA+=	-Wno-address-of-packed-member
 .if ${COMPILER_VERSION} >= 150000
-# Clang 15 has much more aggressive diagnostics about inconsistently declared
-# array parameters, K&R prototypes, mismatched prototypes, and unused-but-set
-# variables. Make these non-fatal for the time being.
-CWARNEXTRA+=	-Wno-error=array-parameter
+# Clang 15 has much more aggressive diagnostics about K&R prototypes,
+# mismatched prototypes, and unused-but-set variables. Make these
+# non-fatal for the time being.
 CWARNEXTRA+=	-Wno-error=deprecated-non-prototype
 CWARNEXTRA+=	-Wno-error=strict-prototypes
 CWARNEXTRA+=	-Wno-error=unused-but-set-variable
@@ -74,7 +73,7 @@ CWARNEXTRA?=	-Wno-error=address				\
 		-Wno-error=sequence-point			\
 		-Wno-error=shift-overflow			\
 		-Wno-error=tautological-compare			\
-		-Wno-unused-but-set-variable
+		-Wno-error=unused-function
 .if ${COMPILER_VERSION} >= 70100
 CWARNEXTRA+=	-Wno-error=stringop-overflow
 .endif
@@ -314,5 +313,4 @@ LD_EMULATION_powerpcspe= elf32ppc_fbsd
 LD_EMULATION_powerpc64= elf64ppc_fbsd
 LD_EMULATION_powerpc64le= elf64lppc_fbsd
 LD_EMULATION_riscv64= elf64lriscv
-LD_EMULATION_riscv64sf= elf64lriscv
 LD_EMULATION=${LD_EMULATION_${MACHINE_ARCH}}

@@ -500,7 +500,7 @@ static void
 bbr_enter_persist(struct tcpcb *tp, struct tcp_bbr *bbr, uint32_t cts,
 		  int32_t line);
 static void
-bbr_stop_all_timers(struct tcpcb *tp);
+bbr_stop_all_timers(struct tcpcb *tp, struct tcp_bbr *bbr);
 static void
 bbr_exit_probe_rtt(struct tcpcb *tp, struct tcp_bbr *bbr, uint32_t cts);
 static void
@@ -511,8 +511,7 @@ static void
 bbr_log_pacing_delay_calc(struct tcp_bbr *bbr, uint16_t gain, uint32_t len,
 			  uint32_t cts, uint32_t usecs, uint64_t bw,
 			  uint32_t override, int mod);
-static int
-bbr_ctloutput(struct inpcb *inp, struct sockopt *sopt);
+static int bbr_ctloutput(struct tcpcb *tp, struct sockopt *sopt);
 
 static inline uint8_t
 bbr_state_val(struct tcp_bbr *bbr)
@@ -1885,7 +1884,7 @@ bbr_fill_in_logging_data(struct tcp_bbr *bbr, struct tcp_log_bbr *l, uint32_t ct
 static void
 bbr_log_type_bw_reduce(struct tcp_bbr *bbr, int reason)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -1908,7 +1907,7 @@ bbr_log_type_bw_reduce(struct tcp_bbr *bbr, int reason)
 static void
 bbr_log_type_rwnd_collapse(struct tcp_bbr *bbr, int seq, int mode, uint32_t count)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -1927,7 +1926,7 @@ static void
 bbr_log_type_just_return(struct tcp_bbr *bbr, uint32_t cts, uint32_t tlen, uint8_t hpts_calling,
     uint8_t reason, uint32_t p_maxseg, int len)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -1952,7 +1951,7 @@ bbr_log_type_just_return(struct tcp_bbr *bbr, uint32_t cts, uint32_t tlen, uint8
 static void
 bbr_log_type_enter_rec(struct tcp_bbr *bbr, uint32_t seq)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -1970,7 +1969,7 @@ bbr_log_type_enter_rec(struct tcp_bbr *bbr, uint32_t seq)
 static void
 bbr_log_msgsize_fail(struct tcp_bbr *bbr, struct tcpcb *tp, uint32_t len, uint32_t maxseg, uint32_t mtu, int32_t csum_flags, int32_t tso, uint32_t cts)
 {
-	if (tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -1989,7 +1988,7 @@ bbr_log_msgsize_fail(struct tcp_bbr *bbr, struct tcpcb *tp, uint32_t len, uint32
 static void
 bbr_log_flowend(struct tcp_bbr *bbr)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 		struct sockbuf *r, *s;
 		struct timeval tv;
@@ -2012,7 +2011,7 @@ static void
 bbr_log_pkt_epoch(struct tcp_bbr *bbr, uint32_t cts, uint32_t line,
     uint32_t lost, uint32_t del)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2036,7 +2035,7 @@ bbr_log_pkt_epoch(struct tcp_bbr *bbr, uint32_t cts, uint32_t line,
 static void
 bbr_log_time_epoch(struct tcp_bbr *bbr, uint32_t cts, uint32_t line, uint32_t epoch_time)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2055,7 +2054,7 @@ bbr_log_time_epoch(struct tcp_bbr *bbr, uint32_t cts, uint32_t line, uint32_t ep
 static void
 bbr_log_set_of_state_target(struct tcp_bbr *bbr, uint32_t new_tar, int line, int meth)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2079,7 +2078,7 @@ bbr_log_set_of_state_target(struct tcp_bbr *bbr, uint32_t new_tar, int line, int
 static void
 bbr_log_type_statechange(struct tcp_bbr *bbr, uint32_t cts, int32_t line)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2107,7 +2106,7 @@ static void
 bbr_log_rtt_shrinks(struct tcp_bbr *bbr, uint32_t cts, uint32_t applied,
 		    uint32_t rtt, uint32_t line, uint8_t reas, uint16_t cond)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2130,7 +2129,7 @@ bbr_log_rtt_shrinks(struct tcp_bbr *bbr, uint32_t cts, uint32_t applied,
 static void
 bbr_log_type_exit_rec(struct tcp_bbr *bbr)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2149,7 +2148,7 @@ static void
 bbr_log_type_cwndupd(struct tcp_bbr *bbr, uint32_t bytes_this_ack, uint32_t chg,
     uint32_t prev_acked, int32_t meth, uint32_t target, uint32_t th_ack, int32_t line)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2175,7 +2174,7 @@ bbr_log_rtt_sample(struct tcp_bbr *bbr, uint32_t rtt, uint32_t tsin)
 	 * Log the rtt sample we are applying to the srtt algorithm in
 	 * useconds.
 	 */
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2199,7 +2198,7 @@ bbr_log_rtt_sample(struct tcp_bbr *bbr, uint32_t rtt, uint32_t tsin)
 static void
 bbr_log_type_pesist(struct tcp_bbr *bbr, uint32_t cts, uint32_t time_in, int32_t line, uint8_t enter_exit)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2216,7 +2215,7 @@ bbr_log_type_pesist(struct tcp_bbr *bbr, uint32_t cts, uint32_t time_in, int32_t
 static void
 bbr_log_ack_clear(struct tcp_bbr *bbr, uint32_t cts)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2237,7 +2236,7 @@ static void
 bbr_log_ack_event(struct tcp_bbr *bbr, struct tcphdr *th, struct tcpopt *to, uint32_t tlen,
 		  uint16_t nsegs, uint32_t cts, int32_t nxt_pkt, struct mbuf *m)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 		struct timeval tv;
 
@@ -2285,7 +2284,7 @@ bbr_log_ack_event(struct tcp_bbr *bbr, struct tcphdr *th, struct tcpopt *to, uin
 static void
 bbr_log_doseg_done(struct tcp_bbr *bbr, uint32_t cts, int32_t nxt_pkt, int32_t did_out)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2310,7 +2309,7 @@ static void
 bbr_log_enobuf_jmp(struct tcp_bbr *bbr, uint32_t len, uint32_t cts,
     int32_t line, uint32_t o_len, uint32_t segcnt, uint32_t segsiz)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2329,7 +2328,7 @@ bbr_log_enobuf_jmp(struct tcp_bbr *bbr, uint32_t len, uint32_t cts,
 static void
 bbr_log_to_processing(struct tcp_bbr *bbr, uint32_t cts, int32_t ret, int32_t timers, uint8_t hpts_calling)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2351,7 +2350,7 @@ bbr_log_to_processing(struct tcp_bbr *bbr, uint32_t cts, int32_t ret, int32_t ti
 static void
 bbr_log_to_event(struct tcp_bbr *bbr, uint32_t cts, int32_t to_num)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 		uint64_t ar;
 
@@ -2379,7 +2378,7 @@ bbr_log_to_event(struct tcp_bbr *bbr, uint32_t cts, int32_t to_num)
 static void
 bbr_log_startup_event(struct tcp_bbr *bbr, uint32_t cts, uint32_t flex1, uint32_t flex2, uint32_t flex3, uint8_t reason)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2402,7 +2401,7 @@ bbr_log_startup_event(struct tcp_bbr *bbr, uint32_t cts, uint32_t flex1, uint32_
 static void
 bbr_log_hpts_diag(struct tcp_bbr *bbr, uint32_t cts, struct hpts_diag *diag)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2439,7 +2438,7 @@ static void
 bbr_log_timer_var(struct tcp_bbr *bbr, int mode, uint32_t cts, uint32_t time_since_sent, uint32_t srtt,
     uint32_t thresh, uint32_t to)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2462,7 +2461,7 @@ static void
 bbr_log_pacing_delay_calc(struct tcp_bbr *bbr, uint16_t gain, uint32_t len,
     uint32_t cts, uint32_t usecs, uint64_t bw, uint32_t override, int mod)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2488,7 +2487,7 @@ bbr_log_pacing_delay_calc(struct tcp_bbr *bbr, uint16_t gain, uint32_t len,
 static void
 bbr_log_to_start(struct tcp_bbr *bbr, uint32_t cts, uint32_t to, int32_t slot, uint8_t which)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2512,7 +2511,7 @@ bbr_log_to_start(struct tcp_bbr *bbr, uint32_t cts, uint32_t to, int32_t slot, u
 static void
 bbr_log_thresh_choice(struct tcp_bbr *bbr, uint32_t cts, uint32_t thresh, uint32_t lro, uint32_t srtt, struct bbr_sendmap *rsm, uint8_t frm)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2535,7 +2534,7 @@ bbr_log_thresh_choice(struct tcp_bbr *bbr, uint32_t cts, uint32_t thresh, uint32
 static void
 bbr_log_to_cancel(struct tcp_bbr *bbr, int32_t line, uint32_t cts, uint8_t hpts_removed)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2558,7 +2557,7 @@ bbr_log_to_cancel(struct tcp_bbr *bbr, int32_t line, uint32_t cts, uint8_t hpts_
 static void
 bbr_log_tstmp_validation(struct tcp_bbr *bbr, uint64_t peer_delta, uint64_t delta)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2580,7 +2579,7 @@ bbr_log_tstmp_validation(struct tcp_bbr *bbr, uint64_t peer_delta, uint64_t delt
 static void
 bbr_log_type_tsosize(struct tcp_bbr *bbr, uint32_t cts, uint32_t tsosz, uint32_t tls, uint32_t old_val, uint32_t maxseg, int hdwr)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2609,7 +2608,7 @@ static void
 bbr_log_type_rsmclear(struct tcp_bbr *bbr, uint32_t cts, struct bbr_sendmap *rsm,
 		      uint32_t flags, uint32_t line)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2638,7 +2637,7 @@ bbr_log_type_bbrupd(struct tcp_bbr *bbr, uint8_t flex8, uint32_t cts,
     uint32_t flex4, uint32_t flex1)
 {
 
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2669,7 +2668,7 @@ bbr_log_type_ltbw(struct tcp_bbr *bbr, uint32_t cts, int32_t reason,
 	uint32_t newbw, uint32_t obw, uint32_t diff,
 	uint32_t tim)
 {
-	if (/*bbr_verbose_logging && */(bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (/*bbr_verbose_logging && */tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2697,7 +2696,7 @@ bbr_log_type_ltbw(struct tcp_bbr *bbr, uint32_t cts, int32_t reason,
 static inline void
 bbr_log_progress_event(struct tcp_bbr *bbr, struct tcpcb *tp, uint32_t tick, int event, int line)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2719,7 +2718,7 @@ bbr_type_log_hdwr_pacing(struct tcp_bbr *bbr, const struct ifnet *ifp,
 			 uint64_t rate, uint64_t hw_rate, int line, uint32_t cts,
 			 int error)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2747,7 +2746,7 @@ bbr_type_log_hdwr_pacing(struct tcp_bbr *bbr, const struct ifnet *ifp,
 static void
 bbr_log_type_bbrsnd(struct tcp_bbr *bbr, uint32_t len, uint32_t slot, uint32_t del_by, uint32_t cts, uint32_t line, uint32_t prev_delay)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2770,7 +2769,7 @@ bbr_log_type_bbrsnd(struct tcp_bbr *bbr, uint32_t len, uint32_t slot, uint32_t d
 static void
 bbr_log_type_bbrrttprop(struct tcp_bbr *bbr, uint32_t t, uint32_t end, uint32_t tsconv, uint32_t cts, int32_t match, uint32_t seq, uint8_t flags)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2793,7 +2792,7 @@ bbr_log_type_bbrrttprop(struct tcp_bbr *bbr, uint32_t t, uint32_t end, uint32_t 
 static void
 bbr_log_exit_gain(struct tcp_bbr *bbr, uint32_t cts, int32_t entry_method)
 {
-	if (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -2816,7 +2815,7 @@ bbr_log_exit_gain(struct tcp_bbr *bbr, uint32_t cts, int32_t entry_method)
 static void
 bbr_log_settings_change(struct tcp_bbr *bbr, int settings_desired)
 {
-	if (bbr_verbose_logging && (bbr->rc_tp->t_logstate != TCP_LOG_STATE_OFF)) {
+	if (bbr_verbose_logging && tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, bbr->r_ctl.rc_rcvtime);
@@ -2991,13 +2990,6 @@ use_initial_window:
 		bw = bbr->r_ctl.red_bw;
 	else
 		bw = get_filter_value(&bbr->r_ctl.rc_delrate);
-	if (bbr->rc_tp->t_peakrate_thr && (bbr->rc_use_google == 0)) {
-		/*
-		 * Enforce user set rate limit, keep in mind that
-		 * t_peakrate_thr is in B/s already
-		 */
-		bw = uqmin((uint64_t)bbr->rc_tp->t_peakrate_thr, bw);
-	}
 	if (bw == 0) {
 		/* We should not be at 0, go to the initial window then  */
 		goto use_initial_window;
@@ -6281,6 +6273,9 @@ tcp_bbr_xmit_timer_commit(struct tcp_bbr *bbr, struct tcpcb *tp, uint32_t cts)
 		else
 			apply_filter_min_small(&bbr->r_ctl.rc_rttprop, rtt, cts);
 	}
+#ifdef STATS
+	stats_voi_update_abs_u32(tp->t_stats, VOI_TCP_PATHRTT, imax(0, rtt));
+#endif
 	if (bbr->rc_ack_was_delayed)
 		rtt += bbr->r_ctl.rc_ack_hdwr_delay;
 
@@ -9850,17 +9845,17 @@ bbr_do_fin_wait_2(struct mbuf *m, struct tcphdr *th, struct socket *so,
 }
 
 static void
-bbr_stop_all_timers(struct tcpcb *tp)
+bbr_stop_all_timers(struct tcpcb *tp, struct tcp_bbr *bbr)
 {
-	struct tcp_bbr *bbr;
-
 	/*
 	 * Assure no timers are running.
 	 */
 	if (tcp_timer_active(tp, TT_PERSIST)) {
 		/* We enter in persists, set the flag appropriately */
-		bbr = (struct tcp_bbr *)tp->t_fb_ptr;
 		bbr->rc_in_persist = 1;
+	}
+	if (tcp_in_hpts(bbr->rc_inp)) {
+		tcp_hpts_remove(bbr->rc_inp);
 	}
 }
 
@@ -9927,14 +9922,14 @@ bbr_google_mode_off(struct tcp_bbr *bbr)
  * which indicates the error (usually no memory).
  */
 static int
-bbr_init(struct tcpcb *tp)
+bbr_init(struct tcpcb *tp, void **ptr)
 {
 	struct inpcb *inp = tptoinpcb(tp);
 	struct tcp_bbr *bbr = NULL;
 	uint32_t cts;
 
-	tp->t_fb_ptr = uma_zalloc(bbr_pcb_zone, (M_NOWAIT | M_ZERO));
-	if (tp->t_fb_ptr == NULL) {
+	*ptr = uma_zalloc(bbr_pcb_zone, (M_NOWAIT | M_ZERO));
+	if (*ptr == NULL) {
 		/*
 		 * We need to allocate memory but cant. The INP and INP_INFO
 		 * locks and they are recursive (happens during setup. So a
@@ -9943,10 +9938,16 @@ bbr_init(struct tcpcb *tp)
 		 */
 		return (ENOMEM);
 	}
-	bbr = (struct tcp_bbr *)tp->t_fb_ptr;
+	bbr = (struct tcp_bbr *)*ptr;
 	bbr->rtt_valid = 0;
 	inp->inp_flags2 |= INP_CANNOT_DO_ECN;
 	inp->inp_flags2 |= INP_SUPPORTS_MBUFQ;
+	/* Take off any undesired flags */
+	inp->inp_flags2 &= ~INP_MBUF_QUEUE_READY;
+	inp->inp_flags2 &= ~INP_DONT_SACK_QUEUE;
+	inp->inp_flags2 &= ~INP_MBUF_ACKCMP;
+	inp->inp_flags2 &= ~INP_MBUF_L_ACKS;
+
 	TAILQ_INIT(&bbr->r_ctl.rc_map);
 	TAILQ_INIT(&bbr->r_ctl.rc_free);
 	TAILQ_INIT(&bbr->r_ctl.rc_tmap);
@@ -10065,17 +10066,14 @@ bbr_init(struct tcpcb *tp)
 	bbr->r_ctl.rc_initial_hptsi_bw = bbr_initial_bw_bps;
 	if (bbr_resends_use_tso)
 		bbr->rc_resends_use_tso = 1;
-#ifdef NETFLIX_PEAKRATE
-	tp->t_peakrate_thr = tp->t_maxpeakrate;
-#endif
 	if (tp->snd_una != tp->snd_max) {
 		/* Create a send map for the current outstanding data */
 		struct bbr_sendmap *rsm;
 
 		rsm = bbr_alloc(bbr);
 		if (rsm == NULL) {
-			uma_zfree(bbr_pcb_zone, tp->t_fb_ptr);
-			tp->t_fb_ptr = NULL;
+			uma_zfree(bbr_pcb_zone, *ptr);
+			*ptr = NULL;
 			return (ENOMEM);
 		}
 		rsm->r_rtt_not_allowed = 1;
@@ -10128,7 +10126,17 @@ bbr_init(struct tcpcb *tp)
 	 * the TCB on the hptsi wheel if a timer is needed with appropriate
 	 * flags.
 	 */
-	bbr_stop_all_timers(tp);
+	bbr_stop_all_timers(tp, bbr);
+	/* 
+	 * Validate the timers are not in usec, if they are convert.
+	 * BBR should in theory move to USEC and get rid of a
+	 * lot of the TICKS_2 calls.. but for now we stay
+	 * with tick timers.
+	 */
+	tcp_change_time_units(tp, TCP_TMR_GRANULARITY_TICKS);
+	TCPT_RANGESET(tp->t_rxtcur,
+	    ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1,
+	    tp->t_rttmin, TCPTV_REXMTMAX);
 	bbr_start_hpts_timer(bbr, tp, cts, 5, 0, 0);
 	return (0);
 }
@@ -10172,7 +10180,6 @@ static void
 bbr_fini(struct tcpcb *tp, int32_t tcb_is_purged)
 {
 	if (tp->t_fb_ptr) {
-		struct inpcb *inp = tptoinpcb(tp);
 		uint32_t calc;
 		struct tcp_bbr *bbr;
 		struct bbr_sendmap *rsm;
@@ -10182,10 +10189,6 @@ bbr_fini(struct tcpcb *tp, int32_t tcb_is_purged)
 			tcp_rel_pacing_rate(bbr->r_ctl.crte, bbr->rc_tp);
 		bbr_log_flowend(bbr);
 		bbr->rc_tp = NULL;
-		/* Backout any flags2 we applied */
-		inp->inp_flags2 &= ~INP_CANNOT_DO_ECN;
-		inp->inp_flags2 &= ~INP_SUPPORTS_MBUFQ;
-		inp->inp_flags2 &= ~INP_MBUF_QUEUE_READY;
 		if (bbr->bbr_hdrw_pacing)
 			counter_u64_add(bbr_flows_whdwr_pacing, -1);
 		else
@@ -11260,11 +11263,12 @@ bbr_check_bbr_for_state(struct tcp_bbr *bbr, uint32_t cts, int32_t line, uint32_
 }
 
 static int
-bbr_do_segment_nounlock(struct mbuf *m, struct tcphdr *th, struct socket *so,
-    struct tcpcb *tp, int32_t drop_hdrlen, int32_t tlen, uint8_t iptos,
-    int32_t nxt_pkt, struct timeval *tv)
+bbr_do_segment_nounlock(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
+    int32_t drop_hdrlen, int32_t tlen, uint8_t iptos, int32_t nxt_pkt,
+    struct timeval *tv)
 {
 	struct inpcb *inp = tptoinpcb(tp);
+	struct socket *so = tptosocket(tp);
 	int32_t thflags, retval;
 	uint32_t cts, lcts;
 	uint32_t tiwin;
@@ -11427,7 +11431,7 @@ bbr_do_segment_nounlock(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		if ((tp->t_flags & TF_SACK_PERMIT) == 0) {
 			/* Bail */
 			tcp_switch_back_to_default(tp);
-			(*tp->t_fb->tfb_tcp_do_segment) (m, th, so, tp, drop_hdrlen,
+			(*tp->t_fb->tfb_tcp_do_segment)(tp, m, th, drop_hdrlen,
 			    tlen, iptos);
 			return (1);
 		}
@@ -11577,6 +11581,9 @@ bbr_do_segment_nounlock(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			/* Do we have the correct timer running? */
 			bbr_timer_audit(tp, bbr, lcts, &so->so_snd);
 		}
+		/* Clear the flag, it may have been cleared by output but we may not have  */
+		if ((nxt_pkt == 0) && (inp->inp_hpts_calls))
+			inp->inp_hpts_calls = 0;
 		/* Do we have a new state */
 		if (bbr->r_state != tp->t_state)
 			bbr_set_state(tp, bbr, tiwin);
@@ -11589,15 +11596,15 @@ done_with_input:
 }
 
 static void
-bbr_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
-    struct tcpcb *tp, int32_t drop_hdrlen, int32_t tlen, uint8_t iptos)
+bbr_do_segment(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
+    int32_t drop_hdrlen, int32_t tlen, uint8_t iptos)
 {
 	struct timeval tv;
 	int retval;
 
 	/* First lets see if we have old packets */
-	if (tp->t_in_pkt) {
-		if (ctf_do_queued_segments(so, tp, 1)) {
+	if (!STAILQ_EMPTY(&tp->t_inqueue)) {
+		if (ctf_do_queued_segments(tp, 1)) {
 			m_freem(m);
 			return;
 		}
@@ -11608,8 +11615,8 @@ bbr_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		/* Should not be should we kassert instead? */
 		tcp_get_usecs(&tv);
 	}
-	retval = bbr_do_segment_nounlock(m, th, so, tp,
-					 drop_hdrlen, tlen, iptos, 0, &tv);
+	retval = bbr_do_segment_nounlock(tp, m, th, drop_hdrlen, tlen, iptos,
+	    0, &tv);
 	if (retval == 0) {
 		INP_WUNLOCK(tptoinpcb(tp));
 	}
@@ -11658,19 +11665,9 @@ bbr_what_can_we_send(struct tcpcb *tp, struct tcp_bbr *bbr, uint32_t sendwin,
 }
 
 static inline void
-bbr_do_error_accounting(struct tcpcb *tp, struct tcp_bbr *bbr, struct bbr_sendmap *rsm, int32_t len, int32_t error)
-{
-#ifdef NETFLIX_STATS
-	KMOD_TCPSTAT_INC(tcps_sndpack_error);
-	KMOD_TCPSTAT_ADD(tcps_sndbyte_error, len);
-#endif
-}
-
-static inline void
 bbr_do_send_accounting(struct tcpcb *tp, struct tcp_bbr *bbr, struct bbr_sendmap *rsm, int32_t len, int32_t error)
 {
 	if (error) {
-		bbr_do_error_accounting(tp, bbr, rsm, len, error);
 		return;
 	}
 	if (rsm) {
@@ -11679,10 +11676,8 @@ bbr_do_send_accounting(struct tcpcb *tp, struct tcp_bbr *bbr, struct bbr_sendmap
 			 * TLP should not count in retran count, but in its
 			 * own bin
 			 */
-#ifdef NETFLIX_STATS
 			KMOD_TCPSTAT_INC(tcps_tlpresends);
 			KMOD_TCPSTAT_ADD(tcps_tlpresend_bytes, len);
-#endif
 		} else {
 			/* Retransmit */
 			tp->t_sndrexmitpack++;
@@ -11853,12 +11848,13 @@ bbr_output_wtime(struct tcpcb *tp, const struct timeval *tv)
 	int32_t isipv6;
 #endif
 	uint8_t app_limited = BBR_JR_SENT_DATA;
-	uint8_t filled_all = 0;
 	bbr = (struct tcp_bbr *)tp->t_fb_ptr;
 	/* We take a cache hit here */
 	memcpy(&bbr->rc_tv, tv, sizeof(struct timeval));
 	cts = tcp_tv_to_usectick(&bbr->rc_tv);
 	inp = bbr->rc_inp;
+	hpts_calling = inp->inp_hpts_calls;
+	inp->inp_hpts_calls = 0;
 	so = inp->inp_socket;
 	sb = &so->so_snd;
 	if (tp->t_nic_ktls_xmit)
@@ -11994,7 +11990,7 @@ bbr_output_wtime(struct tcpcb *tp, const struct timeval *tv)
 			merged_val = bbr->rc_pacer_started;
 			merged_val <<= 32;
 			merged_val |= bbr->r_ctl.rc_last_delay_val;
-			bbr_log_pacing_delay_calc(bbr, inp->inp_hpts_calls,
+			bbr_log_pacing_delay_calc(bbr, hpts_calling,
 						 bbr->r_ctl.rc_agg_early, cts, delay_calc, merged_val,
 						 bbr->r_agg_early_set, 3);
 			bbr->r_ctl.rc_last_delay_val = 0;
@@ -12037,8 +12033,6 @@ bbr_output_wtime(struct tcpcb *tp, const struct timeval *tv)
 	 * <and> c) We had room to send something.
 	 *
 	 */
-	hpts_calling = inp->inp_hpts_calls;
-	inp->inp_hpts_calls = 0;
 	if (bbr->r_ctl.rc_hpts_flags & PACE_TMR_MASK) {
 		int retval;
 
@@ -13162,7 +13156,7 @@ send:
 				if_hw_tsomaxsegsize, msb,
 				((rsm == NULL) ? hw_tls : 0)
 #ifdef NETFLIX_COPY_ARGS
-				, &filled_all
+				, NULL, NULL
 #endif
 				);
 			if (len <= maxseg) {
@@ -13474,7 +13468,7 @@ send:
 #endif
 
 	/* Log to the black box */
-	if (tp->t_logstate != TCP_LOG_STATE_OFF) {
+	if (tcp_bblogging_on(tp)) {
 		union tcp_log_stackspecific log;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
@@ -13483,13 +13477,10 @@ send:
 		log.u_bbr.flex2 = (bbr->r_recovery_bw << 3);
 		log.u_bbr.flex3 = maxseg;
 		log.u_bbr.flex4 = delay_calc;
-		/* Encode filled_all into the upper flex5 bit */
 		log.u_bbr.flex5 = bbr->rc_past_init_win;
 		log.u_bbr.flex5 <<= 1;
 		log.u_bbr.flex5 |= bbr->rc_no_pacing;
 		log.u_bbr.flex5 <<= 29;
-		if (filled_all)
-			log.u_bbr.flex5 |= 0x80000000;
 		log.u_bbr.flex5 |= tp->t_maxseg;
 		log.u_bbr.flex6 = bbr->r_ctl.rc_pace_max_segs;
 		log.u_bbr.flex7 = (bbr->rc_bbr_state << 8) | bbr_state_val(bbr);
@@ -13503,7 +13494,7 @@ send:
 		} else {
 			log.u_bbr.flex8 = 0;
 		}
-		lgb = tcp_log_event_(tp, th, &so->so_rcv, &so->so_snd, TCP_LOG_OUT, ERRNO_UNK,
+		lgb = tcp_log_event(tp, th, &so->so_rcv, &so->so_snd, TCP_LOG_OUT, ERRNO_UNK,
 		    len, &log, false, NULL, NULL, 0, tv);
 	} else {
 		lgb = NULL;
@@ -14073,6 +14064,56 @@ bbr_pru_options(struct tcpcb *tp, int flags)
 	return (0);
 }
 
+static void
+bbr_switch_failed(struct tcpcb *tp)
+{
+	/*
+	 * If a switch fails we only need to
+	 * make sure mbuf_queuing is still in place.
+	 * We also need to make sure we are still in
+	 * ticks granularity (though we should probably
+	 * change bbr to go to USECs).
+	 *
+	 * For timers we need to see if we are still in the
+	 * pacer (if our flags are up) if so we are good, if
+	 * not we need to get back into the pacer.
+	 */
+	struct inpcb *inp = tptoinpcb(tp);
+	struct timeval tv;
+	uint32_t cts;
+	uint32_t toval;
+	struct tcp_bbr *bbr;
+	struct hpts_diag diag;
+
+	inp->inp_flags2 |= INP_CANNOT_DO_ECN;
+	inp->inp_flags2 |= INP_SUPPORTS_MBUFQ;
+	tcp_change_time_units(tp, TCP_TMR_GRANULARITY_TICKS);
+	if (inp->inp_in_hpts) {
+		return;
+	}
+	bbr = (struct tcp_bbr *)tp->t_fb_ptr;
+	cts = tcp_get_usecs(&tv);
+	if (bbr->r_ctl.rc_hpts_flags & PACE_PKT_OUTPUT) {
+		if (TSTMP_GT(bbr->rc_pacer_started, cts)) {
+			toval = bbr->rc_pacer_started - cts;
+		} else {
+			/* one slot please */
+			toval = HPTS_TICKS_PER_SLOT;
+		}
+	} else if (bbr->r_ctl.rc_hpts_flags & PACE_TMR_MASK) {
+		if (TSTMP_GT(bbr->r_ctl.rc_timer_exp, cts)) {
+			toval = bbr->r_ctl.rc_timer_exp - cts;
+		} else {
+			/* one slot please */
+			toval = HPTS_TICKS_PER_SLOT;
+		}
+	} else
+		toval = HPTS_TICKS_PER_SLOT;
+	(void)tcp_hpts_insert_diag(inp, HPTS_USEC_TO_SLOTS(toval),
+				   __LINE__, &diag);
+	bbr_log_hpts_diag(bbr, cts, &diag);
+}
+
 struct tcp_function_block __tcp_bbr = {
 	.tfb_tcp_block_name = __XSTRING(STACKNAME),
 	.tfb_tcp_output = bbr_output,
@@ -14087,6 +14128,7 @@ struct tcp_function_block __tcp_bbr = {
 	.tfb_tcp_handoff_ok = bbr_handoff_ok,
 	.tfb_tcp_mtu_chg = bbr_mtu_chg,
 	.tfb_pru_options = bbr_pru_options,
+	.tfb_switch_failed = bbr_switch_failed,
 	.tfb_flags = TCP_FUNC_OUTPUT_CANDROP,
 };
 
@@ -14097,17 +14139,17 @@ struct tcp_function_block __tcp_bbr = {
  * option.
  */
 static int
-bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
+bbr_set_sockopt(struct tcpcb *tp, struct sockopt *sopt)
 {
 	struct epoch_tracker et;
-	struct tcpcb *tp;
+	struct inpcb *inp = tptoinpcb(tp);
 	struct tcp_bbr *bbr;
 	int32_t error = 0, optval;
 
 	switch (sopt->sopt_level) {
 	case IPPROTO_IPV6:
 	case IPPROTO_IP:
-		return (tcp_default_ctloutput(inp, sopt));
+		return (tcp_default_ctloutput(tp, sopt));
 	}
 
 	switch (sopt->sopt_name) {
@@ -14148,15 +14190,12 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
 	case TCP_BBR_PACE_SEG_MIN:
 	case TCP_BBR_PACE_CROSS:
 	case TCP_BBR_PACE_OH:
-#ifdef NETFLIX_PEAKRATE
-	case TCP_MAXPEAKRATE:
-#endif
 	case TCP_BBR_TMR_PACE_OH:
 	case TCP_BBR_RACK_RTT_USE:
 	case TCP_BBR_RETRAN_WTSO:
 		break;
 	default:
-		return (tcp_default_ctloutput(inp, sopt));
+		return (tcp_default_ctloutput(tp, sopt));
 		break;
 	}
 	INP_WUNLOCK(inp);
@@ -14168,7 +14207,6 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
 		INP_WUNLOCK(inp);
 		return (ECONNRESET);
 	}
-	tp = intotcpcb(inp);
 	if (tp->t_fb != &__tcp_bbr) {
 		INP_WUNLOCK(inp);
 		return (ENOPROTOOPT);
@@ -14416,14 +14454,7 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
 		BBR_OPTS_INC(tcp_rack_pkt_delay);
 		bbr->r_ctl.rc_pkt_delay = optval;
 		break;
-#ifdef NETFLIX_PEAKRATE
-	case TCP_MAXPEAKRATE:
-		BBR_OPTS_INC(tcp_maxpeak);
-		error = tcp_set_maxpeakrate(tp, optval);
-		if (!error)
-			tp->t_peakrate_thr = tp->t_maxpeakrate;
-		break;
-#endif
+
 	case TCP_BBR_RETRAN_WTSO:
 		BBR_OPTS_INC(tcp_retran_wtso);
 		if (optval)
@@ -14492,12 +14523,10 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
 		}
 		break;
 	default:
-		return (tcp_default_ctloutput(inp, sopt));
+		return (tcp_default_ctloutput(tp, sopt));
 		break;
 	}
-#ifdef NETFLIX_STATS
 	tcp_log_socket_option(tp, sopt->sopt_name, optval, error);
-#endif
 	INP_WUNLOCK(inp);
 	return (error);
 }
@@ -14506,13 +14535,12 @@ bbr_set_sockopt(struct inpcb *inp, struct sockopt *sopt)
  * return 0 on success, error-num on failure
  */
 static int
-bbr_get_sockopt(struct inpcb *inp, struct sockopt *sopt)
+bbr_get_sockopt(struct tcpcb *tp, struct sockopt *sopt)
 {
-	struct tcpcb *tp;
+	struct inpcb *inp = tptoinpcb(tp);
 	struct tcp_bbr *bbr;
 	int32_t error, optval;
 
-	tp = intotcpcb(inp);
 	bbr = (struct tcp_bbr *)tp->t_fb_ptr;
 	if (bbr == NULL) {
 		INP_WUNLOCK(inp);
@@ -14651,7 +14679,7 @@ bbr_get_sockopt(struct inpcb *inp, struct sockopt *sopt)
 			optval |= BBR_INCL_ENET_OH;
 		break;
 	default:
-		return (tcp_default_ctloutput(inp, sopt));
+		return (tcp_default_ctloutput(tp, sopt));
 		break;
 	}
 	INP_WUNLOCK(inp);
@@ -14663,12 +14691,12 @@ bbr_get_sockopt(struct inpcb *inp, struct sockopt *sopt)
  * return 0 on success, error-num on failure
  */
 static int
-bbr_ctloutput(struct inpcb *inp, struct sockopt *sopt)
+bbr_ctloutput(struct tcpcb *tp, struct sockopt *sopt)
 {
 	if (sopt->sopt_dir == SOPT_SET) {
-		return (bbr_set_sockopt(inp, sopt));
+		return (bbr_set_sockopt(tp, sopt));
 	} else if (sopt->sopt_dir == SOPT_GET) {
-		return (bbr_get_sockopt(inp, sopt));
+		return (bbr_get_sockopt(tp, sopt));
 	} else {
 		panic("%s: sopt_dir $%d", __func__, sopt->sopt_dir);
 	}

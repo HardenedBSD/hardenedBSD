@@ -57,6 +57,7 @@
 #include <linux/compiler.h>
 #include <linux/errno.h>
 #include <asm/atomic.h>
+#include <asm/memtype.h>
 #include <linux/device.h>
 #include <linux/pci_ids.h>
 #include <linux/pm.h>
@@ -1368,6 +1369,12 @@ pcie_bandwidth_available(struct pci_dev *pdev,
 		*width = nwidth;
 
 	return (nwidth * PCIE_SPEED2MBS_ENC(nspeed));
+}
+
+static inline bool
+pcie_aspm_enabled(struct pci_dev *pdev)
+{
+	return (false);
 }
 
 static inline struct pci_dev *

@@ -140,8 +140,8 @@ tcp_bblog_pru(struct tcpcb *tp, uint32_t pru, int error)
 		return;
 	}
 	INP_WLOCK_ASSERT(tptoinpcb(tp));
-	if (tp->t_logstate != TCP_LOG_STATE_OFF) {
-		lgb = tcp_log_event_(tp, NULL, NULL, NULL, TCP_LOG_PRU, error,
+	if (tcp_bblogging_on(tp)) {
+		lgb = tcp_log_event(tp, NULL, NULL, NULL, TCP_LOG_PRU, error,
 		    0, NULL, false, NULL, NULL, 0, NULL);
 	} else {
 		lgb = NULL;
@@ -1659,6 +1659,7 @@ tcp_ctloutput_set(struct inpcb *inp, struct sockopt *sopt)
 		 */
 		struct tcp_function_set fsn;
 		struct tcp_function_block *blk;
+		void *ptr = NULL;
 
 		INP_WUNLOCK(inp);
 		error = sooptcopyin(sopt, &fsn, sizeof fsn, sizeof fsn);
@@ -1666,10 +1667,6 @@ tcp_ctloutput_set(struct inpcb *inp, struct sockopt *sopt)
 			return (error);
 
 		INP_WLOCK(inp);
-		if (inp->inp_flags & INP_DROPPED) {
-			INP_WUNLOCK(inp);
-			return (ECONNRESET);
-		}
 		tp = intotcpcb(inp);
 
 		blk = find_and_ref_tcp_functions(&fsn);
@@ -1710,10 +1707,35 @@ tcp_ctloutput_set(struct inpcb *inp, struct sockopt *sopt)
 			return (ENOENT);
 		}
 		/*
-		 * Release the old refcnt, the
-		 * lookup acquired a ref on the
-		 * new one already.
+		 * Ensure the new stack takes ownership with a
+		 * clean slate on peak rate threshold.
 		 */
+#ifdef TCPHPTS
+		/* Assure that we are not on any hpts */
+		tcp_hpts_remove(tptoinpcb(tp));
+#endif
+		if (blk->tfb_tcp_fb_init) {
+			error = (*blk->tfb_tcp_fb_init)(tp, &ptr);
+			if (error) {
+				/*
+				 * Release the ref count the lookup
+				 * acquired.
+				 */ 
+				refcount_release(&blk->tfb_refcnt);
+				/* 
+				 * Now there is a chance that the
+				 * init() function mucked with some
+				 * things before it failed, such as
+				 * hpts or inp_flags2 or timer granularity.
+				 * It should not of, but lets give the old
+				 * stack a chance to reset to a known good state.
+				 */
+				if (tp->t_fb->tfb_switch_failed) {
+					(*tp->t_fb->tfb_switch_failed)(tp);
+				}
+			 	goto err_out;
+			}
+		}
 		if (tp->t_fb->tfb_tcp_fb_fini) {
 			struct epoch_tracker et;
 			/*
@@ -1724,27 +1746,17 @@ tcp_ctloutput_set(struct inpcb *inp, struct sockopt *sopt)
 			(*tp->t_fb->tfb_tcp_fb_fini)(tp, 0);
 			NET_EPOCH_EXIT(et);
 		}
-#ifdef TCPHPTS
-		/* Assure that we are not on any hpts */
-		tcp_hpts_remove(tptoinpcb(tp));
-#endif
-		if (blk->tfb_tcp_fb_init) {
-			error = (*blk->tfb_tcp_fb_init)(tp);
-			if (error) {
-				refcount_release(&blk->tfb_refcnt);
-				if (tp->t_fb->tfb_tcp_fb_init) {
-					if((*tp->t_fb->tfb_tcp_fb_init)(tp) != 0)  {
-						/* Fall back failed, drop the connection */
-						INP_WUNLOCK(inp);
-						soabort(so);
-						return (error);
-					}
-				}
-				goto err_out;
-			}
-		}
+		/*
+		 * Release the old refcnt, the
+		 * lookup acquired a ref on the
+		 * new one already.
+		 */
 		refcount_release(&tp->t_fb->tfb_refcnt);
+		/* 
+		 * Set in the new stack.
+		 */
 		tp->t_fb = blk;
+		tp->t_fb_ptr = ptr;
 #ifdef TCP_OFFLOAD
 		if (tp->t_flags & TF_TOE) {
 			tcp_offload_ctloutput(tp, sopt->sopt_dir,
@@ -1754,10 +1766,11 @@ tcp_ctloutput_set(struct inpcb *inp, struct sockopt *sopt)
 err_out:
 		INP_WUNLOCK(inp);
 		return (error);
+
 	}
 
 	/* Pass in the INP locked, callee must unlock it. */
-	return (tp->t_fb->tfb_tcp_ctloutput(inp, sopt));
+	return (tp->t_fb->tfb_tcp_ctloutput(tp, sopt));
 }
 
 static int
@@ -1807,7 +1820,7 @@ tcp_ctloutput_get(struct inpcb *inp, struct sockopt *sopt)
 	}
 
 	/* Pass in the INP locked, callee must unlock it. */
-	return (tp->t_fb->tfb_tcp_ctloutput(inp, sopt));
+	return (tp->t_fb->tfb_tcp_ctloutput(tp, sopt));
 }
 
 int
@@ -1987,9 +2000,9 @@ no_mem_needed:
 }
 
 int
-tcp_default_ctloutput(struct inpcb *inp, struct sockopt *sopt)
+tcp_default_ctloutput(struct tcpcb *tp, struct sockopt *sopt)
 {
-	struct tcpcb *tp = intotcpcb(inp);
+	struct inpcb *inp = tptoinpcb(tp);
 	int	error, opt, optval;
 	u_int	ui;
 	struct	tcp_info ti;
@@ -2320,7 +2333,8 @@ unlock_and_done:
 
 			INP_WLOCK_RECHECK(inp);
 			if (optval >= 0)
-				tcp_pcap_set_sock_max(TCP_PCAP_OUT ?
+				tcp_pcap_set_sock_max(
+					(sopt->sopt_name == TCP_PCAP_OUT) ?
 					&(tp->t_outpkts) : &(tp->t_inpkts),
 					optval);
 			else
@@ -2561,7 +2575,8 @@ unhold:
 #ifdef TCPPCAP
 		case TCP_PCAP_OUT:
 		case TCP_PCAP_IN:
-			optval = tcp_pcap_get_sock_max(TCP_PCAP_OUT ?
+			optval = tcp_pcap_get_sock_max(
+					(sopt->sopt_name == TCP_PCAP_OUT) ?
 					&(tp->t_outpkts) : &(tp->t_inpkts));
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof optval);
@@ -2574,7 +2589,7 @@ unhold:
 			break;
 #ifdef TCP_BLACKBOX
 		case TCP_LOG:
-			optval = tp->t_logstate;
+			optval = tcp_get_bblog_state(tp);
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;

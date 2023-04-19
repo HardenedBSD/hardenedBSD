@@ -2056,7 +2056,7 @@ ifaof_ifpforaddr(const struct sockaddr *addr, struct ifnet *ifp)
 			continue;
 		}
 		if (ifp->if_flags & IFF_POINTOPOINT) {
-			if (sa_equal(addr, ifa->ifa_dstaddr))
+			if (ifa->ifa_dstaddr && sa_equal(addr, ifa->ifa_dstaddr))
 				goto done;
 		} else {
 			cp = addr->sa_data;
@@ -2425,7 +2425,7 @@ const struct ifcap_nv_bit_name ifcap_nv_bit_names[] = {
 	CAPNV(TXTLS_RTLMT),
 	{0, NULL}
 };
-#define CAP2NV(x) {.cap_bit = IFCAP2_##x, \
+#define CAP2NV(x) {.cap_bit = IFCAP2_BIT(IFCAP2_##x), \
     .cap_name = __CONCAT(IFCAP2_, __CONCAT(x, _NAME)) }
 const struct ifcap_nv_bit_name ifcap2_nv_bit_names[] = {
 	CAP2NV(RXTLS4),
@@ -2853,12 +2853,8 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 		/*
 		 * If the link MTU changed, do network layer specific procedure.
 		 */
-		if (ifp->if_mtu != oldmtu) {
-#ifdef INET6
-			nd6_setmtu(ifp);
-#endif
-			rt_updatemtu(ifp);
-		}
+		if (ifp->if_mtu != oldmtu)
+			if_notifymtu(ifp);
 		break;
 	}
 
@@ -4470,6 +4466,15 @@ if_setmtu(if_t ifp, int mtu)
 	return (0);
 }
 
+void
+if_notifymtu(if_t ifp)
+{
+#ifdef INET6
+	nd6_setmtu(ifp);
+#endif
+	rt_updatemtu(ifp);
+}
+
 int
 if_getmtu(const if_t ifp)
 {
@@ -4528,6 +4533,107 @@ if_foreach(if_foreach_cb_t cb, void *cb_arg)
 	}
 
 	return (error);
+}
+
+/*
+ * Iterates over the list of interfaces, permitting callback function @cb to sleep.
+ * Stops iteration if @cb returns non-zero error code.
+ * Returns the last error code from @cb.
+ * @match_cb: optional match callback limiting the iteration to only matched interfaces
+ * @match_arg: argument to pass to @match_cb
+ * @cb: iteration callback
+ * @cb_arg: argument to pass to @cb
+ */
+int
+if_foreach_sleep(if_foreach_match_t match_cb, void *match_arg, if_foreach_cb_t cb,
+    void *cb_arg)
+{
+	int match_count = 0, array_size = 16; /* 128 bytes for malloc */
+	struct ifnet **match_array = NULL;
+	int error = 0;
+
+	MPASS(cb);
+
+	while (true) {
+		struct ifnet **new_array;
+		int new_size = array_size;
+		struct epoch_tracker et;
+		struct ifnet *ifp;
+
+		while (new_size < match_count)
+			new_size *= 2;
+		new_array = malloc(new_size * sizeof(void *), M_TEMP, M_WAITOK);
+		if (match_array != NULL)
+			memcpy(new_array, match_array, array_size * sizeof(void *));
+		free(match_array, M_TEMP);
+		match_array = new_array;
+		array_size = new_size;
+
+		match_count = 0;
+		NET_EPOCH_ENTER(et);
+		CK_STAILQ_FOREACH(ifp, &V_ifnet, if_link) {
+			if (match_cb != NULL && !match_cb(ifp, match_arg))
+				continue;
+			if (match_count < array_size) {
+				if (if_try_ref(ifp))
+					match_array[match_count++] = ifp;
+			} else
+				match_count++;
+		}
+		NET_EPOCH_EXIT(et);
+
+		if (match_count > array_size) {
+			for (int i = 0; i < array_size; i++)
+				if_rele(match_array[i]);
+			continue;
+		} else {
+			for (int i = 0; i < match_count; i++) {
+				if (error == 0)
+					error = cb(match_array[i], cb_arg);
+				if_rele(match_array[i]);
+			}
+			free(match_array, M_TEMP);
+			break;
+		}
+	}
+
+	return (error);
+}
+
+
+/*
+ * Uses just 1 pointer of the 4 available in the public struct.
+ */
+if_t
+if_iter_start(struct if_iter *iter)
+{
+	if_t ifp;
+
+	NET_EPOCH_ASSERT();
+
+	bzero(iter, sizeof(*iter));
+	ifp = CK_STAILQ_FIRST(&V_ifnet);
+	if (ifp != NULL)
+		iter->context[0] = CK_STAILQ_NEXT(ifp, if_link);
+	else
+		iter->context[0] = NULL;
+	return (ifp);
+}
+
+if_t
+if_iter_next(struct if_iter *iter)
+{
+	if_t cur_ifp = iter->context[0];
+
+	if (cur_ifp != NULL)
+		iter->context[0] = CK_STAILQ_NEXT(cur_ifp, if_link);
+	return (cur_ifp);
+}
+
+void
+if_iter_finish(struct if_iter *iter)
+{
+	/* Nothing to do here for now. */
 }
 
 u_int

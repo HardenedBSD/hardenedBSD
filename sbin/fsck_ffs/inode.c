@@ -510,7 +510,7 @@ static ino_t nextinum, lastvalidinum;
 static long readcount, readpercg, fullcnt, inobufsize, partialcnt, partialsize;
 
 union dinode *
-getnextinode(ino_t inumber, int rebuildcg)
+getnextinode(ino_t inumber, int rebuiltcg)
 {
 	int j;
 	long size;
@@ -569,7 +569,7 @@ getnextinode(ino_t inumber, int rebuildcg)
 			dirty(&inobuf);
 		}
 	}
-	if (rebuildcg && (char *)dp == inobuf.b_un.b_buf) {
+	if (rebuiltcg && (char *)dp == inobuf.b_un.b_buf) {
 		/*
 		 * Try to determine if we have reached the end of the
 		 * allocated inodes.
@@ -661,9 +661,8 @@ freeblock(struct inodesc *idesc)
 	struct bufarea *cgbp;
 	struct cg *cgp;
 	ufs2_daddr_t blkno;
-	long size, nfrags, res;
+	long size, nfrags;
 
-	res = KEEPON;
 	blkno = idesc->id_blkno;
 	if (idesc->id_type == SNAP) {
 		pfatal("clearing a snapshot dinode\n");
@@ -672,10 +671,10 @@ freeblock(struct inodesc *idesc)
 	size = lfragtosize(&sblock, idesc->id_numfrags);
 	if (snapblkfree(&sblock, blkno, size, idesc->id_number,
 	    std_checkblkavail))
-		return (res);
+		return (KEEPON);
 	for (nfrags = idesc->id_numfrags; nfrags > 0; blkno++, nfrags--) {
 		if (chkrange(blkno, 1)) {
-			res = SKIP;
+			return (SKIP);
 		} else if (testbmap(blkno)) {
 			for (dlp = duplist; dlp; dlp = dlp->next) {
 				if (dlp->dup != blkno)
@@ -704,7 +703,7 @@ freeblock(struct inodesc *idesc)
 			cgp->cg_cs.cs_nffree += idesc->id_numfrags;
 		cgdirty(cgbp);
 	}
-	return (res);
+	return (KEEPON);
 }
 
 /*
@@ -748,6 +747,7 @@ snapremove(ino_t inum)
 		bzero(&snaplist[i - 1], sizeof(struct inode));
 		snapcnt--;
 	}
+	memset(&idesc, 0, sizeof(struct inodesc));
 	idesc.id_type = SNAP;
 	idesc.id_func = snapclean;
 	idesc.id_number = inum;
@@ -768,14 +768,15 @@ snapclean(struct inodesc *idesc)
 	if (blkno == 0)
 		return (KEEPON);
 
-	bp = idesc->id_bp;
 	dp = idesc->id_dp;
 	if (blkno == BLK_NOCOPY || blkno == BLK_SNAP) {
-		if (idesc->id_lbn < UFS_NDADDR)
+		if (idesc->id_lbn < UFS_NDADDR) {
 			DIP_SET(dp, di_db[idesc->id_lbn], 0);
-		else
+		} else {
+			bp = idesc->id_bp;
 			IBLK_SET(bp, bp->b_index, 0);
-		dirty(bp);
+			dirty(bp);
+		}
 	}
 	return (KEEPON);
 }
@@ -799,12 +800,8 @@ snapclean(struct inodesc *idesc)
  * must always have been allocated from a BLK_NOCOPY location.
  */
 int
-snapblkfree(fs, bno, size, inum, checkblkavail)
-	struct fs *fs;
-	ufs2_daddr_t bno;
-	long size;
-	ino_t inum;
-	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags);
+snapblkfree(struct fs *fs, ufs2_daddr_t bno, long size, ino_t inum,
+	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags))
 {
 	union dinode *dp;
 	struct inode ip;
@@ -931,10 +928,8 @@ snapblkfree(fs, bno, size, inum, checkblkavail)
  * block. Here we need to check each block in the buffer.
  */
 void
-copyonwrite(fs, bp, checkblkavail)
-	struct fs *fs;
-	struct bufarea *bp;
-	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags);
+copyonwrite(struct fs *fs, struct bufarea *bp,
+	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags))
 {
 	ufs2_daddr_t copyblkno;
 	long i, numblks;
@@ -954,10 +949,8 @@ copyonwrite(fs, bp, checkblkavail)
 }
 
 static void
-chkcopyonwrite(fs, copyblkno, checkblkavail)
-	struct fs *fs;
-	ufs2_daddr_t copyblkno;
-	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags);
+chkcopyonwrite(struct fs *fs, ufs2_daddr_t copyblkno,
+	ufs2_daddr_t (*checkblkavail)(ufs2_daddr_t blkno, long frags))
 {
 	struct inode ip;
 	union dinode *dp;
@@ -1122,7 +1115,7 @@ freeinodebuf(void)
 struct inoinfo *
 cacheino(union dinode *dp, ino_t inumber)
 {
-	struct inoinfo *inp, **inpp;
+	struct inoinfo *inp;
 	int i, blks;
 
 	if (getinoinfo(inumber) != NULL)
@@ -1138,14 +1131,13 @@ cacheino(union dinode *dp, ino_t inumber)
 		Malloc(sizeof(*inp) + (blks - 1) * sizeof(ufs2_daddr_t));
 	if (inp == NULL)
 		errx(EEXIT, "cannot increase directory list");
-	inpp = &inphead[inumber % dirhash];
-	inp->i_nexthash = *inpp;
-	*inpp = inp;
+	SLIST_INSERT_HEAD(&inphash[inumber % dirhash], inp, i_hash);
 	inp->i_flags = 0;
 	inp->i_parent = inumber == UFS_ROOTINO ? UFS_ROOTINO : (ino_t)0;
 	inp->i_dotdot = (ino_t)0;
 	inp->i_number = inumber;
 	inp->i_isize = DIP(dp, di_size);
+	inp->i_depth = DIP(dp, di_dirdepth);
 	inp->i_numblks = blks;
 	for (i = 0; i < MIN(blks, UFS_NDADDR); i++)
 		inp->i_blks[i] = DIP(dp, di_db[i]);
@@ -1171,12 +1163,43 @@ getinoinfo(ino_t inumber)
 {
 	struct inoinfo *inp;
 
-	for (inp = inphead[inumber % dirhash]; inp; inp = inp->i_nexthash) {
+	SLIST_FOREACH(inp, &inphash[inumber % dirhash], i_hash) {
 		if (inp->i_number != inumber)
 			continue;
 		return (inp);
 	}
-	return ((struct inoinfo *)0);
+	return (NULL);
+}
+
+/*
+ * Remove an entry from the inode cache and disk-order sorted list.
+ * Return 0 on success and 1 on failure.
+ */
+int
+removecachedino(ino_t inumber)
+{
+	struct inoinfo *inp, **inpp;
+	char *listtype;
+
+	listtype = "hash";
+	SLIST_FOREACH(inp, &inphash[inumber % dirhash], i_hash) {
+		if (inp->i_number != inumber)
+			continue;
+		SLIST_REMOVE(&inphash[inumber % dirhash], inp, inoinfo, i_hash);
+		for (inpp = &inpsort[inplast - 1]; inpp >= inpsort; inpp--) {
+			if (*inpp != inp)
+				continue;
+			*inpp = inpsort[inplast - 1];
+			inplast--;
+			free(inp);
+			return (0);
+		}
+		listtype = "sort";
+		break;
+	}
+	pfatal("removecachedino: entry for ino %jd not found on %s list\n",
+	    (intmax_t)inumber, listtype);
+	return (1);
 }
 
 /*
@@ -1187,13 +1210,14 @@ inocleanup(void)
 {
 	struct inoinfo **inpp;
 
-	if (inphead == NULL)
+	if (inphash == NULL)
 		return;
 	for (inpp = &inpsort[inplast - 1]; inpp >= inpsort; inpp--)
 		free((char *)(*inpp));
-	free((char *)inphead);
+	free((char *)inphash);
+	inphash = NULL;
 	free((char *)inpsort);
-	inphead = inpsort = NULL;
+	inpsort = NULL;
 }
 
 void
@@ -1310,8 +1334,8 @@ prtinode(struct inode *ip)
 		printf("%s: ", cdevname);
 	printf("SIZE=%ju ", (uintmax_t)DIP(dp, di_size));
 	t = DIP(dp, di_mtime);
-	p = ctime(&t);
-	printf("MTIME=%12.12s %4.4s ", &p[4], &p[20]);
+	if ((p = ctime(&t)) != NULL)
+		printf("MTIME=%12.12s %4.4s ", &p[4], &p[20]);
 }
 
 void
@@ -1428,7 +1452,7 @@ freeino(ino_t ino)
 	struct inode ip;
 
 	memset(&idesc, 0, sizeof(struct inodesc));
-	idesc.id_type = inoinfo(ino)->ino_idtype;
+	idesc.id_type = ADDR;
 	idesc.id_func = freeblock;
 	idesc.id_number = ino;
 	ginode(ino, &ip);

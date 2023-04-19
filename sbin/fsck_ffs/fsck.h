@@ -303,16 +303,19 @@ extern struct dups *muldup;		/* end of unique duplicate dup block numbers */
 /*
  * Inode cache data structures.
  */
-extern struct inoinfo {
-	struct	inoinfo *i_nexthash;	/* next entry in hash chain */
+struct inoinfo {
+	SLIST_ENTRY(inoinfo) i_hash;	/* hash list */
 	ino_t	i_number;		/* inode number of this entry */
 	ino_t	i_parent;		/* inode number of parent */
 	ino_t	i_dotdot;		/* inode number of `..' */
 	size_t	i_isize;		/* size of inode */
+	u_int	i_depth;		/* depth of directory from root */
 	u_int	i_flags;		/* flags, see below */
 	u_int	i_numblks;		/* size of block array in bytes */
 	ufs2_daddr_t i_blks[1];		/* actually longer */
-} **inphead, **inpsort;
+};
+extern SLIST_HEAD(inohash, inoinfo) *inphash;
+extern struct inoinfo **inpsort;
 /*
  * flags for struct inoinfo
  */
@@ -343,6 +346,7 @@ extern off_t bflag;		/* location of alternate super block */
 extern int bkgrdflag;		/* use a snapshot to run on an active system */
 extern char *blockmap;		/* ptr to primary blk allocation map */
 extern char *cdevname;		/* name of device being checked */
+extern int cgheader_corrupt;	/* one or more CG headers are corrupt */
 extern char ckclean;		/* only do work if not cleanly unmounted */
 extern int ckhashadd;		/* check hashes to be added */
 extern char *copybuf;		/* buffer to copy snapshot blocks */
@@ -460,9 +464,10 @@ void		catch(int);
 void		catchquit(int);
 void		cgdirty(struct bufarea *);
 struct bufarea *cglookup(int cg);
-int		changeino(ino_t dir, const char *name, ino_t newnum);
+int		changeino(ino_t dir, const char *name, ino_t newnum, int depth);
 void		check_blkcnt(struct inode *ip);
 int		check_cgmagic(int cg, struct bufarea *cgbp, int requestrebuild);
+void		check_dirdepth(struct inoinfo *inp);
 int		chkrange(ufs2_daddr_t blk, int cnt);
 void		ckfini(int markclean);
 int		ckinode(union dinode *dp, struct inodesc *);
@@ -480,6 +485,7 @@ int		findino(struct inodesc *);
 int		findname(struct inodesc *);
 void		flush(int fd, struct bufarea *bp);
 int		freeblock(struct inodesc *);
+void		freedirino(ino_t ino, ino_t parent);
 void		freeino(ino_t ino);
 void		freeinodebuf(void);
 void		fsckinit(void);
@@ -488,7 +494,7 @@ int		ftypeok(union dinode *dp);
 void		getblk(struct bufarea *bp, ufs2_daddr_t blk, long size);
 struct bufarea *getdatablk(ufs2_daddr_t blkno, long size, int type);
 struct inoinfo *getinoinfo(ino_t inumber);
-union dinode   *getnextinode(ino_t inumber, int rebuildcg);
+union dinode   *getnextinode(ino_t inumber, int rebuiltcg);
 void		getpathname(char *namebuf, ino_t curdir, ino_t ino);
 void		ginode(ino_t, struct inode *);
 void		gjournal_check(const char *filesys);
@@ -517,6 +523,7 @@ void		prtbuf(struct bufarea *, const char *, ...) __printflike(2, 3);
 void		prtinode(struct inode *);
 void		pwarn(const char *fmt, ...) __printflike(1, 2);
 int		readsb(void);
+int		removecachedino(ino_t);
 int		reply(const char *question);
 void		rwerror(const char *mesg, ufs2_daddr_t blk);
 void		sblock_init(void);

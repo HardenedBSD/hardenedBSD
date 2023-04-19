@@ -109,6 +109,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_vm.h"
 
 #include <sys/param.h>
+#include <sys/asan.h>
 #include <sys/bitstring.h>
 #include <sys/bus.h>
 #include <sys/systm.h>
@@ -147,6 +148,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_dumpset.h>
 #include <vm/uma.h>
 
+#include <machine/asan.h>
 #include <machine/machdep.h>
 #include <machine/md_var.h>
 #include <machine/pcb.h>
@@ -190,6 +192,9 @@ __FBSDID("$FreeBSD$");
 #define	pmap_l0_pindex(v)	(NUL2E + NUL1E + ((v) >> L0_SHIFT))
 #define	pmap_l1_pindex(v)	(NUL2E + ((v) >> L1_SHIFT))
 #define	pmap_l2_pindex(v)	((v) >> L2_SHIFT)
+
+#define	PMAP_SAN_PTE_BITS	(ATTR_DEFAULT | ATTR_S1_XN |	\
+	ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | ATTR_S1_AP(ATTR_S1_AP_RW))
 
 struct pmap_large_md_page {
 	struct rwlock   pv_lock;
@@ -403,6 +408,8 @@ SYSCTL_INT(_vm_pmap_vmid, OID_AUTO, epoch, CTLFLAG_RD, &vmids.asid_epoch, 0,
 
 void (*pmap_clean_stage2_tlbi)(void);
 void (*pmap_invalidate_vpipt_icache)(void);
+void (*pmap_stage2_invalidate_range)(uint64_t, vm_offset_t, vm_offset_t, bool);
+void (*pmap_stage2_invalidate_all)(uint64_t);
 
 /*
  * A pmap's cookie encodes an ASID and epoch number.  Cookies for reserved
@@ -1210,6 +1217,54 @@ pmap_bootstrap_l3(vm_offset_t va)
 		pmap_bootstrap_l2_table(&bs_state);
 }
 
+#ifdef KASAN
+static void
+pmap_bootstrap_allocate_kasan_l2(vm_paddr_t start_pa, vm_paddr_t end_pa,
+    vm_offset_t *start_va, int *nkasan_l2)
+{
+	int i;
+	vm_paddr_t pa;
+	vm_offset_t va;
+	pd_entry_t *l2;
+
+	va = *start_va;
+	pa = rounddown2(end_pa - L2_SIZE, L2_SIZE);
+	l2 = pmap_l2(kernel_pmap, va);
+
+	for (i = 0; pa >= start_pa && i < *nkasan_l2;
+	    i++, va += L2_SIZE, pa -= L2_SIZE, l2++) {
+		/*
+		 * KASAN stack checking results in us having already allocated
+		 * part of our shadow map, so we can just skip those segments.
+		 */
+		if ((pmap_load(l2) & ATTR_DESCR_VALID) != 0) {
+			pa += L2_SIZE;
+			continue;
+		}
+
+		pmap_store(l2, (pa & ~Ln_TABLE_MASK) | PMAP_SAN_PTE_BITS |
+		    L2_BLOCK);
+	}
+
+	/*
+	 * Ended the allocation due to start_pa constraint, rather than because
+	 * we allocated everything.  Adjust back up to the start_pa and remove
+	 * the invalid L2 block from our accounting.
+	 */
+	if (pa < start_pa) {
+		va += L2_SIZE;
+		i--;
+		pa = start_pa;
+	}
+
+	bzero((void *)PHYS_TO_DMAP(pa), i * L2_SIZE);
+	physmem_exclude_region(pa, i * L2_SIZE, EXFLAG_NOALLOC);
+
+	*nkasan_l2 -= i;
+	*start_va = va;
+}
+#endif
+
 /*
  *	Bootstrap the system enough to run with virtual memory.
  */
@@ -1310,6 +1365,68 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
 
 	cpu_tlb_flushID();
 }
+
+#if defined(KASAN)
+/*
+ * Finish constructing the initial shadow map:
+ * - Count how many pages from KERNBASE to virtual_avail (scaled for
+ *   shadow map)
+ * - Map that entire range using L2 superpages.
+ */
+void
+pmap_bootstrap_san(vm_paddr_t kernstart)
+{
+	vm_offset_t va;
+	int i, shadow_npages, nkasan_l2;
+
+	/*
+	 * Rebuild physmap one more time, we may have excluded more regions from
+	 * allocation since pmap_bootstrap().
+	 */
+	bzero(physmap, sizeof(physmap));
+	physmap_idx = physmem_avail(physmap, nitems(physmap));
+	physmap_idx /= 2;
+
+	shadow_npages = (virtual_avail - VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE;
+	shadow_npages = howmany(shadow_npages, KASAN_SHADOW_SCALE);
+	nkasan_l2 = howmany(shadow_npages, Ln_ENTRIES);
+
+	/* Map the valid KVA up to this point. */
+	va = KASAN_MIN_ADDRESS;
+
+	/*
+	 * Find a slot in the physmap large enough for what we needed.  We try to put
+	 * the shadow map as high up as we can to avoid depleting the lower 4GB in case
+	 * it's needed for, e.g., an xhci controller that can only do 32-bit DMA.
+	 */
+	for (i = (physmap_idx * 2) - 2; i >= 0 && nkasan_l2 > 0; i -= 2) {
+		vm_paddr_t plow, phigh;
+
+		/* L2 mappings must be backed by memory that is L2-aligned */
+		plow = roundup2(physmap[i], L2_SIZE);
+		phigh = physmap[i + 1];
+		if (plow >= phigh)
+			continue;
+		if (kernstart >= plow && kernstart < phigh)
+			phigh = kernstart;
+		if (phigh - plow >= L2_SIZE)
+			pmap_bootstrap_allocate_kasan_l2(plow, phigh, &va,
+			    &nkasan_l2);
+	}
+
+	if (nkasan_l2 != 0)
+		panic("Could not find phys region for shadow map");
+
+	/*
+	 * Done. We should now have a valid shadow address mapped for all KVA
+	 * that has been mapped so far, i.e., KERNBASE to virtual_avail. Thus,
+	 * shadow accesses by the kasan(9) runtime will succeed for this range.
+	 * When the kernel virtual address range is later expanded, as will
+	 * happen in vm_mem_init(), the shadow map will be grown as well. This
+	 * is handled by pmap_san_enter().
+	 */
+}
+#endif
 
 /*
  *	Initialize a vm_page's machine-dependent fields.
@@ -1550,6 +1667,24 @@ pmap_s1_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
 	isb();
 }
 
+static __inline void
+pmap_s2_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
+{
+	PMAP_ASSERT_STAGE2(pmap);
+	MPASS(pmap_stage2_invalidate_range != NULL);
+	pmap_stage2_invalidate_range(pmap_to_ttbr0(pmap), va, va + PAGE_SIZE,
+	    final_only);
+}
+
+static __inline void
+pmap_invalidate_page(pmap_t pmap, vm_offset_t va, bool final_only)
+{
+	if (pmap->pm_stage == PM_STAGE1)
+		pmap_s1_invalidate_page(pmap, va, final_only);
+	else
+		pmap_s2_invalidate_page(pmap, va, final_only);
+}
+
 /*
  * Invalidates any cached final- and optionally intermediate-level TLB entries
  * for the specified virtual address range in the given virtual address space.
@@ -1579,6 +1714,25 @@ pmap_s1_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 	isb();
 }
 
+static __inline void
+pmap_s2_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
+    bool final_only)
+{
+	PMAP_ASSERT_STAGE2(pmap);
+	MPASS(pmap_stage2_invalidate_range != NULL);
+	pmap_stage2_invalidate_range(pmap_to_ttbr0(pmap), sva, eva, final_only);
+}
+
+static __inline void
+pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
+    bool final_only)
+{
+	if (pmap->pm_stage == PM_STAGE1)
+		pmap_s1_invalidate_range(pmap, sva, eva, final_only);
+	else
+		pmap_s2_invalidate_range(pmap, sva, eva, final_only);
+}
+
 /*
  * Invalidates all cached intermediate- and final-level TLB entries for the
  * given virtual address space.
@@ -1599,6 +1753,23 @@ pmap_s1_invalidate_all(pmap_t pmap)
 	}
 	dsb(ish);
 	isb();
+}
+
+static __inline void
+pmap_s2_invalidate_all(pmap_t pmap)
+{
+	PMAP_ASSERT_STAGE2(pmap);
+	MPASS(pmap_stage2_invalidate_all != NULL);
+	pmap_stage2_invalidate_all(pmap_to_ttbr0(pmap));
+}
+
+static __inline void
+pmap_invalidate_all(pmap_t pmap)
+{
+	if (pmap->pm_stage == PM_STAGE1)
+		pmap_s1_invalidate_all(pmap);
+	else
+		pmap_s2_invalidate_all(pmap);
 }
 
 /*
@@ -2047,7 +2218,7 @@ _pmap_unwire_l3(pmap_t pmap, vm_offset_t va, vm_page_t m, struct spglist *free)
 		l1pg = PHYS_TO_VM_PAGE(tl0 & ~ATTR_MASK);
 		pmap_unwire_l3(pmap, va, l1pg, free);
 	}
-	pmap_s1_invalidate_page(pmap, va, false);
+	pmap_invalidate_page(pmap, va, false);
 
 	/*
 	 * Put page on a list so that it is released after
@@ -2525,6 +2696,8 @@ pmap_growkernel(vm_offset_t addr)
 	addr = roundup2(addr, L2_SIZE);
 	if (addr - 1 >= vm_map_max(kernel_map))
 		addr = vm_map_max(kernel_map);
+	if (kernel_vm_end < addr)
+		kasan_shadow_map(kernel_vm_end, addr - kernel_vm_end);
 	while (kernel_vm_end < addr) {
 		l0 = pmap_l0(kernel_pmap, kernel_vm_end);
 		KASSERT(pmap_load(l0) != 0,
@@ -3348,7 +3521,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 	for (l3 = pmap_l2_to_l3(&l2e, sva); sva != eva; l3++, sva += L3_SIZE) {
 		if (!pmap_l3_valid(pmap_load(l3))) {
 			if (va != eva) {
-				pmap_s1_invalidate_range(pmap, va, sva, true);
+				pmap_invalidate_range(pmap, va, sva, true);
 				va = eva;
 			}
 			continue;
@@ -3375,7 +3548,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 					 * still provides access to that page. 
 					 */
 					if (va != eva) {
-						pmap_s1_invalidate_range(pmap, va,
+						pmap_invalidate_range(pmap, va,
 						    sva, true);
 						va = eva;
 					}
@@ -3406,7 +3579,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			va = sva;
 	}
 	if (va != eva)
-		pmap_s1_invalidate_range(pmap, va, sva, true);
+		pmap_invalidate_range(pmap, va, sva, true);
 }
 
 /*
@@ -3567,7 +3740,6 @@ retry:
 	}
 	while ((pv = TAILQ_FIRST(&m->md.pv_list)) != NULL) {
 		pmap = PV_PMAP(pv);
-		PMAP_ASSERT_STAGE1(pmap);
 		if (!PMAP_TRYLOCK(pmap)) {
 			pvh_gen = pvh->pv_gen;
 			md_gen = m->md.pv_gen;
@@ -3593,7 +3765,7 @@ retry:
 		if (tpte & ATTR_SW_WIRED)
 			pmap->pm_stats.wired_count--;
 		if ((tpte & ATTR_AF) != 0) {
-			pmap_s1_invalidate_page(pmap, pv->pv_va, true);
+			pmap_invalidate_page(pmap, pv->pv_va, true);
 			vm_page_aflag_set(m, PGA_REFERENCED);
 		}
 
@@ -3666,14 +3838,14 @@ pmap_protect_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva, pt_entry_t mask,
  * pmap and range
  */
 static void
-pmap_mask_set(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t mask,
+pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t mask,
     pt_entry_t nbits, bool invalidate)
 {
 	vm_offset_t va, va_next;
 	pd_entry_t *l0, *l1, *l2;
 	pt_entry_t *l3p, l3;
 
-	PMAP_LOCK(pmap);
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	for (; sva < eva; sva = va_next) {
 		l0 = pmap_l0(pmap, sva);
 		if (pmap_load(l0) == 0) {
@@ -3767,6 +3939,14 @@ pmap_mask_set(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t mask,
 		if (va != va_next && invalidate)
 			pmap_s1_invalidate_range(pmap, va, sva, true);
 	}
+}
+
+static void
+pmap_mask_set(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t mask,
+    pt_entry_t nbits, bool invalidate)
+{
+	PMAP_LOCK(pmap);
+	pmap_mask_set_locked(pmap, sva, eva, mask, nbits, invalidate);
 	PMAP_UNLOCK(pmap);
 }
 
@@ -4313,12 +4493,6 @@ havel3:
 	 */
 	if (pmap_l3_valid(orig_l3)) {
 		/*
-		 * Only allow adding new entries on stage 2 tables for now.
-		 * This simplifies cache invalidation as we may need to call
-		 * into EL2 to perform such actions.
-		 */
-		PMAP_ASSERT_STAGE1(pmap);
-		/*
 		 * Wiring change, just update stats. We don't worry about
 		 * wiring PT pages as they remain resident as long as there
 		 * are valid mappings in them. Hence, if a user page is wired,
@@ -4372,7 +4546,7 @@ havel3:
 			if (pmap_pte_dirty(pmap, orig_l3))
 				vm_page_dirty(om);
 			if ((orig_l3 & ATTR_AF) != 0) {
-				pmap_s1_invalidate_page(pmap, va, true);
+				pmap_invalidate_page(pmap, va, true);
 				vm_page_aflag_set(om, PGA_REFERENCED);
 			}
 			CHANGE_PV_LIST_LOCK_TO_PHYS(&lock, opa);
@@ -4387,7 +4561,7 @@ havel3:
 		} else {
 			KASSERT((orig_l3 & ATTR_AF) != 0,
 			    ("pmap_enter: unmanaged mapping lacks ATTR_AF"));
-			pmap_s1_invalidate_page(pmap, va, true);
+			pmap_invalidate_page(pmap, va, true);
 		}
 		orig_l3 = 0;
 	} else {
@@ -4440,12 +4614,11 @@ validate:
 	 * Update the L3 entry
 	 */
 	if (pmap_l3_valid(orig_l3)) {
-		PMAP_ASSERT_STAGE1(pmap);
 		KASSERT(opa == pa, ("pmap_enter: invalid update"));
 		if ((orig_l3 & ~ATTR_AF) != (new_l3 & ~ATTR_AF)) {
 			/* same PA, different attributes */
 			orig_l3 = pmap_load_store(l3, new_l3);
-			pmap_s1_invalidate_page(pmap, va, true);
+			pmap_invalidate_page(pmap, va, true);
 			if ((orig_l3 & ATTR_SW_MANAGED) != 0 &&
 			    pmap_pte_dirty(pmap, orig_l3))
 				vm_page_dirty(m);
@@ -5589,7 +5762,7 @@ pmap_remove_pages(pmap_t pmap)
 	}
 	if (lock != NULL)
 		rw_wunlock(lock);
-	pmap_s1_invalidate_all(pmap);
+	pmap_invalidate_all(pmap);
 	free_pv_chunk_batch(free_chunks);
 	PMAP_UNLOCK(pmap);
 	vm_page_free_pages_toq(&free, true);
@@ -5756,7 +5929,7 @@ pmap_remove_write(vm_page_t m)
 	pmap_t pmap;
 	struct rwlock *lock;
 	pv_entry_t next_pv, pv;
-	pt_entry_t oldpte, *pte;
+	pt_entry_t oldpte, *pte, set, clear, mask, val;
 	vm_offset_t va;
 	int md_gen, pvh_gen;
 
@@ -5794,7 +5967,6 @@ retry:
 	}
 	TAILQ_FOREACH(pv, &m->md.pv_list, pv_next) {
 		pmap = PV_PMAP(pv);
-		PMAP_ASSERT_STAGE1(pmap);
 		if (!PMAP_TRYLOCK(pmap)) {
 			pvh_gen = pvh->pv_gen;
 			md_gen = m->md.pv_gen;
@@ -5810,13 +5982,25 @@ retry:
 		pte = pmap_pte_exists(pmap, pv->pv_va, 3, __func__);
 		oldpte = pmap_load(pte);
 		if ((oldpte & ATTR_SW_DBM) != 0) {
+			if (pmap->pm_stage == PM_STAGE1) {
+				set = ATTR_S1_AP_RW_BIT;
+				clear = 0;
+				mask = ATTR_S1_AP_RW_BIT;
+				val = ATTR_S1_AP(ATTR_S1_AP_RW);
+			} else {
+				set = 0;
+				clear = ATTR_S2_S2AP(ATTR_S2_S2AP_WRITE);
+				mask = ATTR_S2_S2AP(ATTR_S2_S2AP_WRITE);
+				val = ATTR_S2_S2AP(ATTR_S2_S2AP_WRITE);
+			}
+			clear |= ATTR_SW_DBM;
 			while (!atomic_fcmpset_64(pte, &oldpte,
-			    (oldpte | ATTR_S1_AP_RW_BIT) & ~ATTR_SW_DBM))
+			    (oldpte | set) & ~clear))
 				cpu_spinwait();
-			if ((oldpte & ATTR_S1_AP_RW_BIT) ==
-			    ATTR_S1_AP(ATTR_S1_AP_RW))
+
+			if ((oldpte & mask) == val)
 				vm_page_dirty(m);
-			pmap_s1_invalidate_page(pmap, pv->pv_va, true);
+			pmap_invalidate_page(pmap, pv->pv_va, true);
 		}
 		PMAP_UNLOCK(pmap);
 	}
@@ -5914,7 +6098,7 @@ retry:
 			    (uintptr_t)pmap) & (Ln_ENTRIES - 1)) == 0 &&
 			    (tpte & ATTR_SW_WIRED) == 0) {
 				pmap_clear_bits(pte, ATTR_AF);
-				pmap_s1_invalidate_page(pmap, va, true);
+				pmap_invalidate_page(pmap, va, true);
 				cleared++;
 			} else
 				not_cleared++;
@@ -5955,7 +6139,7 @@ small_mappings:
 		if ((tpte & ATTR_AF) != 0) {
 			if ((tpte & ATTR_SW_WIRED) == 0) {
 				pmap_clear_bits(pte, ATTR_AF);
-				pmap_s1_invalidate_page(pmap, pv->pv_va, true);
+				pmap_invalidate_page(pmap, pv->pv_va, true);
 				cleared++;
 			} else
 				not_cleared++;
@@ -7498,6 +7682,151 @@ pmap_is_valid_memattr(pmap_t pmap __unused, vm_memattr_t mode)
 	return (mode >= VM_MEMATTR_DEVICE && mode <= VM_MEMATTR_WRITE_THROUGH);
 }
 
+#if defined(KASAN)
+static vm_paddr_t	pmap_san_early_kernstart;
+static pd_entry_t	*pmap_san_early_l2;
+
+void __nosanitizeaddress
+pmap_san_bootstrap(struct arm64_bootparams *abp)
+{
+
+	pmap_san_early_kernstart = KERNBASE - abp->kern_delta;
+	kasan_init_early(abp->kern_stack, KSTACK_PAGES * PAGE_SIZE);
+}
+
+#define	SAN_BOOTSTRAP_L2_SIZE	(1 * L2_SIZE)
+#define	SAN_BOOTSTRAP_SIZE	(2 * PAGE_SIZE)
+static vm_offset_t __nosanitizeaddress
+pmap_san_enter_bootstrap_alloc_l2(void)
+{
+	static uint8_t bootstrap_data[SAN_BOOTSTRAP_L2_SIZE] __aligned(L2_SIZE);
+	static size_t offset = 0;
+	vm_offset_t addr;
+
+	if (offset + L2_SIZE > sizeof(bootstrap_data)) {
+		panic("%s: out of memory for the bootstrap shadow map L2 entries",
+		    __func__);
+	}
+
+	addr = (uintptr_t)&bootstrap_data[offset];
+	offset += L2_SIZE;
+	return (addr);
+}
+
+/*
+ * SAN L1 + L2 pages, maybe L3 entries later?
+ */
+static vm_offset_t __nosanitizeaddress
+pmap_san_enter_bootstrap_alloc_pages(int npages)
+{
+	static uint8_t bootstrap_data[SAN_BOOTSTRAP_SIZE] __aligned(PAGE_SIZE);
+	static size_t offset = 0;
+	vm_offset_t addr;
+
+	if (offset + (npages * PAGE_SIZE) > sizeof(bootstrap_data)) {
+		panic("%s: out of memory for the bootstrap shadow map",
+		    __func__);
+	}
+
+	addr = (uintptr_t)&bootstrap_data[offset];
+	offset += (npages * PAGE_SIZE);
+	return (addr);
+}
+
+static void __nosanitizeaddress
+pmap_san_enter_bootstrap(void)
+{
+	vm_offset_t freemempos;
+
+	/* L1, L2 */
+	freemempos = pmap_san_enter_bootstrap_alloc_pages(2);
+	bs_state.freemempos = freemempos;
+	bs_state.va = KASAN_MIN_ADDRESS;
+	pmap_bootstrap_l1_table(&bs_state);
+	pmap_san_early_l2 = bs_state.l2;
+}
+
+static vm_page_t
+pmap_san_enter_alloc_l3(void)
+{
+	vm_page_t m;
+
+	m = vm_page_alloc_noobj(VM_ALLOC_INTERRUPT | VM_ALLOC_WIRED |
+	    VM_ALLOC_ZERO);
+	if (m == NULL)
+		panic("%s: no memory to grow shadow map", __func__);
+	return (m);
+}
+
+static vm_page_t
+pmap_san_enter_alloc_l2(void)
+{
+	return (vm_page_alloc_noobj_contig(VM_ALLOC_WIRED | VM_ALLOC_ZERO,
+	    Ln_ENTRIES, 0, ~0ul, L2_SIZE, 0, VM_MEMATTR_DEFAULT));
+}
+
+void __nosanitizeaddress
+pmap_san_enter(vm_offset_t va)
+{
+	pd_entry_t *l1, *l2;
+	pt_entry_t *l3;
+	vm_page_t m;
+
+	if (virtual_avail == 0) {
+		vm_offset_t block;
+		int slot;
+		bool first;
+
+		/* Temporary shadow map prior to pmap_bootstrap(). */
+		first = pmap_san_early_l2 == NULL;
+		if (first)
+			pmap_san_enter_bootstrap();
+
+		l2 = pmap_san_early_l2;
+		slot = pmap_l2_index(va);
+
+		if ((pmap_load(&l2[slot]) & ATTR_DESCR_VALID) == 0) {
+			MPASS(first);
+			block = pmap_san_enter_bootstrap_alloc_l2();
+			pmap_store(&l2[slot], pmap_early_vtophys(block) |
+			    PMAP_SAN_PTE_BITS | L2_BLOCK);
+			dmb(ishst);
+		}
+
+		return;
+	}
+
+	mtx_assert(&kernel_map->system_mtx, MA_OWNED);
+	l1 = pmap_l1(kernel_pmap, va);
+	MPASS(l1 != NULL);
+	if ((pmap_load(l1) & ATTR_DESCR_VALID) == 0) {
+		m = pmap_san_enter_alloc_l3();
+		pmap_store(l1, (VM_PAGE_TO_PHYS(m) & ~Ln_TABLE_MASK) |
+		    L1_TABLE);
+	}
+	l2 = pmap_l1_to_l2(l1, va);
+	if ((pmap_load(l2) & ATTR_DESCR_VALID) == 0) {
+		m = pmap_san_enter_alloc_l2();
+		if (m != NULL) {
+			pmap_store(l2, VM_PAGE_TO_PHYS(m) | PMAP_SAN_PTE_BITS |
+			    L2_BLOCK);
+		} else {
+			m = pmap_san_enter_alloc_l3();
+			pmap_store(l2, VM_PAGE_TO_PHYS(m) | L2_TABLE);
+		}
+		dmb(ishst);
+	}
+	if ((pmap_load(l2) & ATTR_DESCR_MASK) == L2_BLOCK)
+		return;
+	l3 = pmap_l2_to_l3(l2, va);
+	if ((pmap_load(l3) & ATTR_DESCR_VALID) != 0)
+		return;
+	m = pmap_san_enter_alloc_l3();
+	pmap_store(l3, VM_PAGE_TO_PHYS(m) | PMAP_SAN_PTE_BITS | L3_PAGE);
+	dmb(ishst);
+}
+#endif /* KASAN */
+
 #ifndef PAX_HARDENING
 /*
  * Track a range of the kernel's virtual address space that is contiguous
@@ -7524,6 +7853,9 @@ sysctl_kmaps_dump(struct sbuf *sb, struct pmap_kernel_map_range *range,
 
 	index = range->attrs & ATTR_S1_IDX_MASK;
 	switch (index) {
+	case ATTR_S1_IDX(VM_MEMATTR_DEVICE_NP):
+		mode = "DEV-NP";
+		break;
 	case ATTR_S1_IDX(VM_MEMATTR_DEVICE):
 		mode = "DEV";
 		break;
@@ -7544,7 +7876,7 @@ sysctl_kmaps_dump(struct sbuf *sb, struct pmap_kernel_map_range *range,
 		break;
 	}
 
-	sbuf_printf(sb, "0x%016lx-0x%016lx r%c%c%c%c %3s %d %d %d %d\n",
+	sbuf_printf(sb, "0x%016lx-0x%016lx r%c%c%c%c %6s %d %d %d %d\n",
 	    range->sva, eva,
 	    (range->attrs & ATTR_S1_AP_RW_BIT) == ATTR_S1_AP_RW ? 'w' : '-',
 	    (range->attrs & ATTR_S1_PXN) != 0 ? '-' : 'x',
@@ -7667,6 +7999,10 @@ sysctl_kmaps(SYSCTL_HANDLER_ARGS)
 			sbuf_printf(sb, "\nDirect map:\n");
 		else if (i == pmap_l0_index(VM_MIN_KERNEL_ADDRESS))
 			sbuf_printf(sb, "\nKernel map:\n");
+#ifdef KASAN
+		else if (i == pmap_l0_index(KASAN_MIN_ADDRESS))
+			sbuf_printf(sb, "\nKASAN shadow map:\n");
+#endif
 
 		l0e = kernel_pmap->pm_l0[i];
 		if ((l0e & ATTR_DESCR_VALID) == 0) {

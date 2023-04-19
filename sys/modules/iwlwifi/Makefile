@@ -63,9 +63,6 @@ CFLAGS+=	-DCONFIG_IWLWIFI_DEVICE_TRACING=1
 #CFLAGS+=	-DCONFIG_THERMAL=1
 #CFLAGS+=	-DCONFIG_EFI=1
 
-# GCC warns about NULL format strings passed to iwl_fw_dbg_collect_trig
-CWARNFLAGS.gcc+= -Wno-format
-
 TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
 
 .include <bsd.kmod.mk>

@@ -34,6 +34,7 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/event.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 
@@ -47,6 +48,7 @@ __FBSDID("$FreeBSD$");
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -58,50 +60,73 @@ __FBSDID("$FreeBSD$");
 
 #define LBUF_SIZE 4096
 
-struct log_params {
-	int dosyslog;
-	int logpri;
-	int noclose;
-	int outfd;
-	const char *outfn;
+enum daemon_mode {
+	MODE_DAEMON = 0,   /* simply daemonize, no supervision */
+	MODE_SUPERVISE,    /* initial supervision state */
+	MODE_TERMINATING,  /* user requested termination */
+	MODE_NOCHILD,      /* child is terminated, final state of the event loop */
+};
+
+struct daemon_state {
+	int pipe_fd[2];
+	char **argv;
+	const char *child_pidfile;
+	const char *parent_pidfile;
+	const char *output_filename;
+	const char *syslog_tag;
+	const char *title;
+	const char *user;
+	struct pidfh *parent_pidfh;
+	struct pidfh *child_pidfh;
+	enum daemon_mode mode;
+	int pid;
+	int keep_cur_workdir;
+	int restart_delay;
+	int stdmask;
+	int syslog_priority;
+	int syslog_facility;
+	int keep_fds_open;
+	int output_fd;
+	bool restart_enabled;
+	bool syslog_enabled;
+	bool log_reopen;
 };
 
 static void restrict_process(const char *);
-static void handle_term(int);
-static void handle_chld(int);
-static void handle_hup(int);
-static int open_log(const char *);
-static void reopen_log(struct log_params *);
-static int  listen_child(int, struct log_params *);
+static int  open_log(const char *);
+static void reopen_log(struct daemon_state *);
+static bool listen_child(int, struct daemon_state *);
 static int  get_log_mapping(const char *, const CODE *);
-static void open_pid_files(const char *, const char *, struct pidfh **,
-			   struct pidfh **);
-static void do_output(const unsigned char *, size_t, struct log_params *);
-static void daemon_sleep(time_t, long);
-
-static volatile sig_atomic_t terminate = 0, child_gone = 0, pid = 0,
-  do_log_reopen = 0;
+static void open_pid_files(struct daemon_state *);
+static void do_output(const unsigned char *, size_t, struct daemon_state *);
+static void daemon_sleep(struct daemon_state *);
+static void daemon_state_init(struct daemon_state *);
+static void daemon_eventloop(struct daemon_state *);
+static void daemon_terminate(struct daemon_state *);
+static void daemon_exec(struct daemon_state *);
+static bool daemon_is_child_dead(struct daemon_state *);
+static void daemon_set_child_pipe(struct daemon_state *);
 
 static const char shortopts[] = "+cfHSp:P:ru:o:s:l:t:m:R:T:h";
 
 static const struct option longopts[] = {
-        { "change-dir",         no_argument,            NULL,           'c' },
-        { "close-fds",          no_argument,            NULL,           'f' },
-        { "sighup",             no_argument,            NULL,           'H' },
-        { "syslog",             no_argument,            NULL,           'S' },
-        { "output-file",        required_argument,      NULL,           'o' },
-        { "output-mask",        required_argument,      NULL,           'm' },
-        { "child-pidfile",      required_argument,      NULL,           'p' },
-        { "supervisor-pidfile", required_argument,      NULL,           'P' },
-        { "restart",            no_argument,            NULL,           'r' },
-        { "restart-delay",      required_argument,      NULL,           'R' },
-        { "title",              required_argument,      NULL,           't' },
-        { "user",               required_argument,      NULL,           'u' },
-        { "syslog-priority",    required_argument,      NULL,           's' },
-        { "syslog-facility",    required_argument,      NULL,           'l' },
-        { "syslog-tag",         required_argument,      NULL,           'T' },
-        { "help",               no_argument,            NULL,           'h' },
-        { NULL,                 0,                      NULL,            0  }
+	{ "change-dir",         no_argument,            NULL,           'c' },
+	{ "close-fds",          no_argument,            NULL,           'f' },
+	{ "sighup",             no_argument,            NULL,           'H' },
+	{ "syslog",             no_argument,            NULL,           'S' },
+	{ "output-file",        required_argument,      NULL,           'o' },
+	{ "output-mask",        required_argument,      NULL,           'm' },
+	{ "child-pidfile",      required_argument,      NULL,           'p' },
+	{ "supervisor-pidfile", required_argument,      NULL,           'P' },
+	{ "restart",            no_argument,            NULL,           'r' },
+	{ "restart-delay",      required_argument,      NULL,           'R' },
+	{ "title",              required_argument,      NULL,           't' },
+	{ "user",               required_argument,      NULL,           'u' },
+	{ "syslog-priority",    required_argument,      NULL,           's' },
+	{ "syslog-facility",    required_argument,      NULL,           'l' },
+	{ "syslog-tag",         required_argument,      NULL,           'T' },
+	{ "help",               no_argument,            NULL,           'h' },
+	{ NULL,                 0,                      NULL,            0  }
 };
 
 static _Noreturn void
@@ -133,371 +158,388 @@ usage(int exitcode)
 	    "  --syslog-tag         -T <tag>   Set syslog tag\n"
 	    "  --help               -h         Show this help\n");
 
-        exit(exitcode);
+	exit(exitcode);
 }
 
 int
 main(int argc, char *argv[])
 {
-	const char *pidfile, *ppidfile, *title, *user, *outfn, *logtag;
-	int ch, nochdir, noclose, restart, dosyslog, child_eof;
-	sigset_t mask_susp, mask_orig, mask_read, mask_term;
-	struct log_params logpar;
-	int pfd[2] = { -1, -1 }, outfd = -1;
-	int stdmask, logpri, logfac, log_reopen;
-	struct pidfh *ppfh, *pfh;
-	char *p;
+	char *p = NULL;
+	int ch = 0;
+	struct daemon_state state;
 
-	memset(&logpar, 0, sizeof(logpar));
-	stdmask = STDOUT_FILENO | STDERR_FILENO;
-	ppidfile = pidfile = user = NULL;
-	nochdir = noclose = 1;
-	logpri = LOG_NOTICE;
-	logfac = LOG_DAEMON;
-	logtag = "daemon";
-	restart = 0;
-	dosyslog = 0;
-	log_reopen = 0;
-	outfn = NULL;
-	title = NULL;
+	daemon_state_init(&state);
+
+	/* Signals are processed via kqueue */
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
+
+	/*
+	 * Supervision mode is enabled if one of the following options are used:
+	 * --child-pidfile -p
+	 * --supervisor-pidfile -P
+	 * --restart -r / --restart-delay -R
+	 * --syslog -S
+	 * --syslog-facility -l
+	 * --syslog-priority -s
+	 * --syslog-tag -T
+	 *
+	 * In supervision mode daemon executes the command in a forked process
+	 * and observes the child by waiting for SIGCHILD. In supervision mode
+	 * daemon must never exit before the child, this is necessary  to prevent
+	 * orphaning the child and leaving a stale pid file.
+	 * To achieve this daemon catches SIGTERM and
+	 * forwards it to the child, expecting to get SIGCHLD eventually.
+	 */
 	while ((ch = getopt_long(argc, argv, shortopts, longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'c':
-			nochdir = 0;
+			state.keep_cur_workdir = 0;
 			break;
 		case 'f':
-			noclose = 0;
+			state.keep_fds_open = 0;
 			break;
 		case 'H':
-			log_reopen = 1;
+			state.log_reopen = true;
 			break;
 		case 'l':
-			logfac = get_log_mapping(optarg, facilitynames);
-			if (logfac == -1)
+			state.syslog_facility = get_log_mapping(optarg,
+			    facilitynames);
+			if (state.syslog_facility == -1) {
 				errx(5, "unrecognized syslog facility");
-			dosyslog = 1;
+			}
+			state.syslog_enabled = true;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'm':
-			stdmask = strtol(optarg, &p, 10);
-			if (p == optarg || stdmask < 0 || stdmask > 3)
+			state.stdmask = strtol(optarg, &p, 10);
+			if (p == optarg || state.stdmask < 0 || state.stdmask > 3) {
 				errx(6, "unrecognized listening mask");
+			}
 			break;
 		case 'o':
-			outfn = optarg;
+			state.output_filename = optarg;
+			/*
+			 * TODO: setting output filename doesn't have to turn
+			 * the supervision mode on. For non-supervised mode
+			 * daemon could open the specified file and set it's
+			 * descriptor as both stderr and stout before execve()
+			 */
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'p':
-			pidfile = optarg;
+			state.child_pidfile = optarg;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'P':
-			ppidfile = optarg;
+			state.parent_pidfile = optarg;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'r':
-			restart = 1;
+			state.restart_enabled = true;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'R':
-			restart = strtol(optarg, &p, 0);
-			if (p == optarg || restart < 1)
+			state.restart_enabled = true;
+			state.restart_delay = strtol(optarg, &p, 0);
+			if (p == optarg || state.restart_delay < 1) {
 				errx(6, "invalid restart delay");
+			}
 			break;
 		case 's':
-			logpri = get_log_mapping(optarg, prioritynames);
-			if (logpri == -1)
+			state.syslog_priority = get_log_mapping(optarg,
+			    prioritynames);
+			if (state.syslog_priority == -1) {
 				errx(4, "unrecognized syslog priority");
-			dosyslog = 1;
+			}
+			state.syslog_enabled = true;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'S':
-			dosyslog = 1;
+			state.syslog_enabled = true;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 't':
-			title = optarg;
+			state.title = optarg;
 			break;
 		case 'T':
-			logtag = optarg;
-			dosyslog = 1;
+			state.syslog_tag = optarg;
+			state.syslog_enabled = true;
+			state.mode = MODE_SUPERVISE;
 			break;
 		case 'u':
-			user = optarg;
+			state.user = optarg;
 			break;
-                case 'h':
+		case 'h':
 			usage(0);
-                        __builtin_unreachable();
+			__builtin_unreachable();
 		default:
 			usage(1);
 		}
 	}
 	argc -= optind;
 	argv += optind;
+	state.argv = argv;
 
-	if (argc == 0)
+	if (argc == 0) {
 		usage(1);
-
-	if (!title)
-		title = argv[0];
-
-	if (outfn) {
-		outfd = open_log(outfn);
-		if (outfd == -1)
-			err(7, "open");
 	}
 
-	if (dosyslog)
-		openlog(logtag, LOG_PID | LOG_NDELAY, logfac);
+	if (!state.title) {
+		state.title = argv[0];
+	}
 
-	ppfh = pfh = NULL;
+	if (state.output_filename) {
+		state.output_fd = open_log(state.output_filename);
+		if (state.output_fd == -1) {
+			err(7, "open");
+		}
+	}
+
+	if (state.syslog_enabled) {
+		openlog(state.syslog_tag, LOG_PID | LOG_NDELAY,
+		    state.syslog_facility);
+	}
+
 	/*
 	 * Try to open the pidfile before calling daemon(3),
 	 * to be able to report the error intelligently
 	 */
-	open_pid_files(pidfile, ppidfile, &pfh, &ppfh);
-	if (daemon(nochdir, noclose) == -1) {
+	open_pid_files(&state);
+
+	/*
+	 * TODO: add feature to avoid backgrounding
+	 * i.e. --foreground, -f
+	 */
+	if (daemon(state.keep_cur_workdir, state.keep_fds_open) == -1) {
 		warn("daemon");
-		goto exit;
+		daemon_terminate(&state);
 	}
+
+	if (state.mode == MODE_DAEMON) {
+		daemon_exec(&state);
+	}
+
 	/* Write out parent pidfile if needed. */
-	pidfile_write(ppfh);
-	/*
-	 * If the pidfile or restart option is specified the daemon
-	 * executes the command in a forked process and wait on child
-	 * exit to remove the pidfile or restart the command. Normally
-	 * we don't want the monitoring daemon to be terminated
-	 * leaving the running process and the stale pidfile, so we
-	 * catch SIGTERM and forward it to the children expecting to
-	 * get SIGCHLD eventually. We also must fork() to obtain a
-	 * readable pipe with the child for writing to a log file
-	 * and syslog.
-	 */
-	pid = -1;
-	if (pidfile || ppidfile || restart || outfd != -1 || dosyslog) {
-		struct sigaction act_term, act_chld, act_hup;
+	pidfile_write(state.parent_pidfh);
 
-		/* Avoid PID racing with SIGCHLD and SIGTERM. */
-		memset(&act_term, 0, sizeof(act_term));
-		act_term.sa_handler = handle_term;
-		sigemptyset(&act_term.sa_mask);
-		sigaddset(&act_term.sa_mask, SIGCHLD);
+	do {
+		state.mode = MODE_SUPERVISE;
+		daemon_eventloop(&state);
+		daemon_sleep(&state);
+	} while (state.restart_enabled);
 
-		memset(&act_chld, 0, sizeof(act_chld));
-		act_chld.sa_handler = handle_chld;
-		sigemptyset(&act_chld.sa_mask);
-		sigaddset(&act_chld.sa_mask, SIGTERM);
-
-		memset(&act_hup, 0, sizeof(act_hup));
-		act_hup.sa_handler = handle_hup;
-		sigemptyset(&act_hup.sa_mask);
-
-		/* Block these when avoiding racing before sigsuspend(). */
-		sigemptyset(&mask_susp);
-		sigaddset(&mask_susp, SIGTERM);
-		sigaddset(&mask_susp, SIGCHLD);
-		/* Block SIGTERM when we lack a valid child PID. */
-		sigemptyset(&mask_term);
-		sigaddset(&mask_term, SIGTERM);
-		/*
-		 * When reading, we wish to avoid SIGCHLD. SIGTERM
-		 * has to be caught, otherwise we'll be stuck until
-		 * the read() returns - if it returns.
-		 */
-		sigemptyset(&mask_read);
-		sigaddset(&mask_read, SIGCHLD);
-		/* Block SIGTERM to avoid racing until we have forked. */
-		if (sigprocmask(SIG_BLOCK, &mask_term, &mask_orig)) {
-			warn("sigprocmask");
-			goto exit;
-		}
-		if (sigaction(SIGTERM, &act_term, NULL) == -1) {
-			warn("sigaction");
-			goto exit;
-		}
-		if (sigaction(SIGCHLD, &act_chld, NULL) == -1) {
-			warn("sigaction");
-			goto exit;
-		}
-		/*
-		 * Try to protect against pageout kill. Ignore the
-		 * error, madvise(2) will fail only if a process does
-		 * not have superuser privileges.
-		 */
-		(void)madvise(NULL, 0, MADV_PROTECT);
-		logpar.outfd = outfd;
-		logpar.dosyslog = dosyslog;
-		logpar.logpri = logpri;
-		logpar.noclose = noclose;
-		logpar.outfn = outfn;
-		if (log_reopen && outfd >= 0 &&
-		    sigaction(SIGHUP, &act_hup, NULL) == -1) {
-			warn("sigaction");
-			goto exit;
-		}
-restart:
-		if (pipe(pfd))
-			err(1, "pipe");
-		/*
-		 * Spawn a child to exec the command.
-		 */
-		child_gone = 0;
-		pid = fork();
-		if (pid == -1) {
-			warn("fork");
-			goto exit;
-		} else if (pid > 0) {
-			/*
-			 * Unblock SIGTERM after we know we have a valid
-			 * child PID to signal.
-			 */
-			if (sigprocmask(SIG_UNBLOCK, &mask_term, NULL)) {
-				warn("sigprocmask");
-				goto exit;
-			}
-			close(pfd[1]);
-			pfd[1] = -1;
-		}
-	}
-	if (pid <= 0) {
-		/* Now that we are the child, write out the pid. */
-		pidfile_write(pfh);
-
-		if (user != NULL)
-			restrict_process(user);
-		/*
-		 * When forking, the child gets the original sigmask,
-		 * and dup'd pipes.
-		 */
-		if (pid == 0) {
-			close(pfd[0]);
-			if (sigprocmask(SIG_SETMASK, &mask_orig, NULL))
-				err(1, "sigprogmask");
-			if (stdmask & STDERR_FILENO) {
-				if (dup2(pfd[1], STDERR_FILENO) == -1)
-					err(1, "dup2");
-			}
-			if (stdmask & STDOUT_FILENO) {
-				if (dup2(pfd[1], STDOUT_FILENO) == -1)
-					err(1, "dup2");
-			}
-			if (pfd[1] != STDERR_FILENO &&
-			    pfd[1] != STDOUT_FILENO)
-				close(pfd[1]);
-		}
-		execvp(argv[0], argv);
-		/*
-		 * execvp() failed -- report the error. The child is
-		 * now running, so the exit status doesn't matter.
-		 */
-		err(1, "%s", argv[0]);
-	}
-	setproctitle("%s[%d]", title, (int)pid);
-	/*
-	 * As we have closed the write end of pipe for parent process,
-	 * we might detect the child's exit by reading EOF. The child
-	 * might have closed its stdout and stderr, so we must wait for
-	 * the SIGCHLD to ensure that the process is actually gone.
-	 */
-	child_eof = 0;
-	for (;;) {
-		/*
-		 * We block SIGCHLD when listening, but SIGTERM we accept
-		 * so the read() won't block if we wish to depart.
-		 *
-		 * Upon receiving SIGTERM, we have several options after
-		 * sending the SIGTERM to our child:
-		 * - read until EOF
-		 * - read until EOF but only for a while
-		 * - bail immediately
-		 *
-		 * We go for the third, as otherwise we have no guarantee
-		 * that we won't block indefinitely if the child refuses
-		 * to depart. To handle the second option, a different
-		 * approach would be needed (procctl()?)
-		 */
-		if (child_gone && child_eof) {
-			break;
-		} else if (terminate) {
-			goto exit;
-		} else if (!child_eof) {
-			if (sigprocmask(SIG_BLOCK, &mask_read, NULL)) {
-				warn("sigprocmask");
-				goto exit;
-			}
-			child_eof = !listen_child(pfd[0], &logpar);
-			if (sigprocmask(SIG_UNBLOCK, &mask_read, NULL)) {
-				warn("sigprocmask");
-				goto exit;
-			}
-		} else {
-			if (sigprocmask(SIG_BLOCK, &mask_susp, NULL)) {
-				warn("sigprocmask");
-	 			goto exit;
-			}
-			while (!terminate && !child_gone)
-				sigsuspend(&mask_orig);
-			if (sigprocmask(SIG_UNBLOCK, &mask_susp, NULL)) {
-				warn("sigprocmask");
-				goto exit;
-			}
-		}
-	}
-	if (restart && !terminate)
-		daemon_sleep(restart, 0);
-	if (sigprocmask(SIG_BLOCK, &mask_term, NULL)) {
-		warn("sigprocmask");
-		goto exit;
-	}
-	if (restart && !terminate) {
-		close(pfd[0]);
-		pfd[0] = -1;
-		goto restart;
-	}
-exit:
-	close(outfd);
-	close(pfd[0]);
-	close(pfd[1]);
-	if (dosyslog)
-		closelog();
-	pidfile_remove(pfh);
-	pidfile_remove(ppfh);
-	exit(1); /* If daemon(3) succeeded exit status does not matter. */
+	daemon_terminate(&state);
 }
 
 static void
-daemon_sleep(time_t secs, long nsecs)
+daemon_exec(struct daemon_state *state)
 {
-	struct timespec ts = { secs, nsecs };
+	pidfile_write(state->child_pidfh);
 
-	while (!terminate && nanosleep(&ts, &ts) == -1) {
-		if (errno != EINTR)
+	if (state->user != NULL) {
+		restrict_process(state->user);
+	}
+
+	/* Ignored signals remain ignored after execve, unignore them */
+	signal(SIGHUP, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+	execvp(state->argv[0], state->argv);
+	/* execvp() failed - report error and exit this process */
+	err(1, "%s", state->argv[0]);
+}
+
+/* Main event loop: fork the child and watch for events.
+ * After SIGTERM is recieved and propagated to the child there are
+ * several options on what to do next:
+ * - read until EOF
+ * - read until EOF but only for a while
+ * - bail immediately
+ * Currently the third option is used, because otherwise there is no
+ * guarantee that read() won't block indefinitely if the child refuses
+ * to depart. To handle the second option, a different approach
+ * would be needed (procctl()?).
+ */
+static void
+daemon_eventloop(struct daemon_state *state)
+{
+	struct kevent event;
+	int kq;
+	int ret;
+
+	/*
+	 * Try to protect against pageout kill. Ignore the
+	 * error, madvise(2) will fail only if a process does
+	 * not have superuser privileges.
+	 */
+	(void)madvise(NULL, 0, MADV_PROTECT);
+
+	if (pipe(state->pipe_fd)) {
+		err(1, "pipe");
+	}
+
+	kq = kqueuex(KQUEUE_CLOEXEC);
+	EV_SET(&event, state->pipe_fd[0], EVFILT_READ, EV_ADD|EV_CLEAR, 0, 0,
+	    NULL);
+	if (kevent(kq, &event, 1, NULL, 0, NULL) == -1) {
+		err(EXIT_FAILURE, "failed to register kevent");
+	}
+
+	EV_SET(&event, SIGHUP,  EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	if (kevent(kq, &event, 1, NULL, 0, NULL) == -1) {
+		err(EXIT_FAILURE, "failed to register kevent");
+	}
+
+	EV_SET(&event, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	if (kevent(kq, &event, 1, NULL, 0, NULL) == -1) {
+		err(EXIT_FAILURE, "failed to register kevent");
+	}
+
+	EV_SET(&event, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+	if (kevent(kq, &event, 1, NULL, 0, NULL) == -1) {
+		err(EXIT_FAILURE, "failed to register kevent");
+	}
+	memset(&event, 0, sizeof(struct kevent));
+
+	/* Spawn a child to exec the command. */
+	state->pid = fork();
+
+	/* fork failed, this can only happen when supervision is enabled */
+	switch (state->pid) {
+	case -1:
+		warn("fork");
+		state->mode = MODE_NOCHILD;
+		return;
+	/* fork succeeded, this is child's branch */
+	case 0:
+		close(kq);
+		daemon_set_child_pipe(state);
+		daemon_exec(state);
+		break;
+	}
+
+	/* case: pid > 0; fork succeeded */
+	close(state->pipe_fd[1]);
+	state->pipe_fd[1] = -1;
+	setproctitle("%s[%d]", state->title, (int)state->pid);
+
+	while (state->mode != MODE_NOCHILD) {
+		ret = kevent(kq, NULL, 0, &event, 1, NULL);
+		switch (ret) {
+		case -1:
+			err(EXIT_FAILURE, "kevent wait");
+		case 0:
+			continue;
+		}
+
+		if (event.flags & EV_ERROR) {
+			errx(EXIT_FAILURE, "Event error: %s",
+			    strerror(event.data));
+		}
+
+		switch (event.filter) {
+		case EVFILT_SIGNAL:
+
+			switch (event.ident) {
+			case SIGCHLD:
+				if (daemon_is_child_dead(state)) {
+					/* child is dead, read all until EOF */
+					state->pid = -1;
+					state->mode = MODE_NOCHILD;
+					while (listen_child(state->pipe_fd[0],
+					    state))
+						;
+				}
+				continue;
+			case SIGTERM:
+				if (state->mode != MODE_SUPERVISE) {
+					/* user is impatient */
+					/* TODO: warn about repeated SIGTERM? */
+					continue;
+				}
+
+				state->mode = MODE_TERMINATING;
+				state->restart_enabled = false;
+				if (state->pid > 0) {
+					kill(state->pid, SIGTERM);
+				}
+				/*
+				 * TODO set kevent timer to exit
+				 * unconditionally after some time
+				 */
+				continue;
+			case SIGHUP:
+				if (state->log_reopen && state->output_fd >= 0) {
+					reopen_log(state);
+				}
+				continue;
+			}
+			break;
+
+		case EVFILT_READ:
+			/*
+			 * detecting EOF is no longer necessary
+			 * if child closes the pipe daemon will stop getting
+			 * EVFILT_READ events
+			 */
+
+			if (event.data > 0) {
+				(void)listen_child(state->pipe_fd[0], state);
+			}
+			continue;
+		default:
+			continue;
+		}
+	}
+
+	close(kq);
+	close(state->pipe_fd[0]);
+	state->pipe_fd[0] = -1;
+}
+
+static void
+daemon_sleep(struct daemon_state *state)
+{
+	struct timespec ts = { state->restart_delay, 0 };
+
+	if (!state->restart_enabled) {
+		return;
+	}
+	while (nanosleep(&ts, &ts) == -1) {
+		if (errno != EINTR) {
 			err(1, "nanosleep");
+		}
 	}
 }
 
 static void
-open_pid_files(const char *pidfile, const char *ppidfile,
-	       struct pidfh **pfh, struct pidfh **ppfh)
+open_pid_files(struct daemon_state *state)
 {
 	pid_t fpid;
 	int serrno;
 
-	if (pidfile) {
-		*pfh = pidfile_open(pidfile, 0600, &fpid);
-		if (*pfh == NULL) {
+	if (state->child_pidfile) {
+		state->child_pidfh = pidfile_open(state->child_pidfile, 0600, &fpid);
+		if (state->child_pidfh == NULL) {
 			if (errno == EEXIST) {
 				errx(3, "process already running, pid: %d",
 				    fpid);
 			}
-			err(2, "pidfile ``%s''", pidfile);
+			err(2, "pidfile ``%s''", state->child_pidfile);
 		}
 	}
 	/* Do the same for the actual daemon process. */
-	if (ppidfile) {
-		*ppfh = pidfile_open(ppidfile, 0600, &fpid);
-		if (*ppfh == NULL) {
+	if (state->parent_pidfile) {
+		state->parent_pidfh= pidfile_open(state->parent_pidfile, 0600, &fpid);
+		if (state->parent_pidfh == NULL) {
 			serrno = errno;
-			pidfile_remove(*pfh);
+			pidfile_remove(state->child_pidfh);
 			errno = serrno;
 			if (errno == EEXIST) {
 				errx(3, "process already running, pid: %d",
 				     fpid);
 			}
-			err(2, "ppidfile ``%s''", ppidfile);
+			err(2, "ppidfile ``%s''", state->parent_pidfile);
 		}
 	}
 }
@@ -507,8 +549,9 @@ get_log_mapping(const char *str, const CODE *c)
 {
 	const CODE *cp;
 	for (cp = c; cp->c_name; cp++)
-		if (strcmp(cp->c_name, str) == 0)
+		if (strcmp(cp->c_name, str) == 0) {
 			return cp->c_val;
+		}
 	return -1;
 }
 
@@ -518,11 +561,13 @@ restrict_process(const char *user)
 	struct passwd *pw = NULL;
 
 	pw = getpwnam(user);
-	if (pw == NULL)
+	if (pw == NULL) {
 		errx(1, "unknown user: %s", user);
+	}
 
-	if (setusercontext(NULL, pw, pw->pw_uid, LOGIN_SETALL) != 0)
+	if (setusercontext(NULL, pw, pw->pw_uid, LOGIN_SETALL) != 0) {
 		errx(1, "failed to set user environment");
+	}
 
 	setenv("USER", pw->pw_name, 1);
 	setenv("HOME", pw->pw_dir, 1);
@@ -533,21 +578,21 @@ restrict_process(const char *user)
  * We try to collect whole lines terminated by '\n'. Otherwise we collect a
  * full buffer, and then output it.
  *
- * Return value of 0 is assumed to mean EOF or error, and 1 indicates to
+ * Return value of false is assumed to mean EOF or error, and true indicates to
  * continue reading.
+ *
+ * TODO: simplify signature - state contains pipefd
  */
-static int
-listen_child(int fd, struct log_params *logpar)
+static bool
+listen_child(int fd, struct daemon_state *state)
 {
 	static unsigned char buf[LBUF_SIZE];
 	static size_t bytes_read = 0;
 	int rv;
 
-	assert(logpar);
+	assert(state != NULL);
 	assert(bytes_read < LBUF_SIZE - 1);
 
-	if (do_log_reopen)
-		reopen_log(logpar);
 	rv = read(fd, buf + bytes_read, LBUF_SIZE - bytes_read - 1);
 	if (rv > 0) {
 		unsigned char *cp;
@@ -563,31 +608,32 @@ listen_child(int fd, struct log_params *logpar)
 		while ((cp = memchr(buf, '\n', bytes_read)) != NULL) {
 			size_t bytes_line = cp - buf + 1;
 			assert(bytes_line <= bytes_read);
-			do_output(buf, bytes_line, logpar);
+			do_output(buf, bytes_line, state);
 			bytes_read -= bytes_line;
 			memmove(buf, cp + 1, bytes_read);
 		}
 		/* Wait until the buffer is full. */
-		if (bytes_read < LBUF_SIZE - 1)
-			return 1;
-		do_output(buf, bytes_read, logpar);
+		if (bytes_read < LBUF_SIZE - 1) {
+			return true;
+		}
+		do_output(buf, bytes_read, state);
 		bytes_read = 0;
-		return 1;
+		return true;
 	} else if (rv == -1) {
 		/* EINTR should trigger another read. */
 		if (errno == EINTR) {
-			return 1;
+			return true;
 		} else {
 			warn("read");
-			return 0;
+			return false;
 		}
 	}
 	/* Upon EOF, we have to flush what's left of the buffer. */
 	if (bytes_read > 0) {
-		do_output(buf, bytes_read, logpar);
+		do_output(buf, bytes_read, state);
 		bytes_read = 0;
 	}
-	return 0;
+	return false;
 }
 
 /*
@@ -596,56 +642,26 @@ listen_child(int fd, struct log_params *logpar)
  * everything back to parent's stdout.
  */
 static void
-do_output(const unsigned char *buf, size_t len, struct log_params *logpar)
+do_output(const unsigned char *buf, size_t len, struct daemon_state *state)
 {
 	assert(len <= LBUF_SIZE);
-	assert(logpar);
+	assert(state != NULL);
 
-	if (len < 1)
+	if (len < 1) {
 		return;
-	if (logpar->dosyslog)
-		syslog(logpar->logpri, "%.*s", (int)len, buf);
-	if (logpar->outfd != -1) {
-		if (write(logpar->outfd, buf, len) == -1)
+	}
+	if (state->syslog_enabled) {
+		syslog(state->syslog_priority, "%.*s", (int)len, buf);
+	}
+	if (state->output_fd != -1) {
+		if (write(state->output_fd, buf, len) == -1)
 			warn("write");
 	}
-	if (logpar->noclose && !logpar->dosyslog && logpar->outfd == -1)
+	if (state->keep_fds_open &&
+	    !state->syslog_enabled &&
+	    state->output_fd == -1) {
 		printf("%.*s", (int)len, buf);
-}
-
-/*
- * We use the global PID acquired directly from fork. If there is no valid
- * child pid, the handler should be blocked and/or child_gone == 1.
- */
-static void
-handle_term(int signo)
-{
-	if (pid > 0 && !child_gone)
-		kill(pid, signo);
-	terminate = 1;
-}
-
-static void
-handle_chld(int signo __unused)
-{
-
-	for (;;) {
-		int rv = waitpid(-1, NULL, WNOHANG);
-		if (pid == rv) {
-			child_gone = 1;
-			break;
-		} else if (rv == -1 && errno != EINTR) {
-			warn("waitpid");
-			return;
-		}
 	}
-}
-
-static void
-handle_hup(int signo __unused)
-{
-
-	do_log_reopen = 1;
 }
 
 static int
@@ -656,14 +672,113 @@ open_log(const char *outfn)
 }
 
 static void
-reopen_log(struct log_params *lpp)
+reopen_log(struct daemon_state *state)
 {
 	int outfd;
 
-	do_log_reopen = 0;
-	outfd = open_log(lpp->outfn);
-	if (lpp->outfd >= 0)
-		close(lpp->outfd);
-	lpp->outfd = outfd;
+	outfd = open_log(state->output_filename);
+	if (state->output_fd >= 0) {
+		close(state->output_fd);
+	}
+	state->output_fd = outfd;
 }
 
+static void
+daemon_state_init(struct daemon_state *state)
+{
+	*state = (struct daemon_state) {
+		.pipe_fd = { -1, -1 },
+		.argv = NULL,
+		.parent_pidfh = NULL,
+		.child_pidfh = NULL,
+		.child_pidfile = NULL,
+		.parent_pidfile = NULL,
+		.title = NULL,
+		.user = NULL,
+		.mode = MODE_DAEMON,
+		.restart_enabled = false,
+		.pid = 0,
+		.keep_cur_workdir = 1,
+		.restart_delay = 1,
+		.stdmask = STDOUT_FILENO | STDERR_FILENO,
+		.syslog_enabled = false,
+		.log_reopen = false,
+		.syslog_priority = LOG_NOTICE,
+		.syslog_tag = "daemon",
+		.syslog_facility = LOG_DAEMON,
+		.keep_fds_open = 1,
+		.output_fd = -1,
+		.output_filename = NULL,
+	};
+}
+
+static _Noreturn void
+daemon_terminate(struct daemon_state *state)
+{
+	assert(state != NULL);
+
+	if (state->output_fd >= 0) {
+		close(state->output_fd);
+	}
+	if (state->pipe_fd[0] >= 0) {
+		close(state->pipe_fd[0]);
+	}
+
+	if (state->pipe_fd[1] >= 0) {
+		close(state->pipe_fd[1]);
+	}
+	if (state->syslog_enabled) {
+		closelog();
+	}
+	pidfile_remove(state->child_pidfh);
+	pidfile_remove(state->parent_pidfh);
+
+	/*
+	 * Note that the exit value here doesn't matter in the case of a clean
+	 * exit; daemon(3) already detached us from the caller, nothing is left
+	 * to care about this one.
+	 */
+	exit(1);
+}
+
+/*
+ * Returns true if SIGCHILD came from state->pid
+ * This function could hang if SIGCHILD was emittied for a reason other than
+ * child dying (e.g., ptrace attach).
+ */
+static bool
+daemon_is_child_dead(struct daemon_state *state)
+{
+	for (;;) {
+		int who = waitpid(-1, NULL, WNOHANG);
+		if (state->pid == who) {
+			return true;
+		}
+		if (who == -1 && errno != EINTR) {
+			warn("waitpid");
+			return false;
+		}
+	}
+}
+
+static void
+daemon_set_child_pipe(struct daemon_state *state)
+{
+	if (state->stdmask & STDERR_FILENO) {
+		if (dup2(state->pipe_fd[1], STDERR_FILENO) == -1) {
+			err(1, "dup2");
+		}
+	}
+	if (state->stdmask & STDOUT_FILENO) {
+		if (dup2(state->pipe_fd[1], STDOUT_FILENO) == -1) {
+			err(1, "dup2");
+		}
+	}
+	if (state->pipe_fd[1] != STDERR_FILENO &&
+	    state->pipe_fd[1] != STDOUT_FILENO) {
+		close(state->pipe_fd[1]);
+	}
+
+	/* The child gets dup'd pipes. */
+	close(state->pipe_fd[0]);
+}

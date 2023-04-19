@@ -92,9 +92,8 @@ __FBSDID("$FreeBSD$");
  *
  * There is a common functions within the rack_bbr_common code
  * version i.e. ctf_do_queued_segments(). This function
- * knows how to take the input queue of packets from
- * tp->t_in_pkts and process them digging out
- * all the arguments, calling any bpf tap and
+ * knows how to take the input queue of packets from tp->t_inqueue
+ * and process them digging out all the arguments, calling any bpf tap and
  * calling into tfb_do_segment_nounlock(). The common
  * function (ctf_do_queued_segments())  requires that
  * you have defined the tfb_do_segment_nounlock() as
@@ -1054,27 +1053,6 @@ hpts_cpuid(struct inpcb *inp, int *failed)
 	return (cpuid);
 }
 
-#ifdef not_longer_used_gleb
-static void
-tcp_drop_in_pkts(struct tcpcb *tp)
-{
-	struct mbuf *m, *n;
-
-	m = tp->t_in_pkt;
-	if (m)
-		n = m->m_nextpkt;
-	else
-		n = NULL;
-	tp->t_in_pkt = NULL;
-	while (m) {
-		m_freem(m);
-		m = n;
-		if (m)
-			n = m->m_nextpkt;
-	}
-}
-#endif
-
 static void
 tcp_hpts_set_max_sleep(struct tcp_hpts_entry *hpts, int wrap_loop_cnt)
 {
@@ -1344,7 +1322,7 @@ again:
 			}
 			CURVNET_SET(inp->inp_vnet);
 			/* Lets do any logging that we might want to */
-			if (hpts_does_tp_logging && (tp->t_logstate != TCP_LOG_STATE_OFF)) {
+			if (hpts_does_tp_logging && tcp_bblogging_on(tp)) {
 				tcp_hpts_log(hpts, tp, &tv, slots_to_run, i, from_callout);
 			}
 
@@ -1352,18 +1330,29 @@ again:
 				kern_prefetch(tp->t_fb_ptr, &did_prefetch);
 				did_prefetch = 1;
 			}
-			if ((inp->inp_flags2 & INP_SUPPORTS_MBUFQ) && tp->t_in_pkt) {
-				error = (*tp->t_fb->tfb_do_queued_segments)(inp->inp_socket, tp, 0);
+			/*
+			 * We set inp_hpts_calls to 1 before any possible output.
+			 * The contract with the transport is that if it cares about
+			 * hpts calling it should clear the flag. That way next time
+			 * it is called it will know it is hpts.
+			 *
+			 * We also only call tfb_do_queued_segments() <or> tcp_output()
+			 * it is expected that if segments are queued and come in that
+			 * the final input mbuf will cause a call to  output if it is needed.
+			 */
+			inp->inp_hpts_calls = 1;
+			if ((inp->inp_flags2 & INP_SUPPORTS_MBUFQ) &&
+			    !STAILQ_EMPTY(&tp->t_inqueue)) {
+				error = (*tp->t_fb->tfb_do_queued_segments)(tp, 0);
 				if (error) {
 					/* The input killed the connection */
 					goto skip_pacing;
 				}
+			} else {
+				error = tcp_output(tp);
+				if (error < 0)
+					goto skip_pacing;
 			}
-			inp->inp_hpts_calls = 1;
-			error = tcp_output(tp);
-			if (error < 0)
-				goto skip_pacing;
-			inp->inp_hpts_calls = 0;
 			if (ninp) {
 				/*
 				 * If we have a nxt inp, see if we can

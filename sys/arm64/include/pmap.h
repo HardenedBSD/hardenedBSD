@@ -154,6 +154,7 @@ int	pmap_pinit_stage(pmap_t, enum pmap_stage, int);
 bool	pmap_ps_enabled(pmap_t pmap);
 uint64_t pmap_to_ttbr0(pmap_t pmap);
 void	pmap_disable_promotion(vm_offset_t sva, vm_size_t size);
+#define	pmap_map_delete(pmap, sva, eva)	pmap_remove(pmap, sva, eva)
 
 void	*pmap_mapdev(vm_paddr_t, vm_size_t);
 void	*pmap_mapbios(vm_paddr_t, vm_size_t);
@@ -172,6 +173,9 @@ struct pcb *pmap_switch(struct thread *);
 
 extern void (*pmap_clean_stage2_tlbi)(void);
 extern void (*pmap_invalidate_vpipt_icache)(void);
+extern void (*pmap_stage2_invalidate_range)(uint64_t, vm_offset_t, vm_offset_t,
+    bool);
+extern void (*pmap_stage2_invalidate_all)(uint64_t);
 
 static inline int
 pmap_vmspace_copy(pmap_t dst_pmap __unused, pmap_t src_pmap __unused)
@@ -179,6 +183,14 @@ pmap_vmspace_copy(pmap_t dst_pmap __unused, pmap_t src_pmap __unused)
 
 	return (0);
 }
+
+#if defined(KASAN) || defined(KMSAN)
+struct arm64_bootparams;
+
+void	pmap_bootstrap_san(vm_paddr_t);
+void	pmap_san_enter(vm_offset_t);
+void	pmap_san_bootstrap(struct arm64_bootparams *);
+#endif
 
 #endif	/* _KERNEL */
 

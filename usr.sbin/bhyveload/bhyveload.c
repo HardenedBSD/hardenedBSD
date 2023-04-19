@@ -67,6 +67,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/specialreg.h>
 #include <machine/vmm.h>
 
+#include <assert.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -108,6 +109,7 @@ static jmp_buf jb;
 
 static char *vmname, *progname;
 static struct vmctx *ctx;
+static struct vcpu *vcpu;
 
 static uint64_t gdtbase, cr3, rsp;
 
@@ -118,7 +120,7 @@ static void cb_exit(void *arg, int v);
  */
 
 static void
-cb_putc(void *arg, int ch)
+cb_putc(void *arg __unused, int ch)
 {
 	char c = ch;
 
@@ -126,7 +128,7 @@ cb_putc(void *arg, int ch)
 }
 
 static int
-cb_getc(void *arg)
+cb_getc(void *arg __unused)
 {
 	char c;
 
@@ -136,7 +138,7 @@ cb_getc(void *arg)
 }
 
 static int
-cb_poll(void *arg)
+cb_poll(void *arg __unused)
 {
 	int n;
 
@@ -160,7 +162,7 @@ struct cb_file {
 };
 
 static int
-cb_open(void *arg, const char *filename, void **hp)
+cb_open(void *arg __unused, const char *filename, void **hp)
 {
 	struct cb_file *cf;
 	char path[PATH_MAX];
@@ -202,7 +204,7 @@ out:
 }
 
 static int
-cb_close(void *arg, void *h)
+cb_close(void *arg __unused, void *h)
 {
 	struct cb_file *cf = h;
 
@@ -216,7 +218,7 @@ cb_close(void *arg, void *h)
 }
 
 static int
-cb_isdir(void *arg, void *h)
+cb_isdir(void *arg __unused, void *h)
 {
 	struct cb_file *cf = h;
 
@@ -224,7 +226,7 @@ cb_isdir(void *arg, void *h)
 }
 
 static int
-cb_read(void *arg, void *h, void *buf, size_t size, size_t *resid)
+cb_read(void *arg __unused, void *h, void *buf, size_t size, size_t *resid)
 {
 	struct cb_file *cf = h;
 	ssize_t sz;
@@ -239,8 +241,8 @@ cb_read(void *arg, void *h, void *buf, size_t size, size_t *resid)
 }
 
 static int
-cb_readdir(void *arg, void *h, uint32_t *fileno_return, uint8_t *type_return,
-	   size_t *namelen_return, char *name)
+cb_readdir(void *arg __unused, void *h, uint32_t *fileno_return,
+    uint8_t *type_return, size_t *namelen_return, char *name)
 {
 	struct cb_file *cf = h;
 	struct dirent *dp;
@@ -266,7 +268,7 @@ cb_readdir(void *arg, void *h, uint32_t *fileno_return, uint8_t *type_return,
 }
 
 static int
-cb_seek(void *arg, void *h, uint64_t offset, int whence)
+cb_seek(void *arg __unused, void *h, uint64_t offset, int whence)
 {
 	struct cb_file *cf = h;
 
@@ -278,7 +280,7 @@ cb_seek(void *arg, void *h, uint64_t offset, int whence)
 }
 
 static int
-cb_stat(void *arg, void *h, struct stat *sbp)
+cb_stat(void *arg __unused, void *h, struct stat *sbp)
 {
 	struct cb_file *cf = h;
 
@@ -299,7 +301,7 @@ cb_stat(void *arg, void *h, struct stat *sbp)
  */
 
 static int
-cb_diskread(void *arg, int unit, uint64_t from, void *to, size_t size,
+cb_diskread(void *arg __unused, int unit, uint64_t from, void *to, size_t size,
     size_t *resid)
 {
 	ssize_t n;
@@ -314,8 +316,8 @@ cb_diskread(void *arg, int unit, uint64_t from, void *to, size_t size,
 }
 
 static int
-cb_diskwrite(void *arg, int unit, uint64_t offset, void *src, size_t size,
-    size_t *resid)
+cb_diskwrite(void *arg __unused, int unit, uint64_t offset, void *src,
+    size_t size, size_t *resid)
 {
 	ssize_t n;
 
@@ -329,7 +331,7 @@ cb_diskwrite(void *arg, int unit, uint64_t offset, void *src, size_t size,
 }
 
 static int
-cb_diskioctl(void *arg, int unit, u_long cmd, void *data)
+cb_diskioctl(void *arg __unused, int unit, u_long cmd, void *data)
 {
 	struct stat sb;
 
@@ -359,7 +361,7 @@ cb_diskioctl(void *arg, int unit, u_long cmd, void *data)
  * Guest virtual machine i/o callbacks
  */
 static int
-cb_copyin(void *arg, const void *from, uint64_t to, size_t size)
+cb_copyin(void *arg __unused, const void *from, uint64_t to, size_t size)
 {
 	char *ptr;
 
@@ -374,7 +376,7 @@ cb_copyin(void *arg, const void *from, uint64_t to, size_t size)
 }
 
 static int
-cb_copyout(void *arg, uint64_t from, void *to, size_t size)
+cb_copyout(void *arg __unused, uint64_t from, void *to, size_t size)
 {
 	char *ptr;
 
@@ -389,7 +391,7 @@ cb_copyout(void *arg, uint64_t from, void *to, size_t size)
 }
 
 static void
-cb_setreg(void *arg, int r, uint64_t v)
+cb_setreg(void *arg __unused, int r, uint64_t v)
 {
 	int error;
 	enum vm_reg_name vmreg;
@@ -410,7 +412,7 @@ cb_setreg(void *arg, int r, uint64_t v)
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
 	}
 
-	error = vm_set_register(ctx, BSP, vmreg, v);
+	error = vm_set_register(vcpu, vmreg, v);
 	if (error) {
 		perror("vm_set_register");
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
@@ -418,7 +420,7 @@ cb_setreg(void *arg, int r, uint64_t v)
 }
 
 static void
-cb_setmsr(void *arg, int r, uint64_t v)
+cb_setmsr(void *arg __unused, int r, uint64_t v)
 {
 	int error;
 	enum vm_reg_name vmreg;
@@ -438,7 +440,7 @@ cb_setmsr(void *arg, int r, uint64_t v)
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
 	}
 
-	error = vm_set_register(ctx, BSP, vmreg, v);
+	error = vm_set_register(vcpu, vmreg, v);
 	if (error) {
 		perror("vm_set_msr");
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
@@ -446,7 +448,7 @@ cb_setmsr(void *arg, int r, uint64_t v)
 }
 
 static void
-cb_setcr(void *arg, int r, uint64_t v)
+cb_setcr(void *arg __unused, int r, uint64_t v)
 {
 	int error;
 	enum vm_reg_name vmreg;
@@ -473,7 +475,7 @@ cb_setcr(void *arg, int r, uint64_t v)
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
 	}
 
-	error = vm_set_register(ctx, BSP, vmreg, v);
+	error = vm_set_register(vcpu, vmreg, v);
 	if (error) {
 		perror("vm_set_cr");
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
@@ -481,11 +483,11 @@ cb_setcr(void *arg, int r, uint64_t v)
 }
 
 static void
-cb_setgdt(void *arg, uint64_t base, size_t size)
+cb_setgdt(void *arg __unused, uint64_t base, size_t size)
 {
 	int error;
 
-	error = vm_set_desc(ctx, BSP, VM_REG_GUEST_GDTR, base, size - 1, 0);
+	error = vm_set_desc(vcpu, VM_REG_GUEST_GDTR, base, size - 1, 0);
 	if (error != 0) {
 		perror("vm_set_desc(gdt)");
 		cb_exit(NULL, USERBOOT_EXIT_QUIT);
@@ -495,15 +497,15 @@ cb_setgdt(void *arg, uint64_t base, size_t size)
 }
 
 static void
-cb_exec(void *arg, uint64_t rip)
+cb_exec(void *arg __unused, uint64_t rip)
 {
 	int error;
 
 	if (cr3 == 0)
-		error = vm_setup_freebsd_registers_i386(ctx, BSP, rip, gdtbase,
+		error = vm_setup_freebsd_registers_i386(vcpu, rip, gdtbase,
 		    rsp);
 	else
-		error = vm_setup_freebsd_registers(ctx, BSP, rip, cr3, gdtbase,
+		error = vm_setup_freebsd_registers(vcpu, rip, cr3, gdtbase,
 		    rsp);
 	if (error) {
 		perror("vm_setup_freebsd_registers");
@@ -518,14 +520,14 @@ cb_exec(void *arg, uint64_t rip)
  */
 
 static void
-cb_delay(void *arg, int usec)
+cb_delay(void *arg __unused, int usec)
 {
 
 	usleep(usec);
 }
 
 static void
-cb_exit(void *arg, int v)
+cb_exit(void *arg __unused, int v)
 {
 
 	tcsetattr(consout_fd, TCSAFLUSH, &oldterm);
@@ -533,7 +535,7 @@ cb_exit(void *arg, int v)
 }
 
 static void
-cb_getmem(void *arg, uint64_t *ret_lowmem, uint64_t *ret_highmem)
+cb_getmem(void *arg __unused, uint64_t *ret_lowmem, uint64_t *ret_highmem)
 {
 
 	*ret_lowmem = vm_get_lowmem_size(ctx);
@@ -548,17 +550,21 @@ struct env {
 static SLIST_HEAD(envhead, env) envhead;
 
 static void
-addenv(char *str)
+addenv(const char *str)
 {
 	struct env *env;
 
 	env = malloc(sizeof(struct env));
-	env->str = str;
+	if (env == NULL)
+		err(EX_OSERR, "malloc");
+	env->str = strdup(str);
+	if (env->str == NULL)
+		err(EX_OSERR, "strdup");
 	SLIST_INSERT_HEAD(&envhead, env, next);
 }
 
 static char *
-cb_getenv(void *arg, int num)
+cb_getenv(void *arg __unused, int num)
 {
 	int i;
 	struct env *env;
@@ -574,22 +580,24 @@ cb_getenv(void *arg, int num)
 }
 
 static int
-cb_vm_set_register(void *arg, int vcpu, int reg, uint64_t val)
+cb_vm_set_register(void *arg __unused, int vcpuid, int reg, uint64_t val)
 {
 
-	return (vm_set_register(ctx, vcpu, reg, val));
+	assert(vcpuid == BSP);
+	return (vm_set_register(vcpu, reg, val));
 }
 
 static int
-cb_vm_set_desc(void *arg, int vcpu, int reg, uint64_t base, u_int limit,
-    u_int access)
+cb_vm_set_desc(void *arg __unused, int vcpuid, int reg, uint64_t base,
+    u_int limit, u_int access)
 {
 
-	return (vm_set_desc(ctx, vcpu, reg, base, limit, access));
+	assert(vcpuid == BSP);
+	return (vm_set_desc(vcpu, reg, base, limit, access));
 }
 
 static void
-cb_swap_interpreter(void *arg, const char *interp_req)
+cb_swap_interpreter(void *arg __unused, const char *interp_req)
 {
 
 	/*
@@ -797,6 +805,8 @@ main(int argc, char** argv)
 		perror("vm_open");
 		exit(1);
 	}
+
+	vcpu = vm_vcpu_open(ctx, BSP);
 
 	/*
 	 * setjmp in the case the guest wants to swap out interpreter,

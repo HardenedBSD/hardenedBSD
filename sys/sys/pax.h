@@ -66,6 +66,7 @@ struct hbsd_features {
 		int		 tpe_root_owned;
 		pax_state_t	 harden_rtld;
 		pax_state_t	 prohibit_ptrace_syscall;
+		pax_state_t	 harden_tty;
 	} hardening;
 	struct hbsd_log {
 		pax_state_t	log;		/* (p) Per-jail logging status */
@@ -237,6 +238,7 @@ int pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts);
 #endif
 int pax_procfs_harden(struct thread *td);
 int pax_ptrace_syscall_prohibit(struct thread *td);
+int pax_harden_tty(struct thread *td);
 int pax_enforce_tpe(struct thread *, struct vnode *, const char *);
 pax_flag_t pax_hardening_setup_flags(struct image_params *, struct thread *,
     pax_flag_t);

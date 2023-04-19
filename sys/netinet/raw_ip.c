@@ -38,12 +38,14 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_pax.h"
 #include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/eventhandler.h>
+#include <sys/libkern.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -84,6 +86,9 @@ __FBSDID("$FreeBSD$");
 
 extern ipproto_input_t *ip_protox[];
 
+VNET_DEFINE(int, ip_minrandttl) = IP_MINDEFTTL;
+#define V_ip_minrandttl		VNET(ip_minrandttl)
+
 VNET_DEFINE(int, ip_defttl) = IPDEFTTL;
 SYSCTL_INT(_net_inet_ip, IPCTL_DEFTTL, ttl, CTLFLAG_VNET | CTLFLAG_RW,
     &VNET_NAME(ip_defttl), 0,
@@ -97,7 +102,6 @@ VNET_DEFINE(struct inpcbinfo, ripcbinfo);
  * The data hooks are not used here but it is convenient
  * to keep them all in one place.
  */
-VNET_DEFINE(ip_fw_chk_ptr_t, ip_fw_chk_ptr) = NULL;
 VNET_DEFINE(ip_fw_ctl_ptr_t, ip_fw_ctl_ptr) = NULL;
 
 int	(*ip_dn_ctl_ptr)(struct sockopt *);
@@ -191,6 +195,23 @@ rip_init(void *arg __unused)
 	in_pcbinfo_init(&V_ripcbinfo, &ripcbstor, INP_PCBHASH_RAW_SIZE, 1);
 }
 VNET_SYSINIT(rip_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_THIRD, rip_init, NULL);
+
+static void
+defttl_init(void)
+{
+#ifdef HBSD_RESIST_FINGERPRINTING
+	unsigned int val;
+
+	val = 0;
+	while (val < V_ip_minrandttl) {
+		val = (arc4random() % (254 - (unsigned)V_ip_minrandttl)) + 1;
+	}
+	V_ip_defttl = (int)val;
+#else
+	V_ip_defttl = IPDEFTTL;
+#endif
+}
+VNET_SYSINIT(defttl_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_ANY, defttl_init, NULL);
 
 #ifdef VIMAGE
 static void

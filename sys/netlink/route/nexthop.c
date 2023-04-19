@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_netlink.h"
+
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
@@ -54,7 +56,7 @@ __FBSDID("$FreeBSD$");
 #define	DEBUG_MOD_NAME	nl_nhop
 #define	DEBUG_MAX_LEVEL	LOG_DEBUG3
 #include <netlink/netlink_debug.h>
-_DECLARE_DEBUG(LOG_DEBUG3);
+_DECLARE_DEBUG(LOG_DEBUG);
 
 /*
  * This file contains the logic to maintain kernel nexthops and

@@ -36,6 +36,7 @@
 #include <sys/lock.h>
 #include <sys/rmlock.h>
 #include <sys/domain.h>
+#include <sys/jail.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/proc.h>
@@ -83,12 +84,6 @@ SYSCTL_OID(_net_netlink, OID_AUTO, nl_maxsockbuf,
     sysctl_handle_nl_maxsockbuf, "LU",
     "Maximum Netlink socket buffer size");
 
-uint32_t
-nlp_get_pid(const struct nlpcb *nlp)
-{
-	return (nlp->nl_process_id);
-}
-
 /*
  * Looks up a nlpcb struct based on the @portid. Need to claim nlsock_mtx.
  * Returns nlpcb pointer if present else NULL
@@ -110,6 +105,10 @@ nl_add_group_locked(struct nlpcb *nlp, unsigned int group_id)
 {
 	MPASS(group_id <= NLP_MAX_GROUPS);
 	--group_id;
+
+	/* TODO: add family handler callback */
+	if (!nlp_unconstrained_vnet(nlp))
+		return;
 
 	nlp->nl_groups[group_id / 64] |= (uint64_t)1 << (group_id % 64);
 }
@@ -206,12 +205,6 @@ nl_has_listeners(int netlink_family, uint32_t groups_mask)
 	return (V_nl_ctl != NULL);
 }
 
-bool
-nlp_has_priv(struct nlpcb *nlp, int priv)
-{
-	return (priv_check_cred(nlp->nl_cred, priv) == 0);
-}
-
 static uint32_t
 nl_find_port(void)
 {
@@ -302,6 +295,7 @@ nl_pru_attach(struct socket *so, int proto, struct thread *td)
 	nlp->nl_process_id = curproc->p_pid;
 	nlp->nl_linux = is_linux;
 	nlp->nl_active = true;
+	nlp->nl_unconstrained_vnet = !jailed_without_vnet(so->so_cred);
 	NLP_LOCK_INIT(nlp);
 	refcount_init(&nlp->nl_refcount, 1);
 	nl_init_io(nlp);

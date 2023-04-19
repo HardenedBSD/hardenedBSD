@@ -80,7 +80,8 @@ arm64/arm64/trap.c				standard
 arm64/arm64/uio_machdep.c			standard
 arm64/arm64/uma_machdep.c			standard
 arm64/arm64/undefined.c				standard
-arm64/arm64/unwind.c				optional ddb | kdtrace_hooks | stack
+arm64/arm64/unwind.c				optional ddb | kdtrace_hooks | stack \
+	compile-with "${NORMAL_C:N-fsanitize*}"
 arm64/arm64/vfp.c				standard
 arm64/arm64/vm_machdep.c			standard
 
@@ -102,6 +103,8 @@ arm64/coresight/coresight_replicator_fdt.c	optional fdt
 arm64/coresight/coresight_tmc.c			standard
 arm64/coresight/coresight_tmc_acpi.c		optional acpi
 arm64/coresight/coresight_tmc_fdt.c		optional fdt
+
+dev/smbios/smbios_subr.c			standard
 
 arm64/iommu/iommu.c				optional iommu
 arm64/iommu/iommu_if.m				optional iommu
@@ -156,8 +159,23 @@ cddl/dev/dtrace/aarch64/dtrace_asm.S		optional dtrace compile-with "${DTRACE_S}"
 cddl/dev/dtrace/aarch64/dtrace_subr.c		optional dtrace compile-with "${DTRACE_C}"
 cddl/dev/fbt/aarch64/fbt_isa.c			optional dtrace_fbt | dtraceall compile-with "${FBT_C}"
 
+# zfs blake3 hash support
 contrib/openzfs/module/icp/asm-aarch64/blake3/b3_aarch64_sse2.S		optional zfs compile-with "${ZFS_S:N-mgeneral-regs-only}"
 contrib/openzfs/module/icp/asm-aarch64/blake3/b3_aarch64_sse41.S	optional zfs compile-with "${ZFS_S:N-mgeneral-regs-only}"
+
+# zfs sha2 hash support
+
+zfs-sha256-armv8.o	optional zfs \
+	dependency "$S/contrib/openzfs/module/icp/asm-aarch64/sha2/sha256-armv8.S" \
+	compile-with "${CC} -c ${ZFS_ASM_CFLAGS:N-mgeneral-regs-only} -o ${.TARGET} ${WERROR} $S/contrib/openzfs/module/icp/asm-aarch64/sha2/sha256-armv8.S" \
+	no-implicit-rule \
+	clean "zfs-sha256-armv8.o"
+
+zfs-sha512-armv8.o	optional zfs \
+	dependency "$S/contrib/openzfs/module/icp/asm-aarch64/sha2/sha512-armv8.S" \
+	compile-with "${CC} -c ${ZFS_ASM_CFLAGS:N-mgeneral-regs-only} -o ${.TARGET} ${WERROR} $S/contrib/openzfs/module/icp/asm-aarch64/sha2/sha512-armv8.S" \
+	no-implicit-rule \
+	clean "zfs-sha512-armv8.o"
 
 ##
 ## ASoC support
@@ -251,6 +269,7 @@ dev/hyperv/utilities/hv_kvp.c			optional hyperv acpi
 dev/hyperv/netvsc/hn_nvs.c			optional hyperv acpi
 dev/hyperv/netvsc/hn_rndis.c			optional hyperv acpi
 dev/hyperv/netvsc/if_hn.c			optional hyperv acpi
+dev/hyperv/pcib/vmbus_pcib.c			optional hyperv pci acpi
 
 dev/ice/if_ice_iflib.c				optional ice pci \
 	compile-with "${NORMAL_C} -I$S/dev/ice"

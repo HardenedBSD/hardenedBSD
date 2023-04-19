@@ -384,15 +384,15 @@ blk_isindir(ufs2_daddr_t blk, ino_t ino, ufs_lbn_t lbn)
  * they will only have usable blocks in them.
  */
 ufs2_daddr_t
-suj_checkblkavail(blkno, frags)
-	ufs2_daddr_t blkno;
-	long frags;
+suj_checkblkavail(ufs2_daddr_t blkno, long frags)
 {
 	struct bufarea *cgbp;
 	struct cg *cgp;
 	ufs2_daddr_t j, k, baseblk;
 	long cg;
 
+	if ((u_int64_t)blkno > sblock.fs_size)
+		return (0);
 	cg = dtog(&sblock, blkno);
 	cgbp = cglookup(cg);
 	cgp = cgbp->b_un.b_cg;

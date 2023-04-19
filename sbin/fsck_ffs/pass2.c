@@ -85,7 +85,7 @@ pass2(void)
 	case DCLEAR:
 		pfatal("DUPS/BAD IN ROOT INODE");
 		if (reply("REALLOCATE")) {
-			freeino(UFS_ROOTINO);
+			freedirino(UFS_ROOTINO, UFS_ROOTINO);
 			if (allocdir(UFS_ROOTINO, UFS_ROOTINO, 0755) !=
 			    UFS_ROOTINO)
 				errx(EEXIT, "CANNOT ALLOCATE ROOT INODE");
@@ -210,8 +210,10 @@ pass2(void)
 		if (inp->i_parent == 0 || inp->i_isize == 0)
 			continue;
 		if (inoinfo(inp->i_parent)->ino_state == DFOUND &&
-		    INO_IS_DUNFOUND(inp->i_number))
+		    INO_IS_DUNFOUND(inp->i_number)) {
 			inoinfo(inp->i_number)->ino_state = DFOUND;
+			check_dirdepth(inp);
+		}
 		if (inp->i_dotdot == inp->i_parent ||
 		    inp->i_dotdot == (ino_t)-1)
 			continue;
@@ -271,7 +273,8 @@ pass2(void)
 		inoinfo(inp->i_dotdot)->ino_linkcnt++;
 		inoinfo(inp->i_parent)->ino_linkcnt--;
 		inp->i_dotdot = inp->i_parent;
-		(void)changeino(inp->i_number, "..", inp->i_parent);
+		(void)changeino(inp->i_number, "..", inp->i_parent,
+		    getinoinfo(inp->i_parent)->i_depth  + 1);
 	}
 	/*
 	 * Mark all the directories that can be found from the root.
@@ -294,8 +297,6 @@ pass2check(struct inodesc *idesc)
 	/*
 	 * check for "."
 	 */
-	if (dirp->d_ino > maxino)
-		goto chk2;
 	if (idesc->id_entryno != 0)
 		goto chk1;
 	if (dirp->d_ino != 0 && strcmp(dirp->d_name, ".") == 0) {
@@ -370,6 +371,20 @@ chk1:
 		dirp->d_reclen = proto.d_reclen;
 	}
 	if (dirp->d_ino != 0 && strcmp(dirp->d_name, "..") == 0) {
+		if (dirp->d_ino > maxino) {
+			direrror(idesc->id_number, "BAD INODE NUMBER FOR '..'");
+			/*
+			 * If we know parent set it now, otherwise let it
+			 * point to the root inode and it will get cleaned
+			 * up later if that is not correct.
+			 */
+			if (inp->i_parent != 0)
+				dirp->d_ino = inp->i_parent;
+			else
+				dirp->d_ino = UFS_ROOTINO;
+			if (reply("FIX") == 1)
+				ret |= ALTERED;
+		}
 		inp->i_dotdot = dirp->d_ino;
 		if (dirp->d_type != DT_DIR) {
 			direrror(idesc->id_number, "BAD TYPE VALUE FOR '..'");
@@ -536,10 +551,12 @@ again:
 		case DFOUND:
 			inp = getinoinfo(dirp->d_ino);
 			if (idesc->id_entryno > 2) {
-				if (inp->i_parent == 0)
+				if (inp->i_parent == 0) {
 					inp->i_parent = idesc->id_number;
-				else if ((n = fix_extraneous(inp, idesc)) == 1)
+					check_dirdepth(inp);
+				} else if ((n = fix_extraneous(inp, idesc))) {
 					break;
+				}
 			}
 			/* FALLTHROUGH */
 
@@ -590,6 +607,7 @@ fix_extraneous(struct inoinfo *inp, struct inodesc *idesc)
 		if ((ckinode(ip.i_dp, &dotdesc) & FOUND))
 			inp->i_dotdot = dotdesc.id_parent;
 		irelse(&ip);
+		free(dotdesc.id_name);
 	}
 	/*
 	 * We have the previously found old name (inp->i_parent) and the

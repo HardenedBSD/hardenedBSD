@@ -518,7 +518,20 @@
 #define	PRIV_KMEM_READ		680	/* Open mem/kmem for reading. */
 #define	PRIV_KMEM_WRITE		681	/* Open mem/kmem for writing. */
 
-/* sysctl(9) privileges.
+/*
+ * Kernel debugger privileges.
+ */
+#define	PRIV_KDB_SET_BACKEND	690	/* Allow setting KDB backend. */
+
+/*
+ * veriexec override privileges - very rare!
+ */
+#define	PRIV_VERIEXEC_DIRECT	700	/* Can override 'indirect' */
+#define	PRIV_VERIEXEC_NOVERIFY	701	/* Can override O_VERIFY */
+#define	PRIV_VERIEXEC_CONTROL	702	/* Can configure veriexec */
+
+/*
+ * sysctl(9) privileges.
  */
 #define	PRIV_SYSCTL_ROOTONLY	800
 

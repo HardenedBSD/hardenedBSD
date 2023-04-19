@@ -85,6 +85,20 @@ comc_probe(struct console *cp)
 	int speed, port;
 	uint32_t locator;
 
+#if defined(__amd64__)
+	extern bool efi_comconsole_avail;
+
+	if (efi_comconsole_avail) {
+		/*
+		 * If EFI provides serial I/O, then don't use this legacy
+		 * com driver to avoid conflicts with the firmware's driver.
+		 * Change c_name so that it cannot be found in the lookup.
+		 */
+		comconsole.c_name = "xcomconsole";
+		return;
+	}
+#endif
+
 	if (comc_curspeed == 0) {
 		comc_curspeed = COMSPEED;
 		/*
@@ -324,11 +338,12 @@ comc_setup(int speed, int port)
 	char intbuf[64];
 	int tries;
 
-	unsetenv("hw.uart.console");
 	comc_curspeed = speed;
 	comc_port = port;
 	if ((comconsole.c_flags & (C_ACTIVEIN | C_ACTIVEOUT)) == 0)
 		return;
+
+	unsetenv("hw.uart.console");
 
 #define	COMC_TEST	0xbb
 	/*

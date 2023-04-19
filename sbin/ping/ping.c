@@ -225,9 +225,8 @@ static void pinger(void);
 static char *pr_addr(struct in_addr);
 static char *pr_ntime(n_time);
 static void pr_icmph(struct icmp *, struct ip *, const u_char *const);
-static void pr_iph(struct ip *);
+static void pr_iph(struct ip *, const u_char *);
 static void pr_pack(char *, ssize_t, struct sockaddr_in *, struct timespec *);
-static void pr_retip(struct ip *, const u_char *);
 static void status(int);
 static void stopit(int);
 
@@ -1189,12 +1188,8 @@ pr_pack(char *buf, ssize_t cc, struct sockaddr_in *from, struct timespec *tv)
 		return;
 	}
 
-#ifndef icmp_data
-	icmp_data_raw = buf + hlen + offsetof(struct icmp, icmp_ip);
-#else
 	icmp_data_raw_len = cc - (hlen + offsetof(struct icmp, icmp_data));
 	icmp_data_raw = buf + hlen + offsetof(struct icmp, icmp_data);
-#endif
 
 	/* Now the ICMP part */
 	cc -= hlen;
@@ -1218,8 +1213,14 @@ pr_pack(char *buf, ssize_t cc, struct sockaddr_in *from, struct timespec *tv)
 				tv1.tv_sec = ntohl(tv32.tv32_sec);
 				tv1.tv_nsec = ntohl(tv32.tv32_nsec);
 				timespecsub(tv, &tv1, tv);
- 				triptime = ((double)tv->tv_sec) * 1000.0 +
+				triptime = ((double)tv->tv_sec) * 1000.0 +
 				    ((double)tv->tv_nsec) / 1000000.0;
+				if (triptime < 0) {
+					warnx("time of day goes back (%.3f ms),"
+					    " clamping time to 0",
+					    triptime);
+					triptime = 0;
+				}
 				tsum += triptime;
 				tsumsq += triptime * triptime;
 				if (triptime < tmin)
@@ -1370,7 +1371,7 @@ pr_pack(char *buf, ssize_t cc, struct sockaddr_in *from, struct timespec *tv)
 		     (oicmp.icmp_id == ident))) {
 		    (void)printf("%zd bytes from %s: ", cc,
 			pr_addr(from->sin_addr));
-		    pr_icmph(&icp, &oip, oicmp_raw);
+		    pr_icmph(&icp, &oip, icmp_data_raw);
 		} else
 		    return;
 	}
@@ -1578,11 +1579,11 @@ pr_icmph(struct icmp *icp, struct ip *oip, const u_char *const oicmp_raw)
 			break;
 		}
 		/* Print returned IP header information */
-		pr_retip(oip, oicmp_raw);
+		pr_iph(oip, oicmp_raw);
 		break;
 	case ICMP_SOURCEQUENCH:
 		(void)printf("Source Quench\n");
-		pr_retip(oip, oicmp_raw);
+		pr_iph(oip, oicmp_raw);
 		break;
 	case ICMP_REDIRECT:
 		switch(icp->icmp_code) {
@@ -1603,7 +1604,7 @@ pr_icmph(struct icmp *icp, struct ip *oip, const u_char *const oicmp_raw)
 			break;
 		}
 		(void)printf("(New addr: %s)\n", inet_ntoa(icp->icmp_gwaddr));
-		pr_retip(oip, oicmp_raw);
+		pr_iph(oip, oicmp_raw);
 		break;
 	case ICMP_ECHO:
 		(void)printf("Echo Request\n");
@@ -1622,12 +1623,12 @@ pr_icmph(struct icmp *icp, struct ip *oip, const u_char *const oicmp_raw)
 			    icp->icmp_code);
 			break;
 		}
-		pr_retip(oip, oicmp_raw);
+		pr_iph(oip, oicmp_raw);
 		break;
 	case ICMP_PARAMPROB:
 		(void)printf("Parameter problem: pointer = 0x%02x\n",
 		    icp->icmp_hun.ih_pptr);
-		pr_retip(oip, oicmp_raw);
+		pr_iph(oip, oicmp_raw);
 		break;
 	case ICMP_TSTAMP:
 		(void)printf("Timestamp\n");
@@ -1667,22 +1668,21 @@ pr_icmph(struct icmp *icp, struct ip *oip, const u_char *const oicmp_raw)
  *	Print an IP header with options.
  */
 static void
-pr_iph(struct ip *ip)
+pr_iph(struct ip *ip, const u_char *cp)
 {
 	struct in_addr ina;
-	u_char *cp;
 	int hlen;
 
 	hlen = ip->ip_hl << 2;
-	cp = (u_char *)ip + 20;		/* point to options */
+	cp = cp + sizeof(struct ip);		/* point to options */
 
 	(void)printf("Vr HL TOS  Len   ID Flg  off TTL Pro  cks      Src      Dst\n");
 	(void)printf(" %1x  %1x  %02x %04x %04x",
 	    ip->ip_v, ip->ip_hl, ip->ip_tos, ntohs(ip->ip_len),
 	    ntohs(ip->ip_id));
-	(void)printf("   %1lx %04lx",
-	    (u_long) (ntohl(ip->ip_off) & 0xe000) >> 13,
-	    (u_long) ntohl(ip->ip_off) & 0x1fff);
+	(void)printf("   %1x %04x",
+	    (ntohs(ip->ip_off) & 0xe000) >> 13,
+	    ntohs(ip->ip_off) & 0x1fff);
 	(void)printf("  %02x  %02x %04x", ip->ip_ttl, ip->ip_p,
 							    ntohs(ip->ip_sum));
 	memcpy(&ina, &ip->ip_src.s_addr, sizeof ina);
@@ -1690,7 +1690,7 @@ pr_iph(struct ip *ip)
 	memcpy(&ina, &ip->ip_dst.s_addr, sizeof ina);
 	(void)printf(" %s ", inet_ntoa(ina));
 	/* dump any option bytes */
-	while (hlen-- > 20) {
+	while (hlen-- > (int)sizeof(struct ip)) {
 		(void)printf("%02x", *cp++);
 	}
 	(void)putchar('\n');
@@ -1710,7 +1710,7 @@ pr_addr(struct in_addr ina)
 	if (options & F_NUMERIC)
 		return inet_ntoa(ina);
 
-	hp = cap_gethostbyaddr(capdns, (char *)&ina, 4, AF_INET);
+	hp = cap_gethostbyaddr(capdns, (char *)&ina, sizeof(ina), AF_INET);
 
 	if (hp == NULL)
 		return inet_ntoa(ina);
@@ -1718,23 +1718,6 @@ pr_addr(struct in_addr ina)
 	(void)snprintf(buf, sizeof(buf), "%s (%s)", hp->h_name,
 	    inet_ntoa(ina));
 	return(buf);
-}
-
-/*
- * pr_retip --
- *	Dump some info on a returned (via ICMP) IP packet.
- */
-static void
-pr_retip(struct ip *ip, const u_char *cp)
-{
-	pr_iph(ip);
-
-	if (ip->ip_p == 6)
-		(void)printf("TCP: from port %u, to port %u (decimal)\n",
-		    (*cp * 256 + *(cp + 1)), (*(cp + 2) * 256 + *(cp + 3)));
-	else if (ip->ip_p == 17)
-		(void)printf("UDP: from port %u, to port %u (decimal)\n",
-			(*cp * 256 + *(cp + 1)), (*(cp + 2) * 256 + *(cp + 3)));
 }
 
 static char *

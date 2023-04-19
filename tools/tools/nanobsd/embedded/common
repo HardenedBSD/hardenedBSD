@@ -128,11 +128,9 @@ cust_install_machine_files ( ) (
 customize_cmd cust_install_files
 customize_cmd cust_install_machine_files 
 
-# NB: leave c++ enabled so devd can be built
 CONF_BUILD="
 LOCAL_XTOOL_DIRS=usr.bin/mkimg
 WITHOUT_ACPI=true
-WITHOUT_ATM=true
 WITHOUT_AUDIT=true
 WITHOUT_BLUETOOTH=true
 WITHOUT_CALENDAR=true
@@ -522,20 +520,6 @@ std_i386 ( ) {
 	: ${NANO_LAYOUT:=std-x86}
 	: ${NANO_BOOT_MBR:=${NANO_WORLDDIR}/boot/boot0sio}
 	: ${NANO_BOOT_BSD:=${NANO_WORLDDIR}/boot/boot}
-}
-
-std_mips ( ) {
-	NANO_ENDIAN=big
-}
-
-std_mipsel ( ) {
-}
-
-std_mips64 ( ) {
-	NANO_ENDIAN=big
-}
-
-std_mips64el ( ) {
 }
 
 std_powerpc ( ) {

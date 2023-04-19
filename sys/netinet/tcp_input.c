@@ -105,10 +105,10 @@ __FBSDID("$FreeBSD$");
 #include <netinet6/nd6.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_fsm.h>
-#include <netinet/tcp_log_buf.h>
 #include <netinet/tcp_seq.h>
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
+#include <netinet/tcp_log_buf.h>
 #include <netinet6/tcp6_var.h>
 #include <netinet/tcpip.h>
 #include <netinet/cc/cc.h>
@@ -677,8 +677,10 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 		 * Note that packets with unspecified IPv6 destination is
 		 * already dropped in ip6_input.
 		 */
+		KASSERT(!IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_dst),
+		    ("%s: unspecified destination v6 address", __func__));
 		if (IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_src)) {
-			/* XXX stat */
+			IP6STAT_INC(ip6s_badscope); /* XXX */
 			goto drop;
 		}
 		iptos = IPV6_TRAFFIC_CLASS(ip6);
@@ -743,6 +745,12 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 	skip_csum:
 		if (th->th_sum && (port == 0)) {
 			TCPSTAT_INC(tcps_rcvbadsum);
+			goto drop;
+		}
+		KASSERT(ip->ip_dst.s_addr != INADDR_ANY,
+		    ("%s: unspecified destination v4 address", __func__));
+		if (__predict_false(ip->ip_src.s_addr == INADDR_ANY)) {
+			IPSTAT_INC(ips_badaddr);
 			goto drop;
 		}
 	}
@@ -1139,8 +1147,8 @@ tfo_socket_result:
 			 * the mbuf chain and unlocks the inpcb.
 			 */
 			TCP_PROBE5(receive, NULL, tp, m, tp, th);
-			tp->t_fb->tfb_tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen,
-			    iptos);
+			tp->t_fb->tfb_tcp_do_segment(tp, m, th, drop_hdrlen,
+			    tlen, iptos);
 			return (IPPROTO_DONE);
 		}
 		/*
@@ -1376,7 +1384,7 @@ tfo_socket_result:
 	if ((lookupflag & INPLOOKUP_RLOCKPCB) && INP_TRY_UPGRADE(inp) == 0)
 		goto dropunlock;
 
-	tp->t_fb->tfb_tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen, iptos);
+	tp->t_fb->tfb_tcp_do_segment(tp, m, th, drop_hdrlen, tlen, iptos);
 	return (IPPROTO_DONE);
 
 dropwithreset:
@@ -1490,8 +1498,8 @@ tcp_handle_wakeup(struct tcpcb *tp)
 }
 
 void
-tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
-    struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos)
+tcp_do_segment(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
+    int drop_hdrlen, int tlen, uint8_t iptos)
 {
 	uint16_t thflags;
 	int acked, ourfinisacked, needoutput = 0, sack_changed;
@@ -1500,6 +1508,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	uint16_t nsegs;
 	char *s;
 	struct inpcb *inp = tptoinpcb(tp);
+	struct socket *so = tptosocket(tp);
 	struct in_conninfo *inc = &inp->inp_inc;
 	struct mbuf *mfree;
 	struct tcpopt to;

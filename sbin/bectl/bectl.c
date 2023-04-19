@@ -362,7 +362,8 @@ static int
 bectl_cmd_destroy(int argc, char *argv[])
 {
 	nvlist_t *props;
-	char *origin, *target, targetds[BE_MAXPATHLEN];
+	char *target, targetds[BE_MAXPATHLEN];
+	const char *origin;
 	int err, flags, opt;
 
 	flags = 0;

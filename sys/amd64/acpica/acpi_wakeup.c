@@ -250,7 +250,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 			ia32_pause();
 	} else {
 		/*
-		 * Re-initialize console hardware as soon as possibe.
+		 * Re-initialize console hardware as soon as possible.
 		 * No console output (e.g. printf) is allowed before
 		 * this point.
 		 */
@@ -288,10 +288,26 @@ acpi_wakeup_machdep(struct acpi_softc *sc, int state, int sleep_result,
 		if (!CPU_EMPTY(&suspcpus))
 			resume_cpus(suspcpus);
 #endif
+
+		/*
+		 * Re-read cpu_stdext_feature3, which was zeroed-out
+		 * in acpi_sleep_machdep(), after the microcode was
+		 * reloaded.  Then recalculate the active mitigation
+		 * knobs that depend on the microcode and
+		 * cpu_stdext_feature3.  Do it after LAPICs are woken,
+		 * so that IPIs work.
+		 */
+		identify_cpu_ext_features();
+
 		mca_resume();
 		if (vmm_resume_p != NULL)
 			vmm_resume_p();
 		intr_resume(/*suspend_cancelled*/false);
+
+		hw_ibrs_recalculate(true);
+		amd64_syscall_ret_flush_l1d_recalc();
+		hw_ssb_recalculate(true);
+		x86_rngds_mitg_recalculate(true);
 
 		AcpiSetFirmwareWakingVector(0, 0);
 	} else {

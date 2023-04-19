@@ -35,6 +35,7 @@
 #include <sys/sdt.h>
 #include <x86/segments.h>
 
+struct vcpu;
 struct vm_snapshot_meta;
 
 #ifdef _KERNEL
@@ -143,7 +144,6 @@ enum x2apic_state {
 #ifdef _KERNEL
 CTASSERT(VM_MAX_NAMELEN >= VM_MIN_NAMELEN);
 
-struct vcpu;
 struct vm;
 struct vm_exception;
 struct seg_desc;
@@ -184,7 +184,6 @@ typedef struct vmspace * (*vmi_vmspace_alloc)(vm_offset_t min, vm_offset_t max);
 typedef void	(*vmi_vmspace_free)(struct vmspace *vmspace);
 typedef struct vlapic * (*vmi_vlapic_init)(void *vcpui);
 typedef void	(*vmi_vlapic_cleanup)(struct vlapic *vlapic);
-typedef int	(*vmi_snapshot_t)(void *vmi, struct vm_snapshot_meta *meta);
 typedef int	(*vmi_snapshot_vcpu_t)(void *vcpui, struct vm_snapshot_meta *meta);
 typedef int	(*vmi_restore_tsc_t)(void *vcpui, uint64_t now);
 
@@ -210,7 +209,6 @@ struct vmm_ops {
 	vmi_vlapic_cleanup	vlapic_cleanup;
 
 	/* checkpoint operations */
-	vmi_snapshot_t		snapshot;
 	vmi_snapshot_vcpu_t	vcpu_snapshot;
 	vmi_restore_tsc_t	restore_tsc;
 };
@@ -764,7 +762,6 @@ struct vm_exit {
 };
 
 /* APIs to inject faults into the guest */
-#ifdef _KERNEL
 void vm_inject_fault(struct vcpu *vcpu, int vector, int errcode_valid,
     int errcode);
 
@@ -793,35 +790,5 @@ vm_inject_ss(struct vcpu *vcpu, int errcode)
 }
 
 void vm_inject_pf(struct vcpu *vcpu, int error_code, uint64_t cr2);
-#else
-void vm_inject_fault(void *vm, int vcpuid, int vector, int errcode_valid,
-    int errcode);
-
-static __inline void
-vm_inject_ud(void *vm, int vcpuid)
-{
-	vm_inject_fault(vm, vcpuid, IDT_UD, 0, 0);
-}
-
-static __inline void
-vm_inject_gp(void *vm, int vcpuid)
-{
-	vm_inject_fault(vm, vcpuid, IDT_GP, 1, 0);
-}
-
-static __inline void
-vm_inject_ac(void *vm, int vcpuid, int errcode)
-{
-	vm_inject_fault(vm, vcpuid, IDT_AC, 1, errcode);
-}
-
-static __inline void
-vm_inject_ss(void *vm, int vcpuid, int errcode)
-{
-	vm_inject_fault(vm, vcpuid, IDT_SS, 1, errcode);
-}
-
-void vm_inject_pf(void *vm, int vcpuid, int error_code, uint64_t cr2);
-#endif
 
 #endif	/* _VMM_H_ */

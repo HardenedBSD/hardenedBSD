@@ -17,7 +17,7 @@ MK_INSTALL_AS_USER= yes
 TARGET_ARCHES_arm?=     arm armv6 armv7
 TARGET_ARCHES_arm64?=   aarch64
 TARGET_ARCHES_powerpc?= powerpc powerpc64 powerpc64le powerpcspe
-TARGET_ARCHES_riscv?=   riscv64 riscv64sf
+TARGET_ARCHES_riscv?=   riscv64
 
 # some corner cases
 BOOT_MACHINE_DIR.amd64 = boot/i386
@@ -52,7 +52,7 @@ MACHINE_ARCH:= ${MACHINE_ARCH.${MACHINE}}
 # now because for universe we want to potentially
 # build for multiple MACHINE_ARCH per MACHINE
 # we need more than MACHINE in TARGET_SPEC
-TARGET_SPEC_VARS= MACHINE MACHINE_ARCH
+TARGET_SPEC_VARS?= MACHINE MACHINE_ARCH
 # see dirdeps.mk
 .if ${TARGET_SPEC:Uno:M*,*} != ""
 _tspec := ${TARGET_SPEC:S/,/ /g}

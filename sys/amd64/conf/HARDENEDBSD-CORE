@@ -29,3 +29,4 @@ options 	PAX_HARDENING		# Various hardening options
 #options	PAX_HARDEN_KMALLOC	# Harden malloc(9)
 options 	PAX_SEGVGUARD		# prevent brute-force attacks
 options 	HBSD_DEBUG
+options		HBSD_RESIST_FINGERPRINTING

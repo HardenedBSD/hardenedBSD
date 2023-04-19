@@ -155,7 +155,6 @@ static const struct vm_snapshot_dev_info snapshot_devs[] = {
 static const struct vm_snapshot_kern_info snapshot_kern_structs[] = {
 	{ "vhpet",	STRUCT_VHPET	},
 	{ "vm",		STRUCT_VM	},
-	{ "vmx",	STRUCT_VMX	},
 	{ "vioapic",	STRUCT_VIOAPIC	},
 	{ "vlapic",	STRUCT_VLAPIC	},
 	{ "vmcx",	STRUCT_VMCX	},
@@ -887,7 +886,6 @@ vm_restore_kern_struct(struct vmctx *ctx, struct restore_state *rstate,
 	}
 
 	meta = &(struct vm_snapshot_meta) {
-		.ctx = ctx,
 		.dev_name = info->struct_name,
 		.dev_req  = info->req,
 
@@ -900,7 +898,7 @@ vm_restore_kern_struct(struct vmctx *ctx, struct restore_state *rstate,
 		.op = VM_SNAPSHOT_RESTORE,
 	};
 
-	ret = vm_snapshot_req(meta);
+	ret = vm_snapshot_req(ctx, meta);
 	if (ret != 0) {
 		fprintf(stderr, "%s: Failed to restore struct: %s\r\n",
 			__func__, info->struct_name);
@@ -928,7 +926,7 @@ vm_restore_kern_structs(struct vmctx *ctx, struct restore_state *rstate)
 }
 
 static int
-vm_restore_user_dev(struct vmctx *ctx, struct restore_state *rstate,
+vm_restore_user_dev(struct restore_state *rstate,
 		    const struct vm_snapshot_dev_info *info)
 {
 	void *dev_ptr;
@@ -951,7 +949,6 @@ vm_restore_user_dev(struct vmctx *ctx, struct restore_state *rstate,
 	}
 
 	meta = &(struct vm_snapshot_meta) {
-		.ctx = ctx,
 		.dev_name = info->dev_name,
 
 		.buffer.buf_start = dev_ptr,
@@ -975,13 +972,13 @@ vm_restore_user_dev(struct vmctx *ctx, struct restore_state *rstate,
 
 
 int
-vm_restore_user_devs(struct vmctx *ctx, struct restore_state *rstate)
+vm_restore_user_devs(struct restore_state *rstate)
 {
 	size_t i;
 	int ret;
 
 	for (i = 0; i < nitems(snapshot_devs); i++) {
-		ret = vm_restore_user_dev(ctx, rstate, &snapshot_devs[i]);
+		ret = vm_restore_user_dev(rstate, &snapshot_devs[i]);
 		if (ret != 0)
 			return (ret);
 	}
@@ -1030,14 +1027,14 @@ vm_resume_user_devs(void)
 }
 
 static int
-vm_snapshot_kern_struct(int data_fd, xo_handle_t *xop, const char *array_key,
-			struct vm_snapshot_meta *meta, off_t *offset)
+vm_snapshot_kern_struct(struct vmctx *ctx, int data_fd, xo_handle_t *xop,
+    const char *array_key, struct vm_snapshot_meta *meta, off_t *offset)
 {
 	int ret;
 	size_t data_size;
 	ssize_t write_cnt;
 
-	ret = vm_snapshot_req(meta);
+	ret = vm_snapshot_req(ctx, meta);
 	if (ret != 0) {
 		fprintf(stderr, "%s: Failed to snapshot struct %s\r\n",
 			__func__, meta->dev_name);
@@ -1090,8 +1087,6 @@ vm_snapshot_kern_structs(struct vmctx *ctx, int data_fd, xo_handle_t *xop)
 	}
 
 	meta = &(struct vm_snapshot_meta) {
-		.ctx = ctx,
-
 		.buffer.buf_start = buffer,
 		.buffer.buf_size = buf_size,
 
@@ -1107,8 +1102,8 @@ vm_snapshot_kern_structs(struct vmctx *ctx, int data_fd, xo_handle_t *xop)
 		meta->buffer.buf = meta->buffer.buf_start;
 		meta->buffer.buf_rem = meta->buffer.buf_size;
 
-		ret = vm_snapshot_kern_struct(data_fd, xop, JSON_DEV_ARR_KEY,
-					      meta, &offset);
+		ret = vm_snapshot_kern_struct(ctx, data_fd, xop,
+		    JSON_DEV_ARR_KEY, meta, &offset);
 		if (ret != 0) {
 			error = -1;
 			goto err_vm_snapshot_kern_data;
@@ -1187,7 +1182,7 @@ vm_snapshot_user_dev(const struct vm_snapshot_dev_info *info,
 }
 
 static int
-vm_snapshot_user_devs(struct vmctx *ctx, int data_fd, xo_handle_t *xop)
+vm_snapshot_user_devs(int data_fd, xo_handle_t *xop)
 {
 	int ret;
 	off_t offset;
@@ -1211,8 +1206,6 @@ vm_snapshot_user_devs(struct vmctx *ctx, int data_fd, xo_handle_t *xop)
 	}
 
 	meta = &(struct vm_snapshot_meta) {
-		.ctx = ctx,
-
 		.buffer.buf_start = buffer,
 		.buffer.buf_size = buf_size,
 
@@ -1297,7 +1290,7 @@ vm_vcpu_pause(struct vmctx *ctx)
 
 	pthread_mutex_lock(&vcpu_lock);
 	checkpoint_active = true;
-	vm_suspend_cpu(ctx, -1);
+	vm_suspend_all_cpus(ctx);
 	while (CPU_CMP(&vcpus_active, &vcpus_suspended) != 0)
 		pthread_cond_wait(&vcpus_idle, &vcpu_lock);
 	pthread_mutex_unlock(&vcpu_lock);
@@ -1310,7 +1303,7 @@ vm_vcpu_resume(struct vmctx *ctx)
 	pthread_mutex_lock(&vcpu_lock);
 	checkpoint_active = false;
 	pthread_mutex_unlock(&vcpu_lock);
-	vm_resume_cpu(ctx, -1);
+	vm_resume_all_cpus(ctx);
 	pthread_cond_broadcast(&vcpus_can_run);
 }
 
@@ -1396,7 +1389,7 @@ vm_checkpoint(struct vmctx *ctx, const char *checkpoint_file, bool stop_vm)
 		goto done;
 	}
 
-	ret = vm_snapshot_user_devs(ctx, kdata_fd, xop);
+	ret = vm_snapshot_user_devs(kdata_fd, xop);
 	if (ret != 0) {
 		fprintf(stderr, "Failed to snapshot device state.\n");
 		error = -1;
@@ -1518,6 +1511,9 @@ init_checkpoint_thread(struct vmctx *ctx)
 	int socket_fd;
 	pthread_t checkpoint_pthread;
 	int err;
+#ifndef WITHOUT_CAPSICUM
+	cap_rights_t rights;
+#endif
 
 	memset(&addr, 0, sizeof(addr));
 
@@ -1548,6 +1544,13 @@ init_checkpoint_thread(struct vmctx *ctx)
 		goto fail;
 	}
 
+#ifndef WITHOUT_CAPSICUM
+	cap_rights_init(&rights, CAP_ACCEPT, CAP_READ, CAP_RECV, CAP_WRITE,
+	    CAP_SEND, CAP_GETSOCKOPT);
+
+	if (caph_rights_limit(socket_fd, &rights) == -1)
+		errx(EX_OSERR, "Unable to apply rights for sandbox");
+#endif
 	checkpoint_info = calloc(1, sizeof(*checkpoint_info));
 	checkpoint_info->ctx = ctx;
 	checkpoint_info->socket_fd = socket_fd;
@@ -1630,14 +1633,14 @@ vm_get_snapshot_size(struct vm_snapshot_meta *meta)
 }
 
 int
-vm_snapshot_guest2host_addr(void **addrp, size_t len, bool restore_null,
-			    struct vm_snapshot_meta *meta)
+vm_snapshot_guest2host_addr(struct vmctx *ctx, void **addrp, size_t len,
+    bool restore_null, struct vm_snapshot_meta *meta)
 {
 	int ret;
 	vm_paddr_t gaddr;
 
 	if (meta->op == VM_SNAPSHOT_SAVE) {
-		gaddr = paddr_host2guest(meta->ctx, *addrp);
+		gaddr = paddr_host2guest(ctx, *addrp);
 		if (gaddr == (vm_paddr_t) -1) {
 			if (!restore_null ||
 			    (restore_null && (*addrp != NULL))) {
@@ -1656,7 +1659,7 @@ vm_snapshot_guest2host_addr(void **addrp, size_t len, bool restore_null,
 			}
 		}
 
-		*addrp = paddr_guest2host(meta->ctx, gaddr, len);
+		*addrp = paddr_guest2host(ctx, gaddr, len);
 	} else {
 		ret = EINVAL;
 	}

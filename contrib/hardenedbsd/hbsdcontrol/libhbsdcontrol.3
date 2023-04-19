@@ -94,8 +94,8 @@
 .Sh DESCRIPTION
 The
 .Nm libhbsdcontrol
-library provides access to a special attributes which stored in file systems
-extended attributes.
+library can get, set, and remove extended attributes that are both
+PaX and file-specific.
 .Pp
 The
 .Fn hbsdcontrol_extattr_get_attr ,
@@ -113,7 +113,7 @@ The
 .Fa file
 parameter is the target file path, where the
 .Fa attr
-attriube will be created with the 
+attribute will be created with the
 .Fa val
 value.
 The

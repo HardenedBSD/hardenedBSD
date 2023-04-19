@@ -56,7 +56,11 @@ __FBSDID("$FreeBSD$");
 #include <compat/linux/linux_mib.h>
 #include <compat/linux/linux_util.h>
 
-CTASSERT(LINUX_IFNAMSIZ == IFNAMSIZ);
+_Static_assert(LINUX_IFNAMSIZ == IFNAMSIZ, "Linux IFNAMSIZ");
+_Static_assert(sizeof(struct sockaddr) == sizeof(struct l_sockaddr),
+    "Linux struct sockaddr size");
+_Static_assert(offsetof(struct sockaddr, sa_data) ==
+    offsetof(struct l_sockaddr, sa_data), "Linux struct sockaddr layout");
 
 static bool use_real_ifnames = false;
 SYSCTL_BOOL(_compat_linux, OID_AUTO, use_real_ifnames, CTLFLAG_RWTUN,
@@ -287,13 +291,37 @@ ifname_bsd_to_linux_idx(u_int idx, char *lxname, size_t len)
 
 /*
  * Translate a FreeBSD interface name to a Linux interface name,
- * and return the number of bytes copied to lxname.
+ * and return the number of bytes copied to lxname, 0 if interface
+ * not found, -1 on error.
  */
+struct ifname_bsd_to_linux_ifp_cb_s {
+	struct ifnet	*ifp;
+	int		ethno;
+	char		*lxname;
+	size_t		len;
+};
+
+static int
+ifname_bsd_to_linux_ifp_cb(if_t ifp, void *arg)
+{
+	struct ifname_bsd_to_linux_ifp_cb_s *cbs = arg;
+
+	if (ifp == cbs->ifp)
+		return (snprintf(cbs->lxname, cbs->len, "eth%d", cbs->ethno));
+	if (IFP_IS_ETH(ifp))
+		cbs->ethno++;
+	return (0);
+}
+
 int
 ifname_bsd_to_linux_ifp(struct ifnet *ifp, char *lxname, size_t len)
 {
-	struct ifnet *ifscan;
-	int unit;
+	struct ifname_bsd_to_linux_ifp_cb_s arg = {
+		.ifp = ifp,
+		.ethno = 0,
+		.lxname = lxname,
+		.len = len,
+	};
 
 	NET_EPOCH_ASSERT();
 
@@ -301,22 +329,15 @@ ifname_bsd_to_linux_ifp(struct ifnet *ifp, char *lxname, size_t len)
 	 * Linux loopback interface name is lo (not lo0),
 	 * we translate lo to lo0, loX to loX.
 	 */
-	if (IFP_IS_LOOP(ifp) && strncmp(ifp->if_xname, "lo0", IFNAMSIZ) == 0)
+	if (IFP_IS_LOOP(ifp) && strncmp(if_name(ifp), "lo0", IFNAMSIZ) == 0)
 		return (strlcpy(lxname, "lo", len));
 
 	/* Short-circuit non ethernet interfaces. */
 	if (!IFP_IS_ETH(ifp) || linux_use_real_ifname(ifp))
-		return (strlcpy(lxname, ifp->if_xname, len));
+		return (strlcpy(lxname, if_name(ifp), len));
 
-	/* Determine the (relative) unit number for ethernet interfaces. */
-	unit = 0;
-	CK_STAILQ_FOREACH(ifscan, &V_ifnet, if_link) {
-		if (ifscan == ifp)
-			return (snprintf(lxname, len, "eth%d", unit));
-		if (IFP_IS_ETH(ifscan))
-			unit++;
-	}
-	return (0);
+ 	/* Determine the (relative) unit number for ethernet interfaces. */
+	return (if_foreach(ifname_bsd_to_linux_ifp_cb, &arg));
 }
 
 /*
@@ -325,14 +346,54 @@ ifname_bsd_to_linux_ifp(struct ifnet *ifp, char *lxname, size_t len)
  * bsdname and lxname need to be least IFNAMSIZ bytes long, but
  * can point to the same buffer.
  */
-struct ifnet *
-ifname_linux_to_bsd(struct thread *td, const char *lxname, char *bsdname)
+struct ifname_linux_to_ifp_cb_s {
+	bool		is_lo;
+	bool		is_eth;
+	int		ethno;
+	int		unit;
+	const char	*lxname;
+	if_t		ifp;
+};
+
+static int
+ifname_linux_to_ifp_cb(if_t ifp, void *arg)
 {
-	struct ifnet *ifp;
-	int len, unit;
+	struct ifname_linux_to_ifp_cb_s *cbs = arg;
+
+	NET_EPOCH_ASSERT();
+
+	/*
+	 * Allow Linux programs to use FreeBSD names. Don't presume
+	 * we never have an interface named "eth", so don't make
+	 * the test optional based on is_eth.
+	 */
+	if (strncmp(if_name(ifp), cbs->lxname, LINUX_IFNAMSIZ) == 0)
+		goto out;
+	if (cbs->is_eth && IFP_IS_ETH(ifp) && cbs->unit == cbs->ethno)
+		goto out;
+	if (cbs->is_lo && IFP_IS_LOOP(ifp))
+		goto out;
+	if (IFP_IS_ETH(ifp))
+		cbs->ethno++;
+	return (0);
+
+out:
+	cbs->ifp = ifp;
+	return (1);
+}
+
+struct ifnet *
+ifname_linux_to_ifp(struct thread *td, const char *lxname)
+{
+	struct ifname_linux_to_ifp_cb_s arg = {
+		.ethno = 0,
+		.lxname = lxname,
+		.ifp = NULL,
+	};
+	int len;
 	char *ep;
-	int index;
-	bool is_eth, is_lo;
+
+	NET_EPOCH_ASSERT();
 
 	for (len = 0; len < LINUX_IFNAMSIZ; ++len)
 		if (!isalpha(lxname[len]) || lxname[len] == '\0')
@@ -343,91 +404,103 @@ ifname_linux_to_bsd(struct thread *td, const char *lxname, char *bsdname)
 	 * Linux loopback interface name is lo (not lo0),
 	 * we translate lo to lo0, loX to loX.
 	 */
-	is_lo = (len == 2 && strncmp(lxname, "lo", LINUX_IFNAMSIZ) == 0);
-	unit = (int)strtoul(lxname + len, &ep, 10);
+	arg.is_lo = (len == 2 && strncmp(lxname, "lo", LINUX_IFNAMSIZ) == 0);
+	arg.unit = (int)strtoul(lxname + len, &ep, 10);
 	if ((ep == NULL || ep == lxname + len || ep >= lxname + LINUX_IFNAMSIZ) &&
-	    is_lo == 0)
+	    arg.is_lo == 0)
 		return (NULL);
-	index = 0;
-	is_eth = (len == 3 && strncmp(lxname, "eth", len) == 0);
+	arg.is_eth = (len == 3 && strncmp(lxname, "eth", len) == 0);
 
-	CURVNET_SET(TD_TO_VNET(td));
-	IFNET_RLOCK();
-	CK_STAILQ_FOREACH(ifp, &V_ifnet, if_link) {
-		/*
-		 * Allow Linux programs to use FreeBSD names. Don't presume
-		 * we never have an interface named "eth", so don't make
-		 * the test optional based on is_eth.
-		 */
-		if (strncmp(ifp->if_xname, lxname, LINUX_IFNAMSIZ) == 0)
-			break;
-		if (is_eth && IFP_IS_ETH(ifp) && unit == index++)
-			break;
-		if (is_lo && IFP_IS_LOOP(ifp))
-			break;
-	}
-	IFNET_RUNLOCK();
-	CURVNET_RESTORE();
-	if (ifp != NULL && bsdname != NULL)
-		strlcpy(bsdname, ifp->if_xname, IFNAMSIZ);
-	return (ifp);
+	if_foreach(ifname_linux_to_ifp_cb, &arg);
+	return (arg.ifp);
 }
 
-void
-linux_ifflags(struct ifnet *ifp, short *flags)
+int
+ifname_linux_to_bsd(struct thread *td, const char *lxname, char *bsdname)
 {
-	unsigned short fl;
+	struct epoch_tracker et;
+	struct ifnet *ifp;
 
-	fl = (ifp->if_flags | ifp->if_drv_flags) & 0xffff;
-	*flags = 0;
+	CURVNET_SET(TD_TO_VNET(td));
+	NET_EPOCH_ENTER(et);
+	ifp = ifname_linux_to_ifp(td, lxname);
+	if (ifp != NULL && bsdname != NULL)
+		strlcpy(bsdname, if_name(ifp), IFNAMSIZ);
+	NET_EPOCH_EXIT(et);
+	CURVNET_RESTORE();
+	return (ifp != NULL ? 0 : EINVAL);
+}
+
+unsigned short
+linux_ifflags(struct ifnet *ifp)
+{
+	unsigned short flags;
+
+	NET_EPOCH_ASSERT();
+
+	flags = if_getflags(ifp) | if_getdrvflags(ifp);
+	return (bsd_to_linux_ifflags(flags));
+}
+
+unsigned short
+bsd_to_linux_ifflags(int fl)
+{
+	unsigned short flags = 0;
+
 	if (fl & IFF_UP)
-		*flags |= LINUX_IFF_UP;
+		flags |= LINUX_IFF_UP;
 	if (fl & IFF_BROADCAST)
-		*flags |= LINUX_IFF_BROADCAST;
+		flags |= LINUX_IFF_BROADCAST;
 	if (fl & IFF_DEBUG)
-		*flags |= LINUX_IFF_DEBUG;
+		flags |= LINUX_IFF_DEBUG;
 	if (fl & IFF_LOOPBACK)
-		*flags |= LINUX_IFF_LOOPBACK;
+		flags |= LINUX_IFF_LOOPBACK;
 	if (fl & IFF_POINTOPOINT)
-		*flags |= LINUX_IFF_POINTOPOINT;
+		flags |= LINUX_IFF_POINTOPOINT;
 	if (fl & IFF_DRV_RUNNING)
-		*flags |= LINUX_IFF_RUNNING;
+		flags |= LINUX_IFF_RUNNING;
 	if (fl & IFF_NOARP)
-		*flags |= LINUX_IFF_NOARP;
+		flags |= LINUX_IFF_NOARP;
 	if (fl & IFF_PROMISC)
-		*flags |= LINUX_IFF_PROMISC;
+		flags |= LINUX_IFF_PROMISC;
 	if (fl & IFF_ALLMULTI)
-		*flags |= LINUX_IFF_ALLMULTI;
+		flags |= LINUX_IFF_ALLMULTI;
 	if (fl & IFF_MULTICAST)
-		*flags |= LINUX_IFF_MULTICAST;
+		flags |= LINUX_IFF_MULTICAST;
+	return (flags);
+}
+
+static u_int
+linux_ifhwaddr_cb(void *arg, struct ifaddr *ifa, u_int count)
+{
+	struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+	struct l_sockaddr *lsa = arg;
+
+	if (count > 0)
+		return (0);
+	if (sdl->sdl_type != IFT_ETHER)
+		return (0);
+	bzero(lsa, sizeof(*lsa));
+	lsa->sa_family = LINUX_ARPHRD_ETHER;
+	bcopy(LLADDR(sdl), lsa->sa_data, LINUX_IFHWADDRLEN);
+	return (1);
 }
 
 int
 linux_ifhwaddr(struct ifnet *ifp, struct l_sockaddr *lsa)
 {
-	struct ifaddr *ifa;
-	struct sockaddr_dl *sdl;
+
+	NET_EPOCH_ASSERT();
 
 	if (IFP_IS_LOOP(ifp)) {
 		bzero(lsa, sizeof(*lsa));
 		lsa->sa_family = LINUX_ARPHRD_LOOPBACK;
 		return (0);
 	}
-
 	if (!IFP_IS_ETH(ifp))
 		return (ENOENT);
-
-	CK_STAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
-		sdl = (struct sockaddr_dl*)ifa->ifa_addr;
-		if (sdl != NULL && (sdl->sdl_family == AF_LINK) &&
-		    (sdl->sdl_type == IFT_ETHER)) {
-			bzero(lsa, sizeof(*lsa));
-			lsa->sa_family = LINUX_ARPHRD_ETHER;
-			bcopy(LLADDR(sdl), lsa->sa_data, LINUX_IFHWADDRLEN);
-			return (0);
-		}
-	}
-
+	if (if_foreach_addr_type(ifp, AF_LINK, linux_ifhwaddr_cb, lsa) > 0)
+		return (0);
 	return (ENOENT);
 }
 

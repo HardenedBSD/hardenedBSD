@@ -108,7 +108,7 @@ static vfs_statfs_t	tarfs_statfs;
 static vfs_fhtovp_t	tarfs_fhtovp;
 
 static const char *tarfs_opts[] = {
-	"from", "gid", "mode", "uid", "verify",
+	"as", "from", "gid", "mode", "uid", "verify",
 	NULL
 };
 
@@ -347,6 +347,11 @@ tarfs_lookup_path(struct tarfs_mount *tmp, char *name, size_t namelen,
 			}
 			tnp = parent;
 			parent = tnp->parent;
+			cn.cn_nameptr = tnp->name;
+			cn.cn_namelen = tnp->namelen;
+			do_lookup = true;
+			TARFS_DPF(LOOKUP, "%s: back to %.*s/\n", __func__,
+			    (int)tnp->namelen, tnp->name);
 			name += len;
 			namelen -= len;
 			continue;
@@ -406,16 +411,14 @@ static void
 tarfs_free_mount(struct tarfs_mount *tmp)
 {
 	struct mount *mp;
-	struct tarfs_node *tnp;
+	struct tarfs_node *tnp, *tnp_next;
 
 	MPASS(tmp != NULL);
 
 	TARFS_DPF(ALLOC, "%s: Freeing mount structure %p\n", __func__, tmp);
 
 	TARFS_DPF(ALLOC, "%s: freeing tarfs_node structures\n", __func__);
-	while (!TAILQ_EMPTY(&tmp->allnodes)) {
-		tnp = TAILQ_FIRST(&tmp->allnodes);
-		TAILQ_REMOVE(&tmp->allnodes, tnp, entries);
+	TAILQ_FOREACH_SAFE(tnp, &tmp->allnodes, entries, tnp_next) {
 		tarfs_free_node(tnp);
 	}
 
@@ -517,12 +520,12 @@ again:
 
 	/* get standard attributes */
 	num = tarfs_str2int64(hdrp->mode, sizeof(hdrp->mode));
-	if (num < 0 || num > ALLPERMS) {
+	if (num < 0 || num > (S_IFMT|ALLPERMS)) {
 		TARFS_DPF(ALLOC, "%s: invalid file mode at %zu\n",
 		    __func__, TARFS_BLOCKSIZE * (blknum - 1));
 		mode = S_IRUSR;
 	} else {
-		mode = num;
+		mode = num & ALLPERMS;
 	}
 	num = tarfs_str2int64(hdrp->uid, sizeof(hdrp->uid));
 	if (num < 0 || num > UID_MAX) {
@@ -744,6 +747,7 @@ again:
 			error = EINVAL;
 			goto bad;
 		}
+		tnp->other->nlink++;
 		break;
 	case TAR_TYPE_SYMLINK:
 		if (link == NULL) {
@@ -901,11 +905,11 @@ tarfs_mount(struct mount *mp)
 	struct tarfs_mount *tmp = NULL;
 	struct thread *td = curthread;
 	struct vnode *vp;
-	char *from;
+	char *as, *from;
 	uid_t root_uid;
 	gid_t root_gid;
 	mode_t root_mode;
-	int error, flags, len;
+	int error, flags, aslen, len;
 
 	if (mp->mnt_flag & MNT_UPDATE)
 		return (EOPNOTSUPP);
@@ -932,10 +936,14 @@ tarfs_mount(struct mount *mp)
 	error = vfs_getopt(mp->mnt_optnew, "from", (void **)&from, &len);
 	if (error != 0 || from[len - 1] != '\0')
 		return (EINVAL);
+	error = vfs_getopt(mp->mnt_optnew, "as", (void **)&as, &aslen);
+	if (error != 0 || as[aslen - 1] != '\0')
+		as = from;
 
 	/* Find the source tarball */
-	TARFS_DPF(FS, "%s(%s, uid=%u, gid=%u, mode=%o)\n", __func__,
-	    from, root_uid, root_gid, root_mode);
+	TARFS_DPF(FS, "%s(%s%s%s, uid=%u, gid=%u, mode=%o)\n", __func__,
+	    from, (as != from) ? " as " : "", (as != from) ? as : "",
+	    root_uid, root_gid, root_mode);
 	flags = FREAD;
 	if (vfs_flagopt(mp->mnt_optnew, "verify", NULL, 0)) {
 	    flags |= O_VERIFY;
@@ -991,7 +999,7 @@ tarfs_mount(struct mount *mp)
 	MNT_IUNLOCK(mp);
 
 	vfs_getnewfsid(mp);
-	vfs_mountedfrom(mp, "tarfs");
+	vfs_mountedfrom(mp, as);
 	TARFS_DPF(FS, "%s: success\n", __func__);
 
 	return (0);

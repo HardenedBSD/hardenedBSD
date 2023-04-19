@@ -80,44 +80,6 @@ OLD_FILES+=usr/share/man/man1/batch.1.gz
 OLD_FILES+=usr/share/man/man8/atrun.8.gz
 .endif
 
-.if ${MK_ATM} == no
-OLD_FILES+=usr/bin/sscop
-OLD_FILES+=usr/include/netnatm/addr.h
-OLD_FILES+=usr/include/netnatm/api/atmapi.h
-OLD_FILES+=usr/include/netnatm/api/ccatm.h
-OLD_FILES+=usr/include/netnatm/api/unisap.h
-OLD_DIRS+=usr/include/netnatm/api
-OLD_FILES+=usr/include/netnatm/msg/uni_config.h
-OLD_FILES+=usr/include/netnatm/msg/uni_hdr.h
-OLD_FILES+=usr/include/netnatm/msg/uni_ie.h
-OLD_FILES+=usr/include/netnatm/msg/uni_msg.h
-OLD_FILES+=usr/include/netnatm/msg/unimsglib.h
-OLD_FILES+=usr/include/netnatm/msg/uniprint.h
-OLD_FILES+=usr/include/netnatm/msg/unistruct.h
-OLD_DIRS+=usr/include/netnatm/msg
-OLD_FILES+=usr/include/netnatm/saal/sscfu.h
-OLD_FILES+=usr/include/netnatm/saal/sscfudef.h
-OLD_FILES+=usr/include/netnatm/saal/sscop.h
-OLD_FILES+=usr/include/netnatm/saal/sscopdef.h
-OLD_DIRS+=usr/include/netnatm/saal
-OLD_FILES+=usr/include/netnatm/sig/uni.h
-OLD_FILES+=usr/include/netnatm/sig/unidef.h
-OLD_FILES+=usr/include/netnatm/sig/unisig.h
-OLD_DIRS+=usr/include/netnatm/sig
-OLD_FILES+=usr/include/netnatm/unimsg.h
-OLD_FILES+=usr/lib/libngatm.a
-OLD_FILES+=usr/lib/libngatm.so
-OLD_LIBS+=usr/lib/libngatm.so.4
-OLD_FILES+=usr/lib/libngatm_p.a
-OLD_FILES+=usr/share/man/man1/sscop.1.gz
-OLD_FILES+=usr/share/man/man3/libngatm.3.gz
-OLD_FILES+=usr/share/man/man3/uniaddr.3.gz
-OLD_FILES+=usr/share/man/man3/unifunc.3.gz
-OLD_FILES+=usr/share/man/man3/unimsg.3.gz
-OLD_FILES+=usr/share/man/man3/unisap.3.gz
-OLD_FILES+=usr/share/man/man3/unistruct.3.gz
-.endif
-
 .if ${MK_AUDIT} == no
 OLD_FILES+=etc/rc.d/auditd
 OLD_FILES+=etc/rc.d/auditdistd
@@ -893,14 +855,15 @@ OLD_DIRS+=usr/tests/usr.bin/calendar
 
 .if ${MK_CASPER} == no
 OLD_LIBS+=lib/libcasper.so.1
-OLD_LIBS+=lib/casper/libcap_dns.so.2
-OLD_LIBS+=lib/casper/libcap_fileargs.so.1
-OLD_LIBS+=lib/casper/libcap_grp.so.1
-OLD_LIBS+=lib/casper/libcap_net.so.1
-OLD_LIBS+=lib/casper/libcap_pwd.so.1
-OLD_LIBS+=lib/casper/libcap_sysctl.so.1
-OLD_LIBS+=lib/casper/libcap_sysctl.so.2
-OLD_LIBS+=lib/casper/libcap_syslog.so.1
+OLD_LIBS+=lib/libcap_dns.so.2
+OLD_LIBS+=lib/libcap_fileargs.so.1
+OLD_LIBS+=lib/libcap_grp.so.1
+OLD_LIBS+=lib/libcap_net.so.1
+OLD_LIBS+=lib/libcap_netdb.so.1
+OLD_LIBS+=lib/libcap_pwd.so.1
+OLD_LIBS+=lib/libcap_sysctl.so.1
+OLD_LIBS+=lib/libcap_sysctl.so.2
+OLD_LIBS+=lib/libcap_syslog.so.1
 .endif
 
 .if ${MK_CCD} == no
@@ -921,6 +884,7 @@ OLD_FILES+=usr/lib/dtrace/drti.o
 OLD_FILES+=usr/lib/dtrace/errno.d
 OLD_FILES+=usr/lib/dtrace/io.d
 OLD_FILES+=usr/lib/dtrace/ip.d
+OLD_FILES+=usr/lib/dtrace/ipfw.d
 OLD_FILES+=usr/lib/dtrace/mbuf.d
 OLD_FILES+=usr/lib/dtrace/psinfo.d
 .if ${TARGET_ARCH} == "amd64" || ${TARGET_ARCH} == "i386"
@@ -6853,8 +6817,6 @@ OLD_FILES+=usr/share/man/man3/pmc.ivybridge.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.ivybridgexeon.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.k7.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.k8.3.gz
-OLD_FILES+=usr/share/man/man3/pmc.mips24k.3.gz
-OLD_FILES+=usr/share/man/man3/pmc.octeon.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.p4.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.p5.3.gz
 OLD_FILES+=usr/share/man/man3/pmc.p6.3.gz
@@ -7026,7 +6988,6 @@ OLD_FILES+=usr/lib/libncurses_p.a
 OLD_FILES+=usr/lib/libncursesw_p.a
 OLD_FILES+=usr/lib/libnetgraph_p.a
 OLD_FILES+=usr/lib/libnetmap_p.a
-OLD_FILES+=usr/lib/libngatm_p.a
 OLD_FILES+=usr/lib/libnv_p.a
 OLD_FILES+=usr/lib/libnvpair_p.a
 OLD_FILES+=usr/lib/libopencsd_p.a

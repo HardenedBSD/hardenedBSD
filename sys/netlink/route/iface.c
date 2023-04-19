@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_netlink.h"
+
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
@@ -32,6 +34,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/types.h>
 #include <sys/eventhandler.h>
 #include <sys/kernel.h>
+#include <sys/jail.h>
 #include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -61,6 +64,7 @@ struct netlink_walkargs {
 	struct nl_writer *nw;
 	struct nlmsghdr hdr;
 	struct nlpcb *so;
+	struct ucred *cred;
 	uint32_t fibnum;
 	int family;
 	int error;
@@ -226,7 +230,7 @@ dump_sa(struct nl_writer *nw, int attr, const struct sockaddr *sa)
                 addr_data = LLADDR_CONST((const struct sockaddr_dl *)sa);
                 break;
         default:
-                NL_LOG(LOG_DEBUG, "unsupported family: %d, skipping", sa->sa_family);
+                NL_LOG(LOG_DEBUG2, "unsupported family: %d, skipping", sa->sa_family);
                 return (true);
         }
 
@@ -360,8 +364,10 @@ static const struct nlattr_parser nla_p_if[] = {
 NL_DECLARE_STRICT_PARSER(ifmsg_parser, struct ifinfomsg, check_ifmsg, nlf_p_if, nla_p_if);
 
 static bool
-match_iface(struct nl_parsed_link *attrs, struct ifnet *ifp)
+match_iface(struct ifnet *ifp, void *_arg)
 {
+	struct nl_parsed_link *attrs = (struct nl_parsed_link *)_arg;
+
 	if (attrs->ifi_index != 0 && attrs->ifi_index != ifp->if_index)
 		return (false);
 	if (attrs->ifi_type != 0 && attrs->ifi_index != ifp->if_type)
@@ -371,6 +377,15 @@ match_iface(struct nl_parsed_link *attrs, struct ifnet *ifp)
 	/* TODO: add group match */
 
 	return (true);
+}
+
+static int
+dump_cb(struct ifnet *ifp, void *_arg)
+{
+	struct netlink_walkargs *wa = (struct netlink_walkargs *)_arg;
+	if (!dump_iface(wa->nw, ifp, &wa->hdr, 0))
+		return (ENOMEM);
+	return (0);
 }
 
 /*
@@ -417,7 +432,7 @@ rtnl_handle_getlink(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 		}
 
 		if (ifp != NULL) {
-			if (match_iface(&attrs, ifp)) {
+			if (match_iface(ifp, &attrs)) {
 				if (!dump_iface(wa.nw, ifp, &wa.hdr, 0))
 					error = ENOMEM;
 			} else
@@ -438,50 +453,7 @@ rtnl_handle_getlink(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 	 */
 
 	NL_LOG(LOG_DEBUG2, "Start dump");
-
-	struct ifnet **match_array = NULL;
-	int offset = 0, base_count = 0;
-
-	NLP_LOG(LOG_DEBUG3, nlp, "MATCHING: index=%u type=%d name=%s",
-	    attrs.ifi_index, attrs.ifi_type, attrs.ifla_ifname);
-	NET_EPOCH_ENTER(et);
-        CK_STAILQ_FOREACH(ifp, &V_ifnet, if_link) {
-		wa.count++;
-		if (match_iface(&attrs, ifp)) {
-			if (offset >= base_count) {
-				/* Too many matches, need to reallocate */
-				struct ifnet **new_array;
-				/* Start with 128 bytes, do 2x increase on each realloc */
-				base_count = (base_count != 0) ? base_count * 2 : 16;
-				new_array = malloc(base_count * sizeof(void *), M_TEMP, M_NOWAIT);
-				if (new_array == NULL) {
-					error = ENOMEM;
-					break;
-				}
-				if (match_array != NULL) {
-					memcpy(new_array, match_array, offset * sizeof(void *));
-					free(match_array, M_TEMP);
-				}
-				match_array = new_array;
-			}
-
-			if (match_array != NULL && if_try_ref(ifp))
-				match_array[offset++] = ifp;
-                }
-        }
-	NET_EPOCH_EXIT(et);
-
-	NL_LOG(LOG_DEBUG2, "Matched %d interface(s), dumping", offset);
-	if (match_array != NULL) {
-		for (int i = 0; error == 0 && i < offset; i++) {
-			if (!dump_iface(wa.nw, match_array[i], &wa.hdr, 0))
-				error = ENOMEM;
-		}
-		for (int i = 0; i < offset; i++)
-			if_rele(match_array[i]);
-		free(match_array, M_TEMP);
-	}
-
+	if_foreach_sleep(match_iface, &attrs, dump_cb, &wa);
 	NL_LOG(LOG_DEBUG2, "End dump, iterated %d dumped %d", wa.count, wa.dumped);
 
 	if (!nlmsg_end_dump(wa.nw, error, &wa.hdr)) {
@@ -762,6 +734,7 @@ ifa_get_scope(const struct ifaddr *ifa)
         return (addr_scope);
 }
 
+#ifdef INET6
 static uint8_t
 inet6_get_plen(const struct in6_addr *addr)
 {
@@ -769,6 +742,7 @@ inet6_get_plen(const struct in6_addr *addr)
 	return (bitcount32(addr->s6_addr32[0]) + bitcount32(addr->s6_addr32[1]) +
 	    bitcount32(addr->s6_addr32[2]) + bitcount32(addr->s6_addr32[3]));
 }
+#endif
 
 static uint8_t
 get_sa_plen(const struct sockaddr *sa)
@@ -865,6 +839,8 @@ dump_iface_addrs(struct netlink_walkargs *wa, struct ifnet *ifp)
 			continue;
 		if (ifa->ifa_addr->sa_family == AF_LINK)
 			continue;
+		if (prison_if(wa->cred, ifa->ifa_addr) != 0)
+			continue;
 		wa->count++;
 		if (!dump_iface_addr(wa->nw, ifp, ifa, &wa->hdr))
 			return (ENOMEM);
@@ -888,6 +864,7 @@ rtnl_handle_getaddr(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *n
 	struct netlink_walkargs wa = {
 		.so = nlp,
 		.nw = npt->nw,
+		.cred = nlp_get_cred(nlp),
 		.family = attrs.ifa_family,
 		.hdr.nlmsg_pid = hdr->nlmsg_pid,
 		.hdr.nlmsg_seq = hdr->nlmsg_seq,
@@ -1009,7 +986,7 @@ static const struct rtnl_cmd_handler cmd_handlers[] = {
 		.cmd = NL_RTM_GETLINK,
 		.name = "RTM_GETLINK",
 		.cb = &rtnl_handle_getlink,
-		.flags = RTNL_F_NOEPOCH,
+		.flags = RTNL_F_NOEPOCH | RTNL_F_ALLOW_NONVNET_JAIL,
 	},
 	{
 		.cmd = NL_RTM_DELLINK,
@@ -1029,6 +1006,7 @@ static const struct rtnl_cmd_handler cmd_handlers[] = {
 		.cmd = NL_RTM_GETADDR,
 		.name = "RTM_GETADDR",
 		.cb = &rtnl_handle_getaddr,
+		.flags = RTNL_F_ALLOW_NONVNET_JAIL,
 	},
 	{
 		.cmd = NL_RTM_NEWADDR,

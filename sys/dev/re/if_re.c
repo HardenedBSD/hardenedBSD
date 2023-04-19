@@ -1653,7 +1653,6 @@ re_attach(device_t dev)
 	if_setcapenable(ifp, if_getcapabilities(ifp));
 	if_setinitfn(ifp, re_init);
 	if_setsendqlen(ifp, RL_IFQ_MAXLEN);
-	if_setsendqlen(ifp, RL_IFQ_MAXLEN);
 	if_setsendqready(ifp);
 
 	NET_TASK_INIT(&sc->rl_inttask, 0, re_int_task, sc);
@@ -1672,6 +1671,11 @@ re_attach(device_t dev)
 	if (error != 0) {
 		device_printf(dev, "attaching PHYs failed\n");
 		goto fail;
+	}
+
+	/* If address was not found, create one based on the hostid and name. */
+	if (ETHER_IS_ZERO(eaddr)) {
+		ether_gen_addr(ifp, (struct ether_addr *)eaddr);
 	}
 
 	/*

@@ -136,9 +136,9 @@ TARGET_TRIPLE_ABI=	gnueabi
 .endif
 .endif
 MACHINE_TRIPLE_ABI?=	unknown
-MACHINE_TRIPLE?=${MACHINE_ARCH:S/amd64/x86_64/:C/sf$//}-${MACHINE_TRIPLE_ABI}-freebsd${OS_REVISION}
+MACHINE_TRIPLE?=${MACHINE_ARCH:S/amd64/x86_64/}-${MACHINE_TRIPLE_ABI}-freebsd${OS_REVISION}
 TARGET_TRIPLE_ABI?=	unknown
-TARGET_TRIPLE?=	${TARGET_ARCH:S/amd64/x86_64/:C/sf$//}-${TARGET_TRIPLE_ABI}-freebsd${OS_REVISION}
+TARGET_TRIPLE?=	${TARGET_ARCH:S/amd64/x86_64/}-${TARGET_TRIPLE_ABI}-freebsd${OS_REVISION}
 KNOWN_ARCHES?=	aarch64/arm64 \
 		amd64 \
 		armv6/arm \
@@ -147,8 +147,7 @@ KNOWN_ARCHES?=	aarch64/arm64 \
 		powerpc64/powerpc \
 		powerpc64le/powerpc \
 		powerpcspe/powerpc \
-		riscv64/riscv \
-		riscv64sf/riscv
+		riscv64/riscv
 
 .if ${TARGET} == ${TARGET_ARCH}
 _t=		${TARGET}
@@ -628,6 +627,18 @@ MKTEMP=${WORLDTMP}/legacy/usr/bin/mktemp
 MKTEMP=mktemp
 .endif
 INSTALLTMP!=	${MKTEMP} -d -u -t install
+
+.if ${.MAKE.OS} == "FreeBSD"
+# When building on FreeBSD we always copy the host tools instead of linking
+# into INSTALLTMP to avoid issues with incompatible libraries (see r364030).
+# Note: we could create links if we don't intend to update the current machine.
+INSTALLTMP_COPY_HOST_TOOL=cp
+.else
+# However, this is not necessary on Linux/macOS. Additionally, copying the host
+# tools to another directory with cp results in AMFI Launch Constraint
+# Violations on macOS Ventura as part of its System Integrity Protection.
+INSTALLTMP_COPY_HOST_TOOL=ln -s
+.endif
 .endif
 
 .if make(stagekernel) || make(distributekernel)
@@ -1072,8 +1083,7 @@ _bootstrap-tools:
 	${_+_}cd ${.CURDIR}; ${BMAKE} _NO_INCLUDE_COMPILERMK=t _cleanobj_fast_depend_hack
 .endif
 	${_+_}cd ${.CURDIR}; ${BMAKE} bootstrap-tools
-	mkdir -p ${WORLDTMP}/usr ${WORLDTMP}/lib/casper ${WORLDTMP}/lib/geom \
-	    ${WORLDTMP}/bin
+	mkdir -p ${WORLDTMP}/usr ${WORLDTMP}/lib/geom ${WORLDTMP}/bin
 	${WORLDTMP_MTREE} -f ${.CURDIR}/etc/mtree/BSD.usr.dist \
 	    -p ${WORLDTMP}/usr >/dev/null
 	${WORLDTMP_MTREE} -f ${.CURDIR}/etc/mtree/BSD.include.dist \
@@ -1396,7 +1406,7 @@ distributeworld installworld stageworld: _installcheck_world .PHONY
 			fi; \
 		    done); \
 	fi; \
-	cp $$libs $$progs ${INSTALLTMP}
+	${INSTALLTMP_COPY_HOST_TOOL} $$libs $$progs ${INSTALLTMP}
 	cp -R $${PATH_LOCALE:-"/usr/share/locale"} ${INSTALLTMP}/locale
 .if defined(NO_ROOT)
 	-mkdir -p ${METALOG:H}
@@ -2291,8 +2301,8 @@ _flua= lib/liblua lib/libucl libexec/flua
 # r245440 mtree -N support added
 # r313404 requires sha384.h for libnetbsd, added to libmd in r292782
 .if ${BOOTSTRAPPING} < 1100093
+_libnetbsd=	lib/libnetbsd
 _nmtree=	lib/libmd \
-		lib/libnetbsd \
 		usr.sbin/nmtree
 
 ${_bt}-lib/libnetbsd: ${_bt}-lib/libmd
@@ -2325,9 +2335,23 @@ _crunchgen=	usr.sbin/crunch/crunchgen
 _bootstrap_tools_links+=crunchgen
 .endif
 
+.if ${MK_DISK_IMAGE_TOOLS_BOOTSTRAP} != "no"
+_etdump=	usr.bin/etdump
+_makefs=	usr.sbin/makefs
+
+_libnetbsd=	lib/libnetbsd
+${_bt}-usr.sbin/makefs: ${_bt}-lib/libnetbsd
+
+.if defined(BOOTSTRAP_ALL_TOOLS)
+_libsbuf=	lib/libsbuf
+${_bt}-usr.sbin/makefs: ${_bt}-lib/libsbuf
+.endif
+.endif
+
 # 1300102: VHDX support
 .if ${BOOTSTRAPPING} < 1201520 || \
-	(${BOOTSTRAPPING} > 1300000 && ${BOOTSTRAPPING} < 1300102)
+	(${BOOTSTRAPPING} > 1300000 && ${BOOTSTRAPPING} < 1300102) || \
+	${MK_DISK_IMAGE_TOOLS_BOOTSTRAP} != "no"
 _mkimg=	usr.bin/mkimg
 .else
 _bootstrap_tools_links+=mkimg
@@ -2528,6 +2552,10 @@ bootstrap-tools: ${_bt}-links .PHONY
     ${_flua} \
     ${_crunchide} \
     ${_crunchgen} \
+    ${_etdump} \
+    ${_libnetbsd} \
+    ${_libsbuf} \
+    ${_makefs} \
     ${_mkimg} \
     ${_nmtree} \
     ${_vtfontcvt} \
@@ -3398,7 +3426,7 @@ check-old: check-old-files check-old-libs check-old-dirs .PHONY
 # showconfig - show build configuration.
 #
 showconfig: .PHONY
-	@(${MAKE} -n -f ${.CURDIR}/sys/conf/kern.opts.mk -V dummy -dg1 UPDATE_DEPENDFILE=no NO_OBJ=yes; \
+	@(${MAKE} -n -f ${.CURDIR}/sys/conf/kern.opts.mk -V dummy -dg1 UPDATE_DEPENDFILE=no NO_OBJ=yes MACHINE=${TARGET} MACHINE_ARCH=${TARGET_ARCH}; \
 	  ${MAKE} -n -f ${.CURDIR}/share/mk/src.opts.mk -V dummy -dg1 UPDATE_DEPENDFILE=no NO_OBJ=yes) 2>&1 | grep ^MK_ | sort -u
 
 .if !empty(KRNLOBJDIR) && !empty(KERNCONF)

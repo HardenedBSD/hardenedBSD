@@ -326,12 +326,17 @@ freebsd_generic_rx_handler(if_t ifp, struct mbuf *m)
 		return;
 	}
 
-	stolen = generic_rx_handler(ifp, m);
-	if (!stolen) {
-		struct netmap_generic_adapter *gna =
-				(struct netmap_generic_adapter *)NA(ifp);
-		gna->save_if_input(ifp, m);
-	}
+	do {
+		struct mbuf *n;
+
+		n = m->m_nextpkt;
+		m->m_nextpkt = NULL;
+		stolen = generic_rx_handler(ifp, m);
+		if (!stolen) {
+			NA(ifp)->if_input(ifp, m);
+		}
+		m = n;
+	} while (m != NULL);
 }
 
 /*
@@ -347,26 +352,12 @@ nm_os_catch_rx(struct netmap_generic_adapter *gna, int intercept)
 
 	nm_os_ifnet_lock();
 	if (intercept) {
-		if (gna->save_if_input) {
-			nm_prerr("RX on %s already intercepted", na->name);
-			ret = EBUSY; /* already set */
-			goto out;
-		}
 		if_setcapenablebit(ifp, IFCAP_NETMAP, 0);
-		gna->save_if_input = if_getinputfn(ifp);
 		if_setinputfn(ifp, freebsd_generic_rx_handler);
 	} else {
-		if (!gna->save_if_input) {
-			nm_prerr("Failed to undo RX intercept on %s",
-				na->name);
-			ret = EINVAL;  /* not saved */
-			goto out;
-		}
 		if_setcapenablebit(ifp, 0, IFCAP_NETMAP);
-		if_setinputfn(ifp, gna->save_if_input);
-		gna->save_if_input = NULL;
+		if_setinputfn(ifp, na->if_input);
 	}
-out:
 	nm_os_ifnet_unlock();
 
 	return ret;
@@ -404,15 +395,20 @@ nm_os_catch_tx(struct netmap_generic_adapter *gna, int intercept)
  * addr and len identify the netmap buffer, m is the (preallocated)
  * mbuf to use for transmissions.
  *
- * We should add a reference to the mbuf so the m_freem() at the end
- * of the transmission does not consume resources.
+ * Zero-copy transmission is possible if netmap is attached directly to a
+ * hardware interface: when cleaning we simply wait for the mbuf cluster
+ * refcount to decrement to 1, indicating that the driver has completed
+ * transmission and is done with the buffer.  However, this approach can
+ * lead to queue deadlocks when attaching to software interfaces (e.g.,
+ * if_bridge) since we cannot rely on member ports to promptly reclaim
+ * transmitted mbufs.  Since there is no easy way to distinguish these
+ * cases, we currently always copy the buffer.
  *
- * On FreeBSD, and on multiqueue cards, we can force the queue using
+ * On multiqueue cards, we can force the queue using
  *      if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE)
  *              i = m->m_pkthdr.flowid % adapter->num_queues;
  *      else
  *              i = curcpu % adapter->num_queues;
- *
  */
 int
 nm_os_generic_xmit_frame(struct nm_os_gen_arg *a)
@@ -422,16 +418,21 @@ nm_os_generic_xmit_frame(struct nm_os_gen_arg *a)
 	if_t ifp = a->ifp;
 	struct mbuf *m = a->m;
 
-	/* Link the external storage to
-	 * the netmap buffer, so that no copy is necessary. */
-	m->m_ext.ext_buf = m->m_data = a->addr;
-	m->m_ext.ext_size = len;
+	M_ASSERTPKTHDR(m);
+	KASSERT((m->m_flags & M_EXT) != 0,
+	    ("%s: mbuf %p has no cluster", __func__, m));
 
-	m->m_flags |= M_PKTHDR;
+	if (MBUF_REFCNT(m) != 1) {
+		nm_prerr("invalid refcnt %d for %p", MBUF_REFCNT(m), m);
+		panic("in generic_xmit_frame");
+	}
+	if (unlikely(m->m_ext.ext_size < len)) {
+		nm_prlim(2, "size %d < len %d", m->m_ext.ext_size, len);
+		len = m->m_ext.ext_size;
+	}
+
+	m_copyback(m, 0, len, a->addr);
 	m->m_len = m->m_pkthdr.len = len;
-
-	/* mbuf refcnt is not contended, no need to use atomic
-	 * (a memory barrier is enough). */
 	SET_MBUF_REFCNT(m, 2);
 	M_HASHTYPE_SET(m, M_HASHTYPE_OPAQUE);
 	m->m_pkthdr.flowid = a->ring_nr;
@@ -441,7 +442,6 @@ nm_os_generic_xmit_frame(struct nm_os_gen_arg *a)
 	CURVNET_RESTORE();
 	return ret ? -1 : 0;
 }
-
 
 struct netmap_adapter *
 netmap_getna(if_t ifp)
@@ -1025,11 +1025,6 @@ netmap_dev_pager_fault(vm_object_t object, vm_ooffset_t offset,
 		 * Replace the passed in reqpage page with our own fake page and
 		 * free up the all of the original pages.
 		 */
-#ifndef VM_OBJECT_WUNLOCK	/* FreeBSD < 10.x */
-#define VM_OBJECT_WUNLOCK VM_OBJECT_UNLOCK
-#define VM_OBJECT_WLOCK	VM_OBJECT_LOCK
-#endif /* VM_OBJECT_WUNLOCK */
-
 		VM_OBJECT_WUNLOCK(object);
 		page = vm_page_getfake(paddr, memattr);
 		VM_OBJECT_WLOCK(object);

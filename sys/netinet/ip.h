@@ -212,6 +212,7 @@ struct	ip_timestamp {
 #define	IPDEFTTL	64		/* default ttl, from RFC 1340 */
 #define	IPTTLDEC	1		/* subtracted when forwarding */
 #define	IP_MSS		576		/* default maximum segment size */
+#define IP_MINDEFTTL	32		/* default minimum ttl, used for ttl randomization */
 
 /*
  * This is the real IPv4 pseudo header, used for computing the TCP and UDP

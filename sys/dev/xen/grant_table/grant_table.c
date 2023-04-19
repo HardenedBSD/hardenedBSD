@@ -29,9 +29,6 @@ __FBSDID("$FreeBSD$");
 
 #include <xen/xen-os.h>
 #include <xen/hypervisor.h>
-#include <machine/xen/synch_bitops.h>
-
-#include <xen/hypervisor.h>
 #include <xen/gnttab.h>
 
 #include <vm/vm.h>
@@ -41,7 +38,7 @@ __FBSDID("$FreeBSD$");
 
 /* External tools reserve first few grant table entries. */
 #define NR_RESERVED_ENTRIES 8
-#define GREFS_PER_GRANT_FRAME (PAGE_SIZE / sizeof(grant_entry_t))
+#define GREFS_PER_GRANT_FRAME (PAGE_SIZE / sizeof(grant_entry_v1_t))
 
 static grant_ref_t **gnttab_list;
 static unsigned int nr_grant_frames;
@@ -59,7 +56,7 @@ static struct resource *gnttab_pseudo_phys_res;
 /* Resource id for allocated physical address space. */
 static int gnttab_pseudo_phys_res_id;
 
-static grant_entry_t *shared;
+static grant_entry_v1_t *shared;
 
 static struct gnttab_free_callback *gnttab_free_callback_list = NULL;
 
@@ -182,18 +179,15 @@ gnttab_query_foreign_access(grant_ref_t ref)
 int
 gnttab_end_foreign_access_ref(grant_ref_t ref)
 {
-	uint16_t flags, nflags;
+	uint16_t flags;
 
-	nflags = shared[ref].flags;
-	do {
-		if ( (flags = nflags) & (GTF_reading|GTF_writing) ) {
-			printf("%s: WARNING: g.e. still in use!\n", __func__);
-			return (0);
-		}
-	} while ((nflags = synch_cmpxchg(&shared[ref].flags, flags, 0)) !=
-	       flags);
+	while (!((flags = atomic_load_16(&shared[ref].flags)) &
+	    (GTF_reading|GTF_writing)))
+		if (atomic_cmpset_16(&shared[ref].flags, flags, 0))
+			return (1);
 
-	return (1);
+	printf("%s: WARNING: g.e. still in use!\n", __func__);
+	return (0);
 }
 
 void
@@ -284,17 +278,21 @@ gnttab_end_foreign_transfer_ref(grant_ref_t ref)
 	/*
          * If a transfer is not even yet started, try to reclaim the grant
          * reference and return failure (== 0).
+	 *
+	 * NOTE: This is a loop since the atomic cmpset can fail multiple
+	 * times.  In normal operation it will be rare to execute more than
+	 * twice.  Attempting an attack would consume a great deal of
+	 * attacker resources and be unlikely to prolong the loop very much.
          */
-	while (!((flags = shared[ref].flags) & GTF_transfer_committed)) {
-		if ( synch_cmpxchg(&shared[ref].flags, flags, 0) == flags )
+	while (!((flags = atomic_load_16(&shared[ref].flags)) &
+	    GTF_transfer_committed))
+		if (atomic_cmpset_16(&shared[ref].flags, flags, 0))
 			return (0);
-		cpu_spinwait();
-	}
 
 	/* If a transfer is in progress then wait until it is completed. */
 	while (!(flags & GTF_transfer_completed)) {
-		flags = shared[ref].flags;
 		cpu_spinwait();
+		flags = atomic_load_16(&shared[ref].flags);
 	}
 
 	/* Read the frame number /after/ reading completion status. */

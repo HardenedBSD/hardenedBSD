@@ -219,6 +219,7 @@ SE_PERFMON= \
 
 .if ${MK_PF} != "no"
 SE_DIRS+=	pf
+.if ${MK_STAGING} == "no"
 SE_PF= \
 	ackpri \
 	faq-example1 \
@@ -230,6 +231,7 @@ SE_PF= \
 	queue3 \
 	queue4 \
 	spamd
+.endif
 .endif
 
 SE_DIRS+=	ppi

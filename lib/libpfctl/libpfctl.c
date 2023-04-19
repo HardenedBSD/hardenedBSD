@@ -225,6 +225,7 @@ pfctl_get_status(int dev)
 	status->states = nvlist_get_number(nvl, "states");
 	status->src_nodes = nvlist_get_number(nvl, "src_nodes");
 	status->syncookies_active = nvlist_get_bool(nvl, "syncookies_active");
+	status->reass = nvlist_get_number(nvl, "reass");
 
 	strlcpy(status->ifname, nvlist_get_string(nvl, "ifname"),
 	    IFNAMSIZ);
@@ -1188,7 +1189,6 @@ static int
 _pfctl_clear_states(int dev, const struct pfctl_kill *kill,
     unsigned int *killed, uint64_t ioctlval)
 {
-	struct pfioc_nv	 nv;
 	nvlist_t	*nvl;
 	int		 ret;
 
@@ -1211,7 +1211,6 @@ _pfctl_clear_states(int dev, const struct pfctl_kill *kill,
 		*killed = nvlist_get_number(nvl, "killed");
 
 	nvlist_destroy(nvl);
-	free(nv.data);
 
 	return (ret);
 }

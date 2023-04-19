@@ -15,4 +15,6 @@ CFLAGS+= -DINET
 CFLAGS+= -DINET6
 .endif
 
+CFI_OVERRIDE=	-fno-sanitize=cfi-icall
+
 .include <bsd.prog.mk>
