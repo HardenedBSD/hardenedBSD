@@ -1978,12 +1978,23 @@ rack_log_hybrid_bw(struct tcp_rack *rack, uint32_t seq, uint64_t cbw, uint64_t t
 	 * once per chunk and make up the BBpoint that can be turned on by the client.
 	 */
 	if ((mod == HYBRID_LOG_RATE_CAP) || (mod == HYBRID_LOG_CAP_CALC)) {
+		/*
+		 * The very noisy two need to only come out when
+		 * we have verbose logging on.
+		 */
 		if (rack_verbose_logging != 0)
 			do_log = tcp_bblogging_on(rack->rc_tp);
 		else
 			do_log = 0;
-	} else
+	} else if (mod != HYBRID_LOG_BW_MEASURE) {
+		/*
+		 * All other less noisy logs here except the measure which
+		 * also needs to come out on the point and the log.
+		 */
+		do_log = tcp_bblogging_on(rack->rc_tp);		
+	} else {
 		do_log = tcp_bblogging_point_on(rack->rc_tp, TCP_BBPOINT_REQ_LEVEL_LOGGING);
+	}
 
 	if (do_log) {
 		union tcp_log_stackspecific log;
@@ -16497,6 +16508,15 @@ rack_do_segment_nounlock(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 	 * anything becase a pacing timer is running.
 	 */
 	us_cts = tcp_tv_to_usectick(tv);
+	if (m->m_flags & M_ACKCMP) {
+		/*
+		 * All compressed ack's are ack's by definition so
+		 * remove any ack required flag and then do the processing.
+		 */
+		rack->rc_ack_required = 0;
+		return (rack_do_compressed_ack_processing(tp, so, m, nxt_pkt, tv));
+	}
+	thflags = tcp_get_flags(th);
 	if ((rack->rc_always_pace == 1) &&
 	    (rack->rc_ack_can_sendout_data == 0) &&
 	    (rack->r_ctl.rc_hpts_flags & PACE_PKT_OUTPUT) &&
@@ -16539,15 +16559,6 @@ rack_do_segment_nounlock(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 			no_output = 0;
 		}
 	}
-	if (m->m_flags & M_ACKCMP) {
-		/*
-		 * All compressed ack's are ack's by definition so
-		 * remove any ack required flag and then do the processing.
-		 */
-		rack->rc_ack_required = 0;
-		return (rack_do_compressed_ack_processing(tp, so, m, nxt_pkt, tv));
-	}
-	thflags = tcp_get_flags(th);
 	/*
 	 * If there is a RST or FIN lets dump out the bw
 	 * with a FIN the connection may go on but we

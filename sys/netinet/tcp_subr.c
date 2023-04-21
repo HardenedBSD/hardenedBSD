@@ -2423,13 +2423,13 @@ tcp_discardcb(struct tcpcb *tp)
 
 	CC_ALGO(tp) = NULL;
 
-#ifdef TCP_BLACKBOX
-	tcp_log_tcpcbfini(tp);
-#endif
 	TCPSTATES_DEC(tp->t_state);
 
 	if (tp->t_fb->tfb_tcp_fb_fini)
 		(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
+#ifdef TCP_BLACKBOX
+	tcp_log_tcpcbfini(tp);
+#endif
 	MPASS(STAILQ_EMPTY(&tp->t_inqueue));
 
 	/*
@@ -3968,6 +3968,13 @@ tcp_inptoxtp(const struct inpcb *inp, struct xtcpcb *xt)
 
 	xt->xt_len = sizeof(struct xtcpcb);
 	in_pcbtoxinpcb(inp, &xt->xt_inp);
+	/*
+	 * TCP doesn't use inp_ppcb pointer, we embed inpcb into tcpcb.
+	 * Fixup the pointer that in_pcbtoxinpcb() has set.  When printing
+	 * TCP netstat(1) used to use this pointer, so this fixup needs to
+	 * stay for stable/14.
+	 */
+	xt->xt_inp.inp_ppcb = (uintptr_t)tp;
 }
 
 void

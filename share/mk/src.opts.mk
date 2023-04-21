@@ -395,6 +395,15 @@ __DEFAULT_NO_OPTIONS+=OPENMP
 BROKEN_OPTIONS+= OFED
 .endif
 
+<<<<<<< HEAD
+=======
+.if ${__T} == "i386" || ${__T} == "amd64"
+__DEFAULT_YES_OPTIONS+=NETLINK_SUPPORT
+.else
+__DEFAULT_NO_OPTIONS+=NETLINK_SUPPORT
+.endif
+
+>>>>>>> freebsd/main
 .-include <site.src.opts.mk>
 
 .include <bsd.mkopt.mk>
