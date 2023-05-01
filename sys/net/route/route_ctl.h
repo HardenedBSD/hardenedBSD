@@ -35,6 +35,8 @@
 #ifndef	_NET_ROUTE_ROUTE_CTL_H_
 #define	_NET_ROUTE_ROUTE_CTL_H_
 
+struct rib_head *rt_tables_get_rnh_safe(uint32_t table, sa_family_t family);
+
 struct rib_cmd_info {
 	uint8_t			rc_cmd;		/* RTM_ADD|RTM_DEL|RTM_CHANGE */
 	uint8_t			spare[3];
@@ -156,6 +158,19 @@ void ip6_writemask(struct in6_addr *addr6, uint8_t mask);
 
 /* Nexthops */
 uint32_t nhops_get_count(struct rib_head *rh);
+
+struct nhop_priv;
+struct nhop_iter {
+	uint32_t		fibnum;
+	uint8_t			family;
+	struct rib_head		*rh;
+	int			_i;
+	struct nhop_priv	*_next;
+};
+
+struct nhop_object *nhops_iter_start(struct nhop_iter *iter);
+struct nhop_object *nhops_iter_next(struct nhop_iter *iter);
+void nhops_iter_stop(struct nhop_iter *iter);
 
 /* Multipath */
 struct weightened_nhop;

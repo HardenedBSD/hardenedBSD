@@ -198,11 +198,6 @@ main(int argc, char *argv[])
 	if (host == NULL)
 		cap_openlog(capsyslog, tag, logflags, 0);
 
-	(void )time(&now);
-	(void )ctime_r(&now, tbuf);
-	tbuf[19] = '\0';
-	timestamp = tbuf + 4;
-
 	if (hostname == NULL) {
 		hostname = hbuf;
 		memset(hbuf, 0, sizeof(hbuf));
@@ -213,10 +208,16 @@ main(int argc, char *argv[])
 			*dotp = '\0';
 	}
 
+	timestamp = tbuf + 4;
+
 	/* log input line if appropriate */
 	if (argc > 0) {
 		char *p, *endp;
 		size_t len;
+
+		(void )time(&now);
+		(void )ctime_r(&now, tbuf);
+		tbuf[19] = '\0';
 
 		for (p = buf, endp = buf + sizeof(buf) - 2; *argv;) {
 			len = strlen(*argv);
@@ -239,9 +240,14 @@ main(int argc, char *argv[])
 			logmessage(pri, timestamp, hostname, tag, socks, nsock,
 			    buf);
 	} else
-		while (fgets(buf, sizeof(buf), stdin) != NULL)
+		while (fgets(buf, sizeof(buf), stdin) != NULL) {
+			(void )time(&now);
+			(void )ctime_r(&now, tbuf);
+			tbuf[19] = '\0';
+
 			logmessage(pri, timestamp, hostname, tag, socks, nsock,
 			    buf);
+		}
 	exit(0);
 }
 

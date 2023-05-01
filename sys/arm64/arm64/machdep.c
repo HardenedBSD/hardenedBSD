@@ -104,6 +104,12 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/smbios/smbios.h>
 
+_Static_assert(sizeof(struct pcb) == 1248, "struct pcb is incorrect size");
+_Static_assert(offsetof(struct pcb, pcb_fpusaved) == 136,
+    "pcb_fpusaved changed offset");
+_Static_assert(offsetof(struct pcb, pcb_fpustate) == 192,
+    "pcb_fpustate changed offset");
+
 enum arm64_bus arm64_bus_method = ARM64_BUS_NONE;
 
 /*
@@ -309,8 +315,7 @@ cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
 {
 
 	pcpu->pc_acpi_id = 0xffffffff;
-	pcpu->pc_mpidr_low = 0xffffffff;
-	pcpu->pc_mpidr_high = 0xffffffff;
+	pcpu->pc_mpidr = UINT64_MAX;
 }
 
 void

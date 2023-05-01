@@ -138,7 +138,12 @@ struct snl_attr_parser {
 	uint16_t		type;	/* Attribute type */
 	uint16_t		off;	/* field offset in the target structure */
 	snl_parse_attr_f	*cb;	/* parser function to call */
-	const void		*arg;	/* Optional argument parser */
+
+	/* Optional parser argument */
+	union {
+		const void		*arg;
+		const uint32_t		 arg_u32;
+	};
 };
 
 struct snl_hdr_parser {
@@ -228,8 +233,14 @@ snl_init(struct snl_state *ss, int netlink_family)
 		return (false);
 	ss->init_done = true;
 
+	int val = 1;
+	socklen_t optlen = sizeof(val);
+	if (setsockopt(ss->fd, SOL_NETLINK, NETLINK_EXT_ACK, &val, optlen) == -1) {
+		snl_free(ss);
+		return (false);
+	}
+
 	int rcvbuf;
-	socklen_t optlen = sizeof(rcvbuf);
 	if (getsockopt(ss->fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &optlen) == -1) {
 		snl_free(ss);
 		return (false);
@@ -270,6 +281,55 @@ snl_get_seq(struct snl_state *ss)
 {
 	return (++ss->seq);
 }
+
+struct snl_msg_info {
+	int		cmsg_type;
+	int		cmsg_level;
+	uint32_t	process_id;
+	uint8_t		port_id;
+	uint8_t		seq_id;
+};
+static inline bool parse_cmsg(struct snl_state *ss, const struct msghdr *msg,
+    struct snl_msg_info *attrs);
+
+static inline struct nlmsghdr *
+snl_read_message_dbg(struct snl_state *ss, struct snl_msg_info *cinfo)
+{
+	memset(cinfo, 0, sizeof(*cinfo));
+
+	if (ss->off == ss->datalen) {
+		struct sockaddr_nl nladdr;
+		char cbuf[64];
+
+		struct iovec iov = {
+			.iov_base = ss->buf,
+			.iov_len = ss->bufsize,
+		};
+		struct msghdr msg = {
+			.msg_name = &nladdr,
+			.msg_namelen = sizeof(nladdr),
+			.msg_iov = &iov,
+			.msg_iovlen = 1,
+			.msg_control = cbuf,
+			.msg_controllen = sizeof(cbuf),
+		};
+		ss->off = 0;
+		ss->datalen = 0;
+		for (;;) {
+			ssize_t datalen = recvmsg(ss->fd, &msg, 0);
+			if (datalen > 0) {
+				ss->datalen = datalen;
+				parse_cmsg(ss, &msg, cinfo);
+				break;
+			} else if (errno != EINTR)
+				return (NULL);
+		}
+	}
+	struct nlmsghdr *hdr = (struct nlmsghdr *)(void *)&ss->buf[ss->off];
+	ss->off += NLMSG_ALIGN(hdr->nlmsg_len);
+	return (hdr);
+}
+
 
 static inline struct nlmsghdr *
 snl_read_message(struct snl_state *ss)
@@ -422,7 +482,8 @@ snl_parse_nlmsg(struct snl_state *ss, struct nlmsghdr *hdr,
 }
 
 static inline bool
-snl_attr_get_flag(struct snl_state *ss __unused, struct nlattr *nla, void *target)
+snl_attr_get_flag(struct snl_state *ss __unused, struct nlattr *nla, const void *arg __unused,
+    void *target)
 {
 	if (NLA_DATA_LEN(nla) == 0) {
 		*((uint8_t *)target) = 1;
@@ -530,6 +591,19 @@ snl_attr_get_stringn(struct snl_state *ss, struct nlattr *nla,
 
 	*((char **)target) = buf;
 	return (true);
+}
+
+static inline bool
+snl_attr_copy_string(struct snl_state *ss, struct nlattr *nla,
+    const void *arg, void *target)
+{
+	char *tmp;
+
+	if (snl_attr_get_string(ss, nla, NULL, &tmp)) {
+		strlcpy(target, tmp, (size_t)arg);
+		return (true);
+	}
+	return (false);
 }
 
 static inline bool
@@ -649,6 +723,33 @@ snl_read_reply_code(struct snl_state *ss, uint32_t nlmsg_seq, struct snl_errmsg_
 		if (!snl_parse_errmsg(ss, hdr, e))
 			e->error = EINVAL;
 		return (e->error == 0);
+	}
+
+	return (false);
+}
+
+#define	_OUT(_field)	offsetof(struct snl_msg_info, _field)
+static const struct snl_attr_parser _nla_p_cinfo[] = {
+	{ .type = NLMSGINFO_ATTR_PROCESS_ID, .off = _OUT(process_id), .cb = snl_attr_get_uint32 },
+	{ .type = NLMSGINFO_ATTR_PORT_ID, .off = _OUT(port_id), .cb = snl_attr_get_uint32 },
+	{ .type = NLMSGINFO_ATTR_SEQ_ID, .off = _OUT(seq_id), .cb = snl_attr_get_uint32 },
+};
+#undef _OUT
+SNL_DECLARE_ATTR_PARSER(snl_msg_info_parser, _nla_p_cinfo);
+
+static inline bool
+parse_cmsg(struct snl_state *ss, const struct msghdr *msg, struct snl_msg_info *attrs)
+{
+	for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL;
+	    cmsg = CMSG_NXTHDR(msg, cmsg)) {
+		if (cmsg->cmsg_level != SOL_NETLINK || cmsg->cmsg_type != NETLINK_MSG_INFO)
+			continue;
+
+		void *data = CMSG_DATA(cmsg);
+		int len = cmsg->cmsg_len - ((char *)data - (char *)cmsg);
+		const struct snl_hdr_parser *ps = &snl_msg_info_parser;
+
+		return (snl_parse_attrs_raw(ss, data, len, ps->np, ps->np_size, attrs));
 	}
 
 	return (false);

@@ -89,7 +89,7 @@ struct linux_lchown16_args {
 };
 struct linux_stat_args {
 	char path_l_[PADL_(char *)]; char * path; char path_r_[PADR_(char *)];
-	char up_l_[PADL_(struct linux_stat *)]; struct linux_stat * up; char up_r_[PADR_(struct linux_stat *)];
+	char up_l_[PADL_(struct l_old_stat *)]; struct l_old_stat * up; char up_r_[PADR_(struct l_old_stat *)];
 };
 struct linux_lseek_args {
 	char fdes_l_[PADL_(l_uint)]; l_uint fdes; char fdes_r_[PADR_(l_uint)];
@@ -273,7 +273,7 @@ struct linux_symlink_args {
 };
 struct linux_lstat_args {
 	char path_l_[PADL_(char *)]; char * path; char path_r_[PADR_(char *)];
-	char up_l_[PADL_(struct linux_lstat *)]; struct linux_lstat * up; char up_r_[PADR_(struct linux_lstat *)];
+	char up_l_[PADL_(struct l_old_stat *)]; struct l_old_stat * up; char up_r_[PADR_(struct l_old_stat *)];
 };
 struct linux_readlink_args {
 	char name_l_[PADL_(char *)]; char * name; char name_r_[PADR_(char *)];
@@ -1000,7 +1000,7 @@ struct linux_mknodat_args {
 	char dfd_l_[PADL_(l_int)]; l_int dfd; char dfd_r_[PADR_(l_int)];
 	char filename_l_[PADL_(const char *)]; const char * filename; char filename_r_[PADR_(const char *)];
 	char mode_l_[PADL_(l_int)]; l_int mode; char mode_r_[PADR_(l_int)];
-	char dev_l_[PADL_(l_uint)]; l_uint dev; char dev_r_[PADR_(l_uint)];
+	char dev_l_[PADL_(l_dev_t)]; l_dev_t dev; char dev_r_[PADR_(l_dev_t)];
 };
 struct linux_fchownat_args {
 	char dfd_l_[PADL_(l_int)]; l_int dfd; char dfd_r_[PADR_(l_int)];

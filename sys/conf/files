@@ -3432,6 +3432,7 @@ dev/vt/colors/vt_termcolors.c	optional vt
 dev/vt/font/vt_font_default.c	optional vt
 dev/vt/font/vt_mouse_cursor.c	optional vt
 dev/vt/hw/efifb/efifb.c		optional vt_efifb
+dev/vt/hw/simplefb/simplefb.c	optional vt_simplefb fdt
 dev/vt/hw/vbefb/vbefb.c		optional vt_vbefb
 dev/vt/hw/fb/vt_fb.c		optional vt
 dev/vt/hw/vga/vt_vga.c		optional vt vt_vga
@@ -4025,6 +4026,7 @@ libkern/arc4random_uniform.c	standard
 libkern/asprintf.c		standard
 libkern/bcd.c			standard
 libkern/bsearch.c		standard
+libkern/crc16.c			standard
 libkern/explicit_bzero.c	standard
 libkern/fnmatch.c		standard
 libkern/gsb_crc32.c		standard
@@ -4572,6 +4574,8 @@ compat/linuxkpi/common/src/linux_interrupt.c	optional compat_linuxkpi \
 compat/linuxkpi/common/src/linux_kthread.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_lock.c		optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_mhi.c		optional compat_linuxkpi wlan \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_netdev.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"

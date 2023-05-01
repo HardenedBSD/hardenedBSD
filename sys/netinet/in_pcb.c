@@ -1692,7 +1692,6 @@ in_pcbrele_rlocked(struct inpcb *inp)
 
 	MPASS(inp->inp_flags & INP_FREED);
 	MPASS(inp->inp_socket == NULL);
-	MPASS(inp->inp_in_hpts == 0);
 	crfree(inp->inp_cred);
 #ifdef INVARIANTS
 	inp->inp_cred = NULL;
@@ -1713,7 +1712,6 @@ in_pcbrele_wlocked(struct inpcb *inp)
 
 	MPASS(inp->inp_flags & INP_FREED);
 	MPASS(inp->inp_socket == NULL);
-	MPASS(inp->inp_in_hpts == 0);
 	crfree(inp->inp_cred);
 #ifdef INVARIANTS
 	inp->inp_cred = NULL;
@@ -2506,7 +2504,8 @@ in_pcbjailed(const struct inpcb *inp, unsigned int flag)
  * in_pcblookup_hash_wild_*() always encounter the highest-ranking PCB first.
  *
  * Specifically, keep jailed PCBs in front of non-jailed PCBs, and keep PCBs
- * with exact local addresses ahead of wildcard PCBs.
+ * with exact local addresses ahead of wildcard PCBs.  Unbound v4-mapped v6 PCBs
+ * always appear last no matter whether they are jailed.
  */
 static void
 _in_pcbinshash_wild(struct inpcbhead *pcbhash, struct inpcb *inp)
@@ -2514,14 +2513,26 @@ _in_pcbinshash_wild(struct inpcbhead *pcbhash, struct inpcb *inp)
 	struct inpcb *last;
 	bool bound, injail;
 
+	INP_LOCK_ASSERT(inp);
 	INP_HASH_WLOCK_ASSERT(inp->inp_pcbinfo);
 
 	last = NULL;
 	bound = inp->inp_laddr.s_addr != INADDR_ANY;
+	if (!bound && (inp->inp_vflag & INP_IPV6PROTO) != 0) {
+		CK_LIST_FOREACH(last, pcbhash, inp_hash_wild) {
+			if (CK_LIST_NEXT(last, inp_hash_wild) == NULL) {
+				CK_LIST_INSERT_AFTER(last, inp, inp_hash_wild);
+				return;
+			}
+		}
+		CK_LIST_INSERT_HEAD(pcbhash, inp, inp_hash_wild);
+		return;
+	}
+
 	injail = in_pcbjailed(inp, PR_IP4);
 	if (!injail) {
 		CK_LIST_FOREACH(last, pcbhash, inp_hash_wild) {
-			if (in_pcbjailed(inp, PR_IP4))
+			if (!in_pcbjailed(last, PR_IP4))
 				break;
 			if (CK_LIST_NEXT(last, inp_hash_wild) == NULL) {
 				CK_LIST_INSERT_AFTER(last, inp, inp_hash_wild);
@@ -2559,6 +2570,7 @@ _in6_pcbinshash_wild(struct inpcbhead *pcbhash, struct inpcb *inp)
 	struct inpcb *last;
 	bool bound, injail;
 
+	INP_LOCK_ASSERT(inp);
 	INP_HASH_WLOCK_ASSERT(inp->inp_pcbinfo);
 
 	last = NULL;
@@ -2566,7 +2578,7 @@ _in6_pcbinshash_wild(struct inpcbhead *pcbhash, struct inpcb *inp)
 	injail = in_pcbjailed(inp, PR_IP6);
 	if (!injail) {
 		CK_LIST_FOREACH(last, pcbhash, inp_hash_wild) {
-			if (in_pcbjailed(last, PR_IP6))
+			if (!in_pcbjailed(last, PR_IP6))
 				break;
 			if (CK_LIST_NEXT(last, inp_hash_wild) == NULL) {
 				CK_LIST_INSERT_AFTER(last, inp, inp_hash_wild);

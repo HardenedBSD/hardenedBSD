@@ -49,6 +49,7 @@
 #include <netlink/netlink.h>
 #include <netlink/netlink_ctl.h>
 #include <netlink/netlink_var.h>
+#include <netlink/route/route_var.h>
 
 /* Standard bits: built-in the kernel */
 SYSCTL_NODE(_net, OID_AUTO, netlink, CTLFLAG_RD, 0, "");
@@ -177,6 +178,25 @@ nlmsg_end_dump_stub(struct nl_writer *nw, int error, struct nlmsghdr *hdr)
 	return (false);
 }
 
+static int
+nl_modify_ifp_generic_stub(struct ifnet *ifp __unused,
+    struct nl_parsed_link *lattrs __unused, const struct nlattr_bmask *bm __unused,
+    struct nl_pstate *npt __unused)
+{
+	return (ENOTSUP);
+}
+
+static void
+nl_store_ifp_cookie_stub(struct nl_pstate *npt __unused, struct ifnet *ifp __unused)
+{
+}
+
+static struct nlpcb *
+nl_get_thread_nlp_stub(struct thread *td __unused)
+{
+	return (NULL);
+}
+
 const static struct nl_function_wrapper nl_stub = {
 	.nlmsg_add = nlmsg_add_stub,
 	.nlmsg_refill_buffer = nlmsg_refill_buffer_stub,
@@ -188,6 +208,9 @@ const static struct nl_function_wrapper nl_stub = {
 	.nlmsg_get_group_writer = nlmsg_get_group_writer_stub,
 	.nlmsg_get_chain_writer = nlmsg_get_chain_writer_stub,
 	.nlmsg_end_dump = nlmsg_end_dump_stub,
+	.nl_modify_ifp_generic = nl_modify_ifp_generic_stub,
+	.nl_store_ifp_cookie = nl_store_ifp_cookie_stub,
+	.nl_get_thread_nlp = nl_get_thread_nlp_stub,
 };
 
 /*
@@ -262,5 +285,25 @@ nlmsg_end_dump(struct nl_writer *nw, int error, struct nlmsghdr *hdr)
 {
 	return (_nl->nlmsg_end_dump(nw, error, hdr));
 }
+
+int
+nl_modify_ifp_generic(struct ifnet *ifp, struct nl_parsed_link *lattrs,
+    const struct nlattr_bmask *bm , struct nl_pstate *npt)
+{
+	return (_nl->nl_modify_ifp_generic(ifp, lattrs, bm, npt));
+}
+
+void
+nl_store_ifp_cookie(struct nl_pstate *npt, struct ifnet *ifp)
+{
+	return (_nl->nl_store_ifp_cookie(npt, ifp));
+}
+
+struct nlpcb *
+nl_get_thread_nlp(struct thread *td)
+{
+	return (_nl->nl_get_thread_nlp(td));
+}
+
 #endif /* !NETLINK */
 
