@@ -2,7 +2,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2008-2020 Hans Petter Selasky. All rights reserved.
+ * Copyright (c) 2008-2023 Hans Petter Selasky
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -841,38 +841,53 @@ usb_config_parse(struct usb_device *udev, uint8_t iface_index, uint8_t cmd)
 	DPRINTFN(5, "iface_index=%d cmd=%d\n",
 	    iface_index, cmd);
 
-	if (cmd == USB_CFG_FREE)
-		goto cleanup;
-
-	if (cmd == USB_CFG_INIT) {
+	if (cmd == USB_CFG_INIT || cmd == USB_CFG_FREE) {
 		sx_assert(&udev->enum_sx, SA_LOCKED);
 
 		/* check for in-use endpoints */
+
+		if (cmd == USB_CFG_INIT) {
+			ep = udev->endpoints;
+			ep_max = udev->endpoints_max;
+			while (ep_max--) {
+				/* look for matching endpoints */
+				if (iface_index == USB_IFACE_INDEX_ANY ||
+				    iface_index == ep->iface_index) {
+					if (ep->refcount_alloc != 0)
+						return (USB_ERR_IN_USE);
+				}
+			}
+		}
 
 		ep = udev->endpoints;
 		ep_max = udev->endpoints_max;
 		while (ep_max--) {
 			/* look for matching endpoints */
-			if ((iface_index == USB_IFACE_INDEX_ANY) ||
-			    (iface_index == ep->iface_index)) {
-				if (ep->refcount_alloc != 0) {
-					/*
-					 * This typically indicates a
-					 * more serious error.
-					 */
-					err = USB_ERR_IN_USE;
-				} else {
-					/* reset endpoint */
-					memset(ep, 0, sizeof(*ep));
-					/* make sure we don't zero the endpoint again */
-					ep->iface_index = USB_IFACE_INDEX_ANY;
-				}
+			if (iface_index == USB_IFACE_INDEX_ANY ||
+			    iface_index == ep->iface_index) {
+				/*
+				 * Check if hardware needs a callback
+				 * to unconfigure the endpoint. This
+				 * may happen multiple times,
+				 * because the requested alternate
+				 * setting may fail. The callback
+				 * implementation should be aware of
+				 * and handle that.
+				 */
+				if (ep->edesc != NULL &&
+				    udev->bus->methods->endpoint_uninit != NULL)
+					udev->bus->methods->endpoint_uninit(udev, ep);
+
+				/* reset endpoint */
+				memset(ep, 0, sizeof(*ep));
+				/* make sure we don't zero the endpoint again */
+				ep->iface_index = USB_IFACE_INDEX_ANY;
 			}
 			ep++;
 		}
 
-		if (err)
-			return (err);
+		if (cmd == USB_CFG_FREE)
+			goto cleanup;
 	}
 
 	memset(&ips, 0, sizeof(ips));
@@ -2031,7 +2046,8 @@ repeat_set_config:
 			goto repeat_set_config;
 		}
 #if USB_HAVE_MSCTEST
-		if (config_index == 0) {
+		if (config_index == 0 &&
+		    usb_test_quirk(&uaa, UQ_MSC_NO_INQUIRY) == 0) {
 			/*
 			 * Try to figure out if we have an
 			 * auto-install disk there:
@@ -2051,7 +2067,8 @@ repeat_set_config:
 	    usb_test_quirk(&uaa, UQ_MSC_NO_PREVENT_ALLOW) == 0 &&
 	    usb_test_quirk(&uaa, UQ_MSC_NO_SYNC_CACHE) == 0 &&
 	    usb_test_quirk(&uaa, UQ_MSC_NO_TEST_UNIT_READY) == 0 &&
-	    usb_test_quirk(&uaa, UQ_MSC_NO_GETMAXLUN) == 0) {
+	    usb_test_quirk(&uaa, UQ_MSC_NO_GETMAXLUN) == 0 &&
+	    usb_test_quirk(&uaa, UQ_MSC_NO_INQUIRY) == 0) {
 		/*
 		 * Try to figure out if there are any MSC quirks we
 		 * should apply automatically:
@@ -2812,7 +2829,7 @@ usb_fifo_free_wrap(struct usb_device *udev,
 				continue;
 			}
 			if ((f->dev_ep_index == 0) &&
-			    (f->fs_xfer == NULL)) {
+			    (f->fs_ep_max == 0)) {
 				/* no need to free this FIFO */
 				continue;
 			}
@@ -2820,7 +2837,7 @@ usb_fifo_free_wrap(struct usb_device *udev,
 			if ((f->methods == &usb_ugen_methods) &&
 			    (f->dev_ep_index == 0) &&
 			    (!(flag & USB_UNCFG_FLAG_FREE_EP0)) &&
-			    (f->fs_xfer == NULL)) {
+			    (f->fs_ep_max == 0)) {
 				/* no need to free this FIFO */
 				continue;
 			}

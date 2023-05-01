@@ -34,10 +34,6 @@ SRCS+=		libusb10_desc.c
 SRCS+=		libusb10_hotplug.c
 SRCS+=		libusb10_io.c
 
-.if defined(COMPAT_32BIT)
-CFLAGS+=	-DCOMPAT_32BIT
-.endif
-
 PCFILES=	libusb-0.1.pc libusb-1.0.pc libusb-2.0.pc
 
 #
@@ -45,14 +41,14 @@ PCFILES=	libusb-0.1.pc libusb-1.0.pc libusb-2.0.pc
 #
 # Examples:
 # make LIBUSB_GLOBAL_INCLUDE_FILE=libusb_global_linux.h
-# make COMPAT_32BIT=YES \
+# make \
 #   LIBUSB_GLOBAL_INCLUDE_FILE=libusb_global_linux.h \
 #   DEBUG_FLAGS="-g"
 #
 # From Ubuntu 10.04:
 # freebsd-make LIBUSB_GLOBAL_INCLUDE_FILE=libusb_global_linux.h \
 #    PTHREAD_LIBS="-lpthread -lrt"
-# freebsd-make COMPAT32_BIT=YES \
+# freebsd-make \
 #    LIBUSB_GLOBAL_INCLUDE_FILE=libusb_global_linux.h \
 #    PTHREAD_LIBS="-lpthread -lrt"
 #
@@ -66,6 +62,7 @@ CFLAGS+=	-I ../../sys
 # LibUSB v1.0
 MLINKS += libusb.3 libusb_get_version.3
 MLINKS += libusb.3 libusb_init.3
+MLINKS += libusb.3 libusb_init_context.3
 MLINKS += libusb.3 libusb_exit.3
 MLINKS += libusb.3 libusb_has_capability.3
 MLINKS += libusb.3 libusb_strerror.3

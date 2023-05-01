@@ -2,7 +2,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2006-2008 Hans Petter Selasky. All rights reserved.
+ * Copyright (c) 2006-2023 Hans Petter Selasky
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -96,12 +96,7 @@ SYSCTL_INT(_hw_usb_dev, OID_AUTO, debug, CTLFLAG_RWTUN,
     &usb_fifo_debug, 0, "Debug Level");
 #endif
 
-#if ((__FreeBSD_version >= 700001) || (__FreeBSD_version == 0) || \
-     ((__FreeBSD_version >= 600034) && (__FreeBSD_version < 700000)))
 #define	USB_UCRED struct ucred *ucred,
-#else
-#define	USB_UCRED
-#endif
 
 /* prototypes */
 
@@ -391,6 +386,7 @@ usb_fifo_alloc(struct mtx *mtx)
 	f = malloc(sizeof(*f), M_USBDEV, M_WAITOK | M_ZERO);
 	cv_init(&f->cv_io, "FIFO-IO");
 	cv_init(&f->cv_drain, "FIFO-DRAIN");
+	sx_init(&f->fs_fastpath_lock, "FIFO-FP");
 	f->priv_mtx = mtx;
 	f->refcount = 1;
 	knlist_init_mtx(&f->selinfo.si_note, mtx);
@@ -631,6 +627,7 @@ usb_fifo_free(struct usb_fifo *f)
 
 	cv_destroy(&f->cv_io);
 	cv_destroy(&f->cv_drain);
+	sx_destroy(&f->fs_fastpath_lock);
 
 	knlist_clear(&f->selinfo.si_note, 0);
 	seldrain(&f->selinfo);
