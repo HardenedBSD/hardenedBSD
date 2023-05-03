@@ -296,9 +296,11 @@ qemu_fwcfg_register_port(const char *const name, const int port, const int size,
 }
 
 int
-qemu_fwcfg_add_file(const uint8_t name[QEMU_FWCFG_MAX_NAME],
-    const uint32_t size, void *const data)
+qemu_fwcfg_add_file(const char *name, const uint32_t size, void *const data)
 {
+	if (strlen(name) >= QEMU_FWCFG_MAX_NAME)
+		return (EINVAL);
+
 	/*
 	 * QEMU specifies count as big endian.
 	 * Convert it to host endian to work with it.
@@ -333,7 +335,7 @@ qemu_fwcfg_add_file(const uint8_t name[QEMU_FWCFG_MAX_NAME],
 			warnx(
 			    "%s: Unable to allocate a new qemu fwcfg files directory (count %d)",
 			    __func__, count);
-			return (-ENOMEM);
+			return (ENOMEM);
 		}
 
 		/* copy files below file_index to new directory */
