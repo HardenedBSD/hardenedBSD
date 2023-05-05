@@ -4715,6 +4715,14 @@ mrsas_get_ld_list(struct mrsas_softc *sc)
 	dcmd = &cmd->frame->dcmd;
 
 	tcmd = malloc(sizeof(struct mrsas_tmp_dcmd), M_MRSAS, M_NOWAIT);
+	if (tcmd == NULL) {
+		device_printf(sc->mrsas_dev,
+		    "Cannot alloc dmamap for get LD list cmd\n");
+		mrsas_release_mfi_cmd(cmd);
+		mrsas_free_tmp_dcmd(tcmd);
+		free(tcmd, M_MRSAS);
+		return (ENOMEM);
+	}
 	ld_list_size = sizeof(struct MR_LD_LIST);
 	if (mrsas_alloc_tmp_dcmd(sc, tcmd, ld_list_size) != SUCCESS) {
 		device_printf(sc->mrsas_dev,
