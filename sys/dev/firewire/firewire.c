@@ -2196,6 +2196,10 @@ fw_vmaccess(struct fw_xfer *xfer)
 		/* XXX need fix for 64bit arch */
 		case FWTCODE_WREQB:
 			xfer->send.buf = malloc(12, M_FW, M_NOWAIT);
+			if (xfer->send.buf == NULL) {
+				fw_xfer_free(xfer);
+				return;
+			}
 			xfer->send.len = 12;
 			sfp = (struct fw_pkt *)xfer->send.buf;
 			bcopy(rfp->mode.wreqb.payload,
@@ -2206,6 +2210,10 @@ fw_vmaccess(struct fw_xfer *xfer)
 			break;
 		case FWTCODE_WREQQ:
 			xfer->send.buf = malloc(12, M_FW, M_NOWAIT);
+			if (xfer->send.buf == NULL) {
+				fw_xfer_free(xfer);
+				return;
+			}
 			xfer->send.len = 12;
 			sfp->mode.wres.tcode = FWTCODE_WRES;
 			*((uint32_t *)(ntohl(rfp->mode.wreqb.dest_lo))) =
@@ -2213,8 +2221,16 @@ fw_vmaccess(struct fw_xfer *xfer)
 			sfp->mode.wres.rtcode = 0;
 			break;
 		case FWTCODE_RREQB:
+			if (16 + rfp->mode.rreqb.len < rfp->mode.rreqb.len) {
+				fw_xfer_free(xfer);
+				return;
+			}
 			xfer->send.buf = malloc(16 + rfp->mode.rreqb.len,
 			    M_FW, M_NOWAIT);
+			if (xfer->send.buf == NULL) {
+				fw_xfer_free(xfer);
+				return;
+			}
 			xfer->send.len = 16 + ntohs(rfp->mode.rreqb.len);
 			sfp = (struct fw_pkt *)xfer->send.buf;
 			bcopy((caddr_t)ntohl(rfp->mode.rreqb.dest_lo),
@@ -2227,6 +2243,10 @@ fw_vmaccess(struct fw_xfer *xfer)
 			break;
 		case FWTCODE_RREQQ:
 			xfer->send.buf = malloc(16, M_FW, M_NOWAIT);
+			if (xfer->send.buf == NULL) {
+				fw_xfer_free(xfer);
+				return;
+			}
 			xfer->send.len = 16;
 			sfp = (struct fw_pkt *)xfer->send.buf;
 			sfp->mode.rresq.data =
