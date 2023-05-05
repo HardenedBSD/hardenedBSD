@@ -4600,6 +4600,13 @@ mrsas_get_pd_list(struct mrsas_softc *sc)
 	dcmd = &cmd->frame->dcmd;
 
 	tcmd = malloc(sizeof(struct mrsas_tmp_dcmd), M_MRSAS, M_NOWAIT);
+	if (tcmd == NULL) {
+		device_printf(sc->mrsas_dev,
+		    "Cannot alloc dmamap for get PD list cmd\n");
+		mrsas_release_mfi_cmd(cmd);
+		mrsas_free_tmp_dcmd(tcmd);
+		return (ENOMEM);
+	}
 	pd_list_size = MRSAS_MAX_PD * sizeof(struct MR_PD_LIST);
 	if (mrsas_alloc_tmp_dcmd(sc, tcmd, pd_list_size) != SUCCESS) {
 		device_printf(sc->mrsas_dev,
