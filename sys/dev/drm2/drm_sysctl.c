@@ -288,8 +288,16 @@ static int drm_bufs_info DRM_SYSCTL_HANDLER_ARGS
 	}
 	DRM_SPINLOCK(&dev->dma_lock);
 	tempdma = *dma;
+	if (sizeof(int) * dma->buf_count < dma->buf_count) {
+		DRM_UNLOCK(dev);
+		return 0;
+	}
 	templists = malloc(sizeof(int) * dma->buf_count, DRM_MEM_DRIVER,
 	    M_NOWAIT);
+	if (templists == NULL) {
+		DRM_UNLOCK(dev);
+		return 0;
+	}
 	for (i = 0; i < dma->buf_count; i++)
 		templists[i] = dma->buflist[i]->list;
 	dma = &tempdma;
