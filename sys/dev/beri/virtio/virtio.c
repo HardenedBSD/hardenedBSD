@@ -249,7 +249,14 @@ getcopy(struct iovec *iov, int n)
 	struct iovec *tiov;
 	int i;
 
+	if (n * sizeof(struct iovec) < n) {
+		return (NULL);
+	}
+
 	tiov = malloc(n * sizeof(struct iovec), M_DEVBUF, M_NOWAIT);
+	if (tiov == NULL) {
+		return (NULL);
+	}
 	for (i = 0; i < n; i++) {
 		tiov[i].iov_base = iov[i].iov_base;
 		tiov[i].iov_len = iov[i].iov_len;
