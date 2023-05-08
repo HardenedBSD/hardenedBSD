@@ -2827,8 +2827,6 @@ OLD_FILES+=usr/share/calendar/uk_UA.KOI8-U/calendar.all
 OLD_FILES+=usr/share/calendar/uk_UA.KOI8-U/calendar.holiday
 OLD_FILES+=usr/share/calendar/uk_UA.KOI8-U/calendar.misc
 OLD_FILES+=usr/share/calendar/uk_UA.KOI8-U/calendar.orthodox
-<<<<<<< HEAD
-=======
 OLD_DIRS+=usr/share/calendar/de_AT.ISO_8859-15
 OLD_DIRS+=usr/share/calendar/de_DE.ISO8859-1
 OLD_FILES+=usr/share/calendar/de_DE.ISO8859-15
@@ -2840,7 +2838,6 @@ OLD_DIRS+=usr/share/calendar/pt_BR.ISO8859-1
 OLD_DIRS+=usr/share/calendar/pt_BR.UTF-8
 OLD_DIRS+=usr/share/calendar/ru_RU.KOI8-R
 OLD_DIRS+=usr/share/calendar/ru_RU.UTF-8
->>>>>>> freebsd/stable/13
 OLD_DIRS+=usr/share/calendar/uk_UA.KOI8-U
 
 # 20201004: logo files renamed to type-agnostic gfx-*.lua
