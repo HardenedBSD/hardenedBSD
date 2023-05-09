@@ -5384,7 +5384,9 @@ qlnx_zalloc(uint32_t size)
 	caddr_t	va;
 
 	va = malloc((unsigned long)size, M_QLNXBUF, M_NOWAIT);
-	bzero(va, size);
+	if (va != NULL) {
+		bzero(va, size);
+	}
 	return ((void *)va);
 }
 

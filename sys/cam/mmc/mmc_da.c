@@ -1287,11 +1287,21 @@ sdda_start_init(void *context, union ccb *start_ccb)
 	device->serial_num_len = strlen(softc->card_sn_string);
 	device->serial_num = (u_int8_t *)malloc((device->serial_num_len + 1),
 	    M_CAMXPT, M_NOWAIT);
+	if (device->serial_num == NULL) {
+		CAM_DEBUG(periph->path, CAM_DEBUG_PERIPH,
+		    ("malloc failed"));
+		return;
+	}
 	strlcpy(device->serial_num, softc->card_sn_string, device->serial_num_len + 1);
 
 	device->device_id_len = strlen(softc->card_id_string);
 	device->device_id = (u_int8_t *)malloc((device->device_id_len + 1),
 	    M_CAMXPT, M_NOWAIT);
+	if (device->device_id == NULL) {
+		CAM_DEBUG(periph->path, CAM_DEBUG_PERIPH,
+		    ("malloc failed"));
+		return;
+	}
 	strlcpy(device->device_id, softc->card_id_string, device->device_id_len + 1);
 
 	strlcpy(mmcp->model, softc->card_id_string, sizeof(mmcp->model));

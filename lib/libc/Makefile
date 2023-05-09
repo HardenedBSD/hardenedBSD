@@ -6,10 +6,13 @@ SHLIBDIR?= /lib
 
 .include <src.opts.mk>
 
+<<<<<<< HEAD
 # Force building of libc_pic.a
 MK_TOOLCHAIN=	yes
 #MK_CROSS_DSO_CFI=	no
 
+=======
+>>>>>>> internal/hardened/current/master
 LIBC_SRCTOP?= ${.CURDIR}
 
 # Pick the current architecture directory for libc. In general, this is

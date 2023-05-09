@@ -3000,6 +3000,9 @@ static int fw6_cqe_handler(struct adapter *sc, const __be64 *rpl)
 	unsigned long flag;
 
 	cle = malloc(sizeof(*cle), M_CXGBE, M_NOWAIT);
+	if (cle == NULL) {
+		return (-1);
+	}
 	cle->rhp = sc->iwarp_softc;
 	cle->err_cqe = *(const struct t4_cqe *)(&rpl[0]);
 

@@ -1683,9 +1683,18 @@ axgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *va, uint64_t *pa, int ntxqs,
 		channel->tx_ring = tx_ring;
 
 		for (j = 0; j < ntxqs; j++, tx_ring++) {
+			if (scctx->isc_ntxd[j] * sizeof(struct xgbe_ring_data) <
+			    scctx->isc_ntxd[j]) {
+				axgbe_error("Unable to allocate TX ring memory\n");
+				goto tx_ring_fail;
+			}
 			tx_ring->rdata =
 			    (struct xgbe_ring_data*)malloc(scctx->isc_ntxd[j] *
 			    sizeof(struct xgbe_ring_data), M_AXGBE, M_NOWAIT);
+			if (tx_ring->rdata == NULL) {
+				axgbe_error("Unable to allocate TX ring memory\n");
+				goto tx_ring_fail;
+			}
 
 			/* Get the virtual & physical address of hw queues */
 			tx_ring->rdesc = (struct xgbe_ring_desc *)va[i*ntxqs + j];
@@ -1756,9 +1765,18 @@ axgbe_if_rx_queues_alloc(if_ctx_t ctx, caddr_t *va, uint64_t *pa, int nrxqs,
 		channel->rx_ring = rx_ring;
 
 		for (j = 0; j < nrxqs; j++, rx_ring++) {
+			if (scctx->isc_nrxd[j] * sizeof(struct xgbe_ring_data) <
+			    scctx->isc_nrxd[j]) {
+				axgbe_error("Unable to allocate RX ring memory\n");
+				goto rx_ring_fail;
+			}
 			rx_ring->rdata =
 			    (struct xgbe_ring_data*)malloc(scctx->isc_nrxd[j] *
 			    sizeof(struct xgbe_ring_data), M_AXGBE, M_NOWAIT);
+			if (rx_ring->rdata == NULL) {
+				axgbe_error("Unable to allocate RX ring memory\n");
+				goto rx_ring_fail;
+			}
 
 			/* Get the virtual and physical address of the hw queues */
 			rx_ring->rdesc = (struct xgbe_ring_desc *)va[i*nrxqs + j];

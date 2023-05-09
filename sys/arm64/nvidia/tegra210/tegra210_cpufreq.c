@@ -222,8 +222,15 @@ build_speed_points(struct tegra210_cpufreq_softc *sc) {
 	int i;
 
 	sc->nspeed_points = nitems(cpu_freq_tbl);
+	if (sc->nspeed_points * sizeof(struct cpu_speed_point) <
+	    sc->nspeed_points) {
+		return;
+	}
 	sc->speed_points = malloc(sizeof(struct cpu_speed_point) *
 	    sc->nspeed_points, M_DEVBUF, M_NOWAIT);
+	if (sc->speed_point == NULL) {
+		return;
+	}
 	for (i = 0; i < sc->nspeed_points; i++) {
 		sc->speed_points[i].freq = cpu_freq_tbl[i];
 		sc->speed_points[i].uvolt = freq_to_voltage(sc,

@@ -263,13 +263,14 @@ linsysfs_run_bus(device_t dev, struct pfs_node *dir, struct pfs_node *scsi,
 {
 	struct scsi_host_queue *scsi_host;
 	struct pfs_node *sub_dir, *cur_file;
-	int i, nchildren, error;
+	int i, nchildren, error, res;
 	device_t *children, parent;
 	devclass_t devclass;
 	const char *name = NULL;
 	struct pci_devinfo *dinfo;
 	char *device, *host, *new_path, *devname;
 
+	res = 0;
 	new_path = path;
 	devname = malloc(16, M_TEMP, M_WAITOK);
 
@@ -342,9 +343,15 @@ linsysfs_run_bus(device_t dev, struct pfs_node *dir, struct pfs_node *scsi,
 					scsi_host = malloc(sizeof(
 					    struct scsi_host_queue),
 					    M_DEVBUF, M_NOWAIT);
+					if (scsi_host == NULL) {
+						return (0);
+					}
 					scsi_host->path = malloc(
 					    strlen(new_path) + 1,
 					    M_DEVBUF, M_NOWAIT);
+					if (scsi_host->path == NULL) {
+						return (0);
+					}
 					scsi_host->path[0] = '\000';
 					bcopy(new_path, scsi_host->path,
 					    strlen(new_path) + 1);
@@ -404,17 +411,24 @@ linsysfs_run_bus(device_t dev, struct pfs_node *dir, struct pfs_node *scsi,
 
 	error = device_get_children(dev, &children, &nchildren);
 	if (error == 0) {
-		for (i = 0; i < nchildren; i++)
-			if (children[i])
-				linsysfs_run_bus(children[i], dir, scsi,
-				    chardev, drm, new_path, prefix);
+		for (i = 0; i < nchildren; i++) {
+			if (children[i]) {
+				if (!linsysfs_run_bus(children[i], dir, scsi,
+				    chardev, drm, new_path, prefix)) {
+					free(children, M_TEMP);
+					res = 0;
+					goto end;
+				}
+			}
+		}
 		free(children, M_TEMP);
 	}
+end:
 	if (new_path != path)
 		free(new_path, M_TEMP);
 	free(devname, M_TEMP);
 
-	return (1);
+	return (res);
 }
 
 /*

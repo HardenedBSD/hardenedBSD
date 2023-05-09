@@ -339,6 +339,10 @@ vscsi_attach(device_t dev)
 	vscsi_setup_bus(sc);
 	sc->xfer = malloc(sizeof(sc->xfer[0])*sc->max_transactions, M_VSCSI,
 	    M_NOWAIT);
+	if (sc->xfer == NULL) {
+		device_printf(dev, "Could not allocate buffer\n");
+		return (ENOMEM)
+	}
 	for (i = 0; i < sc->max_transactions; i++) {
 		xp = &sc->xfer[i];
 		xp->sc = sc;
