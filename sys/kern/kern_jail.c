@@ -34,11 +34,8 @@ __FBSDID("$FreeBSD$");
 #include "opt_ddb.h"
 #include "opt_inet.h"
 #include "opt_inet6.h"
-<<<<<<< HEAD
-#include "opt_pax.h"
-=======
 #include "opt_nfs.h"
->>>>>>> freebsd/stable/13
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/types.h>
