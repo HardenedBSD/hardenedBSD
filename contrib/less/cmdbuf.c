@@ -1475,15 +1475,7 @@ static void read_cmdhist(void (*action)(void*,struct mlist*,char*), void *uparam
 	(*action)(uparam, NULL, NULL); /* signal end of file */
 }
 
-<<<<<<< HEAD
-	static void
-addhist_init(uparam, ml, string)
-	void *uparam;
-	struct mlist *ml;
-	char *string;
-=======
 static void addhist_init(void *uparam, struct mlist *ml, char *string)
->>>>>>> freebsd/stable/13
 {
 	if (ml != NULL)
 		cmd_addhist(ml, string, 0);
@@ -1555,15 +1547,7 @@ struct save_ctx
  * At the end of each mlist, append any new entries
  * created during this session.
  */
-<<<<<<< HEAD
-	static void
-copy_hist(uparam, ml, string)
-	void *uparam;
-	struct mlist *ml;
-	char *string;
-=======
 static void copy_hist(void *uparam, struct mlist *ml, char *string)
->>>>>>> freebsd/stable/13
 {
 	struct save_ctx *ctx = (struct save_ctx *) uparam;
 
