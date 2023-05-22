@@ -2260,12 +2260,12 @@ again:
 			if (nd->nd_flag & ND_NFSV3) {
 				NFSM_BUILD(tl, u_int32_t *, 3 * NFSX_UNSIGNED);
 				*tl++ = newnfs_true;
-				*tl++ = 0;
+				txdr_hyper(dp->d_fileno, tl);
 			} else {
 				NFSM_BUILD(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
 				*tl++ = newnfs_true;
+				*tl = txdr_unsigned(dp->d_fileno);
 			}
-			*tl = txdr_unsigned(dp->d_fileno);
 			(void) nfsm_strtom(nd, dp->d_name, nlen);
 			if (nd->nd_flag & ND_NFSV3) {
 				NFSM_BUILD(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
@@ -2764,8 +2764,7 @@ again:
 			if (nd->nd_flag & ND_NFSV3) {
 				NFSM_BUILD(tl, u_int32_t *, 3 * NFSX_UNSIGNED);
 				*tl++ = newnfs_true;
-				*tl++ = 0;
-				*tl = txdr_unsigned(dp->d_fileno);
+				txdr_hyper(dp->d_fileno, tl);
 				dirlen += nfsm_strtom(nd, dp->d_name, nlen);
 				NFSM_BUILD(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
 				txdr_hyper(*cookiep, tl);
@@ -3270,8 +3269,16 @@ nfsvno_checkexp(struct mount *mp, struct sockaddr *nam, struct nfsexstuff *exp,
 {
 	int error;
 
-	error = VFS_CHECKEXP(mp, nam, &exp->nes_exflag, credp,
-	    &exp->nes_numsecflavor, exp->nes_secflavors);
+	error = 0;
+	*credp = NULL;
+	MNT_ILOCK(mp);
+	if (mp->mnt_exjail == NULL ||
+	    mp->mnt_exjail->cr_prison != curthread->td_ucred->cr_prison)
+		error = EACCES;
+	MNT_IUNLOCK(mp);
+	if (error == 0)
+		error = VFS_CHECKEXP(mp, nam, &exp->nes_exflag, credp,
+		    &exp->nes_numsecflavor, exp->nes_secflavors);
 	if (error) {
 		if (NFSD_VNET(nfs_rootfhset)) {
 			exp->nes_exflag = 0;
@@ -3305,8 +3312,14 @@ nfsvno_fhtovp(struct mount *mp, fhandle_t *fhp, struct sockaddr *nam,
 		/* Make sure the server replies ESTALE to the client. */
 		error = ESTALE;
 	if (nam && !error) {
-		error = VFS_CHECKEXP(mp, nam, &exp->nes_exflag, credp,
-		    &exp->nes_numsecflavor, exp->nes_secflavors);
+		MNT_ILOCK(mp);
+		if (mp->mnt_exjail == NULL ||
+		    mp->mnt_exjail->cr_prison != curthread->td_ucred->cr_prison)
+			error = EACCES;
+		MNT_IUNLOCK(mp);
+		if (error == 0)
+			error = VFS_CHECKEXP(mp, nam, &exp->nes_exflag, credp,
+			    &exp->nes_numsecflavor, exp->nes_secflavors);
 		if (error) {
 			if (NFSD_VNET(nfs_rootfhset)) {
 				exp->nes_exflag = 0;
@@ -3476,7 +3489,7 @@ nfsrv_v4rootexport(void *argp, struct ucred *cred, struct thread *p)
 	struct nameidata nd;
 	fhandle_t fh;
 
-	error = vfs_export(NFSD_VNET(nfsv4root_mnt), &nfsexargp->export);
+	error = vfs_export(NFSD_VNET(nfsv4root_mnt), &nfsexargp->export, 0);
 	if ((nfsexargp->export.ex_flags & MNT_DELEXPORT) != 0)
 		NFSD_VNET(nfs_rootfhset) = 0;
 	else if (error == 0) {

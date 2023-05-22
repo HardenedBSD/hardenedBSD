@@ -219,7 +219,7 @@ static struct bool_flags pr_flag_allow[NBBY * NBPW] = {
 	 PR_ALLOW_UNPRIV_DEBUG},
 	{"allow.extattr", "allow.noextattr", PR_ALLOW_EXTATTR},
 	{"allow.suser", "allow.nosuser", PR_ALLOW_SUSER},
-#if defined(VNET_NFSD) && defined(VIMAGE) && defined(NFSD)
+#ifdef VIMAGE
 	{"allow.nfsd", "allow.nonfsd", PR_ALLOW_NFSD},
 #endif
 };
@@ -1903,12 +1903,10 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 	}
 #endif
 
-#ifdef VNET_NFSD
 	if (born && pr != &prison0 && (pr->pr_allow & PR_ALLOW_NFSD) != 0 &&
 	    (pr->pr_root->v_vflag & VV_ROOT) == 0)
 		printf("Warning jail jid=%d: mountd/nfsd requires a separate"
 		   " file system\n", pr->pr_id);
-#endif
 
 	drflags &= ~PD_KILL;
 	td->td_retval[0] = pr->pr_id;
@@ -3056,6 +3054,7 @@ prison_cleanup(struct prison *pr)
 {
 	sx_assert(&allprison_lock, SA_XLOCKED);
 	mtx_assert(&pr->pr_mtx, MA_NOTOWNED);
+	vfs_exjail_delete(pr);
 	shm_remove_prison(pr);
 	(void)osd_jail_call(pr, PR_METHOD_REMOVE, NULL);
 }
@@ -3493,12 +3492,7 @@ prison_priv_check(struct ucred *cred, int priv)
 	case PRIV_NFS_DAEMON:
 	case PRIV_VFS_GETFH:
 	case PRIV_VFS_MOUNT_EXPORTED:
-#ifdef VNET_NFSD
 		if (!prison_check_nfsd(cred))
-#else
-		printf("running nfsd in a prison requires a kernel "
-		    "built with ''options VNET_NFSD''\n");
-#endif
 			return (EPERM);
 #ifdef notyet
 	case PRIV_NFS_LOCKD:
@@ -4264,7 +4258,7 @@ SYSCTL_JAIL_PARAM(_allow, extattr, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Jails may set system-level filesystem extended attributes");
 SYSCTL_JAIL_PARAM(_allow, suser, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Processes in jail with uid 0 have privilege");
-#if defined(VNET_NFSD) && defined(VIMAGE) && defined(NFSD)
+#ifdef VIMAGE
 SYSCTL_JAIL_PARAM(_allow, nfsd, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Mountd/nfsd may run in the jail");
 #endif
