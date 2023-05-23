@@ -631,7 +631,7 @@ struct pf_kpool {
 };
 
 struct pf_rule_actions {
-	int		 rtableid;
+	int32_t		 rtableid;
 	uint16_t	 qid;
 	uint16_t	 pqid;
 	uint16_t	 max_mss;
@@ -779,7 +779,7 @@ struct pf_krule {
 
 	pf_osfp_t		 os_fingerprint;
 
-	int			 rtableid;
+	int32_t			 rtableid;
 	u_int32_t		 timeout[PFTM_MAX];
 	u_int32_t		 max_states;
 	u_int32_t		 max_src_nodes;
@@ -1053,7 +1053,7 @@ struct pf_kstate {
 	u_int16_t		 dnrpipe;
 	u_int16_t		 tag;
 	u_int8_t		 log;
-	int			 rtableid;
+	int32_t			 rtableid;
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
 	u_int16_t		 max_mss;
@@ -1704,7 +1704,7 @@ struct pfioc_state_kill {
 struct pfioc_states {
 	int	ps_len;
 	union {
-		caddr_t			 ps_buf;
+		void			*ps_buf;
 		struct pfsync_state	*ps_states;
 	};
 };
@@ -1713,7 +1713,7 @@ struct pfioc_states_v2 {
 	int		ps_len;
 	uint64_t	ps_req_version;
 	union {
-		caddr_t			 ps_buf;
+		void			*ps_buf;
 		struct pf_state_export	*ps_states;
 	};
 };
@@ -1721,7 +1721,7 @@ struct pfioc_states_v2 {
 struct pfioc_src_nodes {
 	int	psn_len;
 	union {
-		caddr_t		 psn_buf;
+		void		*psn_buf;
 		struct pf_src_node	*psn_src_nodes;
 	};
 };

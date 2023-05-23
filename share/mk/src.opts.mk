@@ -298,8 +298,8 @@ __DEFAULT_YES_OPTIONS+=LLDB
 .else
 __DEFAULT_NO_OPTIONS+=LLDB
 .endif
-# EFI doesn't exist on powerpc (well, officially)
-.if ${__T:Mpowerpc*}
+# EFI doesn't exist on powerpc (well, officially) and doesn't work on i386
+.if ${__T:Mpowerpc*} || ${__T} == "i386"
 BROKEN_OPTIONS+=EFI
 .endif
 

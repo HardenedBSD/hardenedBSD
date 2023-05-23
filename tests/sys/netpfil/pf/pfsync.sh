@@ -1,6 +1,6 @@
 # $FreeBSD$
 #
-# SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+# SPDX-License-Identifier: BSD-2-Clause
 #
 # Copyright (c) 2018 Orange Business Services
 #
@@ -87,7 +87,7 @@ common_body()
 	sleep 2
 
 	if ! jexec two pfctl -s states | grep icmp | grep 198.51.100.1 | \
-	    grep 198.51.100.2 ; then
+	    grep 198.51.100.254 ; then
 		atf_fail "state not found on synced host"
 	fi
 }

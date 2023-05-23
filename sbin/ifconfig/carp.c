@@ -2,7 +2,7 @@
 /*	from $OpenBSD: ifconfig.c,v 1.82 2003/10/19 05:43:35 mcbride Exp $ */
 
 /*-
- * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
  * Copyright (c) 2003 Ryan McBride. All rights reserved.
@@ -111,31 +111,9 @@ setcarp_vhid(const char *val, int d, int s, const struct afswtch *afp)
 		errx(1, "vhid must be greater than 0 and less than %u",
 		    CARP_MAXVHID);
 
-	switch (afp->af_af) {
-#ifdef INET
-	case AF_INET:
-	    {
-		struct in_aliasreq *ifra;
-
-		ifra = (struct in_aliasreq *)afp->af_addreq;
-		ifra->ifra_vhid = carpr_vhid;
-		break;
-	    }
-#endif
-#ifdef INET6
-	case AF_INET6:
-	    {
-		struct in6_aliasreq *ifra;
-
-		ifra = (struct in6_aliasreq *)afp->af_addreq;
-		ifra->ifra_vhid = carpr_vhid;
-		break;
-	    }
-#endif
-	default:
+	if (afp->af_setvhid == NULL)
 		errx(1, "%s doesn't support carp(4)", afp->af_name);
-	}
-
+	afp->af_setvhid(carpr_vhid);
 	callback_register(setcarp_callback, NULL);
 }
 
@@ -237,7 +215,7 @@ setcarp_peer6(const char *val, int d, int s, const struct afswtch *afp)
 	hints.ai_family = AF_INET6;
 	hints.ai_flags = AI_NUMERICHOST;
 
-	if (getaddrinfo(val, NULL, &hints, &res) == 1)
+	if (getaddrinfo(val, NULL, &hints, &res) != 0)
 		errx(1, "Invalid IPv6 address %s", val);
 
 	memcpy(&carp_addr6, &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr,

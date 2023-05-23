@@ -26,9 +26,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/time.h>
 
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <md5.h>
+#include <osreldate.h>
 #include <ripemd.h>
 #include <sha.h>
 #include <sha224.h>
@@ -661,7 +663,7 @@ main(int argc, char *argv[])
 	}
 	if (failed)
 		return (1);
-	if (checksFailed != 0)
+	if (checksFailed > 0)
 		return (2);
 
 	return (0);
@@ -686,7 +688,7 @@ MDInput(const Algorithm_t *alg, FILE *f, char *buf, bool tee)
 		switch (input_mode) {
 		case input_binary:
 		case input_text:
-			if (tee && fwrite(block, 1, len, stdout) != (size_t)len)
+			if (tee && fwrite(block, 1, len, stdout) != len)
 				err(1, "stdout");
 			alg->Update(&context, block, len);
 			break;
@@ -734,7 +736,7 @@ MDInput(const Algorithm_t *alg, FILE *f, char *buf, bool tee)
 			break;
 		}
 	}
-	if (len < 0) {
+	if (ferror(f)) {
 		alg->End(&context, buf);
 		return (NULL);
 	}
@@ -758,7 +760,7 @@ MDOutput(const Algorithm_t *alg, char *p, const char *name)
 
 	if (p == NULL) {
 		warn("%s", name);
-		failed++;
+		failed = true;
 	} else if (cflag && mode != mode_bsd) {
 		checkfailed = strcasecmp(checkAgainst, p) != 0;
 		if (!sflag && (!qflag || checkfailed))
@@ -1000,7 +1002,7 @@ MDTestSuite(const Algorithm_t *alg)
 			printf(" - verified correct\n");
 		} else {
 			printf(" - INCORRECT RESULT!\n");
-			failed++;
+			failed = true;
 		}
 	}
 }

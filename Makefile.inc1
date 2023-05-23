@@ -143,6 +143,7 @@ KNOWN_ARCHES?=	aarch64/arm64 \
 		amd64 \
 		armv6/arm \
 		armv7/arm \
+		i386 \
 		powerpc \
 		powerpc64/powerpc \
 		powerpc64le/powerpc \
