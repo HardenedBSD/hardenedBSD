@@ -100,7 +100,6 @@ int bootAP;
 void *bootstacks[MAXCPU];
 void *dpcpu;
 
-struct pcb stoppcbs[MAXCPU];
 struct susppcb **susppcbs;
 
 #ifdef COUNT_IPIS
