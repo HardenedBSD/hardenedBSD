@@ -67,6 +67,7 @@ struct hbsd_features {
 		pax_state_t	 harden_rtld;
 		pax_state_t	 prohibit_ptrace_syscall;
 		pax_state_t	 harden_tty;
+		pax_state_t	 harden_shm;
 	} hardening;
 	struct hbsd_log {
 		pax_state_t	log;		/* (p) Per-jail logging status */
@@ -239,6 +240,7 @@ int pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts);
 int pax_procfs_harden(struct thread *td);
 int pax_ptrace_syscall_prohibit(struct thread *td);
 int pax_harden_tty(struct thread *td);
+int pax_harden_shm(struct thread *td);
 int pax_enforce_tpe(struct thread *, struct vnode *, const char *);
 pax_flag_t pax_hardening_setup_flags(struct image_params *, struct thread *,
     pax_flag_t);
@@ -264,6 +266,8 @@ bool pax_kmod_load_disabled(void);
 #define PAX_NOTE_FORBIDKMOD	0x00002000
 #define PAX_NOTE_TPE		0x00004000
 #define PAX_NOTE_NOTPE		0x00008000
+#define PAX_NOTE_HARDEN_SHM	0x00010000
+#define PAX_NOTE_NOHARDEN_SHM	0x00020000
 
 #define	PAX_NOTE_RESERVED0	0x40000000
 #define	PAX_NOTE_PREFER_ACL	0x80000000
@@ -271,12 +275,14 @@ bool pax_kmod_load_disabled(void);
 #define PAX_NOTE_ALL_ENABLED	\
     (PAX_NOTE_PAGEEXEC | PAX_NOTE_MPROTECT | PAX_NOTE_SEGVGUARD | \
     PAX_NOTE_ASLR | PAX_NOTE_SHLIBRANDOM | PAX_NOTE_DISALLOWMAP32BIT | \
-    PAX_NOTE_PERMITKMOD | PAX_NOTE_TPE)
+    PAX_NOTE_PERMITKMOD | PAX_NOTE_TPE | PAX_NOTE_HARDEN_SHM)
 #define PAX_NOTE_ALL_DISABLED	\
     (PAX_NOTE_NOPAGEEXEC | PAX_NOTE_NOMPROTECT | \
     PAX_NOTE_NOSEGVGUARD | PAX_NOTE_NOASLR | PAX_NOTE_NOSHLIBRANDOM | \
-    PAX_NOTE_NODISALLOWMAP32BIT | PAX_NOTE_FORBIDKMOD | PAX_NOTE_NOTPE)
-#define PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED | PAX_NOTE_PREFER_ACL)
+    PAX_NOTE_NODISALLOWMAP32BIT | PAX_NOTE_FORBIDKMOD | PAX_NOTE_NOTPE | \
+    PAX_NOTE_NOHARDEN_SHM)
+#define PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED | \
+    PAX_NOTE_PREFER_ACL)
 
 #define	PAX_HARDENING_SHLIBRANDOM	0x00000100
 #define	PAX_HARDENING_NOSHLIBRANDOM	0x00000200
