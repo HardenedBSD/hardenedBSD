@@ -127,6 +127,23 @@ LINUX_VDSO_SYM_INTPTR(kern_timekeep_base);
 LINUX_VDSO_SYM_INTPTR(kern_tsc_selector);
 LINUX_VDSO_SYM_INTPTR(kern_cpu_selector);
 
+/*
+ * According to the Intel x86 ISA 64-bit syscall
+ * saves %rip to %rcx and rflags to %r11. Registers on syscall entry:
+ * %rax  system call number
+ * %rcx  return address
+ * %r11  saved rflags
+ * %rdi  arg1
+ * %rsi  arg2
+ * %rdx  arg3
+ * %r10  arg4
+ * %r8   arg5
+ * %r9   arg6
+ *
+ * Then FreeBSD fast_syscall() move registers:
+ * %rcx -> trapframe.tf_rip
+ * %r10 -> trapframe.tf_rcx
+ */
 static int
 linux_fetch_syscall_args(struct thread *td)
 {
@@ -153,6 +170,11 @@ linux_fetch_syscall_args(struct thread *td)
 	else
 		sa->callp = &p->p_sysent->sv_table[sa->code];
 
+	/* Restore r10 earlier to avoid doing this multiply times. */
+	frame->tf_r10 = frame->tf_rcx;
+	/* Restore %rcx for machine context. */
+	frame->tf_rcx = frame->tf_rip;
+
 	td->td_retval[0] = 0;
 	return (0);
 }
@@ -167,7 +189,6 @@ linux_set_syscall_retval(struct thread *td, int error)
 	switch (error) {
 	case 0:
 		frame->tf_rax = td->td_retval[0];
-		frame->tf_r10 = frame->tf_rcx;
 		break;
 
 	case ERESTART:
@@ -178,7 +199,6 @@ linux_set_syscall_retval(struct thread *td, int error)
 		 *
 		 */
 		frame->tf_rip -= frame->tf_err;
-		frame->tf_r10 = frame->tf_rcx;
 		break;
 
 	case EJUSTRETURN:
@@ -186,7 +206,6 @@ linux_set_syscall_retval(struct thread *td, int error)
 
 	default:
 		frame->tf_rax = bsd_to_linux_errno(error);
-		frame->tf_r10 = frame->tf_rcx;
 		break;
 	}
 
@@ -195,9 +214,6 @@ linux_set_syscall_retval(struct thread *td, int error)
 	 * and %r11 values are not preserved across the syscall.
 	 * Require full context restore to get all registers except
 	 * those two restored at return to usermode.
-	 *
-	 * XXX: Would be great to be able to avoid PCB_FULL_IRET
-	 *      for the error == 0 case.
 	 */
 	set_pcb_flags(td->td_pcb, PCB_FULL_IRET);
 }

@@ -66,6 +66,7 @@ static int pax_init_hardening_global = PAX_FEATURE_SIMPLE_ENABLED;
 static int pax_insecure_kmod_global = PAX_FEATURE_SIMPLE_DISABLED;
 static int pax_tpe_global = PAX_FEATURE_OPTIN;
 static int harden_rtld_global = PAX_FEATURE_SIMPLE_ENABLED;
+static int harden_shm_global = PAX_FEATURE_OPTOUT;
 #else
 static int pax_procfs_harden_global = PAX_FEATURE_SIMPLE_DISABLED;
 static int pax_randomize_pids_global = PAX_FEATURE_SIMPLE_DISABLED;
@@ -73,6 +74,7 @@ static int pax_init_hardening_global = PAX_FEATURE_SIMPLE_DISABLED;
 static int pax_insecure_kmod_global = PAX_FEATURE_SIMPLE_ENABLED;
 static int pax_tpe_global = PAX_FEATURE_OPTIN;
 static int harden_rtld_global = PAX_FEATURE_SIMPLE_DISABLED;
+static int harden_shm_global = PAX_FEATURE_OPTIN;
 #endif
 
 static int pax_kmod_load_disable = PAX_FEATURE_SIMPLE_DISABLED;
@@ -97,6 +99,7 @@ TUNABLE_INT("hardening.tpe.root_owned", &pax_tpe_root_owned);
 TUNABLE_INT("hardening.harden_rtld", &harden_rtld_global);
 TUNABLE_INT("hardening.prohibit_ptrace_syscall", &prohibit_ptrace_syscall_global);
 TUNABLE_INT("hardening.harden_tty", &harden_tty_global);
+TUNABLE_INT("hardening.harden_shm", &harden_shm_global);
 
 #ifdef PAX_SYSCTLS
 SYSCTL_DECL(_hardening_pax);
@@ -122,6 +125,11 @@ SYSCTL_HBSD_2STATE(harden_tty_global,
     _hardening, harden_tty,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE,
     "Harden the TTY layer");
+
+SYSCTL_HBSD_4STATE(harden_shm_global,
+    pr_hbsd.hardening.harden_shm,
+    _hardening, harden_shm,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE);
 
 SYSCTL_DECL(_hardening_pax);
 SYSCTL_NODE(_hardening_pax, OID_AUTO, tpe, CTLFLAG_RD, 0,
@@ -160,6 +168,8 @@ SYSCTL_JAIL_PARAM(_hardening, harden_rtld,
     CTLTYPE_INT | CTLFLAG_RD, "I", "RTLD Hardening");
 SYSCTL_JAIL_PARAM(_hardening, harden_tty,
     CTLTYPE_INT | CTLFLAG_RD, "I", "TTY Layer Hardening");
+SYSCTL_JAIL_PARAM(_hardening, harden_shm,
+    CTLTYPE_INT | CTLFLAG_RD, "I", "SHM hardening");
 #endif
 
 #if 0
@@ -230,6 +240,12 @@ pax_hardening_sysinit(void)
 		printf("[HBSD HARDENING] WARNING, invalid settings in loader.conf!"
 		    " (hardening.prohibit_ptrace_syscall = %d)\n", old_state);
 	}
+
+	old_state = harden_shm_global;
+	if (!pax_feature_validate_state(&harden_shm_global)) {
+		printf("[HBSD HARDENING] WARNING, invalid settings in loader.conf!"
+		    " (hardening.harden_shm = %d\n", old_state);
+	}
 }
 SYSINIT(pax_hardening, SI_SUB_PAX, SI_ORDER_SECOND, pax_hardening_sysinit, NULL);
 
@@ -253,6 +269,7 @@ pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		pr->pr_hbsd.hardening.prohibit_ptrace_syscall =
 		    prohibit_ptrace_syscall_global;
 		pr->pr_hbsd.hardening.harden_tty = harden_tty_global;
+		pr->pr_hbsd.hardening.harden_shm = harden_shm_global;
 	} else {
 		KASSERT(pr->pr_parent != NULL,
 		   ("%s: pr->pr_parent == NULL", __func__));
@@ -267,10 +284,14 @@ pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		    pr_p->pr_hbsd.hardening.prohibit_ptrace_syscall;
 		pr->pr_hbsd.hardening.harden_tty =
 		    pr_p->pr_hbsd.hardening.harden_tty;
+		pr->pr_hbsd.hardening.harden_shm =
+		    pr_p->pr_hbsd.hardening.harden_shm;
 		error = pax_handle_prison_param(opts, "hardening.harden_rtld",
 		    &(pr->pr_hbsd.hardening.harden_rtld));
 		error = pax_handle_prison_param(opts, "hardening.harden_tty",
 		    &(pr->pr_hbsd.hardening.harden_tty));
+		error = pax_handle_prison_param(opts, "hardening.harden_shm",
+		    &(pr->pr_hbsd.hardening.harden_shm));
 	}
 
 	return (error);
@@ -292,12 +313,12 @@ pax_hardening_setup_flags(struct image_params *imgp, struct thread *td,
 	if (status == PAX_FEATURE_DISABLED) {
 		flags &= ~PAX_NOTE_TPE;
 		flags |= PAX_NOTE_NOTPE;
-		return (flags);
+		goto shm_hardening;
 	}
 	if (status == PAX_FEATURE_FORCE_ENABLED) {
 		flags |= PAX_NOTE_TPE;
 		flags &= ~PAX_NOTE_NOTPE;
-		return (flags);
+		goto shm_hardening;
 	}
 
 	if (status == PAX_FEATURE_OPTIN) {
@@ -308,7 +329,7 @@ pax_hardening_setup_flags(struct image_params *imgp, struct thread *td,
 			flags &= ~PAX_NOTE_TPE;
 			flags |= PAX_NOTE_NOTPE;
 		}
-		return (flags);
+		goto shm_hardening;
 	}
 
 	if (status == PAX_FEATURE_OPTOUT) {
@@ -319,11 +340,50 @@ pax_hardening_setup_flags(struct image_params *imgp, struct thread *td,
 			flags |= PAX_NOTE_TPE;
 			flags &= ~PAX_NOTE_NOTPE;
 		}
-		return (flags);
+		goto shm_hardening;
 	}
 
 	flags |= PAX_NOTE_TPE;
 	flags &= ~PAX_NOTE_NOTPE;
+
+shm_hardening:
+	status = pr->pr_hbsd.hardening.harden_shm;
+	if (status == PAX_FEATURE_DISABLED) {
+		flags &= ~PAX_NOTE_HARDEN_SHM;
+		flags |= PAX_NOTE_NOHARDEN_SHM;
+		return (flags);
+	}
+	if (status == PAX_FEATURE_FORCE_ENABLED) {
+		flags |= PAX_NOTE_HARDEN_SHM;
+		flags &= ~PAX_NOTE_NOHARDEN_SHM;
+		return (flags);
+	}
+
+	if (status == PAX_FEATURE_OPTIN) {
+		if ((mode & PAX_NOTE_HARDEN_SHM) == PAX_NOTE_HARDEN_SHM) {
+			flags |= PAX_NOTE_HARDEN_SHM;
+			flags &= ~PAX_NOTE_NOHARDEN_SHM;
+		} else {
+			flags &= ~PAX_NOTE_HARDEN_SHM;
+			flags |= PAX_NOTE_NOHARDEN_SHM;
+		}
+		return (flags);
+	}
+
+	if (status == PAX_FEATURE_OPTOUT) {
+		if ((mode & PAX_NOTE_NOHARDEN_SHM) == PAX_NOTE_NOHARDEN_SHM) {
+			flags &= ~PAX_NOTE_HARDEN_SHM;
+			flags |= PAX_NOTE_NOHARDEN_SHM;
+		} else {
+			flags |= PAX_NOTE_HARDEN_SHM;
+			flags &= ~PAX_NOTE_NOHARDEN_SHM;
+		}
+		return (flags);
+	}
+
+	flags |= PAX_NOTE_HARDEN_SHM;
+	flags &= ~PAX_NOTE_NOHARDEN_SHM;
+
 	return (flags);
 }
 
@@ -353,6 +413,25 @@ pax_harden_tty(struct thread *td)
 
 	pr = pax_get_prison_td(td);
 	return (pr->pr_hbsd.hardening.harden_tty ? EPERM : 0);
+}
+
+int
+pax_harden_shm(struct thread *td)
+{
+	pax_flag_t flags;
+
+	flags = 0;
+	pax_get_flags(td->td_proc, &flags);
+
+	if ((flags & PAX_NOTE_HARDEN_SHM) == PAX_NOTE_HARDEN_SHM) {
+		return true;
+	}
+
+	if ((flags & PAX_NOTE_NOHARDEN_SHM) == PAX_NOTE_NOHARDEN_SHM) {
+		return false;
+	}
+
+	return (true);
 }
 
 int

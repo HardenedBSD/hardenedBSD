@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_capsicum.h"
 #include "opt_ktrace.h"
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/capsicum.h>
@@ -1172,10 +1173,19 @@ kern_shm_open2(struct thread *td, const char *userpath, int flags, mode_t mode,
 
 #ifdef CAPABILITY_MODE
 	/*
-	 * shm_open(2) is only allowed for anonymous objects.
+	 * shm_open(2) is only allowed for anonymous objects when SHM hardening
+	 * (a HardenedBSD-specific feature) is disabled for the process.
 	 */
-	if (IN_CAPABILITY_MODE(td) && (userpath != SHM_ANON))
-		return (ECAPMODE);
+	if (IN_CAPABILITY_MODE(td)) {
+#ifdef PAX_HARDENING
+		if (pax_harden_shm(td)) {
+			return (ECAPMODE);
+		}
+#endif
+		if (userpath != SHM_ANON) {
+			return (ECAPMODE);
+		}
+	}
 #endif
 
 	AUDIT_ARG_FFLAGS(flags);

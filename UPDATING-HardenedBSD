@@ -1,4 +1,18 @@
+[20230528] Introduce shared memory (SHM) hardening
+__HardenedBSD_version = 1400004
+
+	SHM hardening places restrictions on what can be done with the shared
+	memory subsystem (see `shm_open(2)`.) This feature is launching with
+	one technique:
+
+	Use of `shm_open(2)/__sys_shm_open2` system calls is prohibited when:
+
+	1. The `hardening.harden_shm` sysctl tunable is enabled;
+	2. The process has not opted out of the feature;
+	3. The process has entered capability mode (aka, Capsicum mode)
+
 [20220610] Introduce Trusted Path Execution (TPE)
+__HardenedBSD_version = 1400003
 
 	TPE limits the scope of what files can be executed. By default, TPE is
 	left disabled, but can be enabled via the `hardening.pax.tpe.status`
