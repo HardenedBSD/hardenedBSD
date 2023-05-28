@@ -79,6 +79,8 @@ const struct pax_feature_entry pax_features[] = {
 	{"hbsd.pax.nodisallow_map32bit",	PAX_NOTE_NODISALLOWMAP32BIT},
 	{"hbsd.hardening.permit_kmod",		PAX_NOTE_PERMITKMOD},
 	{"hbsd.hardening.forbid_kmod",		PAX_NOTE_FORBIDKMOD},
+	{"hbsd.hardening.harden_shm",		PAX_NOTE_HARDEN_SHM},
+	{"hbsd.hardening.noharden_shm",		PAX_NOTE_NOHARDEN_SHM},
 	{NULL, 0}
 };
 

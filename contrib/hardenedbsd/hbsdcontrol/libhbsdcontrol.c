@@ -103,6 +103,13 @@ const struct pax_feature_entry pax_features[] = {
 			[enable] = "hbsd.hardening.forbid_kmod",
 		},
 	},
+	{
+		.feature = "harden_shm",
+		.extattr = {
+			[disable] = "hbsd.hardening.noharden_shm",
+			[enable] = "hbsd.hardening.harden_shm",
+		},
+	},
 	/* Terminating NULL entry, DO NOT REMOVE! */
 	{NULL, {0, 0}}
 };
