@@ -811,7 +811,7 @@ fail:
 
 static int
 __elfN(enforce_limits)(struct image_params *imgp, const Elf_Ehdr *hdr,
-    const Elf_Phdr *phdr, u_long et_dyn_addr)
+    const Elf_Phdr *phdr)
 {
 	struct vmspace *vmspace;
 	const char *err_str;
@@ -826,9 +826,9 @@ __elfN(enforce_limits)(struct image_params *imgp, const Elf_Ehdr *hdr,
 		if (phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0)
 			continue;
 
-		seg_addr = trunc_page(phdr[i].p_vaddr + et_dyn_addr);
+		seg_addr = trunc_page(phdr[i].p_vaddr + imgp->et_dyn_addr);
 		seg_size = round_page(phdr[i].p_memsz +
-		    phdr[i].p_vaddr + et_dyn_addr - seg_addr);
+		    phdr[i].p_vaddr + imgp->et_dyn_addr - seg_addr);
 
 		/*
 		 * Make the largest executable segment the official
@@ -987,7 +987,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	char *interp;
 	Elf_Brandinfo *brand_info;
 	struct sysentvec *sv;
-	u_long addr, baddr, et_dyn_addr, entry, proghdr;
+	u_long addr, baddr, entry, proghdr;
 	u_long maxalign, maxsalign, mapsz, maxv;
 	uint32_t fctl0;
 	int32_t osrel;
@@ -1117,7 +1117,6 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		goto ret;
 	}
 	sv = brand_info->sysvec;
-	et_dyn_addr = 0;
 	if (hdr->e_type == ET_DYN) {
 		if ((brand_info->flags & BI_CAN_EXEC_DYN) == 0) {
 			uprintf("Cannot execute shared object\n");
@@ -1129,7 +1128,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		 * non-zero for some reason.
 		 */
 		if (baddr == 0) {
-			et_dyn_addr = ET_DYN_LOAD_ADDR;
+			imgp->et_dyn_addr = ET_DYN_LOAD_ADDR;
 		}
 	}
 
@@ -1157,7 +1156,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 
 #ifdef PAX_ASLR
 	if (hdr->e_type == ET_DYN && baddr == 0) {
-		pax_aslr_execbase(imgp->proc, &et_dyn_addr);
+		pax_aslr_execbase(imgp->proc, &(imgp->et_dyn_addr));
 	}
 #endif
 
@@ -1170,15 +1169,15 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	if (error != 0)
 		goto ret;
 
-	error = __elfN(load_sections)(imgp, hdr, phdr, et_dyn_addr, NULL);
+	error = __elfN(load_sections)(imgp, hdr, phdr, imgp->et_dyn_addr, NULL);
 	if (error != 0)
 		goto ret;
 
-	error = __elfN(enforce_limits)(imgp, hdr, phdr, et_dyn_addr);
+	error = __elfN(enforce_limits)(imgp, hdr, phdr);
 	if (error != 0)
 		goto ret;
 
-	entry = (u_long)(hdr->e_entry) + et_dyn_addr;
+	entry = (u_long)(hdr->e_entry) + imgp->et_dyn_addr;
 
 	/*
 	 * We load the dynamic linker where a userland call
@@ -1208,7 +1207,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		if (error != 0)
 			goto ret;
 	} else {
-		addr = et_dyn_addr;
+		addr = imgp->et_dyn_addr;
 	}
 
 	error = exec_map_stack(imgp);
@@ -1225,7 +1224,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		vn_lock(imgp->vp, LK_SHARED | LK_RETRY);
 	}
 	elf_auxargs->execfd = -1;
-	elf_auxargs->phdr = proghdr + et_dyn_addr;
+	elf_auxargs->phdr = proghdr + imgp->et_dyn_addr;
 	elf_auxargs->phent = hdr->e_phentsize;
 	elf_auxargs->phnum = hdr->e_phnum;
 	elf_auxargs->pagesz = PAGE_SIZE;
