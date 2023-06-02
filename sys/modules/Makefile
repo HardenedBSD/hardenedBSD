@@ -281,6 +281,7 @@ SUBDIR=	\
 	nfsd \
 	nfslockd \
 	nfssvc \
+	nlsysevent \
 	nge \
 	nmdm \
 	nullfs \

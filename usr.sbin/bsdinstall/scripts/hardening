@@ -45,10 +45,9 @@ FEATURES=$( bsddialog --backtitle "$OSNAME Installer" \
 	"2 unprivileged_mlock" "Do not allow non-root users to call mlock" ${unprivileged_mlock:-off} \
 	"3 clear_tmp" "Clean the /tmp filesystem on system startup" ${clear_tmp:-off} \
 	"4 disable_syslogd" "Disable opening Syslogd network socket (disables remote logging)" ${disable_syslogd:-off} \
-	"5 disable_sendmail" "Disable Sendmail service" ${disable_sendmail:-off} \
-	"6 secure_console" "Enable console password prompt" ${secure_console:-off} \
-	"7 disable_ddtrace" "Disallow DTrace destructive-mode" ${disable_ddtrace:-off} \
-	"8 enable_firewall" "Enable a basic firewall (see: /etc/rc.conf)" ${enable_firewall:-off} \
+	"5 secure_console" "Enable console password prompt" ${secure_console:-off} \
+	"6 disable_ddtrace" "Disallow DTrace destructive-mode" ${disable_ddtrace:-off} \
+	"7 enable_firewall" "Enable a basic firewall (see: /etc/rc.conf)" ${enable_firewall:-off} \
 2>&1 1>&3 )
 retval=$?
 exec 3>&-
@@ -73,9 +72,6 @@ for feature in $FEATURES; do
 		;;
 	disable_syslogd)
 		echo 'syslogd_flags="-ss"' >> $BSDINSTALL_TMPETC/rc.conf.hardening
-		;;
-	disable_sendmail)
-		echo 'sendmail_enable="NONE"' >> $BSDINSTALL_TMPETC/rc.conf.hardening
 		;;
 	secure_console)
 		sed "s/unknown	off secure/unknown	off insecure/g" $BSDINSTALL_CHROOT/etc/ttys > $BSDINSTALL_TMPETC/ttys.hardening
