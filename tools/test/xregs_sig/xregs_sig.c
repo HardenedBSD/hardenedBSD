@@ -44,30 +44,61 @@
 #ifndef __unused
 #define	__unused	__attribute__((__unused__))
 #endif
-#ifndef nitems
-#define	nitems(x)	(sizeof((x)) / sizeof((x)[0]))
-#endif
+
+struct xregs_bank {
+	const char	*b_name;
+	const char	*r_name;
+	uint32_t	regs;
+	uint32_t	bytes;
+	void		(*x2c)(uint8_t *);
+	void		(*c2x)(uint8_t *);
+};
+
+int xregs_banks_max(void);
 
 #if defined(__amd64__)
-#define	SIMDRNAM	"xmm"
-#define	NREGS		16
+void cpu_to_xmm(uint8_t *);
+void xmm_to_cpu(uint8_t *);
+void cpu_to_avx(uint8_t *);
+void avx_to_cpu(uint8_t *);
+
+static const struct xregs_bank xregs_banks[] = {
+	{
+		.b_name	= "SSE",
+		.r_name	= "xmm",
+		.regs	= 16,
+		.bytes	= 16,
+		.x2c	= xmm_to_cpu,
+		.c2x	= cpu_to_xmm,
+	},
+	{
+		.b_name	= "AVX",
+		.r_name	= "ymm",
+		.regs	= 16,
+		.bytes	= 32,
+		.x2c	= avx_to_cpu,
+		.c2x	= cpu_to_avx,
+	},
+};
 #elif defined(__aarch64__)
-#define	SIMDRNAM	"q"
-#define	NREGS		32
+void cpu_to_vfp(uint8_t *);
+void vfp_to_cpu(uint8_t *);
+
+static const struct xregs_bank xregs_banks[] = {
+	{
+		.b_name	= "VFP",
+		.r_name	= "q",
+		.regs	= 32,
+		.bytes	= 16,
+		.x2c	= vfp_to_cpu,
+		.c2x	= cpu_to_vfp,
+	},
+};
 #endif
 
-struct simdreg {
-	uint8_t simd_bytes[16];
-};
-
-struct simd {
-	struct simdreg simdreg[NREGS];
-};
-
-void cpu_to_simd(struct simd *simd);
-void simd_to_cpu(struct simd *simd);
-
 static atomic_uint sigs;
+static int max_bank_idx;
+
 
 static void
 sigusr1_handler(int sig __unused, siginfo_t *si __unused, void *m __unused)
@@ -87,23 +118,22 @@ sigalrm_handler(int sig __unused)
 	alarm(TIMO);
 }
 
-static struct simd zero_simd = {};
 
 static void
-fill_simd(struct simd *simd)
+fill_xregs(uint8_t *xregs, int bank)
 {
-	arc4random_buf(simd, sizeof(*simd));
+	arc4random_buf(xregs, xregs_banks[bank].regs * xregs_banks[bank].bytes);
 }
 
 static void
-dump_simd(const struct simdreg *r)
+dump_xregs(const uint8_t *r, int bank)
 {
 	unsigned k;
 
-	for (k = 0; k < nitems(r->simd_bytes); k++) {
+	for (k = 0; k < xregs_banks[bank].bytes; k++) {
 		if (k != 0)
 			printf(" ");
-		printf("%02x", r->simd_bytes[k]);
+		printf("%02x", r[k]);
 	}
 	printf("\n");
 }
@@ -111,9 +141,9 @@ dump_simd(const struct simdreg *r)
 static pthread_mutex_t show_lock;
 
 static void
-show_diff(const struct simd *simd1, const struct simd *simd2)
+show_diff(const uint8_t *xregs1, const uint8_t *xregs2, int bank)
 {
-	const struct simdreg *r1, *r2;
+	const uint8_t *r1, *r2;
 	unsigned i, j;
 
 #if defined(__FreeBSD__)
@@ -121,14 +151,14 @@ show_diff(const struct simd *simd1, const struct simd *simd2)
 #elif defined(__linux__)
 	printf("thr %ld\n", syscall(SYS_gettid));
 #endif
-	for (i = 0; i < nitems(simd1->simdreg); i++) {
-		r1 = &simd1->simdreg[i];
-		r2 = &simd2->simdreg[i];
-		for (j = 0; j < nitems(r1->simd_bytes); j++) {
-			if (r1->simd_bytes[j] != r2->simd_bytes[j]) {
-				printf("%%%s%u\n", SIMDRNAM, i);
-				dump_simd(r1);
-				dump_simd(r2);
+	for (i = 0; i < xregs_banks[bank].regs; i++) {
+		r1 = xregs1 + i * xregs_banks[bank].bytes;
+		r2 = xregs2 + i * xregs_banks[bank].bytes;
+		for (j = 0; j < xregs_banks[bank].bytes; j++) {
+			if (r1[j] != r2[j]) {
+				printf("%%%s%u\n", xregs_banks[bank].r_name, i);
+				dump_xregs(r1, bank);
+				dump_xregs(r2, bank);
 				break;
 			}
 		}
@@ -142,28 +172,32 @@ my_pause(void)
 }
 
 static void *
-worker_thread(void *arg __unused)
+worker_thread(void *arg)
 {
-	struct simd simd, simd_cpu;
+	int bank = (uintptr_t)arg;
+	int sz = xregs_banks[bank].regs * xregs_banks[bank].bytes;
+	uint8_t xregs[sz], xregs_cpu[sz], zero_xregs[sz];
 
-	fill_simd(&simd);
+	memset(zero_xregs, 0, sz);
+
+	fill_xregs(xregs, bank);
 	for (;;) {
-		simd_to_cpu(&simd);
+		xregs_banks[bank].x2c(xregs);
 		my_pause();
-		cpu_to_simd(&simd_cpu);
-		if (memcmp(&simd, &simd_cpu, sizeof(struct simd)) != 0) {
+		xregs_banks[bank].c2x(xregs_cpu);
+		if (memcmp(xregs, xregs_cpu, sz) != 0) {
 			pthread_mutex_lock(&show_lock);
-			show_diff(&simd, &simd_cpu);
+			show_diff(xregs, xregs_cpu, bank);
 			abort();
 			pthread_mutex_unlock(&show_lock);
 		}
 
-		simd_to_cpu(&zero_simd);
+		xregs_banks[bank].x2c(zero_xregs);
 		my_pause();
-		cpu_to_simd(&simd_cpu);
-		if (memcmp(&zero_simd, &simd_cpu, sizeof(struct simd)) != 0) {
+		xregs_banks[bank].c2x(xregs_cpu);
+		if (memcmp(zero_xregs, xregs_cpu, sz) != 0) {
 			pthread_mutex_lock(&show_lock);
-			show_diff(&zero_simd, &simd_cpu);
+			show_diff(zero_xregs, xregs_cpu, bank);
 			abort();
 			pthread_mutex_unlock(&show_lock);
 		}
@@ -175,7 +209,9 @@ int
 main(void)
 {
 	struct sigaction sa;
-	int error, i, ncpu;
+	int error, i, ncpu, bank;
+
+	max_bank_idx = xregs_banks_max();
 
 	bzero(&sa, sizeof(sa));
 	sa.sa_handler = sigalrm_handler;
@@ -199,14 +235,22 @@ main(void)
 	}
 
 	ncpu = sysconf(_SC_NPROCESSORS_ONLN);
-	ncpu *= 2;
+	if (max_bank_idx == 0)
+		ncpu *= 2;
+	bank = 0;
 	pthread_t wt[ncpu];
+nextbank:
+	printf("Starting %d threads for registers bank %s sized [%d][%d]\n", ncpu,
+	    xregs_banks[bank].b_name, xregs_banks[bank].regs, xregs_banks[bank].bytes);
 	for (i = 0; i < ncpu; i++) {
-		error = pthread_create(&wt[i], NULL, worker_thread, NULL);
+		error = pthread_create(&wt[i], NULL, worker_thread,
+		    (void *)(uintptr_t)bank);
 		if (error != 0) {
 			fprintf(stderr, "pthread_create %s\n", strerror(error));
 		}
 	}
+	if (++bank <= max_bank_idx)
+		goto nextbank;
 
 	alarm(TIMO);
 	for (;;) {

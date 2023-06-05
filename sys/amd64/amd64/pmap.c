@@ -1674,6 +1674,7 @@ create_pagetables(vm_paddr_t *firstaddr)
 #endif
 	int i, j, ndm1g, nkpdpe, nkdmpde;
 
+	TSENTER();
 	/* Allocate page table pages for the direct map */
 	ndmpdp = howmany(ptoa(Maxmem), NBPDP);
 	if (ndmpdp < 4)		/* Minimum 4GB of dirmap */
@@ -1890,6 +1891,7 @@ create_pagetables(vm_paddr_t *firstaddr)
 	}
 
 	kernel_pml4 = (pml4_entry_t *)PHYS_TO_DMAP(KPML4phys);
+	TSEXIT();
 }
 
 /*
@@ -1912,6 +1914,7 @@ pmap_bootstrap(vm_paddr_t *firstaddr)
 	u_long res;
 	int i;
 
+	TSENTER();
 	KERNend = *firstaddr;
 	res = atop(KERNend - (vm_paddr_t)kernphys);
 
@@ -2067,6 +2070,7 @@ pmap_bootstrap(vm_paddr_t *firstaddr)
 		 */
 		load_cr4(rcr4() | CR4_PCIDE);
 	}
+	TSEXIT();
 }
 
 /*
@@ -5051,6 +5055,7 @@ pmap_growkernel(vm_offset_t addr)
 	pdp_entry_t *pdpe;
 	vm_offset_t end;
 
+	TSENTER();
 	mtx_assert(&kernel_map->system_mtx, MA_OWNED);
 
 	/*
@@ -5077,8 +5082,10 @@ pmap_growkernel(vm_offset_t addr)
 	 */
 	if (KERNBASE < addr) {
 		end = KERNBASE + nkpt * NBPDR;
-		if (end == 0)
+		if (end == 0) {
+			TSEXIT();
 			return;
+		}
 	} else {
 		end = kernel_vm_end;
 	}
@@ -5091,6 +5098,7 @@ pmap_growkernel(vm_offset_t addr)
 		 * The grown region is already mapped, so there is
 		 * nothing to do.
 		 */
+		TSEXIT();
 		return;
 	}
 
@@ -5138,6 +5146,7 @@ pmap_growkernel(vm_offset_t addr)
 		kernel_vm_end = end;
 	else
 		nkpt = howmany(end - KERNBASE, NBPDR);
+	TSEXIT();
 }
 
 /***************************************************
@@ -8157,9 +8166,16 @@ pmap_vmspace_copy(pmap_t dst_pmap, pmap_t src_pmap)
 void
 pmap_zero_page(vm_page_t m)
 {
-	vm_offset_t va = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(m));
+	vm_offset_t va;
 
+#ifdef TSLOG_PAGEZERO
+	TSENTER();
+#endif
+	va = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(m));
 	pagezero((void *)va);
+#ifdef TSLOG_PAGEZERO
+	TSEXIT();
+#endif
 }
 
 /*

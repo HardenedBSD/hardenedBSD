@@ -1425,6 +1425,7 @@ identify_hypervisor(void)
 	u_int regs[4];
 	char *p;
 
+	TSENTER();
 	/*
 	 * If CPUID2_HV is set, we are running in a hypervisor environment.
 	 */
@@ -1433,8 +1434,10 @@ identify_hypervisor(void)
 		identify_hypervisor_cpuid_base();
 
 		/* If we have a definitive vendor, we can return now. */
-		if (*hv_vendor != '\0')
+		if (*hv_vendor != '\0') {
+			TSEXIT();
 			return;
+		}
 	}
 
 	/*
@@ -1447,11 +1450,13 @@ identify_hypervisor(void)
 			if (regs[1] == VMW_HVMAGIC) {
 				vm_guest = VM_GUEST_VMWARE;
 				freeenv(p);
+				TSEXIT();
 				return;
 			}
 		}
 		freeenv(p);
 	}
+	TSEXIT();
 }
 
 bool
