@@ -43,6 +43,7 @@
 #include <netipsec/key_var.h>
 #include <netipsec/ipsec.h>
 #include <arpa/inet.h>
+#include <netinet/udp.h>
 
 #include <string.h>
 #include <unistd.h>
@@ -64,6 +65,10 @@ u_int32_t p_reqid;
 u_int p_key_enc_len, p_key_auth_len;
 caddr_t p_key_enc, p_key_auth;
 time_t p_lt_hard, p_lt_soft;
+u_int p_natt_type;
+struct addrinfo *p_natt_oai, *p_natt_oar;
+int p_natt_sport, p_natt_dport;
+int p_natt_fraglen;
 
 static int p_aiflags = 0, p_aifamily = PF_UNSPEC;
 
@@ -110,7 +115,7 @@ extern void yyerror(const char *);
 	/* SPD management */
 %token SPDADD SPDDELETE SPDDUMP SPDFLUSH
 %token F_POLICY PL_REQUESTS
-%token F_AIFLAGS
+%token F_AIFLAGS F_NATT F_NATT_MTU
 %token TAGGED
 
 %type <num> prefix protocol_spec upper_spec
@@ -521,6 +526,20 @@ extension
 		}
 	|	F_LIFETIME_HARD DECSTRING { p_lt_hard = $2; }
 	|	F_LIFETIME_SOFT DECSTRING { p_lt_soft = $2; }
+	|	F_NATT ipaddr BLCL DECSTRING ELCL ipaddr BLCL DECSTRING ELCL
+		{
+			p_natt_type = UDP_ENCAP_ESPINUDP;
+			p_natt_oai = $2;
+			p_natt_oar = $6;
+			if (p_natt_oai == NULL || p_natt_oar == NULL)
+				return (-1);
+			p_natt_sport = $4;
+			p_natt_dport = $8;
+		}
+	|	F_NATT_MTU DECSTRING
+		{
+			p_natt_fraglen = $2;
+		}
 	;
 
 	/* definition about command for SPD management */
@@ -773,11 +792,7 @@ policy_requests
 %%
 
 int
-setkeymsg0(msg, type, satype, l)
-	struct sadb_msg *msg;
-	unsigned int type;
-	unsigned int satype;
-	size_t l;
+setkeymsg0(struct sadb_msg *msg, unsigned type, unsigned satype, size_t l)
 {
 
 	msg->sadb_msg_version = PF_KEY_V2;
@@ -791,16 +806,27 @@ setkeymsg0(msg, type, satype, l)
 	return 0;
 }
 
+static int
+setkeymsg_plen(struct addrinfo *s)
+{
+	switch (s->ai_addr->sa_family) {
+#ifdef INET
+	case AF_INET:
+		return (sizeof(struct in_addr) << 3);
+#endif
+#ifdef INET6
+	case AF_INET6:
+		return (sizeof(struct in6_addr) << 3);
+#endif
+	default:
+		return (-1);
+	}
+}
+
 /* XXX NO BUFFER OVERRUN CHECK! BAD BAD! */
 static int
-setkeymsg_spdaddr(type, upper, policy, srcs, splen, dsts, dplen)
-	unsigned int type;
-	unsigned int upper;
-	vchar_t *policy;
-	struct addrinfo *srcs;
-	int splen;
-	struct addrinfo *dsts;
-	int dplen;
+setkeymsg_spdaddr(unsigned type, unsigned upper, vchar_t *policy,
+    struct addrinfo *srcs, int splen, struct addrinfo *dsts, int dplen)
 {
 	struct sadb_msg *msg;
 	char buf[BUFSIZ];
@@ -835,18 +861,9 @@ setkeymsg_spdaddr(type, upper, policy, srcs, splen, dsts, dplen)
 
 			if (s->ai_addr->sa_family != d->ai_addr->sa_family)
 				continue;
-			switch (s->ai_addr->sa_family) {
-			case AF_INET:
-				plen = sizeof(struct in_addr) << 3;
-				break;
-#ifdef INET6
-			case AF_INET6:
-				plen = sizeof(struct in6_addr) << 3;
-				break;
-#endif
-			default:
+			plen = setkeymsg_plen(s);
+			if (plen == -1)
 				continue;
-			}
 
 			/* set src */
 			sa = s->ai_addr;
@@ -892,12 +909,8 @@ setkeymsg_spdaddr(type, upper, policy, srcs, splen, dsts, dplen)
 
 /* XXX NO BUFFER OVERRUN CHECK! BAD BAD! */
 static int
-setkeymsg_addr(type, satype, srcs, dsts, no_spi)
-	unsigned int type;
-	unsigned int satype;
-	struct addrinfo *srcs;
-	struct addrinfo *dsts;
-	int no_spi;
+setkeymsg_addr(unsigned type, unsigned satype, struct addrinfo *srcs,
+    struct addrinfo *dsts, int no_spi)
 {
 	struct sadb_msg *msg;
 	char buf[BUFSIZ];
@@ -968,18 +981,9 @@ setkeymsg_addr(type, satype, srcs, dsts, no_spi)
 
 			if (s->ai_addr->sa_family != d->ai_addr->sa_family)
 				continue;
-			switch (s->ai_addr->sa_family) {
-			case AF_INET:
-				plen = sizeof(struct in_addr) << 3;
-				break;
-#ifdef INET6
-			case AF_INET6:
-				plen = sizeof(struct in6_addr) << 3;
-				break;
-#endif
-			default:
+			plen = setkeymsg_plen(s);
+			if (plen == -1)
 				continue;
-			}
 
 			/* set src */
 			sa = s->ai_addr;
@@ -1023,11 +1027,8 @@ setkeymsg_addr(type, satype, srcs, dsts, no_spi)
 
 /* XXX NO BUFFER OVERRUN CHECK! BAD BAD! */
 static int
-setkeymsg_add(type, satype, srcs, dsts)
-	unsigned int type;
-	unsigned int satype;
-	struct addrinfo *srcs;
-	struct addrinfo *dsts;
+setkeymsg_add(unsigned type, unsigned satype, struct addrinfo *srcs,
+    struct addrinfo *dsts)
 {
 	struct sadb_msg *msg;
 	char buf[BUFSIZ];
@@ -1037,6 +1038,9 @@ setkeymsg_add(type, satype, srcs, dsts)
 	struct sadb_address m_addr;
 	struct sadb_x_sa_replay m_replay;
 	struct addrinfo *s, *d;
+	struct sadb_x_nat_t_type m_natt_type;
+	struct sadb_x_nat_t_port m_natt_port;
+	struct sadb_x_nat_t_frag m_natt_frag;
 	int n;
 	int plen;
 	struct sockaddr *sa;
@@ -1146,6 +1150,64 @@ setkeymsg_add(type, satype, srcs, dsts)
 		memcpy(buf + l, &m_replay, len);
 		l += len;
 	}
+
+	if (p_natt_type != 0) {
+		len = sizeof(m_natt_type);
+		memset(&m_natt_type, 0, sizeof(m_natt_type));
+		m_natt_type.sadb_x_nat_t_type_len = PFKEY_UNIT64(len);
+		m_natt_type.sadb_x_nat_t_type_exttype = SADB_X_EXT_NAT_T_TYPE;
+		m_natt_type.sadb_x_nat_t_type_type = p_natt_type;
+		memcpy(buf + l, &m_natt_type, len);
+		l += len;
+
+		memset(&m_addr, 0, sizeof(m_addr));
+		m_addr.sadb_address_exttype = SADB_X_EXT_NAT_T_OAI;
+		sa = p_natt_oai->ai_addr;
+		salen = p_natt_oai->ai_addr->sa_len;
+		m_addr.sadb_address_len = PFKEY_UNIT64(sizeof(m_addr) +
+		    PFKEY_ALIGN8(salen));
+		m_addr.sadb_address_prefixlen = setkeymsg_plen(p_natt_oai);
+		setvarbuf(buf, &l, (struct sadb_ext *)&m_addr,
+		    sizeof(m_addr), (caddr_t)sa, salen);
+
+		len = sizeof(m_natt_port);
+		memset(&m_natt_port, 0, sizeof(m_natt_port));
+		m_natt_port.sadb_x_nat_t_port_len = PFKEY_UNIT64(len);
+		m_natt_port.sadb_x_nat_t_port_exttype = SADB_X_EXT_NAT_T_SPORT;
+		m_natt_port.sadb_x_nat_t_port_port = htons(p_natt_sport);
+		memcpy(buf + l, &m_natt_port, len);
+		l += len;
+
+		memset(&m_addr, 0, sizeof(m_addr));
+		m_addr.sadb_address_exttype = SADB_X_EXT_NAT_T_OAR;
+		sa = p_natt_oar->ai_addr;
+		salen = p_natt_oar->ai_addr->sa_len;
+		m_addr.sadb_address_len = PFKEY_UNIT64(sizeof(m_addr) +
+		    PFKEY_ALIGN8(salen));
+		m_addr.sadb_address_prefixlen = setkeymsg_plen(p_natt_oar);
+		setvarbuf(buf, &l, (struct sadb_ext *)&m_addr,
+		    sizeof(m_addr), (caddr_t)sa, salen);
+
+		len = sizeof(m_natt_port);
+		memset(&m_natt_port, 0, sizeof(m_natt_port));
+		m_natt_port.sadb_x_nat_t_port_len = PFKEY_UNIT64(len);
+		m_natt_port.sadb_x_nat_t_port_exttype = SADB_X_EXT_NAT_T_DPORT;
+		m_natt_port.sadb_x_nat_t_port_port = htons(p_natt_dport);
+		memcpy(buf + l, &m_natt_port, len);
+		l += len;
+
+		if (p_natt_fraglen != -1) {
+			len = sizeof(m_natt_frag);
+			memset(&m_natt_port, 0, sizeof(m_natt_frag));
+			m_natt_frag.sadb_x_nat_t_frag_len = PFKEY_UNIT64(len);
+			m_natt_frag.sadb_x_nat_t_frag_exttype =
+			    SADB_X_EXT_NAT_T_FRAG;
+			m_natt_frag.sadb_x_nat_t_frag_fraglen = p_natt_fraglen;
+			memcpy(buf + l, &m_natt_frag, len);
+			l += len;
+		}
+	}
+
 	l0 = l;
 	n = 0;
 
@@ -1157,18 +1219,9 @@ setkeymsg_add(type, satype, srcs, dsts)
 
 			if (s->ai_addr->sa_family != d->ai_addr->sa_family)
 				continue;
-			switch (s->ai_addr->sa_family) {
-			case AF_INET:
-				plen = sizeof(struct in_addr) << 3;
-				break;
-#ifdef INET6
-			case AF_INET6:
-				plen = sizeof(struct in6_addr) << 3;
-				break;
-#endif
-			default:
+			plen = setkeymsg_plen(s);
+			if (plen == -1)
 				continue;
-			}
 
 			/* set src */
 			sa = s->ai_addr;
@@ -1211,9 +1264,7 @@ setkeymsg_add(type, satype, srcs, dsts)
 }
 
 static struct addrinfo *
-parse_addr(host, port)
-	char *host;
-	char *port;
+parse_addr(char *host, char *port)
 {
 	struct addrinfo hints, *res = NULL;
 	int error;
@@ -1232,8 +1283,7 @@ parse_addr(host, port)
 }
 
 static int
-fix_portstr(spec, sport, dport)
-	vchar_t *spec, *sport, *dport;
+fix_portstr(vchar_t *spec, vchar_t *sport, vchar_t *dport)
 {
 	char *p, *p2;
 	u_int l;
@@ -1273,13 +1323,8 @@ fix_portstr(spec, sport, dport)
 }
 
 static int
-setvarbuf(buf, off, ebuf, elen, vbuf, vlen)
-	char *buf;
-	int *off;
-	struct sadb_ext *ebuf;
-	int elen;
-	caddr_t vbuf;
-	int vlen;
+setvarbuf(char *buf, int *off, struct sadb_ext *ebuf, int elen, caddr_t vbuf,
+    int vlen)
 {
 	memset(buf + *off, 0, PFKEY_UNUNIT64(ebuf->sadb_ext_len));
 	memcpy(buf + *off, (caddr_t)ebuf, elen);
@@ -1290,7 +1335,7 @@ setvarbuf(buf, off, ebuf, elen, vbuf, vlen)
 }
 
 void
-parse_init()
+parse_init(void)
 {
 	p_spi = 0;
 
@@ -1307,13 +1352,14 @@ parse_init()
 	p_aiflags = 0;
 	p_aifamily = PF_UNSPEC;
 
-	return;
+	p_natt_type = 0;
+	p_natt_oai = p_natt_oar = NULL;
+	p_natt_sport = p_natt_dport = 0;
+	p_natt_fraglen = -1;
 }
 
 void
-free_buffer()
+free_buffer(void)
 {
 	/* we got tons of memory leaks in the parser anyways, leave them */
-
-	return;
 }
