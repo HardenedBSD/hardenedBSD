@@ -734,7 +734,7 @@ indir_visit(ino_t ino, ufs_lbn_t lbn, ufs2_daddr_t blk, uint64_t *frags,
 		lbnadd *= NINDIR(fs);
 	bp = getdatablk(blk, fs->fs_bsize, BT_LEVEL1 + level);
 	if (bp->b_errs != 0)
-		err_suj("indir_visit: UNRECOVERABLE I/O ERROR");
+		err_suj("indir_visit: UNRECOVERABLE I/O ERROR\n");
 	for (i = 0; i < NINDIR(fs); i++) {
 		if ((nblk = IBLK(bp, i)) == 0)
 			continue;
@@ -1916,6 +1916,9 @@ blk_build(struct jblkrec *blkrec)
 
 	blk = blknum(fs, blkrec->jb_blkno);
 	frag = fragnum(fs, blkrec->jb_blkno);
+	if (blkrec->jb_blkno < 0 || blk + fs->fs_frag - frag > fs->fs_size)
+		err_suj("Out-of-bounds journal block number %jd\n",
+		    blkrec->jb_blkno);
 	sblk = blk_lookup(blk, 1);
 	/*
 	 * Rewrite the record using oldfrags to indicate the offset into
@@ -1963,6 +1966,9 @@ ino_build_trunc(struct jtrncrec *rec)
 		printf("ino_build_trunc: op %d ino %ju, size %jd\n",
 		    rec->jt_op, (uintmax_t)rec->jt_ino,
 		    (uintmax_t)rec->jt_size);
+	if (chkfilesize(IFREG, rec->jt_size) == 0)
+		err_suj("ino_build: truncation size too large %ju\n",
+		    (intmax_t)rec->jt_size);
 	sino = ino_lookup(rec->jt_ino, 1);
 	if (rec->jt_op == JOP_SYNC) {
 		sino->si_trunc = NULL;
@@ -2369,7 +2375,7 @@ suj_check(const char *filesys)
 {
 	struct inodesc idesc;
 	struct csum *cgsum;
-	union dinode *jip;
+	union dinode *dp, *jip;
 	struct inode ip;
 	uint64_t blocks;
 	int i, retval;
@@ -2411,7 +2417,17 @@ suj_check(const char *filesys)
 	idesc.id_func = findino;
 	idesc.id_name = SUJ_FILE;
 	ginode(UFS_ROOTINO, &ip);
-	if ((ckinode(ip.i_dp, &idesc) & FOUND) == FOUND) {
+	dp = ip.i_dp;
+	if ((DIP(dp, di_mode) & IFMT) != IFDIR) {
+		irelse(&ip);
+		err_suj("root inode is not a directory\n");
+	}
+	if (DIP(dp, di_size) < 0 || DIP(dp, di_size) > MAXDIRSIZE) {
+		irelse(&ip);
+		err_suj("negative or oversized root directory %jd\n",
+		    (uintmax_t)DIP(dp, di_size));
+	}
+	if ((ckinode(dp, &idesc) & FOUND) == FOUND) {
 		sujino = idesc.id_parent;
 		irelse(&ip);
 	} else {

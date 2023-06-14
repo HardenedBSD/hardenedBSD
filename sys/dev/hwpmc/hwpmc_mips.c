@@ -113,9 +113,8 @@ mips_allocate_pmc(int cpu, int ri, struct pmc *pm,
 
 
 static int
-mips_read_pmc(int cpu, int ri, pmc_value_t *v)
+mips_read_pmc(int cpu, int ri, struct pmc *pm, pmc_value_t *v)
 {
-	struct pmc *pm;
 	pmc_value_t tmp;
 
 	KASSERT(cpu >= 0 && cpu < pmc_cpu_max(),
@@ -123,7 +122,6 @@ mips_read_pmc(int cpu, int ri, pmc_value_t *v)
 	KASSERT(ri >= 0 && ri < mips_npmcs,
 	    ("[mips,%d] illegal row index %d", __LINE__, ri));
 
-	pm  = mips_pcpu[cpu]->pc_mipspmcs[ri].phw_pmc;
 	tmp = mips_pmcn_read(ri);
 	PMCDBG2(MDP,REA,2,"mips-read id=%d -> %jd", ri, tmp);
 
@@ -136,16 +134,13 @@ mips_read_pmc(int cpu, int ri, pmc_value_t *v)
 }
 
 static int
-mips_write_pmc(int cpu, int ri, pmc_value_t v)
+mips_write_pmc(int cpu, int ri, struct pmc *pm, pmc_value_t v)
 {
-	struct pmc *pm;
 
 	KASSERT(cpu >= 0 && cpu < pmc_cpu_max(),
 	    ("[mips,%d] illegal CPU value %d", __LINE__, cpu));
 	KASSERT(ri >= 0 && ri < mips_npmcs,
 	    ("[mips,%d] illegal row-index %d", __LINE__, ri));
-
-	pm  = mips_pcpu[cpu]->pc_mipspmcs[ri].phw_pmc;
 
 	if (PMC_IS_SAMPLING_MODE(PMC_TO_MODE(pm)))
 		v = (1UL << (mips_pmc_spec.ps_counter_width - 1)) - v;
@@ -181,14 +176,10 @@ mips_config_pmc(int cpu, int ri, struct pmc *pm)
 }
 
 static int
-mips_start_pmc(int cpu, int ri)
+mips_start_pmc(int cpu, int ri, struct pmc *pm)
 {
 	uint32_t config;
-        struct pmc *pm;
-        struct pmc_hw *phw;
 
-	phw    = &mips_pcpu[cpu]->pc_mipspmcs[ri];
-	pm     = phw->phw_pmc;
 	config = pm->pm_md.pm_mips_evsel;
 
 	/* Enable the PMC. */
@@ -207,13 +198,8 @@ mips_start_pmc(int cpu, int ri)
 }
 
 static int
-mips_stop_pmc(int cpu, int ri)
+mips_stop_pmc(int cpu, int ri, struct pmc *pm __unused)
 {
-        struct pmc *pm;
-        struct pmc_hw *phw;
-
-	phw    = &mips_pcpu[cpu]->pc_mipspmcs[ri];
-	pm     = phw->phw_pmc;
 
 	/*
 	 * Disable the PMCs.
@@ -297,11 +283,11 @@ mips_pmc_intr(struct trapframe *tf)
 				r0 = 0;
 			else if (ri == 1)
 				r2 = 0;
-			mips_stop_pmc(cpu, ri);
+			mips_stop_pmc(cpu, ri, pm);
 		}
 
 		/* Reload sampling count */
-		mips_write_pmc(cpu, ri, pm->pm_sc.pm_reloadcount);
+		mips_write_pmc(cpu, ri, pm, pm->pm_sc.pm_reloadcount);
 	}
 
 	/*
@@ -319,9 +305,7 @@ mips_pmc_intr(struct trapframe *tf)
 static int
 mips_describe(int cpu, int ri, struct pmc_info *pi, struct pmc **ppmc)
 {
-	int error;
 	struct pmc_hw *phw;
-	char mips_name[PMC_NAME_MAX];
 
 	KASSERT(cpu >= 0 && cpu < pmc_cpu_max(),
 	    ("[mips,%d], illegal CPU %d", __LINE__, cpu));
@@ -329,10 +313,8 @@ mips_describe(int cpu, int ri, struct pmc_info *pi, struct pmc **ppmc)
 	    ("[mips,%d] row-index %d out of range", __LINE__, ri));
 
 	phw = &mips_pcpu[cpu]->pc_mipspmcs[ri];
-	snprintf(mips_name, sizeof(mips_name), "MIPS-%d", ri);
-	if ((error = copystr(mips_name, pi->pm_name, PMC_NAME_MAX,
-	    NULL)) != 0)
-		return error;
+
+	snprintf(pi->pm_name, sizeof(pi->pm_name), "MIPS-%d", ri);
 	pi->pm_class = mips_pmc_spec.ps_cpuclass;
 	if (phw->phw_state & PMC_PHW_FLAG_IS_ENABLED) {
 		pi->pm_enabled = TRUE;
