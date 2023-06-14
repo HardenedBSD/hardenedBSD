@@ -252,7 +252,6 @@ void	opt_register(struct option *);
 extern	ifconfig_handle_t *lifh;
 extern	struct ifreq ifr;
 extern	int allmedia;
-extern	int newaddr;
 extern	int exit_code;
 extern	char *f_inet, *f_inet6, *f_ether, *f_addr;
 
@@ -274,7 +273,7 @@ void	sfp_status(if_ctx *ctx);
 struct sockaddr_dl;
 bool	match_ether(const struct sockaddr_dl *sdl);
 bool	match_if_flags(struct ifconfig_args *args, int if_flags);
-int	ifconfig(if_ctx *ctx, int iscreate, const struct afswtch *uafp);
+int	ifconfig_ioctl(if_ctx *ctx, int iscreate, const struct afswtch *uafp);
 bool	group_member(const char *ifname, const char *match, const char *nomatch);
 void	print_ifcap(struct ifconfig_args *args, int s);
 void	tunnel_status(if_ctx *ctx);
@@ -285,7 +284,7 @@ void	print_metric(int s);
 
 /* Netlink-related functions */
 void	list_interfaces_nl(struct ifconfig_args *args);
-int	ifconfig_wrapper_nl(if_ctx *ctx, int iscreate,
+int	ifconfig_nl(if_ctx *ctx, int iscreate,
 		const struct afswtch *uafp);
 uint32_t if_nametoindex_nl(struct snl_state *ss, const char *ifname);
 
@@ -295,7 +294,7 @@ uint32_t if_nametoindex_nl(struct snl_state *ss, const char *ifname);
  */
 struct ifmediareq *ifmedia_getstate(if_ctx *ctx);
 
-void print_vhid(const struct ifaddrs *, const char *);
+void print_vhid(const struct ifaddrs *);
 
 void ifcreate_ioctl(if_ctx *ctx, struct ifreq *ifr);
 
