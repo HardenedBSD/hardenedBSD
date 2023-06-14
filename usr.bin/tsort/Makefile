@@ -5,11 +5,9 @@
 
 PROG=	tsort
 
-<<<<<<< HEAD
-CFI_OVERRIDE=-fno-sanitize=cfi-icall
-=======
 HAS_TESTS=
 SUBDIR.${MK_TESTS}=	tests
->>>>>>> freebsd/stable/13
+
+CFI_OVERRIDE=-fno-sanitize=cfi-icall
 
 .include <bsd.prog.mk>
