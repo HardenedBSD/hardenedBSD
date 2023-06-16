@@ -46,6 +46,7 @@ SRCS=	\
 	pci_e82545.c		\
 	pci_emul.c		\
 	pci_fbuf.c		\
+	pci_gvt-d.c		\
 	pci_hda.c		\
 	pci_hostbridge.c	\
 	pci_irq.c		\
@@ -75,6 +76,8 @@ SRCS=	\
 	spinup_ap.c		\
 	task_switch.c		\
 	tpm_device.c		\
+	tpm_emul_passthru.c	\
+	tpm_intf_crb.c		\
 	uart_emul.c		\
 	usb_emul.c		\
 	usb_mouse.c		\
