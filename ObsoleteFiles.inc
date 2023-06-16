@@ -52,6 +52,7 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+<<<<<<< HEAD
 # 20230601: OpenSSL 3.0.9
 
 OLD_LIBS+=lib/libcrypto.so.111
@@ -100,6 +101,18 @@ OLD_FILES+=usr/share/man/man3/RSA_padding_add_SSLv23.3
 OLD_FILES+=usr/share/man/man3/RSA_padding_check_SSLv23.3
 OLD_FILES+=usr/share/man/man7/RAND_DRBG.7
 OLD_FILES+=usr/share/man/man7/scrypt.7
+=======
+# 20230614: caroot bundle updated
+OLD_FILES+=usr/share/certs/trusted/Cybertrust_Global_Root.pem
+OLD_FILES+=usr/share/certs/trusted/DST_Root_CA_X3.pem
+OLD_FILES+=usr/share/certs/trusted/GlobalSign_Root_CA_-_R2.pem
+OLD_FILES+=usr/share/certs/trusted/Hellenic_Academic_and_Research_Institutions_RootCA_2011.pem
+OLD_FILES+=usr/share/certs/trusted/Network_Solutions_Certificate_Authority.pem
+OLD_FILES+=usr/share/certs/trusted/Staat_der_Nederlanden_EV_Root_CA.pem
+OLD_FILES+=usr/share/certs/trusted/TrustCor_ECA-1.pem
+OLD_FILES+=usr/share/certs/trusted/TrustCor_RootCert_CA-1.pem
+OLD_FILES+=usr/share/certs/trusted/TrustCor_RootCert_CA-2.pem
+>>>>>>> hardened/current/master
 
 # 20230505: md5 tests are now self-contained
 OLD_FILES+=usr/tests/sbin/md5/1.inp

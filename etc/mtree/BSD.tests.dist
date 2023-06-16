@@ -450,6 +450,8 @@
         ..
         ifconfig
         ..
+        ipfw
+        ..
         md5
         ..
         mdconfig
@@ -899,6 +901,8 @@
     ..
     usr.bin
         apply
+        ..
+        asa
         ..
         awk
             bugs-fixed
