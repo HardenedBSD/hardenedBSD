@@ -553,17 +553,31 @@ fbsdrun_addcpu(struct vcpu_info *vi)
 	assert(error == 0);
 }
 
-static int
+static void
 fbsdrun_deletecpu(int vcpu)
 {
+	static pthread_mutex_t resetcpu_mtx = PTHREAD_MUTEX_INITIALIZER;
+	static pthread_cond_t resetcpu_cond = PTHREAD_COND_INITIALIZER;
 
+	pthread_mutex_lock(&resetcpu_mtx);
 	if (!CPU_ISSET(vcpu, &cpumask)) {
 		fprintf(stderr, "Attempting to delete unknown cpu %d\n", vcpu);
 		exit(4);
 	}
 
-	CPU_CLR_ATOMIC(vcpu, &cpumask);
-	return (CPU_EMPTY(&cpumask));
+	CPU_CLR(vcpu, &cpumask);
+
+	if (vcpu != BSP) {
+		pthread_cond_signal(&resetcpu_cond);
+		pthread_mutex_unlock(&resetcpu_mtx);
+		pthread_exit(NULL);
+		/* NOTREACHED */
+	}
+
+	while (!CPU_EMPTY(&cpumask)) {
+		pthread_cond_wait(&resetcpu_cond, &resetcpu_mtx);
+	}
+	pthread_mutex_unlock(&resetcpu_mtx);
 }
 
 static int
@@ -818,9 +832,6 @@ fail:
 	return (VMEXIT_ABORT);
 }
 
-static pthread_mutex_t resetcpu_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t resetcpu_cond = PTHREAD_COND_INITIALIZER;
-
 static int
 vmexit_suspend(struct vmctx *ctx, struct vcpu *vcpu, struct vm_run *vmrun)
 {
@@ -833,19 +844,6 @@ vmexit_suspend(struct vmctx *ctx, struct vcpu *vcpu, struct vm_run *vmrun)
 	how = vme->u.suspended.how;
 
 	fbsdrun_deletecpu(vcpuid);
-
-	if (vcpuid != BSP) {
-		pthread_mutex_lock(&resetcpu_mtx);
-		pthread_cond_signal(&resetcpu_cond);
-		pthread_mutex_unlock(&resetcpu_mtx);
-		pthread_exit(NULL);
-	}
-
-	pthread_mutex_lock(&resetcpu_mtx);
-	while (!CPU_EMPTY(&cpumask)) {
-		pthread_cond_wait(&resetcpu_cond, &resetcpu_mtx);
-	}
-	pthread_mutex_unlock(&resetcpu_mtx);
 
 	switch (how) {
 	case VM_SUSPEND_RESET:
@@ -930,7 +928,7 @@ vmexit_ipi(struct vmctx *ctx __unused, struct vcpu *vcpu __unused,
 	return (error);
 }
 
-static vmexit_handler_t handler[VM_EXITCODE_MAX] = {
+static const vmexit_handler_t handler[VM_EXITCODE_MAX] = {
 	[VM_EXITCODE_INOUT]  = vmexit_inout,
 	[VM_EXITCODE_INOUT_STR]  = vmexit_inout,
 	[VM_EXITCODE_VMX]    = vmexit_vmx,
@@ -946,6 +944,8 @@ static vmexit_handler_t handler[VM_EXITCODE_MAX] = {
 	[VM_EXITCODE_DEBUG] = vmexit_debug,
 	[VM_EXITCODE_BPT] = vmexit_breakpoint,
 	[VM_EXITCODE_IPI] = vmexit_ipi,
+	[VM_EXITCODE_HLT] = vmexit_hlt,
+	[VM_EXITCODE_PAUSE] = vmexit_pause,
 };
 
 static void
@@ -1012,7 +1012,7 @@ num_vcpus_allowed(struct vmctx *ctx, struct vcpu *vcpu)
 }
 
 static void
-fbsdrun_set_capabilities(struct vcpu *vcpu, bool bsp)
+fbsdrun_set_capabilities(struct vcpu *vcpu)
 {
 	int err, tmp;
 
@@ -1023,8 +1023,6 @@ fbsdrun_set_capabilities(struct vcpu *vcpu, bool bsp)
 			exit(4);
 		}
 		vm_set_capability(vcpu, VM_CAP_HALT_EXIT, 1);
-		if (bsp)
-			handler[VM_EXITCODE_HLT] = vmexit_hlt;
 	}
 
 	if (get_config_bool_default("x86.vmexit_on_pause", false)) {
@@ -1038,8 +1036,6 @@ fbsdrun_set_capabilities(struct vcpu *vcpu, bool bsp)
 			exit(4);
 		}
 		vm_set_capability(vcpu, VM_CAP_PAUSE_EXIT, 1);
-		if (bsp)
-			handler[VM_EXITCODE_PAUSE] = vmexit_pause;
         }
 
 	if (get_config_bool_default("x86.x2apic", false))
@@ -1130,7 +1126,7 @@ spinup_vcpu(struct vcpu_info *vi, bool bsp)
 	int error;
 
 	if (!bsp) {
-		fbsdrun_set_capabilities(vi->vcpu, false);
+		fbsdrun_set_capabilities(vi->vcpu);
 
 		/*
 		 * Enable the 'unrestricted guest' mode for APs.
@@ -1432,7 +1428,7 @@ main(int argc, char *argv[])
 		exit(4);
 	}
 
-	fbsdrun_set_capabilities(bsp, true);
+	fbsdrun_set_capabilities(bsp);
 
 	/* Allocate per-VCPU resources. */
 	vcpu_info = calloc(guest_ncpus, sizeof(*vcpu_info));
