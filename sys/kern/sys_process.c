@@ -56,6 +56,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/signalvar.h>
 #include <sys/caprights.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 
 #include <security/audit/audit.h>
@@ -930,6 +931,13 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		tid = td2->td_tid;
 	}
 
+#ifdef PAX_HARDENING
+	if (IN_CAPABILITY_MODE(td2) && pax_ptrace_capsicum_prohibit(p)) {
+		error = EPERM;
+		goto fail;
+	}
+#endif
+
 #ifdef COMPAT_FREEBSD32
 	/*
 	 * Test if we're a 32 bit client and what the target is.
@@ -966,6 +974,14 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 			error = EINVAL;
 			goto fail;
 		}
+
+#ifdef PAX_HARDENING
+		if (IN_CAPABILITY_MODE(td2) &&
+		    pax_ptrace_capsicum_prohibit(p)) {
+			error = EPERM;
+			goto fail;
+		}
+#endif
 
 		/* Already traced */
 		if (p->p_flag & P_TRACED) {

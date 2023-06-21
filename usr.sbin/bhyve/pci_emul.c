@@ -62,6 +62,7 @@ __FBSDID("$FreeBSD$");
 #include "pci_irq.h"
 #include "pci_lpc.h"
 #include "pci_passthru.h"
+#include "qemu_fwcfg.h"
 
 #define CONF1_ADDR_PORT	   0x0cf8
 #define CONF1_DATA_PORT	   0x0cfc
@@ -120,6 +121,14 @@ struct pci_bar_allocation {
 
 static TAILQ_HEAD(pci_bar_list, pci_bar_allocation) pci_bars =
     TAILQ_HEAD_INITIALIZER(pci_bars);
+
+struct boot_device {
+	TAILQ_ENTRY(boot_device) boot_device_chain;
+	struct pci_devinst *pdi;
+	int bootindex;
+};
+static TAILQ_HEAD(boot_list, boot_device) boot_devices = TAILQ_HEAD_INITIALIZER(
+    boot_devices);
 
 #define	PCI_EMUL_IOBASE		0x2000
 #define	PCI_EMUL_IOLIMIT	0x10000
@@ -955,6 +964,45 @@ pci_emul_alloc_rom(struct pci_devinst *const pdi, const uint64_t size,
 	return (0);
 }
 
+int
+pci_emul_add_boot_device(struct pci_devinst *pi, int bootindex)
+{
+	struct boot_device *new_device, *device;
+
+	/* don't permit a negative bootindex */
+	if (bootindex < 0) {
+		errx(4, "Invalid bootindex %d for %s", bootindex, pi->pi_name);
+	}
+
+	/* alloc new boot device */
+	new_device = calloc(1, sizeof(struct boot_device));
+	if (new_device == NULL) {
+		return (ENOMEM);
+	}
+	new_device->pdi = pi;
+	new_device->bootindex = bootindex;
+
+	/* search for boot device with higher boot index */
+	TAILQ_FOREACH(device, &boot_devices, boot_device_chain) {
+		if (device->bootindex == bootindex) {
+			errx(4,
+			    "Could not set bootindex %d for %s. Bootindex already occupied by %s",
+			    bootindex, pi->pi_name, device->pdi->pi_name);
+		} else if (device->bootindex > bootindex) {
+			break;
+		}
+	}
+
+	/* add boot device to queue */
+	if (device == NULL) {
+		TAILQ_INSERT_TAIL(&boot_devices, new_device, boot_device_chain);
+	} else {
+		TAILQ_INSERT_BEFORE(device, new_device, boot_device_chain);
+	}
+
+	return (0);
+}
+
 #define	CAP_START_OFFSET	0x40
 static int
 pci_emul_add_capability(struct pci_devinst *pi, u_char *capdata, int caplen)
@@ -1029,7 +1077,8 @@ pci_emul_init(struct vmctx *ctx, struct pci_devemu *pde, int bus, int slot,
 	pdi->pi_lintr.pirq_pin = 0;
 	pdi->pi_lintr.ioapic_irq = 0;
 	pdi->pi_d = pde;
-	snprintf(pdi->pi_name, PI_NAMESZ, "%s-pci-%d", pde->pe_emu, slot);
+	snprintf(pdi->pi_name, PI_NAMESZ, "%s@pci.%d.%d.%d", pde->pe_emu, bus,
+	    slot, func);
 
 	/* Disable legacy interrupts */
 	pci_set_cfgdata8(pdi, PCIR_INTLINE, 255);
@@ -1361,6 +1410,27 @@ pci_ecfg_base(void)
 	return (PCI_EMUL_ECFG_BASE);
 }
 
+static int
+init_bootorder(void)
+{
+	struct boot_device *device;
+	FILE *fp;
+	char *bootorder;
+	size_t bootorder_len;
+
+	if (TAILQ_EMPTY(&boot_devices))
+		return (0);
+
+	fp = open_memstream(&bootorder, &bootorder_len);
+	TAILQ_FOREACH(device, &boot_devices, boot_device_chain) {
+		fprintf(fp, "/pci@i0cf8/pci@%d,%d\n",
+		    device->pdi->pi_slot, device->pdi->pi_func);
+	}
+	fclose(fp);
+
+	return (qemu_fwcfg_add_file("bootorder", bootorder_len, bootorder));
+}
+
 #define	BUSIO_ROUNDUP		32
 #define	BUSMEM32_ROUNDUP	(1024 * 1024)
 #define	BUSMEM64_ROUNDUP	(512 * 1024 * 1024)
@@ -1389,6 +1459,8 @@ init_pci(struct vmctx *ctx)
 	pci_emul_membase64 = 4*GB + vm_get_highmem_size(ctx);
 	pci_emul_membase64 = roundup2(pci_emul_membase64, PCI_EMUL_MEMSIZE64);
 	pci_emul_memlim64 = pci_emul_membase64 + PCI_EMUL_MEMSIZE64;
+
+	TAILQ_INIT(&boot_devices);
 
 	for (bus = 0; bus < MAXBUSES; bus++) {
 		snprintf(node_name, sizeof(node_name), "pci.%d", bus);
@@ -1496,6 +1568,11 @@ init_pci(struct vmctx *ctx)
 		}
 	}
 	lpc_pirq_routed();
+
+	if ((error = init_bootorder()) != 0) {
+		warnx("%s: Unable to init bootorder", __func__);
+		return (error);
+	}
 
 	/*
 	 * The guest physical memory map looks like the following:
@@ -2363,42 +2440,6 @@ done:
 	return (ret);
 }
 
-static int
-pci_find_slotted_dev(const char *dev_name, struct pci_devemu **pde,
-		     struct pci_devinst **pdi)
-{
-	struct businfo *bi;
-	struct slotinfo *si;
-	struct funcinfo *fi;
-	int bus, slot, func;
-
-	assert(dev_name != NULL);
-	assert(pde != NULL);
-	assert(pdi != NULL);
-
-	for (bus = 0; bus < MAXBUSES; bus++) {
-		if ((bi = pci_businfo[bus]) == NULL)
-			continue;
-
-		for (slot = 0; slot < MAXSLOTS; slot++) {
-			si = &bi->slotinfo[slot];
-			for (func = 0; func < MAXFUNCS; func++) {
-				fi = &si->si_funcs[func];
-				if (fi->fi_pde == NULL)
-					continue;
-				if (strcmp(dev_name, fi->fi_pde->pe_emu) != 0)
-					continue;
-
-				*pde = fi->fi_pde;
-				*pdi = fi->fi_devi;
-				return (0);
-			}
-		}
-	}
-
-	return (EINVAL);
-}
-
 int
 pci_snapshot(struct vm_snapshot_meta *meta)
 {
@@ -2408,57 +2449,26 @@ pci_snapshot(struct vm_snapshot_meta *meta)
 
 	assert(meta->dev_name != NULL);
 
-	ret = pci_find_slotted_dev(meta->dev_name, &pde, &pdi);
-	if (ret != 0) {
-		fprintf(stderr, "%s: no such name: %s\r\n",
-			__func__, meta->dev_name);
-		memset(meta->buffer.buf_start, 0, meta->buffer.buf_size);
-		return (0);
-	}
+	pdi = meta->dev_data;
+	pde = pdi->pi_d;
 
-	meta->dev_data = pdi;
-
-	if (pde->pe_snapshot == NULL) {
-		fprintf(stderr, "%s: not implemented yet for: %s\r\n",
-			__func__, meta->dev_name);
-		return (-1);
-	}
+	if (pde->pe_snapshot == NULL)
+		return (ENOTSUP);
 
 	ret = pci_snapshot_pci_dev(meta);
-	if (ret != 0) {
-		fprintf(stderr, "%s: failed to snapshot pci dev\r\n",
-			__func__);
-		return (-1);
-	}
-
-	ret = (*pde->pe_snapshot)(meta);
+	if (ret == 0)
+		ret = (*pde->pe_snapshot)(meta);
 
 	return (ret);
 }
 
 int
-pci_pause(const char *dev_name)
+pci_pause(struct pci_devinst *pdi)
 {
-	struct pci_devemu *pde;
-	struct pci_devinst *pdi;
-	int ret;
-
-	assert(dev_name != NULL);
-
-	ret = pci_find_slotted_dev(dev_name, &pde, &pdi);
-	if (ret != 0) {
-		/*
-		 * It is possible to call this function without
-		 * checking that the device is inserted first.
-		 */
-		fprintf(stderr, "%s: no such name: %s\n", __func__, dev_name);
-		return (0);
-	}
+	struct pci_devemu *pde = pdi->pi_d;
 
 	if (pde->pe_pause == NULL) {
 		/* The pause/resume functionality is optional. */
-		fprintf(stderr, "%s: not implemented for: %s\n",
-			__func__, dev_name);
 		return (0);
 	}
 
@@ -2466,28 +2476,12 @@ pci_pause(const char *dev_name)
 }
 
 int
-pci_resume(const char *dev_name)
+pci_resume(struct pci_devinst *pdi)
 {
-	struct pci_devemu *pde;
-	struct pci_devinst *pdi;
-	int ret;
-
-	assert(dev_name != NULL);
-
-	ret = pci_find_slotted_dev(dev_name, &pde, &pdi);
-	if (ret != 0) {
-		/*
-		 * It is possible to call this function without
-		 * checking that the device is inserted first.
-		 */
-		fprintf(stderr, "%s: no such name: %s\n", __func__, dev_name);
-		return (0);
-	}
+	struct pci_devemu *pde = pdi->pi_d;
 
 	if (pde->pe_resume == NULL) {
 		/* The pause/resume functionality is optional. */
-		fprintf(stderr, "%s: not implemented for: %s\n",
-			__func__, dev_name);
 		return (0);
 	}
 
@@ -2664,6 +2658,42 @@ pci_emul_dior(struct pci_devinst *pi, int baridx, uint64_t offset, int size)
 }
 
 #ifdef BHYVE_SNAPSHOT
+struct pci_devinst *
+pci_next(const struct pci_devinst *cursor)
+{
+	unsigned bus = 0, slot = 0, func = 0;
+	struct businfo *bi;
+	struct slotinfo *si;
+	struct funcinfo *fi;
+
+	bus = cursor ? cursor->pi_bus : 0;
+	slot = cursor ? cursor->pi_slot : 0;
+	func = cursor ? (cursor->pi_func + 1) : 0;
+
+	for (; bus < MAXBUSES; bus++) {
+		if ((bi = pci_businfo[bus]) == NULL)
+			continue;
+
+		if (slot >= MAXSLOTS)
+			slot = 0;
+
+		for (; slot < MAXSLOTS; slot++) {
+			si = &bi->slotinfo[slot];
+			if (func >= MAXFUNCS)
+				func = 0;
+			for (; func < MAXFUNCS; func++) {
+				fi = &si->si_funcs[func];
+				if (fi->fi_devi == NULL)
+					continue;
+
+				return (fi->fi_devi);
+			}
+		}
+	}
+
+	return (NULL);
+}
+
 static int
 pci_emul_snapshot(struct vm_snapshot_meta *meta __unused)
 {
