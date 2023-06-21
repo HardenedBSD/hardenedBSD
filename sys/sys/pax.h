@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2022 by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2023 by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,6 +65,7 @@ struct hbsd_features {
 		int		 tpe_negate;
 		int		 tpe_root_owned;
 		pax_state_t	 harden_rtld;
+		pax_state_t	 prohibit_ptrace_capsicum;
 		pax_state_t	 prohibit_ptrace_syscall;
 		pax_state_t	 harden_tty;
 		pax_state_t	 harden_shm;
@@ -238,6 +239,7 @@ int pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts);
 #define	pax_hardening_init_prison(pr, opts)	({ 0; })
 #endif
 int pax_procfs_harden(struct thread *td);
+bool pax_ptrace_capsicum_prohibit(struct proc *p);
 int pax_ptrace_syscall_prohibit(struct thread *td);
 int pax_harden_tty(struct thread *td);
 int pax_harden_shm(struct thread *td);
@@ -268,6 +270,8 @@ bool pax_kmod_load_disabled(void);
 #define PAX_NOTE_NOTPE		0x00008000
 #define PAX_NOTE_HARDEN_SHM	0x00010000
 #define PAX_NOTE_NOHARDEN_SHM	0x00020000
+#define PAX_NOTE_PROHIBIT_PTRACE_CAPSICUM	0x00040000
+#define PAX_NOTE_NOPROHIBIT_PTRACE_CAPSICUM	0x00080000
 
 #define	PAX_NOTE_RESERVED0	0x40000000
 #define	PAX_NOTE_PREFER_ACL	0x80000000
@@ -275,12 +279,13 @@ bool pax_kmod_load_disabled(void);
 #define PAX_NOTE_ALL_ENABLED	\
     (PAX_NOTE_PAGEEXEC | PAX_NOTE_MPROTECT | PAX_NOTE_SEGVGUARD | \
     PAX_NOTE_ASLR | PAX_NOTE_SHLIBRANDOM | PAX_NOTE_DISALLOWMAP32BIT | \
-    PAX_NOTE_PERMITKMOD | PAX_NOTE_TPE | PAX_NOTE_HARDEN_SHM)
+    PAX_NOTE_PERMITKMOD | PAX_NOTE_TPE | PAX_NOTE_HARDEN_SHM | \
+    PAX_NOTE_PROHIBIT_PTRACE_CAPSICUM)
 #define PAX_NOTE_ALL_DISABLED	\
     (PAX_NOTE_NOPAGEEXEC | PAX_NOTE_NOMPROTECT | \
     PAX_NOTE_NOSEGVGUARD | PAX_NOTE_NOASLR | PAX_NOTE_NOSHLIBRANDOM | \
     PAX_NOTE_NODISALLOWMAP32BIT | PAX_NOTE_FORBIDKMOD | PAX_NOTE_NOTPE | \
-    PAX_NOTE_NOHARDEN_SHM)
+    PAX_NOTE_NOHARDEN_SHM | PAX_NOTE_NOPROHIBIT_PTRACE_CAPSICUM)
 #define PAX_NOTE_ALL	(PAX_NOTE_ALL_ENABLED | PAX_NOTE_ALL_DISABLED | \
     PAX_NOTE_PREFER_ACL)
 
