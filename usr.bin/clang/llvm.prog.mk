@@ -28,6 +28,7 @@ LIBADD+=	tinfow
 .endif
 LIBADD+=	pthread
 LIBADD+=	z
+LIBADD+=	zstd
 
 NOCFI=		yes
 

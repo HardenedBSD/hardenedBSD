@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2022, by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2023, by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -143,17 +143,10 @@ void
 pax_get_flags(struct proc *p, pax_flag_t *flags)
 {
 
-	KASSERT(p == curthread->td_proc,
-	    ("%s: p != curthread->td_proc", __func__));
-
-#ifdef HBSD_DEBUG
-	struct thread *td;
-
-	FOREACH_THREAD_IN_PROC(p, td) {
-		KASSERT(td->td_pax == p->p_pax, ("%s: td->td_pax != p->p_pax",
-		    __func__));
-	}
-#endif
+	KASSERT(p != NULL,
+	    ("%s: p == NULL", __func__));
+	KASSERT(flags != NULL,
+	    ("%s: flags == NULL", __func__));
 
 	*flags = p->p_pax;
 }
@@ -162,22 +155,10 @@ void
 pax_get_flags_td(struct thread *td, pax_flag_t *flags)
 {
 
-	KASSERT(td == curthread,
-	    ("%s: td != curthread", __func__));
-
-#ifdef HBSD_DEBUG
-	struct proc *p;
-	struct thread *td0;
-
-	p = td->td_proc;
-
-	FOREACH_THREAD_IN_PROC(p, td0) {
-		KASSERT(td0->td_proc == p,
-		    ("%s: td0->td_proc != p", __func__));
-		KASSERT(td0->td_pax == p->p_pax, ("%s: td0->td_pax != p->p_pax",
-		    __func__));
-	}
-#endif
+	KASSERT(td != NULL,
+	    ("%s: td == NULL", __func__));
+	KASSERT(flags != NULL,
+	    ("%s: flags == NULL", __func__));
 
 	*flags = td->td_pax;
 }

@@ -58,6 +58,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/libkern.h>
 #include <sys/proc.h>
 #include <sys/vmmeter.h>
 #include <sys/smr.h>
@@ -253,7 +254,7 @@ vm_radix_root_store(struct vm_radix *rtree, struct vm_radix_node *rnode,
 /*
  * Returns TRUE if the specified radix node is a leaf and FALSE otherwise.
  */
-static __inline boolean_t
+static __inline bool
 vm_radix_isleaf(struct vm_radix_node *rnode)
 {
 
@@ -285,28 +286,29 @@ vm_radix_addpage(struct vm_radix_node *rnode, vm_pindex_t index, uint16_t clev,
 }
 
 /*
- * Returns the slot where two keys differ.
+ * Returns the level where two keys differ.
  * It cannot accept 2 equal keys.
  */
 static __inline uint16_t
 vm_radix_keydiff(vm_pindex_t index1, vm_pindex_t index2)
 {
-	uint16_t clev;
 
 	KASSERT(index1 != index2, ("%s: passing the same key value %jx",
 	    __func__, (uintmax_t)index1));
+	CTASSERT(sizeof(long long) >= sizeof(vm_pindex_t));
 
-	index1 ^= index2;
-	for (clev = VM_RADIX_LIMIT;; clev--)
-		if (vm_radix_slot(index1, clev) != 0)
-			return (clev);
+	/*
+	 * From the highest-order bit where the indexes differ,
+	 * compute the highest level in the trie where they differ.
+	 */
+	return ((flsll(index1 ^ index2) - 1) / VM_RADIX_WIDTH);
 }
 
 /*
  * Returns TRUE if it can be determined that key does not belong to the
  * specified rnode.  Otherwise, returns FALSE.
  */
-static __inline boolean_t
+static __inline bool
 vm_radix_keybarr(struct vm_radix_node *rnode, vm_pindex_t idx)
 {
 
@@ -314,7 +316,7 @@ vm_radix_keybarr(struct vm_radix_node *rnode, vm_pindex_t idx)
 		idx = vm_radix_trimkey(idx, rnode->rn_clev + 1);
 		return (idx != rnode->rn_owner);
 	}
-	return (FALSE);
+	return (false);
 }
 
 /*
@@ -453,21 +455,6 @@ vm_radix_insert(struct vm_radix *rtree, vm_page_t page)
 	vm_radix_node_store(parentp, tmp, LOCKED);
 
 	return (0);
-}
-
-/*
- * Returns TRUE if the specified radix tree contains a single leaf and FALSE
- * otherwise.
- */
-boolean_t
-vm_radix_is_singleton(struct vm_radix *rtree)
-{
-	struct vm_radix_node *rnode;
-
-	rnode = vm_radix_root_load(rtree, LOCKED);
-	if (rnode == NULL)
-		return (FALSE);
-	return (vm_radix_isleaf(rnode));
 }
 
 /*

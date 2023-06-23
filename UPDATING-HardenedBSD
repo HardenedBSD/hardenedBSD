@@ -1,3 +1,18 @@
+[20230621] Further restrict ptrace access to capsicumized processes
+__HardenedBSD_version = 1400005
+
+	HBSD: Further restrict ptrace access targeting capsicumized processes
+
+	Prevent capsicumized processes from being ptraced. Introduce a new
+	4-state per-jail sysctl node, hardening.prohibit_ptrace_capsicum,
+	defaulted to process opt-out (2). Introduce a new hbsdcontrol knob,
+	prohibit_ptrace_capsicum, to toggle the feature on a per-application
+	basis.
+
+	The intent behind this change is to make post-exploitation tasks more
+	difficult. Abusing ptrace to inject code or to perform process hollowing
+	is commonplace.
+
 [20230528] Introduce shared memory (SHM) hardening
 __HardenedBSD_version = 1400004
 

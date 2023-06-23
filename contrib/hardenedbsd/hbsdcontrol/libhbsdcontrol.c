@@ -110,6 +110,13 @@ const struct pax_feature_entry pax_features[] = {
 			[enable] = "hbsd.hardening.harden_shm",
 		},
 	},
+	{
+		.feature = "prohibit_ptrace_capsicum",
+		.extattr = {
+			[disable] = "hbsd.hardening.noprohibit_ptrace_capsicum",
+			[enable] = "hbsd.hardening.prohibit_ptrace_capsicum",
+		},
+	},
 	/* Terminating NULL entry, DO NOT REMOVE! */
 	{NULL, {0, 0}}
 };

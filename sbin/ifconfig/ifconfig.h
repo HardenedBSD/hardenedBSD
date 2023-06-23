@@ -255,6 +255,7 @@ extern	int allmedia;
 extern	int exit_code;
 extern	char *f_inet, *f_inet6, *f_ether, *f_addr;
 
+void	clearifcap(if_ctx *ctx, const char *, int value);
 void	setifcap(if_ctx *ctx, const char *, int value);
 void	setifcapnv(if_ctx *ctx, const char *vname, const char *arg);
 
@@ -275,7 +276,6 @@ bool	match_ether(const struct sockaddr_dl *sdl);
 bool	match_if_flags(struct ifconfig_args *args, int if_flags);
 int	ifconfig_ioctl(if_ctx *ctx, int iscreate, const struct afswtch *uafp);
 bool	group_member(const char *ifname, const char *match, const char *nomatch);
-void	print_ifcap(if_ctx *ctx);
 void	tunnel_status(if_ctx *ctx);
 struct afswtch	*af_getbyfamily(int af);
 void	af_other_status(if_ctx *ctx);
