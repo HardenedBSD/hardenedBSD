@@ -52,7 +52,6 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
-<<<<<<< HEAD
 # 20230601: OpenSSL 3.0.9
 
 OLD_LIBS+=lib/libcrypto.so.111
@@ -101,7 +100,7 @@ OLD_FILES+=usr/share/man/man3/RSA_padding_add_SSLv23.3
 OLD_FILES+=usr/share/man/man3/RSA_padding_check_SSLv23.3
 OLD_FILES+=usr/share/man/man7/RAND_DRBG.7
 OLD_FILES+=usr/share/man/man7/scrypt.7
-=======
+
 # 20230622: new clang import which bumps version from 15.0.7 to 16.0.1
 OLD_FILES+=usr/lib/clang/15.0.7/include/__clang_cuda_builtin_vars.h
 OLD_FILES+=usr/lib/clang/15.0.7/include/__clang_cuda_cmath.h
@@ -430,7 +429,6 @@ OLD_DIRS+=usr/lib/clang/15.0.7
 OLD_FILES+=usr/include/c++/v1/__bits
 OLD_FILES+=usr/include/c++/v1/__tuple
 OLD_FILES+=usr/include/c++/v1/__utility/transaction.h
->>>>>>> github/hardened/current/cross-dso-cfi
 
 # 20230614: caroot bundle updated
 OLD_FILES+=usr/share/certs/trusted/Cybertrust_Global_Root.pem
