@@ -30,6 +30,7 @@ LIBADD+=	ncursesw
 .endif
 LIBADD+=	pthread
 LIBADD+=	z
+LIBADD+=	zstd
 
 NOCFI=		yes
 

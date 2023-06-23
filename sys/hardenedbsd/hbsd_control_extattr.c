@@ -81,6 +81,8 @@ const struct pax_feature_entry pax_features[] = {
 	{"hbsd.hardening.forbid_kmod",		PAX_NOTE_FORBIDKMOD},
 	{"hbsd.hardening.harden_shm",		PAX_NOTE_HARDEN_SHM},
 	{"hbsd.hardening.noharden_shm",		PAX_NOTE_NOHARDEN_SHM},
+	{"hbsd.hardening.prohibit_ptrace_capsicum",		PAX_NOTE_PROHIBIT_PTRACE_CAPSICUM},
+	{"hbsd.hardening.noprohibit_ptrace_capsicum",		PAX_NOTE_NOPROHIBIT_PTRACE_CAPSICUM},
 	{NULL, 0}
 };
 
