@@ -437,7 +437,7 @@ pt_entry_t pg_nx;
 static SYSCTL_NODE(_vm, OID_AUTO, pmap, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "VM/pmap parameters");
 
-static int pg_ps_enabled = 1;
+static int __read_frequently pg_ps_enabled = 1;
 SYSCTL_INT(_vm_pmap, OID_AUTO, pg_ps_enabled, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
     &pg_ps_enabled, 0, "Are large page mappings enabled?");
 
@@ -1324,7 +1324,7 @@ static void pmap_kenter_attr(vm_offset_t va, vm_paddr_t pa, int mode);
 static vm_page_t pmap_large_map_getptp_unlocked(void);
 static vm_paddr_t pmap_large_map_kextract(vm_offset_t va);
 #if VM_NRESERVLEVEL > 0
-static void pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
+static bool pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
     vm_page_t mpte, struct rwlock **lockp);
 #endif
 static boolean_t pmap_protect_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t sva,
@@ -6862,7 +6862,7 @@ pmap_pde_ept_executable(pmap_t pmap, pd_entry_t pde)
  * aligned, contiguous physical memory and (2) the 4KB page mappings must have
  * identical characteristics. 
  */
-static void
+static bool
 pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
     struct rwlock **lockp)
 {
@@ -6870,6 +6870,10 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 	pt_entry_t *firstpte, oldpte, pa, *pte;
 	pt_entry_t allpte_PG_A, PG_A, PG_G, PG_M, PG_PKU_MASK, PG_RW, PG_V;
 	int PG_PTE_CACHE;
+
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
+	if (!pmap_ps_enabled(pmap))
+		return (false);
 
 	PG_A = pmap_accessed_bit(pmap);
 	PG_G = pmap_global_bit(pmap);
@@ -6879,8 +6883,6 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 	PG_PKU_MASK = pmap_pku_mask_bit(pmap);
 	PG_PTE_CACHE = pmap_cache_mask(pmap, 0);
 
-	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-
 	/*
 	 * Examine the first PTE in the specified PTP.  Abort if this PTE is
 	 * ineligible for promotion due to hardware errata, invalid, or does
@@ -6889,12 +6891,12 @@ pmap_promote_pde(pmap_t pmap, pd_entry_t *pde, vm_offset_t va, vm_page_t mpte,
 	firstpte = (pt_entry_t *)PHYS_TO_DMAP(*pde & PG_FRAME);
 	newpde = *firstpte;
 	if (!pmap_allow_2m_x_page(pmap, pmap_pde_ept_executable(pmap, newpde)))
-		return;
+		return (false);
 	if ((newpde & ((PG_FRAME & PDRMASK) | PG_V)) != PG_V) {
 		counter_u64_add(pmap_pde_p_failures, 1);
 		CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
 		    " in pmap %p", va, pmap);
-		return;
+		return (false);
 	}
 
 	/*
@@ -6939,7 +6941,7 @@ setpde:
 			counter_u64_add(pmap_pde_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
 			    " in pmap %p", va, pmap);
-			return;
+			return (false);
 		}
 setpte:
 		if ((oldpte & (PG_M | PG_RW)) == PG_RW) {
@@ -6958,7 +6960,7 @@ setpte:
 			counter_u64_add(pmap_pde_p_failures, 1);
 			CTR2(KTR_PMAP, "pmap_promote_pde: failure for va %#lx"
 			    " in pmap %p", va, pmap);
-			return;
+			return (false);
 		}
 		allpte_PG_A &= oldpte;
 		pa -= PAGE_SIZE;
@@ -6999,7 +7001,7 @@ setpte:
 		CTR2(KTR_PMAP,
 		    "pmap_promote_pde: failure for va %#lx in pmap %p", va,
 		    pmap);
-		return;
+		return (false);
 	}
 
 	/*
@@ -7024,6 +7026,7 @@ setpte:
 	counter_u64_add(pmap_pde_promotions, 1);
 	CTR2(KTR_PMAP, "pmap_promote_pde: success for va %#lx"
 	    " in pmap %p", va, pmap);
+	return (true);
 }
 #endif /* VM_NRESERVLEVEL > 0 */
 
@@ -7397,10 +7400,9 @@ unchanged:
 	 * populated, then attempt promotion.
 	 */
 	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
-	    pmap_ps_enabled(pmap) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
 	    vm_reserv_level_iffullpop(m) == 0)
-		pmap_promote_pde(pmap, pde, va, mpte, &lock);
+		(void)pmap_promote_pde(pmap, pde, va, mpte, &lock);
 #endif
 
 	rv = KERN_SUCCESS;
@@ -7788,18 +7790,17 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	 * attempt promotion.
 	 */
 	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
-	    pmap_ps_enabled(pmap) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
 	    vm_reserv_level_iffullpop(m) == 0) {
 		if (pde == NULL)
 			pde = pmap_pde(pmap, va);
-		pmap_promote_pde(pmap, pde, va, mpte, lockp);
 
 		/*
 		 * If promotion succeeds, then the next call to this function
 		 * should not be given the unmapped PTP as a hint.
 		 */
-		mpte = NULL;
+		if (pmap_promote_pde(pmap, pde, va, mpte, lockp))
+			mpte = NULL;
 	}
 #endif
 
@@ -10365,10 +10366,9 @@ pmap_emulate_accessed_dirty(pmap_t pmap, vm_offset_t va, int ftype)
 	m = PHYS_TO_VM_PAGE(*pte & PG_FRAME);
 
 	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
-	    pmap_ps_enabled(pmap) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
-	    vm_reserv_level_iffullpop(m) == 0) {
-		pmap_promote_pde(pmap, pde, va, mpte, &lock);
+	    vm_reserv_level_iffullpop(m) == 0 &&
+	    pmap_promote_pde(pmap, pde, va, mpte, &lock)) {
 #ifdef INVARIANTS
 		atomic_add_long(&ad_emulation_superpage_promotions, 1);
 #endif
