@@ -91,14 +91,14 @@
 
 #define	WRITE_ONCE(x,v) do {		\
 	barrier();			\
-	ACCESS_ONCE(x) = (v);		\
+	(*(volatile __typeof(x) *)(uintptr_t)&(x)) = (v); \
 	barrier();			\
 } while (0)
 
 #define	READ_ONCE(x) ({			\
 	__typeof(x) __var = ({		\
 		barrier();		\
-		ACCESS_ONCE(x);		\
+		(*(const volatile __typeof(x) *)&(x)); \
 	});				\
 	barrier();			\
 	__var;				\
