@@ -188,7 +188,7 @@ PO_FLAG=-pg
 	${CTFCONVERT_CMD}
 
 .s.po .s.pico .s.nossppico:
-	${AS} ${AFLAGS} -o ${.TARGET} ${.IMPSRC}
+	${CC:N${CCACHE_BIN}} -x assembler ${ACFLAGS} -c ${.IMPSRC} -o ${.TARGET}
 	${CTFCONVERT_CMD}
 
 .asm.po:
