@@ -140,13 +140,11 @@ linux_fixup(uintptr_t *stack_base, struct image_params *imgp)
 	return (0);
 }
 
-static int
-linux_copyout_auxargs(struct image_params *imgp, uintptr_t base)
+void
+linux32_arch_copyout_auxargs(struct image_params *imgp, Elf_Auxinfo **pos)
 {
-	Elf32_Auxargs *args;
-	Elf32_Auxinfo *argarray, *pos;
-	int error, issetugid;
 
+<<<<<<< HEAD
 	issetugid = imgp->proc->p_flag & P_SUGID ? 1 : 0;
 	args = (Elf32_Auxargs *)imgp->auxargs;
 	argarray = pos = malloc(LINUX_AT_COUNT * sizeof(*pos), M_TEMP,
@@ -196,6 +194,12 @@ linux_copyout_auxargs(struct image_params *imgp, uintptr_t base)
 	    sizeof(*argarray) * LINUX_AT_COUNT);
 	free(argarray, M_TEMP);
 	return (error);
+=======
+	AUXARGS_ENTRY((*pos), LINUX_AT_SYSINFO_EHDR, linux_vdso_base);
+	AUXARGS_ENTRY((*pos), LINUX_AT_SYSINFO, __kernel_vsyscall);
+	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP, cpu_feature);
+	AUXARGS_ENTRY((*pos), LINUX_AT_PLATFORM, PTROUT(linux_platform));
+>>>>>>> freebsd/stable/13
 }
 
 static void
@@ -653,6 +657,8 @@ struct sysentvec linux_sysvec = {
 	.sv_schedtail	= linux_schedtail,
 	.sv_thread_detach = linux_thread_detach,
 	.sv_trap	= NULL,
+	.sv_hwcap	= NULL,
+	.sv_hwcap2	= NULL,
 	.sv_onexec	= linux_on_exec_vmspace,
 	.sv_onexit	= linux_on_exit,
 	.sv_ontdexit	= linux_thread_dtor,
@@ -681,7 +687,7 @@ struct sysentvec elf_linux_sysvec = {
 	.sv_psstrings	= LINUX_PS_STRINGS,
 	.sv_psstringssz	= sizeof(struct ps_strings),
 	.sv_stackprot	= VM_PROT_ALL,
-	.sv_copyout_auxargs = linux_copyout_auxargs,
+	.sv_copyout_auxargs = __linuxN(copyout_auxargs),
 	.sv_copyout_strings = __linuxN(copyout_strings),
 	.sv_setregs	= linux_exec_setregs,
 	.sv_fixlimit	= NULL,
@@ -696,7 +702,12 @@ struct sysentvec elf_linux_sysvec = {
 	.sv_schedtail	= linux_schedtail,
 	.sv_thread_detach = linux_thread_detach,
 	.sv_trap	= NULL,
+<<<<<<< HEAD
 	.sv_pax_aslr_init = pax_aslr_init_vmspace,
+=======
+	.sv_hwcap	= NULL,
+	.sv_hwcap2	= NULL,
+>>>>>>> freebsd/stable/13
 	.sv_onexec	= linux_on_exec_vmspace,
 	.sv_onexit	= linux_on_exit,
 	.sv_ontdexit	= linux_thread_dtor,

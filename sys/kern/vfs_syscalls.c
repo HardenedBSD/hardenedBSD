@@ -111,7 +111,7 @@ static int kern_readlink_vp(struct vnode *vp, char *buf, enum uio_seg bufseg,
 static int kern_linkat_vp(struct thread *td, struct vnode *vp, int fd,
     const char *path, enum uio_seg segflag);
 
-static uint64_t
+uint64_t
 at2cnpflags(u_int at_flags, u_int mask)
 {
 	u_int64_t res;
@@ -2201,8 +2201,7 @@ ostat(struct thread *td, struct ostat_args *uap)
 	struct ostat osb;
 	int error;
 
-	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE,
-	    &sb, NULL);
+	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	cvtstat(&sb, &osb);
@@ -2226,7 +2225,7 @@ olstat(struct thread *td, struct olstat_args *uap)
 	int error;
 
 	error = kern_statat(td, AT_SYMLINK_NOFOLLOW, AT_FDCWD, uap->path,
-	    UIO_USERSPACE, &sb, NULL);
+	    UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	cvtstat(&sb, &osb);
@@ -2344,8 +2343,7 @@ freebsd11_stat(struct thread *td, struct freebsd11_stat_args* uap)
 	struct freebsd11_stat osb;
 	int error;
 
-	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE,
-	    &sb, NULL);
+	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	error = freebsd11_cvtstat(&sb, &osb);
@@ -2362,7 +2360,7 @@ freebsd11_lstat(struct thread *td, struct freebsd11_lstat_args* uap)
 	int error;
 
 	error = kern_statat(td, AT_SYMLINK_NOFOLLOW, AT_FDCWD, uap->path,
-	    UIO_USERSPACE, &sb, NULL);
+	    UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	error = freebsd11_cvtstat(&sb, &osb);
@@ -2399,7 +2397,7 @@ freebsd11_fstatat(struct thread *td, struct freebsd11_fstatat_args* uap)
 	int error;
 
 	error = kern_statat(td, uap->flag, uap->fd, uap->path,
-	    UIO_USERSPACE, &sb, NULL);
+	    UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	error = freebsd11_cvtstat(&sb, &osb);
@@ -2427,7 +2425,7 @@ sys_fstatat(struct thread *td, struct fstatat_args *uap)
 	int error;
 
 	error = kern_statat(td, uap->flag, uap->fd, uap->path,
-	    UIO_USERSPACE, &sb, NULL);
+	    UIO_USERSPACE, &sb);
 	if (error == 0)
 		error = copyout(&sb, uap->buf, sizeof (sb));
 	return (error);
@@ -2435,8 +2433,7 @@ sys_fstatat(struct thread *td, struct fstatat_args *uap)
 
 int
 kern_statat(struct thread *td, int flag, int fd, const char *path,
-    enum uio_seg pathseg, struct stat *sbp,
-    void (*hook)(struct vnode *vp, struct stat *sbp))
+    enum uio_seg pathseg, struct stat *sbp)
 {
 	struct nameidata nd;
 	int error;
@@ -2456,10 +2453,6 @@ kern_statat(struct thread *td, int flag, int fd, const char *path,
 		return (error);
 	}
 	error = VOP_STAT(nd.ni_vp, sbp, td->td_ucred, NOCRED, td);
-	if (error == 0) {
-		if (__predict_false(hook != NULL))
-			hook(nd.ni_vp, sbp);
-	}
 	NDFREE_NOTHING(&nd);
 	vput(nd.ni_vp);
 #ifdef __STAT_TIME_T_EXT
@@ -2515,8 +2508,7 @@ freebsd11_nstat(struct thread *td, struct freebsd11_nstat_args *uap)
 	struct nstat nsb;
 	int error;
 
-	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE,
-	    &sb, NULL);
+	error = kern_statat(td, 0, AT_FDCWD, uap->path, UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	freebsd11_cvtnstat(&sb, &nsb);
@@ -2540,7 +2532,7 @@ freebsd11_nlstat(struct thread *td, struct freebsd11_nlstat_args *uap)
 	int error;
 
 	error = kern_statat(td, AT_SYMLINK_NOFOLLOW, AT_FDCWD, uap->path,
-	    UIO_USERSPACE, &sb, NULL);
+	    UIO_USERSPACE, &sb);
 	if (error != 0)
 		return (error);
 	freebsd11_cvtnstat(&sb, &nsb);

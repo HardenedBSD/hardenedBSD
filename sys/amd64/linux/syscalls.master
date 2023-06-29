@@ -872,7 +872,7 @@
 		int linux_mknod(
 		    char *path,
 		    l_mode_t mode,
-		    l_uint dev
+		    l_dev_t dev
 		);
 	}
 134	AUE_USELIB	UNIMPL	uselib
@@ -1501,7 +1501,7 @@
 		    l_int dfd,
 		    const char *filename,
 		    l_mode_t mode,
-		    l_uint dev
+		    l_dev_t dev
 		);
 	}
 260	AUE_FCHOWNAT	STD {
@@ -2097,8 +2097,12 @@
 		    l_size_t usize
 		);
 	}
-436    AUE_NULL		STD {
-		int linux_close_range(void);
+436    AUE_CLOSERANGE	STD {
+		int linux_close_range(
+		    l_uint first,
+		    l_uint last,
+		    l_uint flags
+		);
 	}
 437    AUE_NULL		STD {
 		int linux_openat2(void);

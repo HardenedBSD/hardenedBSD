@@ -118,7 +118,6 @@ LIN_SDT_PROVIDER_DECLARE(LINUX_DTRACE);
 
 /* DTrace probes */
 LIN_SDT_PROBE_DEFINE0(sysvec, linux_exec_setregs, todo);
-LIN_SDT_PROBE_DEFINE0(sysvec, linux_copyout_auxargs, todo);
 
 LINUX_VDSO_SYM_CHAR(linux_platform);
 LINUX_VDSO_SYM_INTPTR(kern_timekeep_base);
@@ -163,14 +162,11 @@ linux_set_syscall_retval(struct thread *td, int error)
 	}
 }
 
-static int
-linux_copyout_auxargs(struct image_params *imgp, uintptr_t base)
+void
+linux64_arch_copyout_auxargs(struct image_params *imgp, Elf_Auxinfo **pos)
 {
-	Elf_Auxargs *args;
-	Elf_Auxinfo *argarray, *pos;
-	struct proc *p;
-	int error, issetugid;
 
+<<<<<<< HEAD
 	LIN_SDT_PROBE0(sysvec, linux_copyout_auxargs, todo);
 	p = imgp->proc;
 
@@ -213,6 +209,12 @@ linux_copyout_auxargs(struct image_params *imgp, uintptr_t base)
 	    sizeof(*argarray) * LINUX_AT_COUNT);
 	free(argarray, M_TEMP);
 	return (error);
+=======
+	AUXARGS_ENTRY((*pos), LINUX_AT_SYSINFO_EHDR, linux_vdso_base);
+	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP, *imgp->sysent->sv_hwcap);
+	AUXARGS_ENTRY((*pos), LINUX_AT_HWCAP2, *imgp->sysent->sv_hwcap2);
+	AUXARGS_ENTRY((*pos), LINUX_AT_PLATFORM, PTROUT(linux_platform));
+>>>>>>> freebsd/stable/13
 }
 
 /*
@@ -427,7 +429,7 @@ struct sysentvec elf_linux_sysvec = {
 	.sv_psstrings	= LINUX_PS_STRINGS,
 	.sv_psstringssz	= sizeof(struct ps_strings),
 	.sv_stackprot	= VM_PROT_READ | VM_PROT_WRITE,
-	.sv_copyout_auxargs = linux_copyout_auxargs,
+	.sv_copyout_auxargs = __linuxN(copyout_auxargs),
 	.sv_copyout_strings = __linuxN(copyout_strings),
 	.sv_setregs	= linux_exec_setregs,
 	.sv_fixlimit	= NULL,

@@ -1113,7 +1113,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		struct linux_mknod_args *p = params;
 		uarg[0] = (intptr_t)p->path; /* char * */
 		iarg[1] = p->mode; /* l_mode_t */
-		iarg[2] = p->dev; /* l_uint */
+		iarg[2] = p->dev; /* l_dev_t */
 		*n_args = 3;
 		break;
 	}
@@ -1949,7 +1949,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		iarg[0] = p->dfd; /* l_int */
 		uarg[1] = (intptr_t)p->filename; /* const char * */
 		iarg[2] = p->mode; /* l_mode_t */
-		iarg[3] = p->dev; /* l_uint */
+		iarg[3] = p->dev; /* l_dev_t */
 		*n_args = 4;
 		break;
 	}
@@ -2695,7 +2695,11 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	}
 	/* linux_close_range */
 	case 436: {
-		*n_args = 0;
+		struct linux_close_range_args *p = params;
+		iarg[0] = p->first; /* l_uint */
+		iarg[1] = p->last; /* l_uint */
+		iarg[2] = p->flags; /* l_uint */
+		*n_args = 3;
 		break;
 	}
 	/* linux_openat2 */
@@ -4574,7 +4578,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "l_mode_t";
 			break;
 		case 2:
-			p = "l_uint";
+			p = "l_dev_t";
 			break;
 		default:
 			break;
@@ -5827,7 +5831,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "l_mode_t";
 			break;
 		case 3:
-			p = "l_uint";
+			p = "l_dev_t";
 			break;
 		default:
 			break;
@@ -7077,6 +7081,19 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		break;
 	/* linux_close_range */
 	case 436:
+		switch (ndx) {
+		case 0:
+			p = "l_uint";
+			break;
+		case 1:
+			p = "l_uint";
+			break;
+		case 2:
+			p = "l_uint";
+			break;
+		default:
+			break;
+		};
 		break;
 	/* linux_openat2 */
 	case 437:
@@ -8607,6 +8624,9 @@ systrace_return_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		break;
 	/* linux_close_range */
 	case 436:
+		if (ndx == 0 || ndx == 1)
+			p = "int";
+		break;
 	/* linux_openat2 */
 	case 437:
 	/* linux_pidfd_getfd */
