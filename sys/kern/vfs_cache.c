@@ -3861,12 +3861,13 @@ vn_path_to_global_path_hardlink(struct thread *td, struct vnode *vp,
 	 * name.
 	 */
 	VOP_UNLOCK(vp);
+	len = pathlen;
 	error = vn_fullpath_hardlink(vp, dvp, leaf_name, leaf_length,
 	    &rpath, &fbuf, &len);
 
 	if (error != 0) {
 		vrele(vp);
-		goto out;
+		return (error);
 	}
 
 	if (strlen(rpath) >= pathlen) {
