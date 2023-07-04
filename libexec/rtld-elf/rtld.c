@@ -3883,6 +3883,23 @@ rtld_dlopen(const char *name, int fd, int mode)
 {
     RtldLockState lockstate;
     int lo_flags;
+#ifdef HARDENEDBSD
+	struct statfs sbuf;
+
+	if (harden_rtld && fd != -1) {
+		memset(&sbuf, 0, sizeof(sbuf));
+		if (fstatfs(fd, &sbuf) < 0 && errno == EINVAL) {
+			/*
+			 * HBSD: fstatfs will fail if a memory-backed file
+			 * descriptor is used. This closes a gap in which a
+			 * shared object could be anonymously loaded by virtue
+			 * of using a memory-backed file descriptor (like those
+			 * created by memfd_create(2)).
+			 */
+			return (NULL);
+		}
+	}
+#endif
 
     LD_UTRACE(UTRACE_DLOPEN_START, NULL, NULL, 0, mode, name);
     ld_tracing = (mode & RTLD_TRACE) == 0 ? NULL : "1";
