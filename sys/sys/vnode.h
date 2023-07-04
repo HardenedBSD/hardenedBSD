@@ -271,7 +271,7 @@ struct xvnode {
 #define	VV_DELETED	0x0400	/* should be removed */
 #define	VV_MD		0x0800	/* vnode backs the md device */
 #define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed */
-#define	VV_READLINK	0x2000	/* fdescfs linux vnode */
+#define	VV_UNUSED01	0x2000	/* was: fdescfs linux vnode */
 #define	VV_UNREF	0x4000	/* vunref, do not drop lock in inactive() */
 #define	VV_UNLINKED	0x8000	/* unlinked but stil open directory */
 
@@ -761,8 +761,8 @@ bool	vn_isdisk_error(struct vnode *vp, int *errp);
 bool	vn_isdisk(struct vnode *vp);
 int	_vn_lock(struct vnode *vp, int flags, const char *file, int line);
 #define vn_lock(vp, flags) _vn_lock(vp, flags, __FILE__, __LINE__)
-void	vn_lock_pair(struct vnode *vp1, bool vp1_locked, struct vnode *vp2,
-	    bool vp2_locked);
+void	vn_lock_pair(struct vnode *vp1, bool vp1_locked, int lkflags1,
+	    struct vnode *vp2, bool vp2_locked, int lkflags2);
 int	vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp);
 int	vn_open_cred(struct nameidata *ndp, int *flagp, int cmode,
 	    u_int vn_open_flags, struct ucred *cred, struct file *fp);
