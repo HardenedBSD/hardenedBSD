@@ -141,8 +141,6 @@ kern/kern_clocksource.c		standard
 kern/subr_sfbuf.c		standard
 libkern/divdi3.c		standard
 libkern/divmoddi4.c		standard
-libkern/ffsll.c			standard
-libkern/flsll.c			standard
 libkern/memcmp.c		standard
 libkern/memset.c		standard
 libkern/moddi3.c		standard
