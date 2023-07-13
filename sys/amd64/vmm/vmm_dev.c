@@ -187,6 +187,7 @@ vcpu_lock_all(struct vmmdev_softc *sc)
 	int error;
 	uint16_t i, j, maxcpus;
 
+	error = 0;
 	vm_slock_vcpus(sc->vm);
 	maxcpus = vm_get_maxcpus(sc->vm);
 	for (i = 0; i < maxcpus; i++) {
@@ -1082,6 +1083,7 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		break;
 	}
 
+done:
 	if (vcpus_locked == SINGLE)
 		vcpu_unlock_one(sc, vcpuid, vcpu);
 	else if (vcpus_locked == ALL)
@@ -1089,7 +1091,6 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	if (memsegs_locked)
 		vm_unlock_memsegs(sc->vm);
 
-done:
 	/*
 	 * Make sure that no handler returns a kernel-internal
 	 * error value to userspace.

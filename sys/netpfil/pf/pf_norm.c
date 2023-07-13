@@ -1030,7 +1030,7 @@ pf_refragment6(struct ifnet *ifp, struct mbuf **m0, struct m_tag *mtag,
 
 #ifdef INET
 int
-pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason,
+pf_normalize_ip(struct mbuf **m0, struct pfi_kkif *kif, u_short *reason,
     struct pf_pdesc *pd)
 {
 	struct mbuf		*m = *m0;
@@ -1055,7 +1055,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 		pf_counter_u64_add(&r->evaluations, 1);
 		if (pfi_kkif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
-		else if (r->direction && r->direction != dir)
+		else if (r->direction && r->direction != pd->dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
 		else if (r->af && r->af != AF_INET)
 			r = r->skip[PF_SKIP_AF].ptr;
@@ -1083,9 +1083,10 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 			return (PF_PASS);
 
 		pf_counter_u64_critical_enter();
-		pf_counter_u64_add_protected(&r->packets[dir == PF_OUT], 1);
-		pf_counter_u64_add_protected(&r->bytes[dir == PF_OUT], pd->tot_len);
+		pf_counter_u64_add_protected(&r->packets[pd->dir == PF_OUT], 1);
+		pf_counter_u64_add_protected(&r->bytes[pd->dir == PF_OUT], pd->tot_len);
 		pf_counter_u64_critical_exit();
+		pf_rule_to_actions(r, &pd->act);
 	} else if ((!V_pf_status.reass && (h->ip_off & htons(IP_MF | IP_OFFMASK)))) {
 		/* With no scrub rules IPv4 fragment reassembly depends on the
 		 * global switch. Fragments can be dropped early if reassembly
@@ -1149,7 +1150,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 		 * Might return a completely reassembled mbuf, or NULL */
 		PF_FRAG_LOCK();
 		DPFPRINTF(("reass frag %d @ %d-%d\n", h->ip_id, fragoff, max));
-		verdict = pf_reassemble(m0, h, dir, reason);
+		verdict = pf_reassemble(m0, h, pd->dir, reason);
 		PF_FRAG_UNLOCK();
 
 		if (verdict != PF_PASS)
@@ -1170,10 +1171,6 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 			h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_off, h->ip_off, 0);
 		}
 	}
-	if (r != NULL) {
-		int scrub_flags = pf_rule_to_scrub_flags(r->rule_flag);
-		pf_scrub_ip(&m, scrub_flags, r->min_ttl, r->set_tos);
-	}
 
 	return (PF_PASS);
 
@@ -1182,8 +1179,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 	REASON_SET(reason, PFRES_FRAG);
  drop:
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET, dir, *reason, r, NULL, NULL, pd,
-		    1);
+		PFLOG_PACKET(kif, m, AF_INET, *reason, r, NULL, NULL, pd, 1);
 
 	return (PF_DROP);
 }
@@ -1191,7 +1187,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kkif *kif, u_short *reason
 
 #ifdef INET6
 int
-pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kkif *kif,
+pf_normalize_ip6(struct mbuf **m0, struct pfi_kkif *kif,
     u_short *reason, struct pf_pdesc *pd)
 {
 	struct mbuf		*m = *m0;
@@ -1219,7 +1215,7 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kkif *kif,
 		pf_counter_u64_add(&r->evaluations, 1);
 		if (pfi_kkif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
-		else if (r->direction && r->direction != dir)
+		else if (r->direction && r->direction != pd->dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
 		else if (r->af && r->af != AF_INET6)
 			r = r->skip[PF_SKIP_AF].ptr;
@@ -1246,9 +1242,10 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kkif *kif,
 			return (PF_PASS);
 
 		pf_counter_u64_critical_enter();
-		pf_counter_u64_add_protected(&r->packets[dir == PF_OUT], 1);
-		pf_counter_u64_add_protected(&r->bytes[dir == PF_OUT], pd->tot_len);
+		pf_counter_u64_add_protected(&r->packets[pd->dir == PF_OUT], 1);
+		pf_counter_u64_add_protected(&r->bytes[pd->dir == PF_OUT], pd->tot_len);
 		pf_counter_u64_critical_exit();
+		pf_rule_to_actions(r, &pd->act);
 	}
 
 	/* Check for illegal packets */
@@ -1320,11 +1317,6 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kkif *kif,
 	if (sizeof(struct ip6_hdr) + plen > m->m_pkthdr.len)
 		goto shortpkt;
 
-	if (r != NULL) {
-		int scrub_flags = pf_rule_to_scrub_flags(r->rule_flag);
-		pf_scrub_ip6(&m, scrub_flags, r->min_ttl, r->set_tos);
-	}
-
 	return (PF_PASS);
 
  fragment:
@@ -1350,21 +1342,19 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kkif *kif,
  shortpkt:
 	REASON_SET(reason, PFRES_SHORT);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET6, dir, *reason, r, NULL, NULL, pd,
-		    1);
+		PFLOG_PACKET(kif, m, AF_INET6, *reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 
  drop:
 	REASON_SET(reason, PFRES_NORM);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET6, dir, *reason, r, NULL, NULL, pd,
-		    1);
+		PFLOG_PACKET(kif, m, AF_INET6, *reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 }
 #endif /* INET6 */
 
 int
-pf_normalize_tcp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
+pf_normalize_tcp(struct pfi_kkif *kif, struct mbuf *m, int ipoff,
     int off, void *h, struct pf_pdesc *pd)
 {
 	struct pf_krule	*r, *rm = NULL;
@@ -1385,7 +1375,7 @@ pf_normalize_tcp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
 		pf_counter_u64_add(&r->evaluations, 1);
 		if (pfi_kkif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
-		else if (r->direction && r->direction != dir)
+		else if (r->direction && r->direction != pd->dir)
 			r = r->skip[PF_SKIP_DIR].ptr;
 		else if (r->af && r->af != af)
 			r = r->skip[PF_SKIP_AF].ptr;
@@ -1420,9 +1410,10 @@ pf_normalize_tcp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
 			return (PF_PASS);
 
 		pf_counter_u64_critical_enter();
-		pf_counter_u64_add_protected(&r->packets[dir == PF_OUT], 1);
-		pf_counter_u64_add_protected(&r->bytes[dir == PF_OUT], pd->tot_len);
+		pf_counter_u64_add_protected(&r->packets[pd->dir == PF_OUT], 1);
+		pf_counter_u64_add_protected(&r->bytes[pd->dir == PF_OUT], pd->tot_len);
 		pf_counter_u64_critical_exit();
+		pf_rule_to_actions(rm, &pd->act);
 	}
 
 	if (rm && rm->rule_flag & PFRULE_REASSEMBLE_TCP)
@@ -1473,11 +1464,6 @@ pf_normalize_tcp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
 		rewrite = 1;
 	}
 
-	/* Set MSS for old-style scrub rules.
-	 * The function performs its own copyback. */
-	if (rm != NULL && rm->max_mss)
-		pf_normalize_mss(m, off, pd, rm->max_mss);
-
 	/* copy back packet headers if we sanitized */
 	if (rewrite)
 		m_copyback(m, off, sizeof(*th), (caddr_t)th);
@@ -1487,8 +1473,7 @@ pf_normalize_tcp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
  tcp_drop:
 	REASON_SET(&reason, PFRES_NORM);
 	if (rm != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET, dir, reason, r, NULL, NULL, pd,
-		    1);
+		PFLOG_PACKET(kif, m, AF_INET, reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 }
 
@@ -1978,7 +1963,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 }
 
 int
-pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
+pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd)
 {
 	struct tcphdr	*th = &pd->hdr.tcp;
 	u_int16_t	*mss;
@@ -2012,10 +1997,10 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 		switch (opt) {
 		case TCPOPT_MAXSEG:
 			mss = (u_int16_t *)(optp + 2);
-			if ((ntohs(*mss)) > maxmss) {
+			if ((ntohs(*mss)) > pd->act.max_mss) {
 				pf_patch_16_unaligned(m,
 				    &th->th_sum,
-				    mss, htons(maxmss),
+				    mss, htons(pd->act.max_mss),
 				    PF_ALGNMNT(startoff),
 				    0);
 				m_copyback(m, off + sizeof(*th),
@@ -2031,34 +2016,15 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 	return (0);
 }
 
-u_int16_t
-pf_rule_to_scrub_flags(u_int32_t rule_flags)
-{
-	/*
-	 * Translate pf_krule->rule_flag to pf_krule->scrub_flags.
-	 * The pf_scrub_ip functions have been adapted to the new style of pass
-	 * rules but they might get called if old scrub rules are used.
-	 */
-	int scrub_flags = 0;
-
-	if (rule_flags & PFRULE_SET_TOS) {
-		scrub_flags |= PFSTATE_SETTOS;
-	}
-	if (rule_flags & PFRULE_RANDOMID)
-		scrub_flags |= PFSTATE_RANDOMID;
-
-	return scrub_flags;
-}
-
 #ifdef INET
 void
-pf_scrub_ip(struct mbuf **m0, u_int32_t flags, u_int8_t min_ttl, u_int8_t tos)
+pf_scrub_ip(struct mbuf **m0, struct pf_pdesc *pd)
 {
 	struct mbuf		*m = *m0;
 	struct ip		*h = mtod(m, struct ip *);
 
 	/* Clear IP_DF if no-df was requested */
-	if (flags & PFSTATE_NODF && h->ip_off & htons(IP_DF)) {
+	if (pd->act.flags & PFSTATE_NODF && h->ip_off & htons(IP_DF)) {
 		u_int16_t ip_off = h->ip_off;
 
 		h->ip_off &= htons(~IP_DF);
@@ -2066,26 +2032,26 @@ pf_scrub_ip(struct mbuf **m0, u_int32_t flags, u_int8_t min_ttl, u_int8_t tos)
 	}
 
 	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (min_ttl && h->ip_ttl < min_ttl) {
+	if (pd->act.min_ttl && h->ip_ttl < pd->act.min_ttl) {
 		u_int16_t ip_ttl = h->ip_ttl;
 
-		h->ip_ttl = min_ttl;
+		h->ip_ttl = pd->act.min_ttl;
 		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_ttl, h->ip_ttl, 0);
 	}
 
 	/* Enforce tos */
-	if (flags & PFSTATE_SETTOS) {
+	if (pd->act.flags & PFSTATE_SETTOS) {
 		u_int16_t	ov, nv;
 
 		ov = *(u_int16_t *)h;
-		h->ip_tos = tos | (h->ip_tos & IPTOS_ECN_MASK);
+		h->ip_tos = pd->act.set_tos | (h->ip_tos & IPTOS_ECN_MASK);
 		nv = *(u_int16_t *)h;
 
 		h->ip_sum = pf_cksum_fixup(h->ip_sum, ov, nv, 0);
 	}
 
 	/* random-id, but not for fragments */
-	if (flags & PFSTATE_RANDOMID && !(h->ip_off & ~htons(IP_DF))) {
+	if (pd->act.flags & PFSTATE_RANDOMID && !(h->ip_off & ~htons(IP_DF))) {
 		uint16_t ip_id = h->ip_id;
 
 		ip_fillid(h);
@@ -2096,19 +2062,19 @@ pf_scrub_ip(struct mbuf **m0, u_int32_t flags, u_int8_t min_ttl, u_int8_t tos)
 
 #ifdef INET6
 void
-pf_scrub_ip6(struct mbuf **m0, u_int32_t flags, u_int8_t min_ttl, u_int8_t tos)
+pf_scrub_ip6(struct mbuf **m0, struct pf_pdesc *pd)
 {
 	struct mbuf		*m = *m0;
 	struct ip6_hdr		*h = mtod(m, struct ip6_hdr *);
 
 	/* Enforce a minimum ttl, may cause endless packet loops */
-	if (min_ttl && h->ip6_hlim < min_ttl)
-		h->ip6_hlim = min_ttl;
+	if (pd->act.min_ttl && h->ip6_hlim < pd->act.min_ttl)
+		h->ip6_hlim = pd->act.min_ttl;
 
 	/* Enforce tos. Set traffic class bits */
-	if (flags & PFSTATE_SETTOS) {
+	if (pd->act.flags & PFSTATE_SETTOS) {
 		h->ip6_flow &= IPV6_FLOWLABEL_MASK | IPV6_VERSION_MASK;
-		h->ip6_flow |= htonl((tos | IPV6_ECN(h)) << 20);
+		h->ip6_flow |= htonl((pd->act.set_tos | IPV6_ECN(h)) << 20);
 	}
 }
 #endif

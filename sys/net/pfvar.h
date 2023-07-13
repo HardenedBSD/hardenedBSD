@@ -1061,18 +1061,9 @@ struct pf_kstate {
 	u_int32_t		 creation;
 	u_int32_t	 	 expire;
 	u_int32_t		 pfsync_time;
-	u_int16_t		 qid;
-	u_int16_t		 pqid;
-	u_int16_t		 dnpipe;
-	u_int16_t		 dnrpipe;
+	struct pf_rule_actions	 act;
 	u_int16_t		 tag;
-	u_int8_t		 log;
-	int32_t			 rtableid;
-	u_int8_t		 min_ttl;
-	u_int8_t		 set_tos;
-	u_int16_t		 max_mss;
 	u_int8_t		 rt;
-	u_int8_t		 set_prio[2];
 };
 
 /*
@@ -1214,8 +1205,8 @@ void			pf_state_export(struct pf_state_export *,
 struct pf_kruleset;
 struct pf_pdesc;
 typedef int pflog_packet_t(struct pfi_kkif *, struct mbuf *, sa_family_t,
-    u_int8_t, u_int8_t, struct pf_krule *, struct pf_krule *,
-    struct pf_kruleset *, struct pf_pdesc *, int);
+    u_int8_t, struct pf_krule *, struct pf_krule *, struct pf_kruleset *,
+    struct pf_pdesc *, int);
 extern pflog_packet_t		*pflog_packet_ptr;
 
 #endif /* _KERNEL */
@@ -2236,14 +2227,14 @@ int	pf_test_eth(int, int, struct ifnet *, struct mbuf **, struct inpcb *);
 #ifdef INET
 int	pf_test(int, int, struct ifnet *, struct mbuf **, struct inpcb *,
 	    struct pf_rule_actions *);
-int	pf_normalize_ip(struct mbuf **, int, struct pfi_kkif *, u_short *,
+int	pf_normalize_ip(struct mbuf **, struct pfi_kkif *, u_short *,
 	    struct pf_pdesc *);
 #endif /* INET */
 
 #ifdef INET6
 int	pf_test6(int, int, struct ifnet *, struct mbuf **, struct inpcb *,
 	    struct pf_rule_actions *);
-int	pf_normalize_ip6(struct mbuf **, int, struct pfi_kkif *, u_short *,
+int	pf_normalize_ip6(struct mbuf **, struct pfi_kkif *, u_short *,
 	    struct pf_pdesc *);
 void	pf_poolmask(struct pf_addr *, struct pf_addr*,
 	    struct pf_addr *, struct pf_addr *, sa_family_t);
@@ -2271,7 +2262,7 @@ int	pf_match_port(u_int8_t, u_int16_t, u_int16_t, u_int16_t);
 
 void	pf_normalize_init(void);
 void	pf_normalize_cleanup(void);
-int	pf_normalize_tcp(int, struct pfi_kkif *, struct mbuf *, int, int, void *,
+int	pf_normalize_tcp(struct pfi_kkif *, struct mbuf *, int, int, void *,
 	    struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_kstate *);
 int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
@@ -2285,7 +2276,7 @@ void	pf_purge_expired_fragments(void);
 void	pf_purge_fragments(uint32_t);
 int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kkif *,
 	    int);
-int	pf_socket_lookup(int, struct pf_pdesc *, struct mbuf *);
+int	pf_socket_lookup(struct pf_pdesc *, struct mbuf *);
 struct pf_state_key *pf_alloc_state_key(int);
 void	pfr_initialize(void);
 void	pfr_cleanup(void);
@@ -2472,7 +2463,7 @@ u_short			 pf_map_addr(u_int8_t, struct pf_krule *,
 			    struct pf_addr *, struct pf_addr *,
 			    struct pf_addr *, struct pf_ksrc_node **);
 struct pf_krule		*pf_get_translation(struct pf_pdesc *, struct mbuf *,
-			    int, int, struct pfi_kkif *, struct pf_ksrc_node **,
+			    int, struct pfi_kkif *, struct pf_ksrc_node **,
 			    struct pf_state_key **, struct pf_state_key **,
 			    struct pf_addr *, struct pf_addr *,
 			    uint16_t, uint16_t, struct pf_kanchor_stackframe *);
@@ -2480,15 +2471,15 @@ struct pf_krule		*pf_get_translation(struct pf_pdesc *, struct mbuf *,
 struct pf_state_key	*pf_state_key_setup(struct pf_pdesc *, struct pf_addr *,
 			    struct pf_addr *, u_int16_t, u_int16_t);
 struct pf_state_key	*pf_state_key_clone(struct pf_state_key *);
-
+void			 pf_rule_to_actions(struct pf_krule *,
+			    struct pf_rule_actions *);
 int			 pf_normalize_mss(struct mbuf *m, int off,
-			    struct pf_pdesc *pd, u_int16_t maxmss);
-u_int16_t		 pf_rule_to_scrub_flags(u_int32_t);
+			    struct pf_pdesc *pd);
 #ifdef INET
-void	pf_scrub_ip(struct mbuf **, uint32_t, uint8_t, uint8_t);
+void	pf_scrub_ip(struct mbuf **, struct pf_pdesc *);
 #endif	/* INET */
 #ifdef INET6
-void	pf_scrub_ip6(struct mbuf **, uint32_t, uint8_t, uint8_t);
+void	pf_scrub_ip6(struct mbuf **, struct pf_pdesc *);
 #endif	/* INET6 */
 
 struct pfi_kkif		*pf_kkif_create(int);
