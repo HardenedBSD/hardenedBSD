@@ -15,6 +15,8 @@ CFLAGS+= -I${SRCTOP}/sys/amd64/vmm/io
 CFLAGS+= -I${SRCTOP}/sys/amd64/vmm/intel
 CFLAGS+= -I${SRCTOP}/sys/amd64/vmm/amd
 
+TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
+
 # generic vmm support
 .PATH: ${SRCTOP}/sys/amd64/vmm
 SRCS+=	vmm.c		\
