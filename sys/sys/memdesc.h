@@ -35,6 +35,7 @@ struct bio;
 struct bus_dma_segment;
 struct uio;
 struct mbuf;
+struct vm_page;
 union ccb;
 
 /*
@@ -46,12 +47,17 @@ struct memdesc {
 		void			*md_vaddr;
 		vm_paddr_t		md_paddr;
 		struct bus_dma_segment	*md_list;
-		struct bio		*md_bio;
 		struct uio		*md_uio;
 		struct mbuf		*md_mbuf;
-		union ccb		*md_ccb;
+		struct vm_page 		**md_ma;
 	} u;
-	size_t		md_opaque;	/* type specific data. */
+	union {				/* type specific data. */
+		size_t		md_len;	/* VADDR, PADDR, VMPAGES */
+		int		md_nseg; /* VLIST, PLIST */
+	};
+	union {
+		uint32_t	md_offset; /* VMPAGES */
+	};
 	uint32_t	md_type;	/* Type of memory. */
 };
 
@@ -59,10 +65,9 @@ struct memdesc {
 #define	MEMDESC_PADDR	2	/* Contiguous physical address. */
 #define	MEMDESC_VLIST	3	/* scatter/gather list of kva addresses. */
 #define	MEMDESC_PLIST	4	/* scatter/gather list of physical addresses. */
-#define	MEMDESC_BIO	5	/* Pointer to a bio (block io). */
 #define	MEMDESC_UIO	6	/* Pointer to a uio (any io). */
 #define	MEMDESC_MBUF	7	/* Pointer to a mbuf (network io). */
-#define	MEMDESC_CCB	8	/* Cam control block. (scsi/ata io). */
+#define	MEMDESC_VMPAGES	8	/* Pointer to array of VM pages. */
 
 static inline struct memdesc
 memdesc_vaddr(void *vaddr, size_t len)
@@ -70,7 +75,7 @@ memdesc_vaddr(void *vaddr, size_t len)
 	struct memdesc mem;
 
 	mem.u.md_vaddr = vaddr;
-	mem.md_opaque = len;
+	mem.md_len = len;
 	mem.md_type = MEMDESC_VADDR;
 
 	return (mem);
@@ -82,7 +87,7 @@ memdesc_paddr(vm_paddr_t paddr, size_t len)
 	struct memdesc mem;
 
 	mem.u.md_paddr = paddr;
-	mem.md_opaque = len;
+	mem.md_len = len;
 	mem.md_type = MEMDESC_PADDR;
 
 	return (mem);
@@ -94,7 +99,7 @@ memdesc_vlist(struct bus_dma_segment *vlist, int sglist_cnt)
 	struct memdesc mem;
 
 	mem.u.md_list = vlist;
-	mem.md_opaque = sglist_cnt;
+	mem.md_nseg = sglist_cnt;
 	mem.md_type = MEMDESC_VLIST;
 
 	return (mem);
@@ -106,19 +111,8 @@ memdesc_plist(struct bus_dma_segment *plist, int sglist_cnt)
 	struct memdesc mem;
 
 	mem.u.md_list = plist;
-	mem.md_opaque = sglist_cnt;
+	mem.md_nseg = sglist_cnt;
 	mem.md_type = MEMDESC_PLIST;
-
-	return (mem);
-}
-
-static inline struct memdesc
-memdesc_bio(struct bio *bio)
-{
-	struct memdesc mem;
-
-	mem.u.md_bio = bio;
-	mem.md_type = MEMDESC_BIO;
 
 	return (mem);
 }
@@ -146,13 +140,19 @@ memdesc_mbuf(struct mbuf *mbuf)
 }
 
 static inline struct memdesc
-memdesc_ccb(union ccb *ccb)
+memdesc_vmpages(struct vm_page **ma, size_t len, u_int ma_offset)
 {
 	struct memdesc mem;
 
-	mem.u.md_ccb = ccb;
-	mem.md_type = MEMDESC_CCB;
+	mem.u.md_ma = ma;
+	mem.md_len = len;
+	mem.md_type = MEMDESC_VMPAGES;
+	mem.md_offset = ma_offset;
 
 	return (mem);
 }
+
+struct memdesc	memdesc_bio(struct bio *bio);
+struct memdesc	memdesc_ccb(union ccb *ccb);
+
 #endif /* _SYS_MEMDESC_H_ */
