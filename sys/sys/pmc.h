@@ -1070,9 +1070,21 @@ extern struct pmc_cpu **pmc_pcpu;
 extern struct pmc_driverstats pmc_stats;
 
 #if	defined(HWPMC_DEBUG)
+
+/* HWPMC_DEBUG without KTR will compile but is a no-op. */
+#if !defined(KTR) || !defined(KTR_COMPILE) || ((KTR_COMPILE & KTR_SUBSYS) == 0)
+#error "HWPMC_DEBUG requires KTR and KTR_COMPILE=KTR_SUBSYS -- see ktr(4)"
+#endif
+
 #include <sys/ktr.h>
 
-/* debug flags, major flag groups */
+#define	__pmcdbg_used		/* unused variable annotation */
+
+/*
+ * Debug flags, major flag groups.
+ *
+ * Please keep the DEBUGGING section of the hwpmc(4) man page in sync.
+ */
 struct pmc_debugflags {
 	int	pdb_CPU;
 	int	pdb_CSW;
@@ -1188,6 +1200,7 @@ extern struct pmc_debugflags pmc_debugflags;
 #define	PMC_DEBUG_MIN_CLO	       12 /* close */
 
 #else
+#define	__pmcdbg_used			__unused
 #define	PMCDBG0(M, N, L, F)		/* nothing */
 #define	PMCDBG1(M, N, L, F, p1)
 #define	PMCDBG2(M, N, L, F, p1, p2)
