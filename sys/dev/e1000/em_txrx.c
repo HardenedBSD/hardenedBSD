@@ -141,8 +141,10 @@ em_tso_setup(struct e1000_softc *sc, if_pkt_info_t pi, uint32_t *txd_upper,
 	if_softc_ctx_t scctx = sc->shared;
 	struct em_tx_queue *que = &sc->tx_queues[pi->ipi_qsidx];
 	struct tx_ring *txr = &que->txr;
+	struct e1000_hw *hw = &sc->hw;
 	struct e1000_context_desc *TXD;
 	int cur, hdr_len;
+	uint32_t cmd_type_len;
 
 	hdr_len = pi->ipi_ehdrlen + pi->ipi_ip_hlen + pi->ipi_tcp_hlen;
 	*txd_lower = (E1000_TXD_CMD_DEXT |	/* Extended descr type */
@@ -183,12 +185,23 @@ em_tso_setup(struct e1000_softc *sc, if_pkt_info_t pi, uint32_t *txd_upper,
 	TXD->tcp_seg_setup.fields.mss = htole16(pi->ipi_tso_segsz);
 	TXD->tcp_seg_setup.fields.hdr_len = hdr_len;
 
-	TXD->cmd_and_length = htole32(sc->txd_cmd |
-				E1000_TXD_CMD_DEXT |	/* Extended descr */
-				E1000_TXD_CMD_TSE |	/* TSE context */
-				E1000_TXD_CMD_IP |	/* Do IP csum */
-				E1000_TXD_CMD_TCP |	/* Do TCP checksum */
-				      (pi->ipi_len - hdr_len)); /* Total len */
+	/*
+	 * 8254x SDM4.0 page 45, and PCIe GbE SDM2.5 page 63
+	 * - Set up basic TUCMDs
+	 * - Enable IP bit on 82544
+	 * - For others IP bit on indicates IPv4, while off indicates IPv6
+	*/
+	cmd_type_len = sc->txd_cmd |
+	    E1000_TXD_CMD_DEXT | /* Extended descr */
+	    E1000_TXD_CMD_TSE |  /* TSE context */
+	    E1000_TXD_CMD_TCP;   /* Do TCP checksum */
+	if (hw->mac.type == e1000_82544)
+		cmd_type_len |= E1000_TXD_CMD_IP;
+	else if (pi->ipi_etype == ETHERTYPE_IP)
+		cmd_type_len |= E1000_TXD_CMD_IP;
+	TXD->cmd_and_length = htole32(cmd_type_len |
+	    (pi->ipi_len - hdr_len)); /* Total len */
+
 	txr->tx_tso = true;
 
 	if (++cur == scctx->isc_ntxd[0]) {
@@ -661,12 +674,12 @@ lem_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 		i++;
 	} while (!eop);
 
-	/* XXX add a faster way to look this up */
-	if (sc->hw.mac.type >= e1000_82543)
+	if (scctx->isc_capenable & IFCAP_RXCSUM)
 		em_receive_checksum(status, errors, ri);
 
-	if (status & E1000_RXD_STAT_VP) {
-		ri->iri_vtag = le16toh(rxd->special);
+	if (scctx->isc_capenable & IFCAP_VLAN_HWTAGGING &&
+	    status & E1000_RXD_STAT_VP) {
+		ri->iri_vtag = le16toh(rxd->special & E1000_RXD_SPC_VLAN_MASK);
 		ri->iri_flags |= M_VLANTAG;
 	}
 
@@ -686,11 +699,11 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 	uint16_t len;
 	uint32_t pkt_info;
-	uint32_t staterr = 0;
+	uint32_t staterr;
 	bool eop;
 	int i, cidx;
 
-	i = 0;
+	staterr = i = 0;
 	cidx = ri->iri_cidx;
 
 	do {
@@ -726,7 +739,8 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	if (scctx->isc_capenable & IFCAP_RXCSUM)
 		em_receive_checksum(staterr, staterr >> 24, ri);
 
-	if (staterr & E1000_RXD_STAT_VP) {
+	if (scctx->isc_capenable & IFCAP_VLAN_HWTAGGING &&
+	    staterr & E1000_RXD_STAT_VP) {
 		ri->iri_vtag = le16toh(rxd->wb.upper.vlan);
 		ri->iri_flags |= M_VLANTAG;
 	}

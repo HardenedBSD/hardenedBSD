@@ -37,6 +37,9 @@ PROG=	${PROG_CXX}
 MK_DEBUG_FILES=	no
 .endif
 
+# LLD sensibly defaults to -znoexecstack, so do the same for BFD
+LDFLAGS.bfd+= -Wl,-znoexecstack
+
 # bsd.sanitizer.mk is not installed, so don't require it (e.g. for ports).
 .sinclude "bsd.sanitizer.mk"
 
