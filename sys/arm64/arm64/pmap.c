@@ -171,16 +171,6 @@ __FBSDID("$FreeBSD$");
 #define	NUL1E		(NUL0E * NL1PG)
 #define	NUL2E		(NUL1E * NL2PG)
 
-#if !defined(DIAGNOSTIC)
-#ifdef __GNUC_GNU_INLINE__
-#define PMAP_INLINE	__attribute__((__gnu_inline__)) inline
-#else
-#define PMAP_INLINE	extern inline
-#endif
-#else
-#define PMAP_INLINE
-#endif
-
 #ifdef PV_STATS
 #define PV_STAT(x)	do { x ; } while (0)
 #define __pvused
@@ -1292,6 +1282,7 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
 	PMAP_LOCK_INIT(kernel_pmap);
 	kernel_pmap->pm_l0_paddr =
 	    pmap_early_vtophys((vm_offset_t)kernel_pmap_store.pm_l0);
+	TAILQ_INIT(&kernel_pmap->pm_pvchunk);
 	vm_radix_init(&kernel_pmap->pm_root);
 	kernel_pmap->pm_cookie = COOKIE_FROM(-1, INT_MIN);
 	kernel_pmap->pm_stage = PM_STAGE1;
@@ -2022,7 +2013,7 @@ pmap_kenter_device(vm_offset_t sva, vm_size_t size, vm_paddr_t pa)
 /*
  * Remove a page from the kernel pagetables.
  */
-PMAP_INLINE void
+void
 pmap_kremove(vm_offset_t va)
 {
 	pt_entry_t *pte;
@@ -2032,6 +2023,13 @@ pmap_kremove(vm_offset_t va)
 	pmap_s1_invalidate_page(kernel_pmap, va, true);
 }
 
+/*
+ * Remove the specified range of mappings from the kernel address space.
+ *
+ * Should only be applied to mappings that were created by pmap_kenter() or
+ * pmap_kenter_device().  Nothing about this function is actually specific
+ * to device mappings.
+ */
 void
 pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 {
@@ -2039,7 +2037,7 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 	vm_offset_t va;
 
 	KASSERT((sva & L3_OFFSET) == 0,
-	   ("pmap_kremove_device: Invalid virtual address"));
+	    ("pmap_kremove_device: Invalid virtual address"));
 	KASSERT((size & PAGE_MASK) == 0,
 	    ("pmap_kremove_device: Mapping is not page-sized"));
 
@@ -2271,6 +2269,7 @@ pmap_pinit0(pmap_t pmap)
 	bzero(&pmap->pm_stats, sizeof(pmap->pm_stats));
 	pmap->pm_l0_paddr = READ_SPECIALREG(ttbr0_el1);
 	pmap->pm_l0 = (pd_entry_t *)PHYS_TO_DMAP(pmap->pm_l0_paddr);
+	TAILQ_INIT(&pmap->pm_pvchunk);
 	vm_radix_init(&pmap->pm_root);
 	pmap->pm_cookie = COOKIE_FROM(ASID_RESERVED_FOR_PID_0, INT_MIN);
 	pmap->pm_stage = PM_STAGE1;
@@ -2294,6 +2293,7 @@ pmap_pinit_stage(pmap_t pmap, enum pmap_stage stage, int levels)
 	pmap->pm_l0_paddr = VM_PAGE_TO_PHYS(m);
 	pmap->pm_l0 = (pd_entry_t *)PHYS_TO_DMAP(pmap->pm_l0_paddr);
 
+	TAILQ_INIT(&pmap->pm_pvchunk);
 	vm_radix_init(&pmap->pm_root);
 	bzero(&pmap->pm_stats, sizeof(pmap->pm_stats));
 	pmap->pm_cookie = COOKIE_FROM(-1, INT_MAX);
@@ -6548,7 +6548,7 @@ void
 pmap_unmapbios(void *p, vm_size_t size)
 {
 	struct pmap_preinit_mapping *ppim;
-	vm_offset_t offset, tmpsize, va, va_trunc;
+	vm_offset_t offset, va, va_trunc;
 	pd_entry_t *pde;
 	pt_entry_t *l2;
 	int i, lvl, l2_blocks, block;
@@ -6598,14 +6598,8 @@ pmap_unmapbios(void *p, vm_size_t size)
 		size = round_page(offset + size);
 		va = trunc_page(va);
 
-		pde = pmap_pde(kernel_pmap, va, &lvl);
-		KASSERT(pde != NULL,
-		    ("pmap_unmapbios: Invalid page entry, va: 0x%lx", va));
-		KASSERT(lvl == 2, ("pmap_unmapbios: Invalid level %d", lvl));
-
 		/* Unmap and invalidate the pages */
-                for (tmpsize = 0; tmpsize < size; tmpsize += PAGE_SIZE)
-			pmap_kremove(va + tmpsize);
+		pmap_kremove_device(va, size);
 
 		kva_free(va, size);
 	}

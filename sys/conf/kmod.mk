@@ -174,6 +174,13 @@ CFLAGS+=	-fPIC
 CFLAGS+=	-mretpoline
 .endif
 
+.if ${MACHINE_CPUARCH} == "aarch64"
+# https://bugs.freebsd.org/264094
+# lld >= 14 and recent GNU ld can relax adrp+add and adrp+ldr instructions,
+# which breaks VNET.
+LDFLAGS+=	--no-relax
+.endif
+
 # Temporary workaround for PR 196407, which contains the fascinating details.
 # Don't allow clang to use fpu instructions or registers in kernel modules.
 .if ${MACHINE_CPUARCH} == arm
