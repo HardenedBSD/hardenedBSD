@@ -29,6 +29,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/MachineValueType.h"
+#include <optional>
 #include <utility>
 
 namespace llvm {
@@ -123,6 +124,7 @@ namespace llvm {
     /// XXPERMDI - The PPC XXPERMDI instruction
     ///
     XXPERMDI,
+    XXPERM,
 
     /// The CMPB instruction (takes two operands of i32 or i64).
     CMPB,
@@ -438,21 +440,6 @@ namespace llvm {
     /// and thereby have no chain.
     SWAP_NO_CHAIN,
 
-    /// An SDNode for Power9 vector absolute value difference.
-    /// operand #0 vector
-    /// operand #1 vector
-    /// operand #2 constant i32 0 or 1, to indicate whether needs to patch
-    /// the most significant bit for signed i32
-    ///
-    /// Power9 VABSD* instructions are designed to support unsigned integer
-    /// vectors (byte/halfword/word), if we want to make use of them for signed
-    /// integer vectors, we have to flip their sign bits first. To flip sign bit
-    /// for byte/halfword integer vector would become inefficient, but for word
-    /// integer vector, we can leverage XVNEGSP to make it efficiently. eg:
-    /// abs(sub(a,b)) => VABSDUW(a+0x80000000, b+0x80000000)
-    ///               => VABSDUW((XVNEGSP a), (XVNEGSP b))
-    VABSD,
-
     /// FP_EXTEND_HALF(VECTOR, IDX) - Custom extend upper (IDX=0) half or
     /// lower (IDX=1) half of v4f32 to v2f64.
     FP_EXTEND_HALF,
@@ -593,6 +580,11 @@ namespace llvm {
     /// sub-word versions because the atomic loads zero-extend.
     ATOMIC_CMP_SWAP_8,
     ATOMIC_CMP_SWAP_16,
+
+    /// CHAIN,Glue = STORE_COND CHAIN, GPR, Ptr
+    /// The store conditional instruction ST[BHWD]ARX that produces a glue
+    /// result to attach it to a conditional branch.
+    STORE_COND,
 
     /// GPRC = TOC_ENTRY GA, TOC
     /// Loads the entry for GA from the TOC, where the TOC base is given by
@@ -790,11 +782,11 @@ namespace llvm {
       return MVT::i32;
     }
 
-    bool isCheapToSpeculateCttz() const override {
+    bool isCheapToSpeculateCttz(Type *Ty) const override {
       return true;
     }
 
-    bool isCheapToSpeculateCtlz() const override {
+    bool isCheapToSpeculateCtlz(Type *Ty) const override {
       return true;
     }
 
@@ -848,7 +840,7 @@ namespace llvm {
     /// Returns false if it can be represented by [r+imm], which are preferred.
     bool SelectAddressRegReg(SDValue N, SDValue &Base, SDValue &Index,
                              SelectionDAG &DAG,
-                             MaybeAlign EncodingAlignment = None) const;
+                             MaybeAlign EncodingAlignment = std::nullopt) const;
 
     /// SelectAddressRegImm - Returns true if the address N can be represented
     /// by a base register plus a signed 16-bit displacement [r+imm], and if it
@@ -954,9 +946,9 @@ namespace llvm {
     MachineBasicBlock *emitProbedAlloca(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;
 
-    bool hasInlineStackProbe(MachineFunction &MF) const override;
+    bool hasInlineStackProbe(const MachineFunction &MF) const override;
 
-    unsigned getStackProbeSize(MachineFunction &MF) const;
+    unsigned getStackProbeSize(const MachineFunction &MF) const;
 
     ConstraintType getConstraintType(StringRef Constraint) const override;
 
@@ -994,6 +986,10 @@ namespace llvm {
         return InlineAsm::Constraint_Zy;
       return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
     }
+
+    void CollectTargetIntrinsicOperands(const CallInst &I,
+                                 SmallVectorImpl<SDValue> &Ops,
+                                 SelectionDAG &DAG) const override;
 
     /// isLegalAddressingMode - Return true if the addressing mode represented
     /// by AM is legal for this target, for a load/store of the specified type.
@@ -1067,7 +1063,7 @@ namespace llvm {
     bool allowsMisalignedMemoryAccesses(
         EVT VT, unsigned AddrSpace, Align Alignment = Align(1),
         MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
-        bool *Fast = nullptr) const override;
+        unsigned *Fast = nullptr) const override;
 
     /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
     /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
@@ -1152,10 +1148,10 @@ namespace llvm {
     PPC::AddrMode SelectForceXFormMode(SDValue N, SDValue &Disp, SDValue &Base,
                                        SelectionDAG &DAG) const;
 
-    bool
-    splitValueIntoRegisterParts(SelectionDAG &DAG, const SDLoc &DL, SDValue Val,
-                                SDValue *Parts, unsigned NumParts, MVT PartVT,
-                                Optional<CallingConv::ID> CC) const override;
+    bool splitValueIntoRegisterParts(
+        SelectionDAG & DAG, const SDLoc &DL, SDValue Val, SDValue *Parts,
+        unsigned NumParts, MVT PartVT, std::optional<CallingConv::ID> CC)
+        const override;
     /// Structure that collects some common arguments that get passed around
     /// between the functions for call lowering.
     struct CallFlags {
@@ -1274,13 +1270,15 @@ namespace llvm {
     SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG,
                            const SDLoc &dl) const;
     SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGET_ROUNDING(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSRL_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFunnelShift(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVPERM(SDValue Op, SelectionDAG &DAG, ArrayRef<int> PermMask,
+                       EVT VT, SDValue V1, SDValue V2) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_VOID(SDValue Op, SelectionDAG &DAG) const;
@@ -1409,7 +1407,6 @@ namespace llvm {
     SDValue combineFMALike(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineTRUNCATE(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSetCC(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineABS(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineVSelect(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineVectorShuffle(ShuffleVectorSDNode *SVN,
                                  SelectionDAG &DAG) const;

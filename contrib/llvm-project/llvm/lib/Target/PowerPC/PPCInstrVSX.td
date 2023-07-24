@@ -76,9 +76,6 @@ def SDT_PPCxxswapd : SDTypeProfile<1, 1, [
 def SDTVecConv : SDTypeProfile<1, 2, [
   SDTCisVec<0>, SDTCisVec<1>, SDTCisPtrTy<2>
 ]>;
-def SDTVabsd : SDTypeProfile<1, 3, [
-  SDTCisVec<0>, SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisVT<3, i32>
-]>;
 def SDT_PPCld_vec_be : SDTypeProfile<1, 1, [
   SDTCisVec<0>, SDTCisPtrTy<1>
 ]>;
@@ -86,6 +83,9 @@ def SDT_PPCst_vec_be : SDTypeProfile<0, 2, [
   SDTCisVec<0>, SDTCisPtrTy<1>
 ]>;
 
+def SDT_PPCxxperm : SDTypeProfile<1, 3, [
+  SDTCisVT<0, v2f64>, SDTCisVT<1, v2f64>,
+  SDTCisVT<2, v2f64>, SDTCisVT<3, v4i32>]>;
 //--------------------------- Custom PPC nodes -------------------------------//
 def PPClxvd2x  : SDNode<"PPCISD::LXVD2X", SDT_PPClxvd2x,
                         [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
@@ -102,7 +102,6 @@ def PPCmtvsrz : SDNode<"PPCISD::MTVSRZ", SDTUnaryOp, []>;
 def PPCsvec2fp : SDNode<"PPCISD::SINT_VEC_TO_FP", SDTVecConv, []>;
 def PPCuvec2fp: SDNode<"PPCISD::UINT_VEC_TO_FP", SDTVecConv, []>;
 def PPCswapNoChain : SDNode<"PPCISD::SWAP_NO_CHAIN", SDT_PPCxxswapd>;
-def PPCvabsd : SDNode<"PPCISD::VABSD", SDTVabsd, []>;
 
 def PPCfpexth : SDNode<"PPCISD::FP_EXTEND_HALF", SDT_PPCfpexth, []>;
 def PPCldvsxlh : SDNode<"PPCISD::LD_VSX_LH", SDT_PPCldvsxlh,
@@ -116,6 +115,7 @@ def PPCsextldsplat : SDNode<"PPCISD::SEXT_LD_SPLAT", SDT_PPCldsplat,
 def PPCSToV : SDNode<"PPCISD::SCALAR_TO_VECTOR_PERMUTED",
                      SDTypeProfile<1, 1, []>, []>;
 
+def PPCxxperm : SDNode<"PPCISD::XXPERM", SDT_PPCxxperm, []>;
 //-------------------------- Predicate definitions ---------------------------//
 def HasVSX : Predicate<"Subtarget->hasVSX()">;
 def IsLittleEndian : Predicate<"Subtarget->isLittleEndian()">;
@@ -1300,7 +1300,7 @@ let Predicates = [HasVSX, HasP8Vector] in {
       Requires<[In64BitMode]>;
   def MFVSRWZ : XX1_RS6_RD5_XO<31, 115, (outs gprc:$rA), (ins vsfrc:$XT),
                                "mfvsrwz $rA, $XT", IIC_VecGeneral,
-                               [(set i32:$rA, (PPCmfvsr f64:$XT))]>;
+                               [(set i32:$rA, (PPCmfvsr f64:$XT))]>, ZExt32To64;
   // FIXME: Setting the hasSideEffects flag here to match current behaviour.
   let isCodeGenOnly = 1, hasSideEffects = 1 in
   def MFVRWZ : XX1_RS6_RD5_XO<31, 115, (outs gprc:$rA), (ins vsrc:$XT),
@@ -1643,13 +1643,14 @@ let Predicates = [HasVSX, HasP9Vector] in {
   def XXBRQ : XX2_XT6_XO5_XB6<60, 31, 475, "xxbrq", vsrc, []>;
 
   // Vector Permute
-  // FIXME: Setting the hasSideEffects flag here to match current behaviour.
-  let hasSideEffects = 1 in {
-    def XXPERM  : XX3_XT5_XA5_XB5<60, 26, "xxperm" , vsrc, vsrc, vsrc,
-                                  IIC_VecPerm, []>;
-    def XXPERMR : XX3_XT5_XA5_XB5<60, 58, "xxpermr", vsrc, vsrc, vsrc,
-                                  IIC_VecPerm, []>;
-  }
+  def XXPERM  : XX3Form<60, 26, (outs vsrc:$XT),
+                                (ins vsrc:$XA, vsrc:$XTi, vsrc:$XB),
+                        "xxperm $XT, $XA, $XB", IIC_VecPerm, []>,
+                        RegConstraint<"$XTi = $XT">, NoEncode<"$XTi">;
+  def XXPERMR : XX3Form<60, 58, (outs vsrc:$XT),
+                                (ins vsrc:$XA, vsrc:$XTi, vsrc:$XB),
+                        "xxpermr $XT, $XA, $XB", IIC_VecPerm, []>,
+                        RegConstraint<"$XTi = $XT">, NoEncode<"$XTi">;
 
   // Vector Splat Immediate Byte
   // FIXME: Setting the hasSideEffects flag here to match current behaviour.
@@ -2496,6 +2497,20 @@ def : Pat<(v4i32 (or (and (vnot v4i32:$C), v4i32:$A),
                      (and v4i32:$B, v4i32:$C))),
           (v4i32 (XXSEL $A, $B, $C))>;
 
+def : Pat<(f64 (fpimm0neg)),
+          (f64 (XSNEGDP (XXLXORdpz)))>;
+
+def : Pat<(f32 (fpimm0neg)),
+          (f32 (COPY_TO_REGCLASS (XSNEGDP (XXLXORdpz)), VSSRC))>;
+
+def : Pat<(f64 (nzFPImmExactInti5:$A)),
+          (COPY_TO_REGCLASS (XVCVSXWDP (COPY_TO_REGCLASS
+                     (VSPLTISW (getFPAs5BitExactInt fpimm:$A)), VSRC)), VSFRC)>;
+
+def : Pat<(f32 (nzFPImmExactInti5:$A)),
+          (COPY_TO_REGCLASS (XVCVSXWDP (COPY_TO_REGCLASS
+                     (VSPLTISW (getFPAs5BitExactInt fpimm:$A)), VSRC)), VSSRC)>;
+
 // Additional fnmsub pattern for PPC specific ISD opcode
 def : Pat<(PPCfnmsub f64:$A, f64:$B, f64:$C),
           (XSNMSUBADP $C, $A, $B)>;
@@ -3021,9 +3036,6 @@ defm : ScalToVecWPermute<v2f64, (f64 f64:$A),
                                    (SUBREG_TO_REG (i64 1), $A, sub_64), 0),
                          (SUBREG_TO_REG (i64 1), $A, sub_64)>;
 
-def : Pat<(f64 (extractelt (v2f64 (bitconvert (v16i8
-                 (PPCvperm v16i8:$A, v16i8:$B, v16i8:$C)))), 0)),
-          (f64 (EXTRACT_SUBREG (VPERM $B, $A, $C), sub_64))>;
 def : Pat<(f64 (extractelt v2f64:$S, 0)),
           (f64 (EXTRACT_SUBREG (XXPERMDI $S, $S, 2), sub_64))>;
 def : Pat<(f64 (extractelt v2f64:$S, 1)),
@@ -4146,6 +4158,8 @@ def : Pat<(v8i16 (PPCldsplat ForceXForm:$A)),
           (v8i16 (VSPLTHs 3, (LXSIHZX ForceXForm:$A)))>;
 def : Pat<(v16i8 (PPCldsplat ForceXForm:$A)),
           (v16i8 (VSPLTBs 7, (LXSIBZX ForceXForm:$A)))>;
+def : Pat<(v2f64 (PPCxxperm v2f64:$XT, v2f64:$XB, v4i32:$C)),
+          (XXPERM v2f64:$XT, v2f64:$XB, v4i32:$C)>;
 } // HasVSX, HasP9Vector
 
 // Any Power9 VSX subtarget with equivalent length but better Power10 VSX
@@ -4790,20 +4804,23 @@ def : Pat<(f128 (uint_to_fp (i32 (PPCmfvsr f64:$src)))),
 
 // Any Power9 VSX subtarget that supports Power9 Altivec.
 let Predicates = [HasVSX, HasP9Altivec] in {
-// Put this P9Altivec related definition here since it's possible to be
-// selected to VSX instruction xvnegsp, avoid possible undef.
-def : Pat<(v4i32 (PPCvabsd v4i32:$A, v4i32:$B, (i32 0))),
+// Unsigned absolute-difference.
+def : Pat<(v4i32 (abdu v4i32:$A, v4i32:$B)),
           (v4i32 (VABSDUW $A, $B))>;
 
-def : Pat<(v8i16 (PPCvabsd v8i16:$A, v8i16:$B, (i32 0))),
+def : Pat<(v8i16 (abdu v8i16:$A, v8i16:$B)),
           (v8i16 (VABSDUH $A, $B))>;
 
-def : Pat<(v16i8 (PPCvabsd v16i8:$A, v16i8:$B, (i32 0))),
+def : Pat<(v16i8 (abdu v16i8:$A, v16i8:$B)),
           (v16i8 (VABSDUB $A, $B))>;
 
-// As PPCVABSD description, the last operand indicates whether do the
-// sign bit flip.
-def : Pat<(v4i32 (PPCvabsd v4i32:$A, v4i32:$B, (i32 1))),
+// Signed absolute-difference.
+// Power9 VABSD* instructions are designed to support unsigned integer
+// vectors (byte/halfword/word), if we want to make use of them for signed
+// integer vectors, we have to flip their sign bits first. To flip sign bit
+// for byte/halfword integer vector would become inefficient, but for word
+// integer vector, we can leverage XVNEGSP to make it efficiently.
+def : Pat<(v4i32 (abds v4i32:$A, v4i32:$B)),
           (v4i32 (VABSDUW (XVNEGSP $A), (XVNEGSP $B)))>;
 } // HasVSX, HasP9Altivec
 
