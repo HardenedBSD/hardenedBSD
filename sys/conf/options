@@ -133,7 +133,6 @@ GEOM_PART_EBR	opt_geom.h
 GEOM_PART_GPT	opt_geom.h
 GEOM_PART_LDM	opt_geom.h
 GEOM_PART_MBR	opt_geom.h
-GEOM_PART_VTOC8	opt_geom.h
 GEOM_RAID	opt_geom.h
 GEOM_RAID3	opt_geom.h
 GEOM_SHSEC	opt_geom.h
@@ -158,6 +157,7 @@ MAC_BIBA	opt_dontuse.h
 MAC_BSDEXTENDED	opt_dontuse.h
 MAC_DDB		opt_dontuse.h
 MAC_IFOFF	opt_dontuse.h
+MAC_IPACL	opt_dontuse.h
 MAC_LOMAC	opt_dontuse.h
 MAC_MLS		opt_dontuse.h
 MAC_NONE	opt_dontuse.h
