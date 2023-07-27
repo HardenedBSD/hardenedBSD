@@ -39,6 +39,8 @@ PORTSDIR?=	/usr/ports
 KERNCONF?=	HARDENEDBSD
 VENDOR_NAME?=	HardenedBSD
 
+.include "${WORLDDIR}/share/mk/bsd.compat.pre.mk"
+
 .if !defined(TARGET) || empty(TARGET)
 TARGET=		${MACHINE}
 .endif
@@ -167,19 +169,20 @@ disc1: packagesystem
 	mkdir -p ${.TARGET}
 	cd ${WORLDDIR} && ${IMAKE} installworld installkernel distribution \
 	    DESTDIR=${.OBJDIR}/${.TARGET} MK_AT=no \
-	    MK_INSTALLLIB=no MK_LIB32=no MK_MAIL=no \
+	    MK_INSTALLLIB=no MK_MAIL=no \
+	    ${_ALL_LIBCOMPATS:@v@MK_LIB$v=no@} \
 	    MK_TOOLCHAIN=no MK_PROFILE=no \
 	    MK_RESCUE=no MK_DICT=no \
 	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no \
 	    -DDB_FROM_SRC
 # Copy distfiles
 	mkdir -p ${.TARGET}/usr/freebsd-dist
-	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(base|lib32)-dbg'); \
+	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(${base ${_ALL_libcompats}:L:ts|})-dbg'); \
 	    do cp $${dist} ${.TARGET}/usr/freebsd-dist; \
 	done
 .if defined(NO_ROOT)
 	echo "./usr/freebsd-dist type=dir uname=root gname=wheel mode=0755" >> ${.TARGET}/METALOG
-	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(base|lib32)-dbg'); \
+	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(${base ${_ALL_libcompats}:L:ts|})-dbg'); \
 	    do echo "./usr/freebsd-dist/$${dist} type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG; \
 	done
 .endif
@@ -211,7 +214,8 @@ bootonly: packagesystem
 	cd ${WORLDDIR} && ${IMAKE} installworld installkernel distribution \
 	    DESTDIR=${.OBJDIR}/${.TARGET} MK_AT=no \
 	    MK_GAMES=no \
-	    MK_INSTALLLIB=no MK_LIB32=no MK_MAIL=no \
+	    MK_INSTALLLIB=no MK_MAIL=no \
+	    ${_ALL_LIBCOMPATS:@v@MK_LIB$v=no@} \
 	    MK_TOOLCHAIN=no MK_PROFILE=no \
 	    MK_RESCUE=no MK_DICT=no \
 	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no \
@@ -253,12 +257,12 @@ dvd: packagesystem
 		-DDB_FROM_SRC
 # Copy distfiles
 	mkdir -p ${.TARGET}/usr/freebsd-dist
-	for dist in MANIFEST $$(ls *.txz | grep -v -- '(base|lib32)-dbg'); \
+	for dist in MANIFEST $$(ls *.txz | grep -v -- '(${base ${_ALL_libcompats}:L:ts|})-dbg'); \
 	    do cp $${dist} ${.TARGET}/usr/freebsd-dist; \
 	done
 .if defined(NO_ROOT)
 	echo "./usr/freebsd-dist type=dir uname=root gname=wheel mode=0755" >> ${.TARGET}/METALOG
-	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(base|lib32)-dbg'); \
+	for dist in MANIFEST $$(ls *.txz | grep -vE -- '(${base ${_ALL_libcompats}:L:ts|})-dbg'); \
 	    do echo "./usr/freebsd-dist/$${dist} type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG; \
 	done
 .endif
