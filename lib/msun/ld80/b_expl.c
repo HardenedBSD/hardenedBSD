@@ -29,67 +29,54 @@
  * SUCH DAMAGE.
  */
 
-/* @(#)exp.c	8.1 (Berkeley) 6/4/93 */
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
-/* EXP(X)
- * RETURN THE EXPONENTIAL OF X
- * DOUBLE PRECISION (IEEE 53 bits, VAX D FORMAT 56 BITS)
- * CODED IN C BY K.C. NG, 1/19/85;
- * REVISED BY K.C. NG on 2/6/85, 2/15/85, 3/7/85, 3/24/85, 4/16/85, 6/14/86.
+/*
+ * See bsdsrc/b_exp.c for implementation details.
  *
- * Required system supported functions:
- *	ldexp(x,n)
- *	copysign(x,y)
- *	isfinite(x)
- *
- * Method:
- *	1. Argument Reduction: given the input x, find r and integer k such
- *	   that
- *	        x = k*ln2 + r,  |r| <= 0.5*ln2.
- *	   r will be represented as r := z+c for better accuracy.
- *
- *	2. Compute exp(r) by
- *
- *		exp(r) = 1 + r + r*R1/(2-R1),
- *	   where
- *		R1 = x - x^2*(p1+x^2*(p2+x^2*(p3+x^2*(p4+p5*x^2)))).
- *
- *	3. exp(x) = 2^k * exp(r) .
- *
- * Special cases:
- *	exp(INF) is INF, exp(NaN) is NaN;
- *	exp(-INF)=  0;
- *	for finite argument, only exp(0)=1 is exact.
- *
- * Accuracy:
- *	exp(x) returns the exponential of x nearly rounded. In a test run
- *	with 1,156,000 random arguments on a VAX, the maximum observed
- *	error was 0.869 ulps (units in the last place).
+ * bsdrc/b_exp.c converted to long double by Steven G. Kargl.
  */
-static const double
-    p1 =  1.6666666666666660e-01, /* 0x3fc55555, 0x55555553 */
-    p2 = -2.7777777777564776e-03, /* 0xbf66c16c, 0x16c0ac3c */
-    p3 =  6.6137564717940088e-05, /* 0x3f11566a, 0xb5c2ba0d */
-    p4 = -1.6534060280704225e-06, /* 0xbebbbd53, 0x273e8fb7 */
-    p5 =  4.1437773411069054e-08; /* 0x3e663f2a, 0x09c94b6c */
 
-static const double
-    ln2hi = 0x1.62e42fee00000p-1,   /* High 32 bits round-down. */
-    ln2lo = 0x1.a39ef35793c76p-33;  /* Next 53 bits round-to-nearst. */
+#include "fpmath.h"
+#include "math_private.h"
 
-static const double
-    lnhuge =  0x1.6602b15b7ecf2p9,  /* (DBL_MAX_EXP + 9) * log(2.) */
-    lntiny = -0x1.77af8ebeae354p9,  /* (DBL_MIN_EXP - 53 - 10) * log(2.) */
-    invln2 =  0x1.71547652b82fep0;  /* 1 / log(2.) */
+static const union IEEEl2bits
+    p0u = LD80C(0xaaaaaaaaaaaaaaab,    -3,  1.66666666666666666671e-01L),
+    p1u = LD80C(0xb60b60b60b60b59a,    -9, -2.77777777777777775377e-03L),
+    p2u = LD80C(0x8ab355e008a3cfce,   -14,  6.61375661375629297465e-05L),
+    p3u = LD80C(0xddebbc994b0c1376,   -20, -1.65343915327882529784e-06L),
+    p4u = LD80C(0xb354784cb4ef4c41,   -25,  4.17535101591534118469e-08L),
+    p5u = LD80C(0x913e8a718382ce75,   -30, -1.05679137034774806475e-09L),
+    p6u = LD80C(0xe8f0042aa134502e,   -36,  2.64819349895429516863e-11L);
+#define	p1	(p0u.e)
+#define	p2	(p1u.e)
+#define	p3	(p2u.e)
+#define	p4	(p3u.e)
+#define	p5	(p4u.e)
+#define	p6	(p5u.e)
+#define	p7	(p6u.e)
+
+/*
+ * lnhuge = (LDBL_MAX_EXP + 9) * log(2.)
+ * lntiny = (LDBL_MIN_EXP - 64 - 10) * log(2.)
+ * invln2 = 1 / log(2.)
+ */
+static const union IEEEl2bits
+ln2hiu  = LD80C(0xb17217f700000000,  -1,  6.93147180369123816490e-01L),
+ln2lou  = LD80C(0xd1cf79abc9e3b398, -33,  1.90821492927058781614e-10L),
+lnhugeu = LD80C(0xb18b0c0330a8fad9,  13,  1.13627617309191834574e+04L),
+lntinyu = LD80C(0xb236f28a68bc3bd7,  13, -1.14057368561139000667e+04L),
+invln2u = LD80C(0xb8aa3b295c17f0bc,   0,  1.44269504088896340739e+00L);
+#define	ln2hi	(ln2hiu.e)
+#define ln2lo	(ln2lou.e)
+#define lnhuge	(lnhugeu.e)
+#define	lntiny	(lntinyu.e)
+#define	invln2	(invln2u.e)
 
 /* returns exp(r = x + c) for |c| < |x| with no overlap.  */
 
-static double
-__exp__D(double x, double c)
+static long double
+__exp__D(long double x, long double c)
 {
-	double hi, lo, z;
+	long double hi, lo, z;
 	int k;
 
 	if (x != x)	/* x is NaN. */
@@ -99,7 +86,7 @@ __exp__D(double x, double c)
 		if (x >= lntiny) {
 			/* argument reduction: x --> x - k*ln2 */
 			z = invln2 * x;
-			k = z + copysign(0.5, x);
+			k = z + copysignl(0.5L, x);
 
 		    	/*
 			 * Express (x + c) - k * ln2 as hi - lo.
@@ -112,15 +99,15 @@ __exp__D(double x, double c)
 			/* Return 2^k*[1+x+x*c/(2+c)]  */
 			z = x * x;
 			c = x - z * (p1 + z * (p2 + z * (p3 + z * (p4 +
-			    z * p5))));
+			    z * (p5 + z * (p6 + z * p7))))));
 			c = (x * c) / (2 - c);
 
-			return (ldexp(1 + (hi - (lo - c)), k));
+			return (ldexpl(1 + (hi - (lo - c)), k));
 		} else {
 			/* exp(-INF) is 0. exp(-big) underflows to 0.  */
-			return (isfinite(x) ? ldexp(1., -5000) : 0);
+			return (isfinite(x) ? ldexpl(1., -5000) : 0);
 		}
 	} else
-	/* exp(INF) is INF, exp(+big#) overflows to INF */
-		return (isfinite(x) ? ldexp(1., 5000) : x);
+		/* exp(INF) is INF, exp(+big#) overflows to INF */
+		return (isfinite(x) ? ldexpl(1., 5000) : x);
 }

@@ -29,57 +29,27 @@
  * SUCH DAMAGE.
  */
 
-/* @(#)log.c	8.2 (Berkeley) 11/30/93 */
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
-/* Table-driven natural logarithm.
+/*
+ * See bsdsrc/b_log.c for implementation details.
  *
- * This code was derived, with minor modifications, from:
- *	Peter Tang, "Table-Driven Implementation of the
- *	Logarithm in IEEE Floating-Point arithmetic." ACM Trans.
- *	Math Software, vol 16. no 4, pp 378-400, Dec 1990).
- *
- * Calculates log(2^m*F*(1+f/F)), |f/F| <= 1/256,
- * where F = j/128 for j an integer in [0, 128].
- *
- * log(2^m) = log2_hi*m + log2_tail*m
- * The leading term is exact, because m is an integer,
- * m has at most 10 digits (for subnormal numbers),
- * and log2_hi has 11 trailing zero bits.
- *
- * log(F) = logF_hi[j] + logF_lo[j] is in table below.
- * logF_hi[] + 512 is exact.
- *
- * log(1+f/F) = 2*f/(2*F + f) + 1/12 * (2*f/(2*F + f))**3 + ...
- *
- * The leading term is calculated to extra precision in two
- * parts, the larger of which adds exactly to the dominant
- * m and F terms.
- *
- * There are two cases:
- *	1. When m and j are non-zero (m | j), use absolute
- *	   precision for the leading term.
- *	2. When m = j = 0, |1-x| < 1/256, and log(x) ~= (x-1).
- *	   In this case, use a relative precision of 24 bits.
- * (This is done differently in the original paper)
- *
- * Special cases:
- *	0	return signalling -Inf
- *	neg	return signalling NaN
- *	+Inf	return +Inf
+ * bsdrc/b_log.c converted to long double by Steven G. Kargl.
  */
 
 #define N 128
 
 /*
  * Coefficients in the polynomial approximation of log(1+f/F).
- * Domain of x is [0,1./256] with 2**(-64.187) precision.
+ * Domain of x is [0,1./256] with 2**(-84.48) precision.
  */
-static const double
-    A1 =  8.3333333333333329e-02, /* 0x3fb55555, 0x55555555 */
-    A2 =  1.2499999999943598e-02, /* 0x3f899999, 0x99991a98 */
-    A3 =  2.2321527525957776e-03; /* 0x3f624929, 0xe24e70be */
+static const union IEEEl2bits
+    a1u = LD80C(0xaaaaaaaaaaaaaaab,    -4,  8.33333333333333333356e-02L),
+    a2u = LD80C(0xcccccccccccccd29,    -7,  1.25000000000000000781e-02L),
+    a3u = LD80C(0x9249249241ed3764,    -9,  2.23214285711721994134e-03L),
+    a4u = LD80C(0xe38e959e1e7e01cf,   -12,  4.34030476540000360640e-04L);
+#define	A1	(a1u.e)
+#define	A2	(a2u.e)
+#define	A3	(a3u.e)
+#define	A4	(a4u.e)
 
 /*
  * Table of log(Fj) = logF_head[j] + logF_tail[j], for Fj = 1+j/128.
@@ -91,6 +61,7 @@ static const double
  * Values for log(F) were generated using error < 10^-57 absolute
  * with the bc -l package.
  */
+
 static double logF_head[N+1] = {
 	0.,
 	.007782140442060381246,
@@ -356,35 +327,35 @@ static double logF_tail[N+1] = {
 };
 /*
  * Extra precision variant, returning struct {double a, b;};
- * log(x) = a+b to 63 bits, with 'a' rounded to 24 bits.
+ * log(x) = a + b to 63 bits, with 'a' rounded to 24 bits.
  */
 static struct Double
-__log__D(double x)
+__log__D(long double x)
 {
 	int m, j;
-	double F, f, g, q, u, v, u1, u2;
+	long double F, f, g, q, u, v, u1, u2;
 	struct Double r;
 
 	/*
 	 * Argument reduction: 1 <= g < 2; x/2^m = g;
 	 * y = F*(1 + f/F) for |f| <= 2^-8
 	 */
-	g = frexp(x, &m);
+	g = frexpl(x, &m);
 	g *= 2;
 	m--;
-	if (m == -1022) {
-		j = ilogb(g);
+	if (m == DBL_MIN_EXP - 1) {
+		j = ilogbl(g);
 		m += j;
-		g = ldexp(g, -j);
+		g = ldexpl(g, -j);
 	}
-	j = N * (g - 1) + 0.5;
-	F = (1. / N) * j + 1;
+	j = N * (g - 1) + 0.5L;
+	F = (1.L / N) * j + 1;
 	f = g - F;
 
 	g = 1 / (2 * F + f);
 	u = 2 * f * g;
 	v = u * u;
-	q = u * v * (A1 + v * (A2 + v * A3));
+	q = u * v * (A1 + v * (A2 + v * (A3 + v * A4)));
 	if (m | j) {
 		u1 = u + 513;
 		u1 -= 513;
@@ -393,7 +364,7 @@ __log__D(double x)
 	}
 	u2 = (2 * (f - F * u1) - u1 * f) * g;
 
-	u1 += m * logF_head[N] + logF_head[j];
+	u1 += m * (long double)logF_head[N] + logF_head[j];
 
 	u2 += logF_tail[j];
 	u2 += q;
