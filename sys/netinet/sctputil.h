@@ -253,11 +253,7 @@ do { \
 		} \
 		if (stcb->sctp_socket && ((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) || \
 		    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL))) { \
-			if (stcb->sctp_socket->so_snd.sb_cc >= sp->length) { \
-				atomic_subtract_int(&stcb->sctp_socket->so_snd.sb_cc,sp->length); \
-			} else { \
-				stcb->sctp_socket->so_snd.sb_cc = 0; \
-			} \
+			SCTP_SB_DECR(&stcb->sctp_socket->so_snd, sp->length); \
 		} \
 	} \
 } while (0)
@@ -268,7 +264,7 @@ do { \
 	if ((stcb->sctp_socket != NULL) && \
 	    ((stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_TCPTYPE) || \
 	     (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_IN_TCPPOOL))) { \
-		atomic_add_int(&stcb->sctp_socket->so_snd.sb_cc,sz); \
+		SCTP_SB_INCR(&stcb->sctp_socket->so_snd, sz); \
 	} \
 } while (0)
 
