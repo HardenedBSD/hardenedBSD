@@ -110,7 +110,6 @@ struct xpt_softc {
 	TAILQ_HEAD(, ccb_hdr) ccb_scanq;
 	int buses_to_config;
 	int buses_config_done;
-	int announce_nosbuf;
 
 	/*
 	 * Registered buses
@@ -168,8 +167,6 @@ SYSCTL_INT(_kern_cam, OID_AUTO, boot_delay, CTLFLAG_RDTUN,
            &xsoftc.boot_delay, 0, "Bus registration wait time");
 SYSCTL_UINT(_kern_cam, OID_AUTO, xpt_generation, CTLFLAG_RD,
 	    &xsoftc.xpt_generation, 0, "CAM peripheral generation count");
-SYSCTL_INT(_kern_cam, OID_AUTO, announce_nosbuf, CTLFLAG_RWTUN,
-	    &xsoftc.announce_nosbuf, 0, "Don't use sbuf for announcements");
 
 struct cam_doneq {
 	struct mtx_padalign	cam_doneq_mtx;
@@ -1048,45 +1045,13 @@ xpt_remove_periph(struct cam_periph *periph)
 void
 xpt_announce_periph(struct cam_periph *periph, char *announce_string)
 {
-	struct	cam_path *path = periph->path;
-	struct  xpt_proto *proto;
+	char buf[128];
+	struct sbuf sb;
 
-	cam_periph_assert(periph, MA_OWNED);
-	periph->flags |= CAM_PERIPH_ANNOUNCED;
-
-	printf("%s%d at %s%d bus %d scbus%d target %d lun %jx\n",
-	       periph->periph_name, periph->unit_number,
-	       path->bus->sim->sim_name,
-	       path->bus->sim->unit_number,
-	       path->bus->sim->bus_id,
-	       path->bus->path_id,
-	       path->target->target_id,
-	       (uintmax_t)path->device->lun_id);
-	printf("%s%d: ", periph->periph_name, periph->unit_number);
-	proto = xpt_proto_find(path->device->protocol);
-	if (proto)
-		proto->ops->announce(path->device);
-	else
-		printf("%s%d: Unknown protocol device %d\n",
-		    periph->periph_name, periph->unit_number,
-		    path->device->protocol);
-	if (path->device->serial_num_len > 0) {
-		/* Don't wrap the screen  - print only the first 60 chars */
-		printf("%s%d: Serial Number %.60s\n", periph->periph_name,
-		       periph->unit_number, path->device->serial_num);
-	}
-	/* Announce transport details. */
-	path->bus->xport->ops->announce(periph);
-	/* Announce command queueing. */
-	if (path->device->inq_flags & SID_CmdQue
-	 || path->device->flags & CAM_DEV_TAG_AFTER_COUNT) {
-		printf("%s%d: Command Queueing enabled\n",
-		       periph->periph_name, periph->unit_number);
-	}
-	/* Announce caller's details if they've passed in. */
-	if (announce_string != NULL)
-		printf("%s%d: %s\n", periph->periph_name,
-		       periph->unit_number, announce_string);
+	(void)sbuf_new(&sb, buf, sizeof(buf), SBUF_FIXEDLEN | SBUF_INCLUDENUL);
+	sbuf_set_drain(&sb, sbuf_printf_drain, NULL);
+	xpt_announce_periph_sbuf(periph, &sb, announce_string);
+	(void)sbuf_finish(&sb);
 }
 
 void
@@ -1099,18 +1064,6 @@ xpt_announce_periph_sbuf(struct cam_periph *periph, struct sbuf *sb,
 	cam_periph_assert(periph, MA_OWNED);
 	periph->flags |= CAM_PERIPH_ANNOUNCED;
 
-	/* Fall back to the non-sbuf method if necessary */
-	if (xsoftc.announce_nosbuf != 0) {
-		xpt_announce_periph(periph, announce_string);
-		return;
-	}
-	proto = xpt_proto_find(path->device->protocol);
-	if (((proto != NULL) && (proto->ops->announce_sbuf == NULL)) ||
-	    (path->bus->xport->ops->announce_sbuf == NULL)) {
-		xpt_announce_periph(periph, announce_string);
-		return;
-	}
-
 	sbuf_printf(sb, "%s%d at %s%d bus %d scbus%d target %d lun %jx\n",
 	    periph->periph_name, periph->unit_number,
 	    path->bus->sim->sim_name,
@@ -1120,12 +1073,11 @@ xpt_announce_periph_sbuf(struct cam_periph *periph, struct sbuf *sb,
 	    path->target->target_id,
 	    (uintmax_t)path->device->lun_id);
 	sbuf_printf(sb, "%s%d: ", periph->periph_name, periph->unit_number);
-
+	proto = xpt_proto_find(path->device->protocol);
 	if (proto)
 		proto->ops->announce_sbuf(path->device, sb);
 	else
-		sbuf_printf(sb, "%s%d: Unknown protocol device %d\n",
-		    periph->periph_name, periph->unit_number,
+		sbuf_printf(sb, "Unknown protocol device %d\n",
 		    path->device->protocol);
 	if (path->device->serial_num_len > 0) {
 		/* Don't wrap the screen  - print only the first 60 chars */
@@ -1160,11 +1112,6 @@ void
 xpt_announce_quirks_sbuf(struct cam_periph *periph, struct sbuf *sb,
 			 int quirks, char *bit_string)
 {
-	if (xsoftc.announce_nosbuf != 0) {
-		xpt_announce_quirks(periph, quirks, bit_string);
-		return;
-	}
-
 	if (quirks != 0) {
 		sbuf_printf(sb, "%s%d: quirks=0x%b\n", periph->periph_name,
 		    periph->unit_number, quirks, bit_string);
@@ -1174,29 +1121,13 @@ xpt_announce_quirks_sbuf(struct cam_periph *periph, struct sbuf *sb,
 void
 xpt_denounce_periph(struct cam_periph *periph)
 {
-	struct	cam_path *path = periph->path;
-	struct  xpt_proto *proto;
+	char buf[128];
+	struct sbuf sb;
 
-	cam_periph_assert(periph, MA_OWNED);
-	printf("%s%d at %s%d bus %d scbus%d target %d lun %jx\n",
-	       periph->periph_name, periph->unit_number,
-	       path->bus->sim->sim_name,
-	       path->bus->sim->unit_number,
-	       path->bus->sim->bus_id,
-	       path->bus->path_id,
-	       path->target->target_id,
-	       (uintmax_t)path->device->lun_id);
-	printf("%s%d: ", periph->periph_name, periph->unit_number);
-	proto = xpt_proto_find(path->device->protocol);
-	if (proto)
-		proto->ops->denounce(path->device);
-	else
-		printf("%s%d: Unknown protocol device %d\n",
-		    periph->periph_name, periph->unit_number,
-		    path->device->protocol);
-	if (path->device->serial_num_len > 0)
-		printf(" s/n %.60s", path->device->serial_num);
-	printf(" detached\n");
+	(void)sbuf_new(&sb, buf, sizeof(buf), SBUF_FIXEDLEN | SBUF_INCLUDENUL);
+	sbuf_set_drain(&sb, sbuf_printf_drain, NULL);
+	xpt_denounce_periph_sbuf(periph, &sb);
+	(void)sbuf_finish(&sb);
 }
 
 void
@@ -1207,17 +1138,6 @@ xpt_denounce_periph_sbuf(struct cam_periph *periph, struct sbuf *sb)
 
 	cam_periph_assert(periph, MA_OWNED);
 
-	/* Fall back to the non-sbuf method if necessary */
-	if (xsoftc.announce_nosbuf != 0) {
-		xpt_denounce_periph(periph);
-		return;
-	}
-	proto = xpt_proto_find(path->device->protocol);
-	if ((proto != NULL) && (proto->ops->denounce_sbuf == NULL)) {
-		xpt_denounce_periph(periph);
-		return;
-	}
-
 	sbuf_printf(sb, "%s%d at %s%d bus %d scbus%d target %d lun %jx\n",
 	    periph->periph_name, periph->unit_number,
 	    path->bus->sim->sim_name,
@@ -1227,12 +1147,11 @@ xpt_denounce_periph_sbuf(struct cam_periph *periph, struct sbuf *sb)
 	    path->target->target_id,
 	    (uintmax_t)path->device->lun_id);
 	sbuf_printf(sb, "%s%d: ", periph->periph_name, periph->unit_number);
-
+	proto = xpt_proto_find(path->device->protocol);
 	if (proto)
 		proto->ops->denounce_sbuf(path->device, sb);
 	else
-		sbuf_printf(sb, "%s%d: Unknown protocol device %d\n",
-		    periph->periph_name, periph->unit_number,
+		sbuf_printf(sb, "Unknown protocol device %d",
 		    path->device->protocol);
 	if (path->device->serial_num_len > 0)
 		sbuf_printf(sb, " s/n %.60s", path->device->serial_num);

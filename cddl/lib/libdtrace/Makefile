@@ -1,5 +1,7 @@
 # $FreeBSD$
 
+SHLIBDIR?=	/lib
+
 .include <src.opts.mk>
 
 .PATH: ${SRCTOP}/cddl/contrib/opensolaris/lib/libdtrace/common
@@ -7,6 +9,7 @@
 
 PACKAGE=	dtrace
 LIB=		dtrace
+
 SRCS=		dt_aggregate.c \
 		dt_as.c \
 		dt_buf.c \
