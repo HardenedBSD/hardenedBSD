@@ -172,6 +172,7 @@ disc1: packagesystem
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
+	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
 	cp ${.CURDIR}/rc.local ${.TARGET}/etc
 	# XXXOP - try to work around installer lockup on random dev in a virtual machine
 	dd if=/dev/random of=${.TARGET}/boot/entropy bs=4k count=1
@@ -199,6 +200,7 @@ bootonly: packagesystem
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
+	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
 	cp ${.CURDIR}/rc.local ${.TARGET}/etc
 	# XXXOP - try to work around installer lockup on random dev in a virtual machine
 	dd if=/dev/random of=${.TARGET}/boot/entropy bs=4k count=1
@@ -223,6 +225,7 @@ dvd: packagesystem
 	echo hostid_enable=\"NO\" >> ${.TARGET}/etc/rc.conf
 	echo vfs.mountroot.timeout=\"10\" >> ${.TARGET}/boot/loader.conf
 	echo kernels_autodetect=\"NO\" >> ${.TARGET}/boot/loader.conf
+	echo loader_menu_multi_user_prompt=\"Installer\" >> ${.TARGET}/boot/loader.conf
 	cp ${.CURDIR}/rc.local ${.TARGET}/etc
 	# XXXOP - try to work around installer lockup on random dev in a virtual machine
 	dd if=/dev/random of=${.TARGET}/boot/entropy bs=4k count=1

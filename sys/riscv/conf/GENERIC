@@ -104,6 +104,9 @@ device		vtnet			# VirtIO Ethernet device
 device		virtio_blk		# VirtIO Block device
 device		virtio_mmio		# VirtIO MMIO bus
 
+# ATA/SCSI peripherals
+device		pass			# Passthrough device (direct ATA/SCSI access)
+
 # NVM Express (NVMe) support
 device		nvme		# base NVMe driver
 options 	NVME_USE_NVD=0	# prefer the cam(4) based nda(4) driver
@@ -142,6 +145,7 @@ device		vt
 device		kbdmux
 
 # RTC
+device		da9063_rtc	# Dialog Semiconductor DA9063 RTC
 device		goldfish_rtc	# QEMU RTC
 
 # Ethernet drivers
@@ -159,6 +163,9 @@ device		gpio
 # SPI
 device		spibus
 device		spigen
+
+# Power management controllers
+device		da9063_pmic	# Dialog Semiconductor DA9063 PMIC
 
 # Uncomment for memory disk
 # options 	MD_ROOT
