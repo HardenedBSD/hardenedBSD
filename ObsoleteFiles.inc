@@ -52,6 +52,16 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20230806: Removal of support for the VTOC8 partitioning scheme
+OLD_FILES+=usr/include/sys/disk/vtoc.h
+OLD_FILES+=usr/include/sys/vtoc.h
+
+# 20230806 meteor.4 removed, see also 20200301 entry below
+OLD_FILES+=usr/share/man/man4/meteor.4.gz
+
+# 20230806: remove bt(4) man page
+OLD_FILES+=usr/share/man/man4/bt.4.gz
+
 # 20230622: new clang import which bumps version from 15.0.7 to 16.0.1
 OLD_FILES+=usr/lib/clang/15.0.7/include/__clang_cuda_builtin_vars.h
 OLD_FILES+=usr/lib/clang/15.0.7/include/__clang_cuda_cmath.h
