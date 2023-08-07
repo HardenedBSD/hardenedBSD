@@ -68,6 +68,7 @@ AWK="/usr/bin/awk"
 BEADM="/usr/local/sbin/beadm"
 CAT="/bin/cat"
 CHFLAGS="/bin/chflags"
+CERTCTL="/usr/sbin/certctl"
 DRILL="/usr/bin/drill"
 ETCUPDATE="/usr/sbin/etcupdate"
 FETCH="/usr/bin/fetch"
@@ -748,6 +749,17 @@ apply_base() {
 			echo "[-] Making the password database failed" >&2
 			return ${res}
 		fi
+	fi
+
+	if [ ${verbose} -gt 0 ]; then
+		debug_print "[*] Updating HTTPS certs"
+	fi
+
+	${CERTCTL} -D ${mountpoint} rehash
+	res=${?}
+	if [ ${res} -gt 0 ]; then
+		echo "[-] Updating HTTPS certs failed" >&2
+		return ${res}
 	fi
 
 	return 0
