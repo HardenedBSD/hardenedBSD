@@ -1771,6 +1771,7 @@ killpg1(struct thread *td, int sig, int pgid, int all, ksiginfo_t *ksi)
 		}
 		sx_sunlock(&allproc_lock);
 	} else {
+again:
 		sx_slock(&proctree_lock);
 		if (pgid == 0) {
 			/*
@@ -1786,10 +1787,17 @@ killpg1(struct thread *td, int sig, int pgid, int all, ksiginfo_t *ksi)
 			}
 		}
 		sx_sunlock(&proctree_lock);
+		if (!sx_try_xlock(&pgrp->pg_killsx)) {
+			PGRP_UNLOCK(pgrp);
+			sx_xlock(&pgrp->pg_killsx);
+			sx_xunlock(&pgrp->pg_killsx);
+			goto again;
+		}
 		LIST_FOREACH(p, &pgrp->pg_members, p_pglist) {
 			killpg1_sendsig(p, false, &arg);
 		}
 		PGRP_UNLOCK(pgrp);
+		sx_xunlock(&pgrp->pg_killsx);
 	}
 	MPASS(arg.ret != 0 || arg.found || !arg.sent);
 	if (arg.ret == 0 && !arg.sent)
@@ -2094,14 +2102,18 @@ sigtd(struct proc *p, int sig, bool fast_sigblock)
 	if (curproc == p && !SIGISMEMBER(curthread->td_sigmask, sig) &&
 	    (!fast_sigblock || curthread->td_sigblock_val == 0))
 		return (curthread);
+
+	/* Find a non-stopped thread that does not mask the signal. */
 	signal_td = NULL;
 	FOREACH_THREAD_IN_PROC(p, td) {
 		if (!SIGISMEMBER(td->td_sigmask, sig) && (!fast_sigblock ||
-		    td != curthread || td->td_sigblock_val == 0)) {
+		    td != curthread || td->td_sigblock_val == 0) &&
+		    (td->td_flags & TDF_BOUNDARY) == 0) {
 			signal_td = td;
 			break;
 		}
 	}
+	/* Select random (first) thread if no better match was found. */
 	if (signal_td == NULL)
 		signal_td = FIRST_THREAD_IN_PROC(p);
 	return (signal_td);
