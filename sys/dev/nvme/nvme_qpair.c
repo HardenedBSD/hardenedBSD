@@ -46,86 +46,79 @@ static void	_nvme_qpair_submit_request(struct nvme_qpair *qpair,
 					   struct nvme_request *req);
 static void	nvme_qpair_destroy(struct nvme_qpair *qpair);
 
-struct nvme_opcode_string {
-	uint16_t	opc;
-	const char *	str;
+#define DEFAULT_INDEX	256
+#define DEFAULT_ENTRY(x)	[DEFAULT_INDEX] = x
+#define OPC_ENTRY(x)		[NVME_OPC_ ## x] = #x
+
+static const char *admin_opcode[DEFAULT_INDEX + 1] = {
+	OPC_ENTRY(DELETE_IO_SQ),
+	OPC_ENTRY(CREATE_IO_SQ),
+	OPC_ENTRY(GET_LOG_PAGE),
+	OPC_ENTRY(DELETE_IO_CQ),
+	OPC_ENTRY(CREATE_IO_CQ),
+	OPC_ENTRY(IDENTIFY),
+	OPC_ENTRY(ABORT),
+	OPC_ENTRY(SET_FEATURES),
+	OPC_ENTRY(GET_FEATURES),
+	OPC_ENTRY(ASYNC_EVENT_REQUEST),
+	OPC_ENTRY(NAMESPACE_MANAGEMENT),
+	OPC_ENTRY(FIRMWARE_ACTIVATE),
+	OPC_ENTRY(FIRMWARE_IMAGE_DOWNLOAD),
+	OPC_ENTRY(DEVICE_SELF_TEST),
+	OPC_ENTRY(NAMESPACE_ATTACHMENT),
+	OPC_ENTRY(KEEP_ALIVE),
+	OPC_ENTRY(DIRECTIVE_SEND),
+	OPC_ENTRY(DIRECTIVE_RECEIVE),
+	OPC_ENTRY(VIRTUALIZATION_MANAGEMENT),
+	OPC_ENTRY(NVME_MI_SEND),
+	OPC_ENTRY(NVME_MI_RECEIVE),
+	OPC_ENTRY(CAPACITY_MANAGEMENT),
+	OPC_ENTRY(LOCKDOWN),
+	OPC_ENTRY(DOORBELL_BUFFER_CONFIG),
+	OPC_ENTRY(FABRICS_COMMANDS),
+	OPC_ENTRY(FORMAT_NVM),
+	OPC_ENTRY(SECURITY_SEND),
+	OPC_ENTRY(SECURITY_RECEIVE),
+	OPC_ENTRY(SANITIZE),
+	OPC_ENTRY(GET_LBA_STATUS),
+	DEFAULT_ENTRY("ADMIN COMMAND"),
 };
 
-static struct nvme_opcode_string admin_opcode[] = {
-	{ NVME_OPC_DELETE_IO_SQ, "DELETE IO SQ" },
-	{ NVME_OPC_CREATE_IO_SQ, "CREATE IO SQ" },
-	{ NVME_OPC_GET_LOG_PAGE, "GET LOG PAGE" },
-	{ NVME_OPC_DELETE_IO_CQ, "DELETE IO CQ" },
-	{ NVME_OPC_CREATE_IO_CQ, "CREATE IO CQ" },
-	{ NVME_OPC_IDENTIFY, "IDENTIFY" },
-	{ NVME_OPC_ABORT, "ABORT" },
-	{ NVME_OPC_SET_FEATURES, "SET FEATURES" },
-	{ NVME_OPC_GET_FEATURES, "GET FEATURES" },
-	{ NVME_OPC_ASYNC_EVENT_REQUEST, "ASYNC EVENT REQUEST" },
-	{ NVME_OPC_NAMESPACE_MANAGEMENT, "NAMESPACE MANAGEMENT" },
-	{ NVME_OPC_FIRMWARE_ACTIVATE, "FIRMWARE ACTIVATE" },
-	{ NVME_OPC_FIRMWARE_IMAGE_DOWNLOAD, "FIRMWARE IMAGE DOWNLOAD" },
-	{ NVME_OPC_DEVICE_SELF_TEST, "DEVICE SELF-TEST" },
-	{ NVME_OPC_NAMESPACE_ATTACHMENT, "NAMESPACE ATTACHMENT" },
-	{ NVME_OPC_KEEP_ALIVE, "KEEP ALIVE" },
-	{ NVME_OPC_DIRECTIVE_SEND, "DIRECTIVE SEND" },
-	{ NVME_OPC_DIRECTIVE_RECEIVE, "DIRECTIVE RECEIVE" },
-	{ NVME_OPC_VIRTUALIZATION_MANAGEMENT, "VIRTUALIZATION MANAGEMENT" },
-	{ NVME_OPC_NVME_MI_SEND, "NVME-MI SEND" },
-	{ NVME_OPC_NVME_MI_RECEIVE, "NVME-MI RECEIVE" },
-	{ NVME_OPC_DOORBELL_BUFFER_CONFIG, "DOORBELL BUFFER CONFIG" },
-	{ NVME_OPC_FORMAT_NVM, "FORMAT NVM" },
-	{ NVME_OPC_SECURITY_SEND, "SECURITY SEND" },
-	{ NVME_OPC_SECURITY_RECEIVE, "SECURITY RECEIVE" },
-	{ NVME_OPC_SANITIZE, "SANITIZE" },
-	{ NVME_OPC_GET_LBA_STATUS, "GET LBA STATUS" },
-	{ 0xFFFF, "ADMIN COMMAND" }
+static const char *io_opcode[DEFAULT_INDEX + 1] = {
+	OPC_ENTRY(FLUSH),
+	OPC_ENTRY(WRITE),
+	OPC_ENTRY(READ),
+	OPC_ENTRY(WRITE_UNCORRECTABLE),
+	OPC_ENTRY(COMPARE),
+	OPC_ENTRY(WRITE_ZEROES),
+	OPC_ENTRY(DATASET_MANAGEMENT),
+	OPC_ENTRY(VERIFY),
+	OPC_ENTRY(RESERVATION_REGISTER),
+	OPC_ENTRY(RESERVATION_REPORT),
+	OPC_ENTRY(RESERVATION_ACQUIRE),
+	OPC_ENTRY(RESERVATION_RELEASE),
+	OPC_ENTRY(COPY),
+	DEFAULT_ENTRY("IO COMMAND"),
 };
 
-static struct nvme_opcode_string io_opcode[] = {
-	{ NVME_OPC_FLUSH, "FLUSH" },
-	{ NVME_OPC_WRITE, "WRITE" },
-	{ NVME_OPC_READ, "READ" },
-	{ NVME_OPC_WRITE_UNCORRECTABLE, "WRITE UNCORRECTABLE" },
-	{ NVME_OPC_COMPARE, "COMPARE" },
-	{ NVME_OPC_WRITE_ZEROES, "WRITE ZEROES" },
-	{ NVME_OPC_DATASET_MANAGEMENT, "DATASET MANAGEMENT" },
-	{ NVME_OPC_VERIFY, "VERIFY" },
-	{ NVME_OPC_RESERVATION_REGISTER, "RESERVATION REGISTER" },
-	{ NVME_OPC_RESERVATION_REPORT, "RESERVATION REPORT" },
-	{ NVME_OPC_RESERVATION_ACQUIRE, "RESERVATION ACQUIRE" },
-	{ NVME_OPC_RESERVATION_RELEASE, "RESERVATION RELEASE" },
-	{ 0xFFFF, "IO COMMAND" }
-};
+static const char *
+get_opcode_string(const char *op[DEFAULT_INDEX + 1], uint16_t opc)
+{
+	const char *nm = opc < DEFAULT_INDEX ? op[opc] : op[DEFAULT_INDEX];
+
+	return (nm != NULL ? nm : op[DEFAULT_INDEX]);
+}
 
 static const char *
 get_admin_opcode_string(uint16_t opc)
 {
-	struct nvme_opcode_string *entry;
-
-	entry = admin_opcode;
-
-	while (entry->opc != 0xFFFF) {
-		if (entry->opc == opc)
-			return (entry->str);
-		entry++;
-	}
-	return (entry->str);
+	return (get_opcode_string(admin_opcode, opc));
 }
 
 static const char *
 get_io_opcode_string(uint16_t opc)
 {
-	struct nvme_opcode_string *entry;
-
-	entry = io_opcode;
-
-	while (entry->opc != 0xFFFF) {
-		if (entry->opc == opc)
-			return (entry->str);
-		entry++;
-	}
-	return (entry->str);
+	return (get_opcode_string(io_opcode, opc));
 }
 
 static void
@@ -174,7 +167,7 @@ nvme_io_qpair_print_command(struct nvme_qpair *qpair,
 	}
 }
 
-static void
+void
 nvme_qpair_print_command(struct nvme_qpair *qpair, struct nvme_command *cmd)
 {
 	if (qpair->id == 0)
@@ -341,21 +334,22 @@ get_status_string(uint16_t sct, uint16_t sc)
 	return (entry->str);
 }
 
-static void
+void
 nvme_qpair_print_completion(struct nvme_qpair *qpair,
     struct nvme_completion *cpl)
 {
-	uint8_t sct, sc, crd, m, dnr;
+	uint8_t sct, sc, crd, m, dnr, p;
 
 	sct = NVME_STATUS_GET_SCT(cpl->status);
 	sc = NVME_STATUS_GET_SC(cpl->status);
 	crd = NVME_STATUS_GET_CRD(cpl->status);
 	m = NVME_STATUS_GET_M(cpl->status);
 	dnr = NVME_STATUS_GET_DNR(cpl->status);
+	p = NVME_STATUS_GET_P(cpl->status);
 
-	nvme_printf(qpair->ctrlr, "%s (%02x/%02x) crd:%x m:%x dnr:%x "
+	nvme_printf(qpair->ctrlr, "%s (%02x/%02x) crd:%x m:%x dnr:%x p:%d "
 	    "sqid:%d cid:%d cdw0:%x\n",
-	    get_status_string(sct, sc), sct, sc, crd, m, dnr,
+	    get_status_string(sct, sc), sct, sc, crd, m, dnr, p,
 	    cpl->sqid, cpl->cid, cpl->cdw0);
 }
 
@@ -505,6 +499,9 @@ nvme_qpair_manual_complete_tracker(
 	cpl.status |= (sct & NVME_STATUS_SCT_MASK) << NVME_STATUS_SCT_SHIFT;
 	cpl.status |= (sc & NVME_STATUS_SC_MASK) << NVME_STATUS_SC_SHIFT;
 	cpl.status |= (dnr & NVME_STATUS_DNR_MASK) << NVME_STATUS_DNR_SHIFT;
+	/* M=0 : this is artificial so no data in error log page */
+	/* CRD=0 : this is artificial and no delayed retry support anyway */
+	/* P=0 : phase not checked */
 	nvme_qpair_complete_tracker(tr, &cpl, print_on_error);
 }
 
@@ -654,8 +651,8 @@ nvme_qpair_process_completions(struct nvme_qpair *qpair)
 			nvme_printf(qpair->ctrlr,
 			    "cpl (cid = %u) does not map to outstanding cmd\n",
 				cpl.cid);
-			/* nvme_dump_completion expects device endianess */
-			nvme_dump_completion(&qpair->cpl[qpair->cq_head]);
+			nvme_qpair_print_completion(qpair,
+			    &qpair->cpl[qpair->cq_head]);
 			KASSERT(0, ("received completion for unknown cmd"));
 		}
 
@@ -1246,19 +1243,25 @@ nvme_admin_qpair_enable(struct nvme_qpair *qpair)
 {
 	struct nvme_tracker		*tr;
 	struct nvme_tracker		*tr_temp;
+	bool				rpt;
 
 	/*
 	 * Manually abort each outstanding admin command.  Do not retry
-	 *  admin commands found here, since they will be left over from
-	 *  a controller reset and its likely the context in which the
-	 *  command was issued no longer applies.
+	 * admin commands found here, since they will be left over from
+	 * a controller reset and its likely the context in which the
+	 * command was issued no longer applies.
 	 */
-	TAILQ_FOREACH_SAFE(tr, &qpair->outstanding_tr, tailq, tr_temp) {
+	rpt = !TAILQ_EMPTY(&qpair->outstanding_tr);
+	if (rpt)
 		nvme_printf(qpair->ctrlr,
 		    "aborting outstanding admin command\n");
+	TAILQ_FOREACH_SAFE(tr, &qpair->outstanding_tr, tailq, tr_temp) {
 		nvme_qpair_manual_complete_tracker(tr, NVME_SCT_GENERIC,
 		    NVME_SC_ABORTED_BY_REQUEST, DO_NOT_RETRY, ERROR_PRINT_ALL);
 	}
+	if (rpt)
+		nvme_printf(qpair->ctrlr,
+		    "done aborting outstanding admin\n");
 
 	mtx_lock(&qpair->lock);
 	nvme_qpair_enable(qpair);
@@ -1272,17 +1275,22 @@ nvme_io_qpair_enable(struct nvme_qpair *qpair)
 	struct nvme_tracker		*tr;
 	struct nvme_tracker		*tr_temp;
 	struct nvme_request		*req;
+	bool				report;
 
 	/*
 	 * Manually abort each outstanding I/O.  This normally results in a
-	 *  retry, unless the retry count on the associated request has
-	 *  reached its limit.
+	 * retry, unless the retry count on the associated request has
+	 * reached its limit.
 	 */
-	TAILQ_FOREACH_SAFE(tr, &qpair->outstanding_tr, tailq, tr_temp) {
+	report = !TAILQ_EMPTY(&qpair->outstanding_tr);
+	if (report)
 		nvme_printf(qpair->ctrlr, "aborting outstanding i/o\n");
+	TAILQ_FOREACH_SAFE(tr, &qpair->outstanding_tr, tailq, tr_temp) {
 		nvme_qpair_manual_complete_tracker(tr, NVME_SCT_GENERIC,
 		    NVME_SC_ABORTED_BY_REQUEST, 0, ERROR_PRINT_NO_RETRY);
 	}
+	if (report)
+		nvme_printf(qpair->ctrlr, "done aborting outstanding i/o\n");
 
 	mtx_lock(&qpair->lock);
 
@@ -1291,13 +1299,17 @@ nvme_io_qpair_enable(struct nvme_qpair *qpair)
 	STAILQ_INIT(&temp);
 	STAILQ_SWAP(&qpair->queued_req, &temp, nvme_request);
 
+	report = !STAILQ_EMPTY(&temp);
+	if (report)
+		nvme_printf(qpair->ctrlr, "resubmitting queued i/o\n");
 	while (!STAILQ_EMPTY(&temp)) {
 		req = STAILQ_FIRST(&temp);
 		STAILQ_REMOVE_HEAD(&temp, stailq);
-		nvme_printf(qpair->ctrlr, "resubmitting queued i/o\n");
 		nvme_qpair_print_command(qpair, &req->cmd);
 		_nvme_qpair_submit_request(qpair, req);
 	}
+	if (report)
+		nvme_printf(qpair->ctrlr, "done resubmitting i/o\n");
 
 	mtx_unlock(&qpair->lock);
 }
