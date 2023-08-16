@@ -40,6 +40,8 @@
 
 #define ARCHLEVEL_ENV	"ARCHLEVEL"
 
+extern char **environ;
+
 static volatile int amd64_archlevel = X86_64_UNDEFINED;
 
 static const struct archlevel {

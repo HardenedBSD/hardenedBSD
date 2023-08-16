@@ -114,8 +114,9 @@ static void	ffs_blkfree_cg(struct ufsmount *, struct fs *,
 		    struct vnode *, ufs2_daddr_t, long, ino_t,
 		    struct workhead *);
 #ifdef INVARIANTS
-static int	ffs_checkblk(struct inode *, ufs2_daddr_t, long);
+static int	ffs_checkfreeblk(struct inode *, ufs2_daddr_t, long);
 #endif
+static void	ffs_checkcgintegrity(struct fs *, uint64_t, int);
 static ufs2_daddr_t ffs_clusteralloc(struct inode *, uint64_t, ufs2_daddr_t,
 				  int);
 static ino_t	ffs_dirpref(struct inode *);
@@ -600,7 +601,7 @@ ffs_reallocblks_ufs1(
 	end_lbn = start_lbn + len - 1;
 #ifdef INVARIANTS
 	for (i = 0; i < len; i++)
-		if (!ffs_checkblk(ip,
+		if (!ffs_checkfreeblk(ip,
 		   dbtofsb(fs, buflist->bs_children[i]->b_blkno), fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 1");
 	for (i = 1; i < len; i++)
@@ -721,7 +722,7 @@ ffs_reallocblks_ufs1(
 			soff = -i;
 		}
 #ifdef INVARIANTS
-		if (!ffs_checkblk(ip,
+		if (!ffs_checkfreeblk(ip,
 		   dbtofsb(fs, buflist->bs_children[i]->b_blkno), fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 2");
 		if (dbtofsb(fs, buflist->bs_children[i]->b_blkno) != *bap)
@@ -804,7 +805,8 @@ ffs_reallocblks_ufs1(
 			    NOTRIM_KEY : SINGLETON_KEY);
 		bp->b_blkno = fsbtodb(fs, blkno);
 #ifdef INVARIANTS
-		if (!ffs_checkblk(ip, dbtofsb(fs, bp->b_blkno), fs->fs_bsize))
+		if (!ffs_checkfreeblk(ip, dbtofsb(fs, bp->b_blkno),
+		    fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 3");
 #endif
 #ifdef DIAGNOSTIC
@@ -865,7 +867,7 @@ ffs_reallocblks_ufs2(
 	end_lbn = start_lbn + len - 1;
 #ifdef INVARIANTS
 	for (i = 0; i < len; i++)
-		if (!ffs_checkblk(ip,
+		if (!ffs_checkfreeblk(ip,
 		   dbtofsb(fs, buflist->bs_children[i]->b_blkno), fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 1");
 	for (i = 1; i < len; i++)
@@ -985,7 +987,7 @@ ffs_reallocblks_ufs2(
 			soff = -i;
 		}
 #ifdef INVARIANTS
-		if (!ffs_checkblk(ip,
+		if (!ffs_checkfreeblk(ip,
 		   dbtofsb(fs, buflist->bs_children[i]->b_blkno), fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 2");
 		if (dbtofsb(fs, buflist->bs_children[i]->b_blkno) != *bap)
@@ -1068,7 +1070,8 @@ ffs_reallocblks_ufs2(
 			    NOTRIM_KEY : SINGLETON_KEY);
 		bp->b_blkno = fsbtodb(fs, blkno);
 #ifdef INVARIANTS
-		if (!ffs_checkblk(ip, dbtofsb(fs, bp->b_blkno), fs->fs_bsize))
+		if (!ffs_checkfreeblk(ip, dbtofsb(fs, bp->b_blkno),
+		    fs->fs_bsize))
 			panic("ffs_reallocblks: unallocated block 3");
 #endif
 #ifdef DIAGNOSTIC
@@ -1720,8 +1723,10 @@ ffs_fragextend(struct inode *ip,
 		return (0);
 	}
 	UFS_UNLOCK(ump);
-	if ((error = ffs_getcg(fs, ump->um_devvp, cg, 0, &bp, &cgp)) != 0)
+	if ((error = ffs_getcg(fs, ump->um_devvp, cg, 0, &bp, &cgp)) != 0) {
+		ffs_checkcgintegrity(fs, cg, error);
 		goto fail;
+	}
 	bno = dtogd(fs, bprev);
 	blksfree = cg_blksfree(cgp);
 	for (i = numfrags(fs, osize); i < frags; i++)
@@ -1791,8 +1796,10 @@ ffs_alloccg(struct inode *ip,
 		return (0);
 	UFS_UNLOCK(ump);
 	if ((error = ffs_getcg(fs, ump->um_devvp, cg, 0, &bp, &cgp)) != 0 ||
-	   (cgp->cg_cs.cs_nbfree == 0 && size == fs->fs_bsize))
+	   (cgp->cg_cs.cs_nbfree == 0 && size == fs->fs_bsize)) {
+		ffs_checkcgintegrity(fs, cg, error);
 		goto fail;
+	}
 	if (size == fs->fs_bsize) {
 		UFS_LOCK(ump);
 		blkno = ffs_alloccgblk(ip, bp, bpref, rsize);
@@ -1969,6 +1976,7 @@ ffs_clusteralloc(struct inode *ip,
 		return (0);
 	UFS_UNLOCK(ump);
 	if ((error = ffs_getcg(fs, ump->um_devvp, cg, 0, &bp, &cgp)) != 0) {
+		ffs_checkcgintegrity(fs, cg, error);
 		UFS_LOCK(ump);
 		return (0);
 	}
@@ -2113,6 +2121,7 @@ check_nifree:
 		return (0);
 	UFS_UNLOCK(ump);
 	if ((error = ffs_getcg(fs, ump->um_devvp, cg, 0, &bp, &cgp)) != 0) {
+		ffs_checkcgintegrity(fs, cg, error);
 		UFS_LOCK(ump);
 		return (0);
 	}
@@ -2285,7 +2294,7 @@ ffs_blkfree_cg(struct ufsmount *ump,
 		printf("dev=%s, bno = %jd, bsize = %ld, size = %ld, fs = %s\n",
 		    devtoname(dev), (intmax_t)bno, (long)fs->fs_bsize,
 		    size, fs->fs_fsmnt);
-		panic("ffs_blkfree_cg: bad size");
+		panic("ffs_blkfree_cg: invalid size");
 	}
 #endif
 	if ((uint64_t)bno >= fs->fs_size) {
@@ -2748,11 +2757,11 @@ ffs_blkfree(struct ufsmount *ump,
 
 #ifdef INVARIANTS
 /*
- * Verify allocation of a block or fragment. Returns true if block or
- * fragment is allocated, false if it is free.
+ * Verify allocation of a block or fragment.
+ * Return 1 if block or fragment is free.
  */
 static int
-ffs_checkblk(struct inode *ip,
+ffs_checkfreeblk(struct inode *ip,
 	ufs2_daddr_t bno,
 	long size)
 {
@@ -2760,34 +2769,33 @@ ffs_checkblk(struct inode *ip,
 	struct cg *cgp;
 	struct buf *bp;
 	ufs1_daddr_t cgbno;
-	int i, error, frags, free;
+	int i, frags, blkalloced;
 	uint8_t *blksfree;
 
 	fs = ITOFS(ip);
 	if ((uint64_t)size > fs->fs_bsize || fragoff(fs, size) != 0) {
 		printf("bsize = %ld, size = %ld, fs = %s\n",
 		    (long)fs->fs_bsize, size, fs->fs_fsmnt);
-		panic("ffs_checkblk: bad size");
+		panic("ffs_checkfreeblk: bad size");
 	}
 	if ((uint64_t)bno >= fs->fs_size)
-		panic("ffs_checkblk: bad block %jd", (intmax_t)bno);
-	error = ffs_getcg(fs, ITODEVVP(ip), dtog(fs, bno), 0, &bp, &cgp);
-	if (error)
-		panic("ffs_checkblk: cylinder group read failed");
+		panic("ffs_checkfreeblk: too big block %jd", (intmax_t)bno);
+	if (ffs_getcg(fs, ITODEVVP(ip), dtog(fs, bno), 0, &bp, &cgp) != 0)
+		return (0);
 	blksfree = cg_blksfree(cgp);
 	cgbno = dtogd(fs, bno);
 	if (size == fs->fs_bsize) {
-		free = ffs_isblock(fs, blksfree, fragstoblks(fs, cgbno));
+		blkalloced = ffs_isblock(fs, blksfree, fragstoblks(fs, cgbno));
 	} else {
 		frags = numfrags(fs, size);
-		for (free = 0, i = 0; i < frags; i++)
+		for (blkalloced = 0, i = 0; i < frags; i++)
 			if (isset(blksfree, cgbno + i))
-				free++;
-		if (free != 0 && free != frags)
-			panic("ffs_checkblk: partially free fragment");
+				blkalloced++;
+		if (blkalloced != 0 && blkalloced != frags)
+			panic("ffs_checkfreeblk: partially free fragment");
 	}
 	brelse(bp);
-	return (!free);
+	return (blkalloced == 0);
 }
 #endif /* INVARIANTS */
 
@@ -3040,7 +3048,7 @@ ffs_getcg(struct fs *fs,
 		bp->b_flags &= ~B_CKHASH;
 		bp->b_flags |= B_INVAL | B_NOCACHE;
 		brelse(bp);
-		return (EIO);
+		return (EINTEGRITY);
 	}
 	if (!cg_chkmagic(cgp) || cgp->cg_cgx != cg) {
 		if (ppsratecheck(&VFSTOUFS(mp)->um_last_integritymsg,
@@ -3060,7 +3068,7 @@ ffs_getcg(struct fs *fs,
 		bp->b_flags &= ~B_CKHASH;
 		bp->b_flags |= B_INVAL | B_NOCACHE;
 		brelse(bp);
-		return (EIO);
+		return (EINTEGRITY);
 	}
 	bp->b_flags &= ~B_CKHASH;
 	bp->b_xflags |= BX_BKGRDWRITE;
@@ -3092,6 +3100,38 @@ ffs_ckhash_cg(struct buf *bp)
 	cgp->cg_ckhash = 0;
 	bp->b_ckhash = calculate_crc32c(~0L, bp->b_data, bp->b_bcount);
 	cgp->cg_ckhash = ckhash;
+}
+
+/*
+ * Called when a cylinder group read has failed. If an integrity check
+ * is the cause of failure then the cylinder group will not be usable
+ * until the filesystem has been unmounted and fsck has been run to
+ * repair it. To avoid future attempts to allocate resources from the
+ * cylinder group, its available resources are set to zero in the
+ * superblock summary information. Since it will appear to have no
+ * resources available, no further calls will be made to allocate
+ * resources from it. When resources are freed to the cylinder group
+ * the resource free routines will find the cylinder group unusable so
+ * the resource will simply be discarded and thus will not show up in
+ * the superblock summary information until they are recovered by fsck.
+ */
+static void
+ffs_checkcgintegrity(struct fs *fs,
+	uint64_t cg,
+	int error)
+{
+
+	if (error != EINTEGRITY)
+		return;
+	fs->fs_cstotal.cs_nffree -= fs->fs_cs(fs, cg).cs_nffree;
+	fs->fs_cs(fs, cg).cs_nffree = 0;
+	fs->fs_cstotal.cs_nbfree -= fs->fs_cs(fs, cg).cs_nbfree;
+	fs->fs_cs(fs, cg).cs_nbfree = 0;
+	fs->fs_cstotal.cs_nifree -= fs->fs_cs(fs, cg).cs_nifree;
+	fs->fs_cs(fs, cg).cs_nifree = 0;
+	fs->fs_maxcluster[cg] = 0;
+	fs->fs_flags |= FS_NEEDSFSCK;
+	fs->fs_fmod = 1;
 }
 
 /*

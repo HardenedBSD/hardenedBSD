@@ -183,12 +183,11 @@ vm_map_entry_system_wired_count(vm_map_entry_t entry)
 
 /*
  *	A map is a set of map entries.  These map entries are
- *	organized as a threaded binary search tree.  Both structures
- *	are ordered based upon the start and end addresses contained
+ *	organized as a threaded binary search tree.  The tree is
+ *	ordered based upon the start and end addresses contained
  *	within each map entry.  The largest gap between an entry in a
  *	subtree and one of its neighbors is saved in the max_free
- *	field, and that field is updated when the tree is
- *	restructured.
+ *	field, and that field is updated when the tree is restructured.
  *
  *	Sleator and Tarjan's top-down splay algorithm is employed to
  *	control height imbalance in the binary search tree.
@@ -526,9 +525,15 @@ vm_map_entry_succ(vm_map_entry_t entry)
 	for ((it) = vm_map_entry_first(map);	\
 	    (it) != &(map)->header;		\
 	    (it) = vm_map_entry_succ(it))
-int vm_map_protect (struct proc *, vm_map_t, vm_offset_t, vm_offset_t, vm_prot_t, boolean_t);
+
+#define	VM_MAP_PROTECT_SET_PROT		0x0001
+#define	VM_MAP_PROTECT_SET_MAXPROT	0x0002
+#define	VM_MAP_PROTECT_GROWSDOWN	0x0004
+
+int vm_map_protect(struct proc *p, vm_map_t map, vm_offset_t start, vm_offset_t end,
+    vm_prot_t new_prot, vm_prot_t new_maxprot, int flags);
 int vm_map_remove (vm_map_t, vm_offset_t, vm_offset_t);
-void vm_map_try_merge_entries(vm_map_t map, vm_map_entry_t prev,
+vm_map_entry_t vm_map_try_merge_entries(vm_map_t map, vm_map_entry_t prev,
     vm_map_entry_t entry);
 void vm_map_startup (void);
 int vm_map_submap (vm_map_t, vm_offset_t, vm_offset_t, vm_map_t);

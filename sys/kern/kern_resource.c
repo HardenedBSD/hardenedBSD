@@ -789,7 +789,7 @@ kern_proc_setrlimit(struct thread *td, struct proc *p, u_int which,
 			addr = trunc_page(addr);
 			size = round_page(size);
 			(void)vm_map_protect(p, &p->p_vmspace->vm_map,
-			    addr, addr + size, prot, FALSE);
+			    addr, addr + size, prot, prot, 0);
 		}
 	}
 
