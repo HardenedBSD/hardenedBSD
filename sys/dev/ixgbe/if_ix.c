@@ -76,6 +76,7 @@ static pci_vendor_info_t ixgbe_vendor_info_array[] =
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_XAUI_LOM,  "Intel(R) X520 82599 (XAUI/BX4)"),
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_CX4,  "Intel(R) X520 82599 (Dual CX4)"),
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_T3_LOM,  "Intel(R) X520-T 82599 LOM"),
+  PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_LS,  "Intel(R) X520 82599 LS"),
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_COMBO_BACKPLANE,  "Intel(R) X520 82599 (Combined Backplane)"),
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_BACKPLANE_FCOE,  "Intel(R) X520 82599 (Backplane w/FCoE)"),
   PVID(IXGBE_INTEL_VENDOR_ID, IXGBE_DEV_ID_82599_SFP_SF2,  "Intel(R) X520 82599 (Dual SFP+)"),
@@ -917,6 +918,15 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 	if (ixgbe_init_shared_code(hw) != 0) {
 		device_printf(dev, "Unable to initialize the shared code\n");
 		error = ENXIO;
+		goto err_pci;
+	}
+
+	if (hw->mac.ops.fw_recovery_mode && hw->mac.ops.fw_recovery_mode(hw)) {
+		device_printf(dev, "Firmware recovery mode detected. Limiting "
+		    "functionality.\nRefer to the Intel(R) Ethernet Adapters "
+		    "and Devices User Guide for details on firmware recovery "
+		    "mode.");
+		error = ENOSYS;
 		goto err_pci;
 	}
 
