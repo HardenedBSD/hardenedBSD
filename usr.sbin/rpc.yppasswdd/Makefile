@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 # $FreeBSD$
+=======
+>>>>>>> internal/hardened/current/master
 
 RPCDIR=	${DESTDIR}/usr/include/rpcsvc
 

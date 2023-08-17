@@ -1,3 +1,2 @@
-# $FreeBSD$
 #
 root:*:0:0::0:0:Root &:/root:/bin/csh

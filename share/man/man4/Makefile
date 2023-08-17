@@ -1,5 +1,4 @@
 #	@(#)Makefile	8.1 (Berkeley) 6/18/93
-# $FreeBSD$
 
 .include <src.opts.mk>
 
@@ -573,6 +572,7 @@ MAN=	aac.4 \
 	virtio_balloon.4 \
 	virtio_blk.4 \
 	virtio_console.4 \
+	virtio_gpu.4 \
 	virtio_random.4 \
 	virtio_scsi.4 \
 	${_vmci.4} \

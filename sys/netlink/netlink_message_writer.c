@@ -29,7 +29,6 @@
 #include "opt_pax.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>

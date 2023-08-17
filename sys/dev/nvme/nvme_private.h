@@ -24,8 +24,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #ifndef __NVME_PRIVATE_H__
@@ -203,7 +201,7 @@ struct nvme_qpair {
 
 	struct nvme_tracker	**act_tr;
 
-	struct mtx		lock __aligned(CACHE_LINE_SIZE);
+	struct mtx_padalign	lock;
 
 } __aligned(CACHE_LINE_SIZE);
 

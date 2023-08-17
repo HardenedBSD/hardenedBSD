@@ -1,4 +1,3 @@
-# $FreeBSD$
 
 MK_BIND_NOW=	no
 

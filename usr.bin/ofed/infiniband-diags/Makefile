@@ -1,4 +1,3 @@
-# $FreeBSD$
 
 SUBDIR= \
 dump_fts \

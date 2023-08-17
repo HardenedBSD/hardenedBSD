@@ -27,8 +27,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include "opt_inet6.h"
 
 #include <sys/param.h>
@@ -1700,6 +1698,39 @@ _Static_assert(sizeof(struct bintime) >= sizeof(struct timespec),
 #endif /* __i386__ || (__amd64__ && COMPAT_LINUX32) */
 
 static int
+recvmsg_scm_sol_socket(struct thread *td, l_int msg_type, l_int lmsg_type,
+    l_uint flags, socklen_t *datalen, void **data, void **udata)
+{
+	int error;
+
+	error = 0;
+	switch (msg_type) {
+	case SCM_RIGHTS:
+		error = recvmsg_scm_rights(td, flags, datalen,
+		    data, udata);
+		break;
+	case SCM_CREDS:
+		error = recvmsg_scm_creds(datalen, data, udata);
+		break;
+	case SCM_CREDS2:
+		error = recvmsg_scm_creds2(datalen, data, udata);
+		break;
+	case SCM_TIMESTAMP:
+#if defined(__i386__) || (defined(__amd64__) && defined(COMPAT_LINUX32))
+		error = recvmsg_scm_timestamp(lmsg_type, datalen,
+		    data, udata);
+#endif
+		break;
+	case SCM_BINTIME:
+		error = recvmsg_scm_timestampns(lmsg_type, datalen,
+		    data, udata);
+		break;
+	}
+
+	return (error);
+}
+
+static int
 recvmsg_scm_ip_origdstaddr(socklen_t *datalen, void **data, void **udata)
 {
 	struct l_sockaddr *lsa;
@@ -1710,6 +1741,23 @@ recvmsg_scm_ip_origdstaddr(socklen_t *datalen, void **data, void **udata)
 		*data = *udata = lsa;
 		*datalen = sizeof(*lsa);
 	}
+	return (error);
+}
+
+static int
+recvmsg_scm_ipproto_ip(l_int msg_type, l_int lmsg_type, socklen_t *datalen,
+    void **data, void **udata)
+{
+	int error;
+
+	error = 0;
+	switch (msg_type) {
+	case IP_ORIGDSTADDR:
+		error = recvmsg_scm_ip_origdstaddr(datalen, data,
+		    udata);
+		break;
+	}
+
 	return (error);
 }
 
@@ -1728,7 +1776,7 @@ linux_recvmsg_common(struct thread *td, l_int s, struct l_msghdr *msghdr,
 	struct sockaddr *sa;
 	caddr_t outbuf;
 	void *data, *udata;
-	int error;
+	int error, skiped;
 
 	error = copyin(msghdr, &l_msghdr, sizeof(l_msghdr));
 	if (error != 0)
@@ -1785,8 +1833,8 @@ linux_recvmsg_common(struct thread *td, l_int s, struct l_msghdr *msghdr,
 	if (error != 0)
 		goto bad;
 
+	skiped = outlen = 0;
 	maxlen = l_msghdr.msg_controllen;
-	l_msghdr.msg_controllen = 0;
 	if (control == NULL)
 		goto out;
 
@@ -1794,65 +1842,42 @@ linux_recvmsg_common(struct thread *td, l_int s, struct l_msghdr *msghdr,
 	msg->msg_control = mtod(control, struct cmsghdr *);
 	msg->msg_controllen = control->m_len;
 	outbuf = PTRIN(l_msghdr.msg_control);
-	outlen = 0;
 	for (m = control; m != NULL; m = m->m_next) {
 		cm = mtod(m, struct cmsghdr *);
 		lcm->cmsg_type = bsd_to_linux_cmsg_type(p, cm->cmsg_type,
 		    cm->cmsg_level);
 		lcm->cmsg_level = bsd_to_linux_sockopt_level(cm->cmsg_level);
 
+		if (lcm->cmsg_type == -1 ||
+		    cm->cmsg_level == -1) {
+			LINUX_RATELIMIT_MSG_OPT2(
+			    "unsupported recvmsg cmsg level %d type %d",
+			    cm->cmsg_level, cm->cmsg_type);
+			/* Skip unsupported messages */
+			skiped++;
+			continue;
+		}
 		data = CMSG_DATA(cm);
 		datalen = (caddr_t)cm + cm->cmsg_len - (caddr_t)data;
 		udata = NULL;
 		error = 0;
 
-		/* Process non SOL_SOCKET types. */
-		if (cm->cmsg_level == IPPROTO_IP &&
-		    lcm->cmsg_type == LINUX_IP_ORIGDSTADDR) {
-			error = recvmsg_scm_ip_origdstaddr(&datalen, &data, &udata);
-			goto cont;
-		}
+		switch (cm->cmsg_level) {
+		case IPPROTO_IP:
+			error = recvmsg_scm_ipproto_ip(cm->cmsg_type,
+			    lcm->cmsg_type, &datalen, &data, &udata);
+ 			break;
+		case SOL_SOCKET:
+			error = recvmsg_scm_sol_socket(td, cm->cmsg_type,
+			    lcm->cmsg_type, flags, &datalen, &data, &udata);
+ 			break;
+ 		}
 
-		if (lcm->cmsg_type == -1 ||
-		    cm->cmsg_level != SOL_SOCKET) {
-			LINUX_RATELIMIT_MSG_OPT2(
-			    "unsupported recvmsg cmsg level %d type %d",
-			    cm->cmsg_level, cm->cmsg_type);
-			error = EINVAL;
-			goto bad;
-		}
-
-
-		switch (cm->cmsg_type) {
-		case SCM_RIGHTS:
-			error = recvmsg_scm_rights(td, flags,
-			    &datalen, &data, &udata);
-			break;
-		case SCM_CREDS:
-			error = recvmsg_scm_creds(&datalen,
-			    &data, &udata);
-			break;
-		case SCM_CREDS2:
-			error = recvmsg_scm_creds2(&datalen,
-			    &data, &udata);
-			break;
-		case SCM_TIMESTAMP:
-#if defined(__i386__) || (defined(__amd64__) && defined(COMPAT_LINUX32))
-			error = recvmsg_scm_timestamp(lcm->cmsg_type,
-			    &datalen, &data, &udata);
-#endif
-			break;
-		case SCM_BINTIME:
-			error = recvmsg_scm_timestampns(lcm->cmsg_type,
-			    &datalen, &data, &udata);
-			break;
-		}
-
-cont:
+		/* The recvmsg_scm_ is responsible to free udata on error. */
 		if (error != 0)
 			goto bad;
 
-		if (outlen + LINUX_CMSG_SPACE(datalen) > maxlen) {
+		if (outlen + LINUX_CMSG_LEN(datalen) > maxlen) {
 			if (outlen == 0) {
 				error = EMSGSIZE;
 				goto err;
@@ -1867,10 +1892,9 @@ cont:
 		lcm->cmsg_len = LINUX_CMSG_LEN(datalen);
 		error = copyout(lcm, outbuf, L_CMSG_HDRSZ);
 		if (error == 0) {
-			outbuf += L_CMSG_HDRSZ;
-			error = copyout(data, outbuf, datalen);
+			error = copyout(data, LINUX_CMSG_DATA(outbuf), datalen);
 			if (error == 0) {
-				outbuf += LINUX_CMSG_ALIGN(datalen);
+				outbuf += LINUX_CMSG_SPACE(datalen);
 				outlen += LINUX_CMSG_SPACE(datalen);
 			}
 		}
@@ -1879,9 +1903,13 @@ err:
 		if (error != 0)
 			goto bad;
 	}
-	l_msghdr.msg_controllen = outlen;
+	if (outlen == 0 && skiped > 0) {
+		error = EINVAL;
+		goto bad;
+	}
 
 out:
+	l_msghdr.msg_controllen = outlen;
 	error = copyout(&l_msghdr, msghdr, sizeof(l_msghdr));
 
 bad:

@@ -24,13 +24,9 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/types.h>
 #ifndef WITHOUT_CAPSICUM
 #include <sys/capsicum.h>
@@ -107,6 +103,7 @@ __FBSDID("$FreeBSD$");
 #ifdef BHYVE_SNAPSHOT
 #include "snapshot.h"
 #endif
+#include "tpm_device.h"
 #include "xmsr.h"
 #include "spinup_ap.h"
 #include "rtc.h"
@@ -1476,6 +1473,10 @@ main(int argc, char *argv[])
 	 */
 	if (init_pci(ctx) != 0) {
 		perror("device emulation initialization error");
+		exit(4);
+	}
+	if (init_tpm(ctx) != 0) {
+		fprintf(stderr, "Failed to init TPM device");
 		exit(4);
 	}
 

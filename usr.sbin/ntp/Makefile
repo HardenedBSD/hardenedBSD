@@ -1,5 +1,4 @@
 # Makefile for ntpd.
-# $FreeBSD$
 
 .include <src.opts.mk>
 
