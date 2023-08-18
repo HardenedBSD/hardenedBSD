@@ -1258,9 +1258,9 @@ main(int argc, char *argv[])
 	progname = basename(argv[0]);
 
 #ifdef BHYVE_SNAPSHOT
-	optstr = "aehuwxACDHIPSWYk:o:p:G:c:s:m:l:K:U:r:";
+	optstr = "aehuwxACDHIPSWYk:f:o:p:G:c:s:m:l:K:U:r:";
 #else
-	optstr = "aehuwxACDHIPSWYk:o:p:G:c:s:m:l:K:U:";
+	optstr = "aehuwxACDHIPSWYk:f:o:p:G:c:s:m:l:K:U:";
 #endif
 	while ((c = getopt(argc, argv, optstr)) != -1) {
 		switch (c) {
@@ -1287,6 +1287,11 @@ main(int argc, char *argv[])
 			break;
 		case 'C':
 			set_config_bool("memory.guest_in_core", true);
+			break;
+		case 'f':
+			if (qemu_fwcfg_parse_cmdline_arg(optarg) != 0) {
+			    errx(EX_USAGE, "invalid fwcfg item '%s'", optarg);
+			}
 			break;
 		case 'G':
 			parse_gdb_options(optarg);
@@ -1520,7 +1525,7 @@ main(int argc, char *argv[])
 #ifdef BHYVE_SNAPSHOT
 	if (restore_file != NULL) {
 		fprintf(stdout, "Pausing pci devs...\r\n");
-		if (vm_pause_user_devs() != 0) {
+		if (vm_pause_devices() != 0) {
 			fprintf(stderr, "Failed to pause PCI device state.\n");
 			exit(1);
 		}
@@ -1532,7 +1537,7 @@ main(int argc, char *argv[])
 		}
 
 		fprintf(stdout, "Restoring pci devs...\r\n");
-		if (vm_restore_user_devs(ctx, &rstate) != 0) {
+		if (vm_restore_devices(ctx, &rstate) != 0) {
 			fprintf(stderr, "Failed to restore PCI device state.\n");
 			exit(1);
 		}
@@ -1544,7 +1549,7 @@ main(int argc, char *argv[])
 		}
 
 		fprintf(stdout, "Resuming pci devs...\r\n");
-		if (vm_resume_user_devs() != 0) {
+		if (vm_resume_devices() != 0) {
 			fprintf(stderr, "Failed to resume PCI device state.\n");
 			exit(1);
 		}
