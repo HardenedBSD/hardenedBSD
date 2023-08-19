@@ -132,6 +132,7 @@ SUBDIR=	\
 	${_glxiic} \
 	${_glxsb} \
 	gpio \
+	${_gve} \
 	hid \
 	hifn \
 	${_hpt27xx} \
@@ -532,6 +533,7 @@ SUBDIR+=	linux_common
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64" || \
     ${MACHINE_CPUARCH} == "i386"
 _ena=		ena
+_gve=		gve
 .if ${MK_OFED} != "no" || defined(ALL_MODULES)
 _ibcore=	ibcore
 _ipoib=		ipoib
@@ -554,6 +556,7 @@ _mthca=		mthca
 _mlx4ib=	mlx4ib
 _mlx5ib=	mlx5ib
 .endif
+
 _ossl=		ossl
 _rtw88=		rtw88
 .if ${MK_SOURCELESS_UCODE} != "no"
