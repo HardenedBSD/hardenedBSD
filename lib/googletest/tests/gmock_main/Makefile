@@ -34,6 +34,7 @@ CXXFLAGS.clang+=	-Wno-error=inconsistent-missing-override
 CXXFLAGS.clang+=	-Wno-error=missing-variable-declarations
 CXXFLAGS.clang+=	-Wno-error=sign-compare
 CXXFLAGS.clang+=	-Wno-error=unused-parameter
+MK_WERROR.gcc=		no
 
 MK_CFI=		no
 

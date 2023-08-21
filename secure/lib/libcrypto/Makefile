@@ -243,7 +243,7 @@ SRCS+=	eng_rdrand.c eng_table.c tb_asnmth.c tb_cipher.c tb_dh.c tb_digest.c
 SRCS+=	tb_dsa.c tb_eckey.c tb_pkmeth.c tb_rand.c tb_rsa.c
 
 # err
-SRCS+=	err.c err_all.c err_blocks.c err_prn.c
+SRCS+=	err.c err_all.c err_all_legacy.c err_blocks.c err_prn.c
 
 # ess
 SRCS+=	ess_asn1.c ess_err.c ess_lib.c
@@ -474,7 +474,7 @@ SRCS+=	rmd-586.S
 .endif
 
 # rsa
-SRCS+=	rsa_ameth.c rsa_asn1.c rsa_backend.c rsa_chk.c rsa_crpt.c
+SRCS+=	rsa_ameth.c rsa_asn1.c rsa_backend.c rsa_chk.c rsa_crpt.c rsa_depr.c
 SRCS+=	rsa_err.c rsa_gen.c rsa_lib.c rsa_meth.c rsa_mp.c rsa_mp_names.c
 SRCS+=	rsa_none.c rsa_oaep.c rsa_ossl.c rsa_pk1.c rsa_pmeth.c rsa_prn.c
 SRCS+=	rsa_pss.c rsa_saos.c rsa_schemes.c rsa_sign.c rsa_sp800_56b_check.c

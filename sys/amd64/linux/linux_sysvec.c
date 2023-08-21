@@ -31,8 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include "opt_pax.h"
 
 #define	__ELF_WORD_SIZE	64

@@ -26,8 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include "opt_pax.h"
 
 #define __ELF_WORD_SIZE	32
