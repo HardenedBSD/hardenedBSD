@@ -51,14 +51,12 @@ CLEANFILES=	${ASM} ${SRCS:R:S/$/.s/} sha256-armv8.s
 
 sha256-armv8.S:	sha512-armv8.pl
 	env CC=cc perl ${.ALLSRC} linux64 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .pl.S:
 	env CC=cc perl ${.IMPSRC} linux64 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .elif defined(ASM_amd64)
@@ -81,11 +79,12 @@ sha256-armv8.S:	sha512-armv8.pl
 SRCS=	x86_64cpuid.pl
 
 # aes
-SRCS+=	aesni-mb-x86_64.pl aesni-sha1-x86_64.pl aesni-sha256-x86_64.pl \
-	aesni-x86_64.pl vpaes-x86_64.pl
+SRCS+=	aes-x86_64.pl \
+	aesni-mb-x86_64.pl aesni-sha1-x86_64.pl aesni-sha256-x86_64.pl \
+	aesni-x86_64.pl bsaes-x86_64.pl vpaes-x86_64.pl
 
 # bn
-SRCS+=	rsaz-avx2.pl rsaz-avx512.S rsaz-x86_64.pl x86_64-gf2m.pl \
+SRCS+=	rsaz-avx2.pl rsaz-avx512.pl rsaz-x86_64.pl x86_64-gf2m.pl \
 	x86_64-mont.pl x86_64-mont5.pl
 
 # camellia
@@ -131,8 +130,7 @@ CLEANFILES=	${ASM} ${SHA_ASM:S/$/.s/}
 .SUFFIXES:	.pl
 
 .pl.S:
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T}. */' ;\
 	env CC=cc perl ${.IMPSRC} elf ) > ${.TARGET}
 
 ${SHA_TMP}: ${SHA_SRC}
@@ -140,8 +138,7 @@ ${SHA_TMP}: ${SHA_SRC}
 
 .for s in ${SHA_ASM}
 ${s}.S: ${s}.s
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${SHA_SRC}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${SHA_SRC}. */' ;\
 	cat ${s}.s ) > ${.TARGET}
 .endfor
 
@@ -190,14 +187,12 @@ CLEANFILES=	${ASM} ${SRCS:R:S/$/.s/}
 .SUFFIXES:	.pl
 
 aes-armv4.S:	aes-armv4.pl
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T}. */' ;\
 	env CC=cc perl ${.ALLSRC} linux32 ) > ${.TARGET}
 
 .pl.S:
 	env CC=cc perl ${.IMPSRC} linux32 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .elif defined(ASM_i386)
@@ -227,7 +222,7 @@ aes-armv4.S:	aes-armv4.pl
 SRCS=	x86cpuid.pl
 
 # aes
-SRCS+=	aesni-x86.pl vpaes-x86.pl
+SRCS+=	aes-586.pl aesni-x86.pl vpaes-x86.pl
 
 # blowfish
 SRCS+=	bf-586.pl
@@ -285,8 +280,7 @@ CLEANFILES=	${ASM} ${SRCS:R:S/$/.s/}
 .SUFFIXES:	.pl
 
 .pl.S:
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.IMPSRC:T}. */' ;\
 	echo '#ifdef PIC' ;\
 	env CC=cc perl ${PERLPATH} ${.IMPSRC} elf ${CFLAGS} -fpic -DPIC ${.IMPSRC:R:S/$/.s/} ;\
 	cat ${.IMPSRC:R:S/$/.s/} ;\
@@ -337,26 +331,22 @@ CLEANFILES=	${ASM}
 
 bn-ppc.S:	ppc.pl
 	env CC=cc perl ${.ALLSRC} linux32 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256-ppc.S:	sha512-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux32 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256p8-ppc.S:	sha512p8-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux32 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .pl.S:
 	env CC=cc perl ${.IMPSRC} linux32 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .elif defined(ASM_powerpc64)
@@ -408,26 +398,22 @@ CLEANFILES=	${ASM}
 
 bn-ppc.S:	ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64v2 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256-ppc.S:	sha512-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64v2 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256p8-ppc.S:	sha512p8-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64v2 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .pl.S:
 	env CC=cc perl ${.IMPSRC} linux64v2 ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .elif defined(ASM_powerpc64le)
@@ -479,26 +465,22 @@ CLEANFILES=	${ASM}
 
 bn-ppc.S:	ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64le ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256-ppc.S:	sha512-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64le ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 sha256p8-ppc.S:	sha512p8-ppc.pl
 	env CC=cc perl ${.ALLSRC} linux64le ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .pl.S:
 	env CC=cc perl ${.IMPSRC} linux64le ${.TARGET:R:S/$/.s/}
-	( echo '/* $$'FreeBSD'$$ */' ;\
-	echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
+	( echo '/* Do not modify. This file is auto-generated from ${.ALLSRC:T:R:S/$/.pl/}. */' ;\
 	cat ${.TARGET:R:S/$/.s/}) > ${.TARGET}
 
 .endif
