@@ -48,6 +48,24 @@ import sys
 from pathlib import Path
 
 
+# List of targets that are independent of TARGET/TARGET_ARCH and thus do not
+# need them to be set. Keep in the same order as Makefile documents them (if
+# they are documented).
+mach_indep_targets = [
+    "cleanuniverse",
+    "universe",
+    "universe-toolchain",
+    "tinderbox"
+    "worlds",
+    "kernels",
+    "kernel-toolchains",
+    "targets",
+    "toolchains",
+    "makeman",
+    "sysent",
+]
+
+
 def run(cmd, **kwargs):
     cmd = list(map(str, cmd))  # convert all Path objects to str
     debug("Running", cmd)
@@ -112,6 +130,7 @@ def check_required_make_env_var(varname, binary_name, bindir):
     if parsed_args.debug:
         run([guess, "--version"])
 
+
 def check_xtool_make_env_var(varname, binary_name):
     # Avoid calling brew --prefix on macOS if all variables are already set:
     if os.getenv(varname):
@@ -121,6 +140,7 @@ def check_xtool_make_env_var(varname, binary_name):
         parsed_args.cross_bindir = default_cross_toolchain()
     return check_required_make_env_var(varname, binary_name,
                                        parsed_args.cross_bindir)
+
 
 def default_cross_toolchain():
     # default to homebrew-installed clang on MacOS if available
@@ -188,7 +208,7 @@ if __name__ == "__main__":
     new_env_vars = {}
     if not sys.platform.startswith("freebsd"):
         if not is_make_var_set("TARGET") or not is_make_var_set("TARGET_ARCH"):
-            if "universe" not in sys.argv and "tinderbox" not in sys.argv:
+            if not set(sys.argv).intersection(set(mach_indep_targets)):
                 sys.exit("TARGET= and TARGET_ARCH= must be set explicitly "
                          "when building on non-FreeBSD")
     if not parsed_args.bootstrap_toolchain:
@@ -249,7 +269,7 @@ if __name__ == "__main__":
             and not is_make_var_set("WITHOUT_CLEAN")):
         # Avoid accidentally deleting all of the build tree and wasting lots of
         # time cleaning directories instead of just doing a rm -rf ${.OBJDIR}
-        want_clean = input("You did not set -DWITHOUT_CLEAN/--clean/--no-clean."
+        want_clean = input("You did not set -DWITHOUT_CLEAN/--(no-)clean."
                            " Did you really mean to do a clean build? y/[N] ")
         if not want_clean.lower().startswith("y"):
             bmake_args.append("-DWITHOUT_CLEAN")
