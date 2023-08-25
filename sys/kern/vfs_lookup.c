@@ -39,6 +39,7 @@
 #include <sys/cdefs.h>
 #include "opt_capsicum.h"
 #include "opt_ktrace.h"
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -173,13 +174,21 @@ nameiinit(void *dummy __unused)
 }
 SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_SECOND, nameiinit, NULL);
 
+#ifdef PAX_HARDENING
+static int lookup_cap_dotdot = 0;
+#else
 static int lookup_cap_dotdot = 1;
-SYSCTL_INT(_vfs, OID_AUTO, lookup_cap_dotdot, CTLFLAG_RWTUN,
-    &lookup_cap_dotdot, 0,
+#endif
+SYSCTL_INT(_vfs, OID_AUTO, lookup_cap_dotdot,
+    CTLFLAG_RWTUN | CTLFLAG_SECURE, &lookup_cap_dotdot, 0,
     "enables \"..\" components in path lookup in capability mode");
+#ifdef PAX_HARDENING
+static int lookup_cap_dotdot_nonlocal = 0;
+#else
 static int lookup_cap_dotdot_nonlocal = 1;
-SYSCTL_INT(_vfs, OID_AUTO, lookup_cap_dotdot_nonlocal, CTLFLAG_RWTUN,
-    &lookup_cap_dotdot_nonlocal, 0,
+#endif
+SYSCTL_INT(_vfs, OID_AUTO, lookup_cap_dotdot_nonlocal,
+    CTLFLAG_RWTUN | CTLFLAG_SECURE, &lookup_cap_dotdot_nonlocal, 0,
     "enables \"..\" components in path lookup in capability mode "
     "on non-local mount");
 
