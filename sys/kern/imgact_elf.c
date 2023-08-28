@@ -638,9 +638,7 @@ __elfN(load_section)(struct image_params *imgp, vm_ooffset_t offset,
 	 * to allow copyout.
 	 */
 	flags = VM_MAP_PROTECT_SET_PROT;
-#ifdef PAX_EXEC
 	flags |= VM_MAP_PROTECT_SET_MAXPROT;
-#endif
 	if ((prot & VM_PROT_WRITE) == 0)
 		vm_map_protect(imgp->proc, map, trunc_page(map_addr),
 		    round_page(map_addr + map_len), prot, prot, flags);
