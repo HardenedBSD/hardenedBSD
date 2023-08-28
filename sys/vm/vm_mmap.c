@@ -369,12 +369,10 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 			    lim_max(td, RLIMIT_DATA));
 #ifdef PAX_ASLR
 		PROC_LOCK(td->td_proc);
-		if (!(td->td_proc->p_flag2 & P2_ASLR_ENABLE)) {
-			if (flags & MAP_STACK)
-				pax_aslr_thr_stack(td->td_proc, &addr);
-			else
-				pax_aslr_mmap(td->td_proc, &addr, orig_addr, flags);
-		}
+		if (flags & MAP_STACK)
+			pax_aslr_thr_stack(td->td_proc, &addr);
+		else
+			pax_aslr_mmap(td->td_proc, &addr, orig_addr, flags);
 		PROC_UNLOCK(td->td_proc);
 		pax_aslr_done = 1;
 #endif
@@ -396,20 +394,16 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 		 *
 		 * This relies on VM_PROT_* matching PROT_*.
 		 */
-#ifdef PAX_NOEXEC
 		cap_maxprot = VM_PROT_ALL;
-
+#ifdef PAX_NOEXEC
 		pax_pageexec(td->td_proc, (vm_prot_t *)&prot, (vm_prot_t *)&cap_maxprot);
 		pax_mprotect(td->td_proc, (vm_prot_t *)&prot, (vm_prot_t *)&cap_maxprot);
 		pax_pageexec(td->td_proc, (vm_prot_t *)&prot, (vm_prot_t *)&max_prot);
 		pax_mprotect(td->td_proc, (vm_prot_t *)&prot, (vm_prot_t *)&max_prot);
+#endif
 
 		error = vm_mmap_object(&vms->vm_map, &addr, size, prot,
-		    cap_maxprot, flags, NULL, pos, FALSE, td);
-#else
-		error = vm_mmap_object(&vms->vm_map, &addr, size, prot,
 		    max_prot, flags, NULL, pos, FALSE, td);
-#endif
 	} else {
 		/*
 		 * Mapping file, get fp for validation and don't let the
@@ -722,8 +716,11 @@ kern_mprotect(struct thread *td, uintptr_t addr0, size_t size, int prot,
 		return (EINVAL);
 
 	flags |= VM_MAP_PROTECT_SET_PROT;
-	if (max_prot != 0)
+	if (max_prot != 0) {
 		flags |= VM_MAP_PROTECT_SET_MAXPROT;
+	} else {
+		max_prot = prot;
+	}
 	vm_error = vm_map_protect(td->td_proc, &td->td_proc->p_vmspace->vm_map,
 	    addr, addr + size, prot, max_prot, flags);
 
