@@ -424,8 +424,13 @@ _DP_fifolog=	z
 _DP_ipf=	kvm
 _DP_tpool=	spl
 _DP_uutil=	avl spl
+<<<<<<< HEAD
 _DP_zfs=	jail md pthread umem util uutil m avl bsdxml crypto \
 	geom nvpair z zfs_core zutil
+=======
+_DP_zfs=	md pthread rt umem util uutil m avl bsdxml crypto geom nvpair \
+	z zfs_core zutil
+>>>>>>> internal/freebsd/current/main
 _DP_zfsbootenv= zfs nvpair
 _DP_zfs_core=	nvpair spl zutil
 _DP_zpool=	md pthread z icp spl nvpair avl umem
