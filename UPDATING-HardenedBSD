@@ -1,3 +1,9 @@
+[20230826] Catch up with FreeBSD version bump to 15
+__HardenedBSD_version = 1500000
+
+	HBSD: Now that __FreeBSD_version is 1500000, let's bump up
+	__HardenedBSD_version to reflect major version bump to 15.
+
 [20230621] Further restrict ptrace access to capsicumized processes
 __HardenedBSD_version = 1400005
 
