@@ -606,17 +606,24 @@ buildinf.h: Makefile
 	echo "static const char compiler_flags[] = \"compiler: ${COMPILER_TYPE}\";" ) \
 	> ${.TARGET}
 
+buildasm cleanasm:
+.for arch in aarch64 amd64 arm i386 powerpc powerpc64 powerpc64le
+	make MK_AUTO_OBJ=no -DWITHOUT_AUTO_ASM -DASM_${arch} \
+	    -f ${.CURDIR}/Makefile.asm -C ${SRCTOP}/sys/crypto/openssl/${arch} \
+	    ${.TARGET:S/build/all/:S/asm$//}
+.endfor
+
 .include <bsd.lib.mk>
 
 PICFLAG+=	-DOPENSSL_PIC
 
 .if defined(ASM_${MACHINE_CPUARCH})
-.PATH:	${SRCTOP}/secure/lib/libcrypto/arch/${MACHINE_CPUARCH}
+.PATH:	${SRCTOP}/sys/crypto/openssl/${MACHINE_CPUARCH}
 .if defined(ASM_amd64)
 .PATH:	${LCRYPTO_SRC}/crypto/bn/asm
 .endif
 .elif defined(ASM_${MACHINE_ARCH})
-.PATH:	${SRCTOP}/secure/lib/libcrypto/arch/${MACHINE_ARCH}
+.PATH:	${SRCTOP}/sys/crypto/openssl/${MACHINE_ARCH}
 .endif
 
 .PATH:	${LCRYPTO_SRC}/crypto \
