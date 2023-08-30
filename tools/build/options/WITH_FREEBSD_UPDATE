@@ -1,3 +1,7 @@
+<<<<<<< HEAD:tools/build/options/WITH_FREEBSD_UPDATE
 .\" $FreeBSD$
 Set to build
+=======
+Do not build
+>>>>>>> internal/freebsd/13-stable/main:tools/build/options/WITHOUT_FREEBSD_UPDATE
 .Xr freebsd-update 8 .

@@ -28,8 +28,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
- *
  * Private definitions for libc, libc_r and libpthread.
  *
  */
@@ -186,6 +184,7 @@ typedef enum {
 	PJT_MUTEXATTR_SETROBUST,
 	PJT_GETTHREADID_NP,
 	PJT_ATTR_GET_NP,
+	PJT_GETNAME_NP,
 	PJT_MAX
 } pjt_index_t;
 

@@ -58,8 +58,6 @@
  *
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
- *
- * $FreeBSD$
  */
 
 /*
@@ -97,6 +95,10 @@ union vm_map_object {
  *	a VM object (or sharing map) and offset into that object,
  *	and user-exported inheritance and protection information.
  *	Also included is control information for virtual copy operations.
+ *
+ *	For stack gap map entries (MAP_ENTRY_GUARD | MAP_ENTRY_GROWS_DOWN
+ *	or UP), the next_read member is reused as the stack_guard_page
+ *	storage, and offset is the stack protection.
  */
 struct vm_map_entry {
 	struct vm_map_entry *left;	/* left child or previous entry */
@@ -520,9 +522,19 @@ vm_map_entry_succ(vm_map_entry_t entry)
 	for ((it) = vm_map_entry_first(map);	\
 	    (it) != &(map)->header;		\
 	    (it) = vm_map_entry_succ(it))
+<<<<<<< HEAD
 int vm_map_protect (vm_map_t, vm_offset_t, vm_offset_t, vm_prot_t, boolean_t);
+=======
+
+#define	VM_MAP_PROTECT_SET_PROT		0x0001
+#define	VM_MAP_PROTECT_SET_MAXPROT	0x0002
+#define	VM_MAP_PROTECT_GROWSDOWN	0x0004
+
+int vm_map_protect(vm_map_t map, vm_offset_t start, vm_offset_t end,
+    vm_prot_t new_prot, vm_prot_t new_maxprot, int flags);
+>>>>>>> internal/freebsd/13-stable/main
 int vm_map_remove (vm_map_t, vm_offset_t, vm_offset_t);
-void vm_map_try_merge_entries(vm_map_t map, vm_map_entry_t prev,
+vm_map_entry_t vm_map_try_merge_entries(vm_map_t map, vm_map_entry_t prev,
     vm_map_entry_t entry);
 void vm_map_startup (void);
 int vm_map_submap (vm_map_t, vm_offset_t, vm_offset_t, vm_map_t);

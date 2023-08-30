@@ -33,8 +33,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/domainset.h>
@@ -5080,12 +5078,12 @@ pmc_process_exit(void *arg __unused, struct proc *p)
 		    pmclog_process_sysexit(po, p->p_pid);
 	PMC_EPOCH_EXIT();
 
-	if (!is_using_hwpmcs)
-		return;
-
 	PMC_GET_SX_XLOCK();
 	PMCDBG3(PRC,EXT,1,"process-exit proc=%p (%d, %s)", p, p->p_pid,
 	    p->p_comm);
+
+	if (!is_using_hwpmcs)
+		goto out;
 
 	/*
 	 * Since this code is invoked by the last thread in an exiting
@@ -5218,12 +5216,14 @@ pmc_process_exit(void *arg __unused, struct proc *p)
 	} else
 		critical_exit(); /* pp == NULL */
 
-
+out:
 	/*
 	 * If the process owned PMCs, free them up and free up
 	 * memory.
 	 */
 	if ((po = pmc_find_owner_descriptor(p)) != NULL) {
+		if ((po->po_flags & PMC_PO_OWNS_LOGFILE) != 0)
+			pmclog_close(po);
 		pmc_remove_owner(po);
 		pmc_destroy_owner_descriptor(po);
 	}

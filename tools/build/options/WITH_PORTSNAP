@@ -1,4 +1,8 @@
+<<<<<<< HEAD:tools/build/options/WITH_PORTSNAP
 .\" $FreeBSD$
 Set to build or install
+=======
+Do not build or install
+>>>>>>> internal/freebsd/13-stable/main:tools/build/options/WITHOUT_PORTSNAP
 .Xr portsnap 8
 and related files.

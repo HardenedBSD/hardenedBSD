@@ -37,8 +37,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include "opt_quota.h"
 #include "opt_suiddir.h"
 #include "opt_ufs.h"
@@ -190,6 +188,11 @@ ufs_itimes_locked(struct vnode *vp)
 void
 ufs_itimes(struct vnode *vp)
 {
+	struct inode *ip;
+
+	ip = VTOI(vp);
+	if ((ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_UPDATE)) == 0)
+		return;
 
 	VI_LOCK(vp);
 	ufs_itimes_locked(vp);
@@ -353,13 +356,8 @@ ufs_close(
 	} */ *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	int usecount;
 
-	VI_LOCK(vp);
-	usecount = vp->v_usecount;
-	if (usecount > 1)
-		ufs_itimes_locked(vp);
-	VI_UNLOCK(vp);
+	ufs_itimes(vp);
 	return (0);
 }
 
@@ -2647,14 +2645,8 @@ ufsfifo_close(
 		struct thread *a_td;
 	} */ *ap)
 {
-	struct vnode *vp = ap->a_vp;
-	int usecount;
 
-	VI_LOCK(vp);
-	usecount = vp->v_usecount;
-	if (usecount > 1)
-		ufs_itimes_locked(vp);
-	VI_UNLOCK(vp);
+	ufs_close(ap);
 	return (fifo_specops.vop_close(ap));
 }
 

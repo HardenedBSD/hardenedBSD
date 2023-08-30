@@ -24,8 +24,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/param.h>
 #include <sys/mman.h>
 #include <sys/proc.h>
@@ -126,7 +124,7 @@ cloudabi_sys_mem_protect(struct thread *td,
 		return (error);
 
 	return (kern_mprotect(td, (uintptr_t)uap->mapping, uap->mapping_len,
-	    prot));
+	    prot, 0));
 }
 
 int
