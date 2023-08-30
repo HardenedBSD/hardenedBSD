@@ -284,7 +284,8 @@ link_elf_protect_range(elf_file_t ef, vm_offset_t start, vm_offset_t end,
 #endif
 		return;
 	}
-	error = vm_map_protect(NULL, kernel_map, start, end, prot, prot, 0);
+	error = vm_map_protect(NULL, kernel_map, start, end, prot, 0,
+	    VM_MAP_PROTECT_SET_PROT);
 	KASSERT(error == KERN_SUCCESS,
 	    ("link_elf_protect_range: vm_map_protect() returned %d", error));
 }
