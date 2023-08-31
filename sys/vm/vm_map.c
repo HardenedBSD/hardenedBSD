@@ -2846,14 +2846,14 @@ again:
 			vm_map_unlock(map);
 			return (KERN_INVALID_ARGUMENT);
 		}
-		if ((new_prot & entry->max_protection) != new_prot) {
-			vm_map_unlock(map);
-			return (KERN_PROTECTION_FAILURE);
-		}
 		if ((entry->eflags & (MAP_ENTRY_GUARD |
 		    MAP_ENTRY_STACK_GAP_DN | MAP_ENTRY_STACK_GAP_UP)) ==
 		    MAP_ENTRY_GUARD)
 			continue;
+		if ((new_prot & entry->max_protection) != new_prot) {
+			vm_map_unlock(map);
+			return (KERN_PROTECTION_FAILURE);
+		}
 		max_prot = (entry->eflags & (MAP_ENTRY_STACK_GAP_DN |
 		    MAP_ENTRY_STACK_GAP_UP)) != 0 ?
 		    PROT_MAX_EXTRACT(entry->offset) : entry->max_protection;
@@ -2970,6 +2970,7 @@ again:
 			ret = pax_mprotect_enforce(p, map, old_prot,
 			    new_prot);
 			if (ret != 0) {
+				vm_map_unlock(map);
 				return (ret);
 			}
 		}
