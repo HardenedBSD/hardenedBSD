@@ -719,24 +719,11 @@ kern_mprotect(struct thread *td, uintptr_t addr0, size_t size, int prot,
 	if (addr + size < addr)
 		return (EINVAL);
 
-<<<<<<< HEAD
-	vm_error = KERN_SUCCESS;
-	if (max_prot != 0) {
-		if ((max_prot & prot) != prot)
-			return (ENOTSUP);
-		vm_error = vm_map_protect(&td->td_proc->p_vmspace->vm_map,
-		    addr, addr + size, max_prot, TRUE);
-	}
-	if (vm_error == KERN_SUCCESS)
-		vm_error = vm_map_protect(&td->td_proc->p_vmspace->vm_map,
-		    addr, addr + size, prot, FALSE);
-=======
 	flags |= VM_MAP_PROTECT_SET_PROT;
 	if (max_prot != 0)
 		flags |= VM_MAP_PROTECT_SET_MAXPROT;
-	vm_error = vm_map_protect(&td->td_proc->p_vmspace->vm_map,
+	vm_error = vm_map_protect(td->td_proc, &td->td_proc->p_vmspace->vm_map,
 	    addr, addr + size, prot, max_prot, flags);
->>>>>>> internal/freebsd/13-stable/main
 
 	switch (vm_error) {
 	case KERN_SUCCESS:

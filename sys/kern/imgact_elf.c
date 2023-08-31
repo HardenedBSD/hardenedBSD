@@ -598,7 +598,7 @@ __elfN(load_section)(struct image_params *imgp, vm_ooffset_t offset,
 	vm_map_t map;
 	vm_object_t object;
 	vm_offset_t map_addr;
-	int error, rv, cow;
+	int error, rv, cow, flags;
 	size_t copy_len;
 	vm_ooffset_t file_addr;
 
@@ -686,15 +686,11 @@ __elfN(load_section)(struct image_params *imgp, vm_ooffset_t offset,
 	 * Remove write access to the page if it was only granted by map_insert
 	 * to allow copyout.
 	 */
-#ifdef PAX_NOEXEC
+	flags = VM_MAP_PROTECT_SET_PROT;
+	flags |= VM_MAP_PROTECT_SET_MAXPROT;
 	if ((prot & VM_PROT_WRITE) == 0)
-		vm_map_protect(map, trunc_page(map_addr), round_page(map_addr +
-		    map_len), prot, TRUE);
-#else
-	if ((prot & VM_PROT_WRITE) == 0)
-		vm_map_protect(map, trunc_page(map_addr), round_page(map_addr +
-		    map_len), prot, FALSE);
-#endif
+		vm_map_protect(imgp->proc, map, trunc_page(map_addr),
+		    round_page(map_addr + map_len), prot, prot, flags);
 
 	return (0);
 }

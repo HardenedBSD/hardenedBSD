@@ -65,13 +65,9 @@
  */
 
 #include <sys/cdefs.h>
-<<<<<<< HEAD
-__FBSDID("$FreeBSD$");
 
 #include "opt_pax.h"
 
-=======
->>>>>>> internal/freebsd/13-stable/main
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/elf.h>
@@ -2776,8 +2772,8 @@ vm_map_protect_guard(vm_map_entry_t entry, vm_prot_t new_prot,
  *	otherwise, only the current protection is affected.
  */
 int
-vm_map_protect(vm_map_t map, vm_offset_t start, vm_offset_t end,
-	       vm_prot_t new_prot, boolean_t set_max)
+vm_map_protect(struct proc *p, vm_map_t map, vm_offset_t start,
+    vm_offset_t end, vm_prot_t new_prot, vm_prot_t new_maxprot, int flags)
 {
 	vm_map_entry_t entry, first_entry, in_tran, prev_entry;
 	vm_object_t obj;
@@ -2792,30 +2788,17 @@ vm_map_protect(vm_map_t map, vm_offset_t start, vm_offset_t end,
 	if (start == end)
 		return (KERN_SUCCESS);
 
-<<<<<<< HEAD
-=======
 	if (CONTAINS_BITS(flags, VM_MAP_PROTECT_SET_PROT |
 	    VM_MAP_PROTECT_SET_MAXPROT) &&
 	    !CONTAINS_BITS(new_maxprot, new_prot))
 		return (KERN_OUT_OF_BOUNDS);
 
 	orig_start = start;
->>>>>>> internal/freebsd/13-stable/main
 again:
 	in_tran = NULL;
 	start = orig_start;
 	vm_map_lock(map);
 
-<<<<<<< HEAD
-=======
-	if ((map->flags & MAP_WXORX) != 0 &&
-	    (flags & VM_MAP_PROTECT_SET_PROT) != 0 &&
-	    CONTAINS_BITS(new_prot, VM_PROT_WRITE | VM_PROT_EXECUTE)) {
-		vm_map_unlock(map);
-		return (KERN_PROTECTION_FAILURE);
-	}
-
->>>>>>> internal/freebsd/13-stable/main
 	/*
 	 * Ensure that we are not concurrently wiring pages.  vm_map_wire() may
 	 * need to fault pages into the map and will drop the map lock while
@@ -2859,18 +2842,18 @@ again:
 			vm_map_unlock(map);
 			return (KERN_INVALID_ARGUMENT);
 		}
-<<<<<<< HEAD
-		if ((new_prot & entry->max_protection) != new_prot) {
-=======
 		if ((entry->eflags & (MAP_ENTRY_GUARD |
 		    MAP_ENTRY_STACK_GAP_DN | MAP_ENTRY_STACK_GAP_UP)) ==
 		    MAP_ENTRY_GUARD)
 			continue;
+		if ((new_prot & entry->max_protection) != new_prot) {
+			vm_map_unlock(map);
+			return (KERN_PROTECTION_FAILURE);
+		}
 		max_prot = (entry->eflags & (MAP_ENTRY_STACK_GAP_DN |
 		    MAP_ENTRY_STACK_GAP_UP)) != 0 ?
 		    PROT_MAX_EXTRACT(entry->offset) : entry->max_protection;
 		if (!CONTAINS_BITS(max_prot, check_prot)) {
->>>>>>> internal/freebsd/13-stable/main
 			vm_map_unlock(map);
 			return (KERN_PROTECTION_FAILURE);
 		}
@@ -2911,7 +2894,7 @@ again:
 			return (rv);
 		}
 
-		if (set_max ||
+		if ((flags & VM_MAP_PROTECT_SET_MAXPROT) != 0 ||
 		    ((new_prot & ~entry->protection) & VM_PROT_WRITE) == 0 ||
 		    ENTRY_CHARGED(entry) ||
 		    (entry->eflags & MAP_ENTRY_GUARD) != 0) {
@@ -2987,12 +2970,14 @@ again:
 		}
 #endif
 
-		if (set_max)
+		if ((flags & VM_MAP_PROTECT_SET_MAXPROT) ==
+		    VM_MAP_PROTECT_SET_MAXPROT) {
 			entry->protection =
 			    (entry->max_protection = new_prot) &
 			    old_prot;
-		else
+		} else {
 			entry->protection = new_prot;
+		}
 
 		/*
 		 * For user wired map entries, the normal lazy evaluation of

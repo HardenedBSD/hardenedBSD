@@ -37,13 +37,9 @@
  */
 
 #include <sys/cdefs.h>
-<<<<<<< HEAD
-__FBSDID("$FreeBSD$");
 
 #include "opt_pax.h"
 
-=======
->>>>>>> internal/freebsd/13-stable/main
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
@@ -781,8 +777,9 @@ kern_proc_setrlimit(struct thread *td, struct proc *p, u_int which,
 			}
 			addr = trunc_page(addr);
 			size = round_page(size);
-			(void)vm_map_protect(&p->p_vmspace->vm_map,
-			    addr, addr + size, prot, FALSE);
+			(void)vm_map_protect(p, &p->p_vmspace->vm_map,
+			    addr, addr + size, prot, prot,
+			    VM_MAP_PROTECT_SET_PROT);
 		}
 	}
 
