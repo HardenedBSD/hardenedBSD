@@ -235,8 +235,23 @@ CFLAGS+=	-fstack-protector-strong
 CFLAGS+=	-mretpoline
 .endif
 
+<<<<<<< HEAD
 .if !defined(TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE)
 CFLAGS+=	-ftrivial-auto-var-init=uninitialized
+=======
+#
+# Initialize stack variables on function entry
+#
+.if ${OPT_INIT_ALL} != "none"
+.if ${COMPILER_FEATURES:Minit-all}
+CFLAGS+= -ftrivial-auto-var-init=${OPT_INIT_ALL}
+.if ${OPT_INIT_ALL} == "zero" && ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} < 160000
+CFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+.endif
+.else
+.warning INIT_ALL (${OPT_INIT_ALL}) requested but not supported by compiler
+.endif
+>>>>>>> internal/freebsd/current/main
 .endif
 
 CFLAGS+= ${CWARNFLAGS:M*} ${CWARNFLAGS.${.IMPSRC:T}}

@@ -39,6 +39,23 @@ MK_DEBUG_FILES=	no
 # LLD sensibly defaults to -znoexecstack, so do the same for BFD
 LDFLAGS.bfd+= -Wl,-znoexecstack
 
+<<<<<<< HEAD
+=======
+# Initialize stack variables on function entry
+.if ${OPT_INIT_ALL} != "none"
+.if ${COMPILER_FEATURES:Minit-all}
+CFLAGS+= -ftrivial-auto-var-init=${OPT_INIT_ALL}
+CXXFLAGS+= -ftrivial-auto-var-init=${OPT_INIT_ALL}
+.if ${OPT_INIT_ALL} == "zero" && ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} < 160000
+CFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+CXXFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+.endif
+.else
+.warning INIT_ALL (${OPT_INIT_ALL}) requested but not supported by compiler
+.endif
+.endif
+
+>>>>>>> internal/freebsd/current/main
 # bsd.sanitizer.mk is not installed, so don't require it (e.g. for ports).
 .sinclude "bsd.sanitizer.mk"
 
