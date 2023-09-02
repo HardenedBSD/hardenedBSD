@@ -4156,12 +4156,6 @@ prison_priv_check(struct ucred *cred, int priv)
 			return (0);
 		return (EPERM);
 
-	case PRIV_VFS_EXTATTR_SYSTEM:
-		if (cred->cr_prison->pr_allow & PR_ALLOW_EXTATTR)
-			return (0);
-		else
-			return (EPERM);
-
 	case PRIV_KENV_DUMP:
 	case PRIV_KENV_GET:
 	case PRIV_KENV_SET:
@@ -4591,8 +4585,6 @@ SYSCTL_JAIL_PARAM(_allow, read_msgbuf, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Jail may read the kernel message buffer");
 SYSCTL_JAIL_PARAM(_allow, unprivileged_proc_debug, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Unprivileged processes may use process debugging facilities");
-SYSCTL_JAIL_PARAM(_allow, extattr, CTLTYPE_INT | CTLFLAG_RW,
-    "B", "Jails may set system-level filesystem extended attributes");
 SYSCTL_JAIL_PARAM(_allow, suser, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Processes in jail with uid 0 have privilege");
 #ifdef VIMAGE
