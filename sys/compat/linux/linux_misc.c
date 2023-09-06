@@ -77,6 +77,7 @@
 #include <compat/linux/linux_dtrace.h>
 #include <compat/linux/linux_file.h>
 #include <compat/linux/linux_mib.h>
+#include <compat/linux/linux_mmap.h>
 #include <compat/linux/linux_signal.h>
 #include <compat/linux/linux_time.h>
 #include <compat/linux/linux_util.h>
@@ -348,6 +349,39 @@ linux_msync(struct thread *td, struct linux_msync_args *args)
 
 	return (kern_msync(td, args->addr, args->len,
 	    args->fl & ~LINUX_MS_SYNC));
+}
+
+int
+linux_mprotect(struct thread *td, struct linux_mprotect_args *uap)
+{
+
+	return (linux_mprotect_common(td, PTROUT(uap->addr), uap->len,
+	    uap->prot));
+}
+
+int
+linux_madvise(struct thread *td, struct linux_madvise_args *uap)
+{
+
+	return (linux_madvise_common(td, PTROUT(uap->addr), uap->len,
+	    uap->behav));
+}
+
+int
+linux_mmap2(struct thread *td, struct linux_mmap2_args *uap)
+{
+#if defined(LINUX_ARCHWANT_MMAP2PGOFF)
+	/*
+	 * For architectures with sizeof (off_t) < sizeof (loff_t) mmap is
+	 * implemented with mmap2 syscall and the offset is represented in
+	 * multiples of page size.
+	 */
+	return (linux_mmap_common(td, PTROUT(uap->addr), uap->len, uap->prot,
+	    uap->flags, uap->fd, (uint64_t)(uint32_t)uap->pgoff * PAGE_SIZE));
+#else
+	return (linux_mmap_common(td, PTROUT(uap->addr), uap->len, uap->prot,
+	    uap->flags, uap->fd, uap->pgoff));
+#endif
 }
 
 #ifdef LINUX_LEGACY_SYSCALLS

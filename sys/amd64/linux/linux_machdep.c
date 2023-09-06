@@ -69,7 +69,6 @@
 #include <amd64/linux/linux_proto.h>
 #include <compat/linux/linux_fork.h>
 #include <compat/linux/linux_misc.h>
-#include <compat/linux/linux_mmap.h>
 #include <compat/linux/linux_util.h>
 
 #define	LINUX_ARCH_AMD64		0xc000003e
@@ -87,28 +86,6 @@ linux_set_upcall(struct thread *td, register_t stack)
 	 */
 	td->td_frame->tf_rax = 0;
 	return (0);
-}
-
-int
-linux_mmap2(struct thread *td, struct linux_mmap2_args *args)
-{
-
-	return (linux_mmap_common(td, args->addr, args->len, args->prot,
-		args->flags, args->fd, args->pgoff));
-}
-
-int
-linux_mprotect(struct thread *td, struct linux_mprotect_args *uap)
-{
-
-	return (linux_mprotect_common(td, uap->addr, uap->len, uap->prot));
-}
-
-int
-linux_madvise(struct thread *td, struct linux_madvise_args *uap)
-{
-
-	return (linux_madvise_common(td, uap->addr, uap->len, uap->behav));
 }
 
 int
