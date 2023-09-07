@@ -758,7 +758,6 @@ aio_process_rw(struct kaiocb *job)
 {
 	struct ucred *td_savedcred;
 	struct thread *td;
-	struct aiocb *cb;
 	struct file *fp;
 	ssize_t cnt;
 	long msgsnd_st, msgsnd_end;
@@ -778,7 +777,6 @@ aio_process_rw(struct kaiocb *job)
 	td_savedcred = td->td_ucred;
 	td->td_ucred = job->cred;
 	job->uiop->uio_td = td;
-	cb = &job->uaiocb;
 	fp = job->fd_file;
 
 	opcode = job->uaiocb.aio_lio_opcode;
@@ -1281,7 +1279,7 @@ aio_qbio(struct proc *p, struct kaiocb *job)
 	}
 
 	bios = malloc(sizeof(struct bio *) * iovcnt, M_TEMP, M_WAITOK);
-	atomic_store_int(&job->nbio, iovcnt);
+	refcount_init(&job->nbio, iovcnt);
 	for (i = 0; i < iovcnt; i++) {
 		struct vm_page** pages;
 		struct bio *bp;
@@ -1419,6 +1417,8 @@ aiocb_copyin(struct aiocb *ujob, struct kaiocb *kjob, int type)
 	error = copyin(ujob, kcb, sizeof(struct aiocb));
 	if (error)
 		return (error);
+	if (type == LIO_NOP)
+		type = kcb->aio_lio_opcode;
 	if (type & LIO_VECTORED) {
 		/* malloc a uio and copy in the iovec */
 		error = copyinuio(__DEVOLATILE(struct iovec*, kcb->aio_iov),
@@ -1557,8 +1557,10 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	if (type == LIO_NOP) {
 		switch (job->uaiocb.aio_lio_opcode) {
 		case LIO_WRITE:
+		case LIO_WRITEV:
 		case LIO_NOP:
 		case LIO_READ:
+		case LIO_READV:
 			opcode = job->uaiocb.aio_lio_opcode;
 			break;
 		default:
@@ -2468,7 +2470,7 @@ aio_biowakeup(struct bio *bp)
 	size_t nbytes;
 	long bcount = bp->bio_bcount;
 	long resid = bp->bio_resid;
-	int error, opcode, nblks;
+	int opcode, nblks;
 	int bio_error = bp->bio_error;
 	uint16_t flags = bp->bio_flags;
 
@@ -2476,26 +2478,25 @@ aio_biowakeup(struct bio *bp)
 
 	aio_biocleanup(bp);
 
-	nbytes =bcount - resid;
+	nbytes = bcount - resid;
 	atomic_add_acq_long(&job->nbytes, nbytes);
 	nblks = btodb(nbytes);
-	error = 0;
+
 	/*
 	 * If multiple bios experienced an error, the job will reflect the
 	 * error of whichever failed bio completed last.
 	 */
 	if (flags & BIO_ERROR)
-		atomic_set_int(&job->error, bio_error);
+		atomic_store_int(&job->error, bio_error);
 	if (opcode & LIO_WRITE)
 		atomic_add_int(&job->outblock, nblks);
 	else
 		atomic_add_int(&job->inblock, nblks);
-	atomic_subtract_int(&job->nbio, 1);
 
-
-	if (atomic_load_int(&job->nbio) == 0) {
-		if (atomic_load_int(&job->error))
-			aio_complete(job, -1, job->error);
+	if (refcount_release(&job->nbio)) {
+		bio_error = atomic_load_int(&job->error);
+		if (bio_error != 0)
+			aio_complete(job, -1, bio_error);
 		else
 			aio_complete(job, atomic_load_long(&job->nbytes), 0);
 	}
@@ -2825,6 +2826,8 @@ aiocb32_copyin(struct aiocb *ujob, struct kaiocb *kjob, int type)
 	CP(job32, *kcb, aio_fildes);
 	CP(job32, *kcb, aio_offset);
 	CP(job32, *kcb, aio_lio_opcode);
+	if (type == LIO_NOP)
+		type = kcb->aio_lio_opcode;
 	if (type & LIO_VECTORED) {
 		iov32 = PTRIN(job32.aio_iov);
 		CP(job32, *kcb, aio_iovcnt);

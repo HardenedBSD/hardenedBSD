@@ -41,10 +41,12 @@
 #define	LIO_NOP			0x0
 #define LIO_WRITE		0x1
 #define	LIO_READ		0x2
-#if defined(_KERNEL) || defined(_WANT_ALL_LIO_OPCODES)
+#if __BSD_VISIBLE
 #define	LIO_VECTORED		0x4
 #define	LIO_WRITEV		(LIO_WRITE | LIO_VECTORED)
 #define	LIO_READV		(LIO_READ | LIO_VECTORED)
+#endif
+#if defined(_KERNEL) || defined(_WANT_ALL_LIO_OPCODES)
 #define	LIO_SYNC		0x8
 #define	LIO_DSYNC		(0x10 | LIO_SYNC)
 #define	LIO_MLOCK		0x20
@@ -147,7 +149,7 @@ struct kaiocb {
 	aio_handle_fn_t *handle_fn;	/* (c) backend handle function */
 	union {				/* Backend-specific data fields */
 		struct {		/* BIO backend */
-			int	nbio;	/* Number of remaining bios */
+			volatile u_int nbio; /* Number of remaining bios */
 			int	error;	/* Worst error of all bios */
 			long	nbytes;	/* Bytes completed so far */
 		};
