@@ -126,6 +126,8 @@ SDT_PROBE_DEFINE4(pf, ip, test6, done, "int", "int", "struct pf_krule *",
 SDT_PROBE_DEFINE5(pf, ip, state, lookup, "struct pfi_kkif *",
     "struct pf_state_key_cmp *", "int", "struct pf_pdesc *",
     "struct pf_kstate *");
+SDT_PROBE_DEFINE4(pf, sctp, multihome, test, "struct pfi_kkif *",
+    "struct pf_krule *", "struct mbuf *", "int");
 
 SDT_PROBE_DEFINE3(pf, eth, test_rule, entry, "int", "struct ifnet *",
     "struct mbuf *");
@@ -307,6 +309,8 @@ static int		 pf_test_state_udp(struct pf_kstate **,
 static int		 pf_test_state_icmp(struct pf_kstate **,
 			    struct pfi_kkif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
+static void		 pf_sctp_multihome_delayed(struct pf_pdesc *, int,
+			    struct pfi_kkif *, struct pf_kstate *);
 static int		 pf_test_state_sctp(struct pf_kstate **,
 			    struct pfi_kkif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
@@ -4905,11 +4909,7 @@ pf_create_state(struct pf_krule *r, struct pf_krule *nr, struct pf_krule *a,
 		if (s->state_flags & PFSTATE_SCRUB_TCP &&
 		    pf_normalize_tcp_init(m, off, pd, th, &s->src, &s->dst)) {
 			REASON_SET(&reason, PFRES_MEMORY);
-			pf_src_tree_remove_state(s);
-			s->timeout = PFTM_UNLINKED;
-			STATE_DEC_COUNTERS(s);
-			pf_free_state(s);
-			return (PF_DROP);
+			goto drop;
 		}
 		if (s->state_flags & PFSTATE_SCRUB_TCP && s->src.scrub &&
 		    pf_normalize_tcp_stateful(m, off, pd, &reason, th, s,
@@ -4918,12 +4918,13 @@ pf_create_state(struct pf_krule *r, struct pf_krule *nr, struct pf_krule *a,
 			DPFPRINTF(PF_DEBUG_URGENT,
 			    ("pf_normalize_tcp_stateful failed on first "
 			     "pkt\n"));
-			pf_src_tree_remove_state(s);
-			s->timeout = PFTM_UNLINKED;
-			STATE_DEC_COUNTERS(s);
-			pf_free_state(s);
-			return (PF_DROP);
+			goto drop;
 		}
+	} else if (pd->proto == IPPROTO_SCTP) {
+		if (pf_normalize_sctp_init(m, off, pd, &s->src, &s->dst))
+			goto drop;
+		if (! (pd->sctp_flags & (PFDESC_SCTP_INIT | PFDESC_SCTP_ADD_IP)))
+			goto drop;
 	}
 	s->direction = pd->dir;
 
@@ -5019,6 +5020,13 @@ csfailed:
 		PF_SRC_NODE_UNLOCK(nsn);
 	}
 
+	return (PF_DROP);
+
+drop:
+	pf_src_tree_remove_state(s);
+	s->timeout = PFTM_UNLINKED;
+	STATE_DEC_COUNTERS(s);
+	pf_free_state(s);
 	return (PF_DROP);
 }
 
@@ -5887,6 +5895,13 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 		}
 	}
 
+	if (src->scrub != NULL) {
+		if (src->scrub->pfss_v_tag == 0) {
+			src->scrub->pfss_v_tag = pd->hdr.sctp.v_tag;
+		} else  if (src->scrub->pfss_v_tag != pd->hdr.sctp.v_tag)
+			return (PF_DROP);
+	}
+
 	(*state)->expire = time_uptime;
 
 	/* translate source/destination address, if necessary */
@@ -5910,6 +5925,236 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 	}
 
 	return (PF_PASS);
+}
+
+static void
+pf_sctp_multihome_delayed(struct pf_pdesc *pd, int off, struct pfi_kkif *kif,
+    struct pf_kstate *s)
+{
+	struct pf_sctp_multihome_job	*j, *tmp;
+	int			 action;;
+	struct pf_kstate	*sm = NULL;
+	struct pf_krule		*ra = NULL;
+	struct pf_krule		*r = &V_pf_default_rule;
+	struct pf_kruleset	*rs = NULL;
+
+	PF_RULES_RLOCK_TRACKER;
+
+	TAILQ_FOREACH_SAFE(j, &pd->sctp_multihome_jobs, next, tmp) {
+		switch (j->op) {
+		case  SCTP_ADD_IP_ADDRESS: {
+			j->pd.sctp_flags |= PFDESC_SCTP_ADD_IP;
+			PF_RULES_RLOCK();
+			action = pf_test_rule(&r, &sm, kif,
+			    j->m, off, &j->pd, &ra, &rs, NULL);
+			PF_RULES_RUNLOCK();
+			SDT_PROBE4(pf, sctp, multihome, test, kif, r, j->m, action);
+			if (sm) {
+				/* Inherit v_tag values. */
+				sm->src.scrub->pfss_v_tag = s->src.scrub->pfss_flags;
+				sm->dst.scrub->pfss_v_tag = s->dst.scrub->pfss_flags;
+				PF_STATE_UNLOCK(sm);
+			}
+			break;
+		}
+		case SCTP_DEL_IP_ADDRESS: {
+			struct pf_state_key_cmp key;
+			uint8_t psrc;
+
+			bzero(&key, sizeof(key));
+			key.af = j->pd.af;
+			key.proto = IPPROTO_SCTP;
+			if (j->pd.dir == PF_IN)	{	/* wire side, straight */
+				PF_ACPY(&key.addr[0], j->pd.src, key.af);
+				PF_ACPY(&key.addr[1], j->pd.dst, key.af);
+				key.port[0] = j->pd.hdr.sctp.src_port;
+				key.port[1] = j->pd.hdr.sctp.dest_port;
+			} else {			/* stack side, reverse */
+				PF_ACPY(&key.addr[1], j->pd.src, key.af);
+				PF_ACPY(&key.addr[0], j->pd.dst, key.af);
+				key.port[1] = j->pd.hdr.sctp.src_port;
+				key.port[0] = j->pd.hdr.sctp.dest_port;
+			}
+
+			sm = pf_find_state(kif, &key, j->pd.dir);
+			if (sm != NULL) {
+				PF_STATE_LOCK_ASSERT(sm);
+				if (j->pd.dir == sm->direction) {
+					psrc = PF_PEER_SRC;
+				} else {
+					psrc = PF_PEER_DST;
+				}
+				pf_set_protostate(sm, psrc, SCTP_SHUTDOWN_PENDING);
+				sm->timeout = PFTM_TCP_CLOSING;
+				PF_STATE_UNLOCK(sm);
+			}
+			break;
+		default:
+			panic("Unknown op %#x", j->op);
+		}
+		}
+
+		free(j, M_PFTEMP);
+	}
+}
+
+static int
+pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
+    struct pfi_kkif *kif, int op)
+{
+	int			 off = 0;
+	struct pf_sctp_multihome_job	*job;
+
+	while (off < len) {
+		struct sctp_paramhdr h;
+
+		if (!pf_pull_hdr(m, start + off, &h, sizeof(h), NULL, NULL,
+		    pd->af))
+			return (PF_DROP);
+
+		/* Parameters are at least 4 bytes. */
+		if (ntohs(h.param_length) < 4)
+			return (PF_DROP);
+
+		switch (ntohs(h.param_type)) {
+		case  SCTP_IPV4_ADDRESS: {
+			struct in_addr t;
+
+			if (ntohs(h.param_length) !=
+			    (sizeof(struct sctp_paramhdr) + sizeof(t)))
+				return (PF_DROP);
+
+			if (!pf_pull_hdr(m, start + off + sizeof(h), &t, sizeof(t),
+			    NULL, NULL, pd->af))
+				return (PF_DROP);
+
+			/*
+			 * Avoid duplicating states. We'll already have
+			 * created a state based on the source address of
+			 * the packet, but SCTP endpoints may also list this
+			 * address again in the INIT(_ACK) parameters.
+			 */
+			if (t.s_addr == pd->src->v4.s_addr)
+				break;
+
+			if (in_nullhost(t))
+				t.s_addr = pd->src->v4.s_addr;
+
+			/*
+			 * We hold the state lock (idhash) here, which means
+			 * that we can't acquire the keyhash, or we'll get a
+			 * LOR (and potentially double-lock things too). We also
+			 * can't release the state lock here, so instead we'll
+			 * enqueue this for async handling.
+			 * There's a relatively small race here, in that a
+			 * packet using the new addresses could arrive already,
+			 * but that's just though luck for it.
+			 */
+			job = malloc(sizeof(*job), M_PFTEMP, M_NOWAIT | M_ZERO);
+			if (! job)
+				return (PF_DROP);
+
+			memcpy(&job->pd, pd, sizeof(*pd));
+
+			// New source address!
+			memcpy(&job->src, &t, sizeof(t));
+			job->pd.src = &job->src;
+			memcpy(&job->dst, pd->dst, sizeof(job->dst));
+			job->pd.dst = &job->dst;
+			job->m = m;
+			job->op = op;
+
+			TAILQ_INSERT_TAIL(&pd->sctp_multihome_jobs, job, next);
+			break;
+		}
+#ifdef INET6
+		case SCTP_IPV6_ADDRESS: {
+			struct in6_addr t;
+
+			if (ntohs(h.param_length) !=
+			    (sizeof(struct sctp_paramhdr) + sizeof(t)))
+				return (PF_DROP);
+
+			if (!pf_pull_hdr(m, start + off + sizeof(h), &t, sizeof(t),
+			    NULL, NULL, pd->af))
+				return (PF_DROP);
+			if (memcmp(&t, &pd->src->v6, sizeof(t)) == 0)
+				break;
+			if (memcmp(&t, &in6addr_any, sizeof(t)) == 0)
+				memcpy(&t, &pd->src->v6, sizeof(t));
+
+			job = malloc(sizeof(*job), M_PFTEMP, M_NOWAIT | M_ZERO);
+			if (! job)
+				return (PF_DROP);
+
+			memcpy(&job->pd, pd, sizeof(*pd));
+			memcpy(&job->src, &t, sizeof(t));
+			job->pd.src = &job->src;
+			memcpy(&job->dst, pd->dst, sizeof(job->dst));
+			job->pd.dst = &job->dst;
+			job->m = m;
+			job->op = op;
+
+			TAILQ_INSERT_TAIL(&pd->sctp_multihome_jobs, job, next);
+			break;
+		}
+#endif
+		case SCTP_ADD_IP_ADDRESS: {
+			int ret;
+			struct sctp_asconf_paramhdr ah;
+
+			if (!pf_pull_hdr(m, start + off, &ah, sizeof(ah),
+			    NULL, NULL, pd->af))
+				return (PF_DROP);
+
+			ret = pf_multihome_scan(m, start + off + sizeof(ah),
+			    ntohs(ah.ph.param_length) - sizeof(ah), pd, kif,
+			    SCTP_ADD_IP_ADDRESS);
+			if (ret != PF_PASS)
+				return (ret);
+			break;
+		}
+		case SCTP_DEL_IP_ADDRESS: {
+			int ret;
+			struct sctp_asconf_paramhdr ah;
+
+			if (!pf_pull_hdr(m, start + off, &ah, sizeof(ah),
+			    NULL, NULL, pd->af))
+				return (PF_DROP);
+			ret = pf_multihome_scan(m, start + off + sizeof(ah),
+			    ntohs(ah.ph.param_length) - sizeof(ah), pd, kif,
+			    SCTP_DEL_IP_ADDRESS);
+			if (ret != PF_PASS)
+				return (ret);
+			break;
+		}
+		default:
+			break;
+		}
+
+		off += roundup(ntohs(h.param_length), 4);
+	}
+
+	return (PF_PASS);
+}
+int
+pf_multihome_scan_init(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
+    struct pfi_kkif *kif)
+{
+	start += sizeof(struct sctp_init_chunk);
+	len -= sizeof(struct sctp_init_chunk);
+
+	return (pf_multihome_scan(m, start, len, pd, kif, SCTP_ADD_IP_ADDRESS));
+}
+
+int
+pf_multihome_scan_asconf(struct mbuf *m, int start, int len,
+    struct pf_pdesc *pd, struct pfi_kkif *kif)
+{
+	start += sizeof(struct sctp_asconf_chunk);
+	len -= sizeof(struct sctp_asconf_chunk);
+
+	return (pf_multihome_scan(m, start, len, pd, kif, SCTP_ADD_IP_ADDRESS));
 }
 
 static int
@@ -7412,6 +7657,7 @@ pf_test(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0,
 	}
 
 	memset(&pd, 0, sizeof(pd));
+	TAILQ_INIT(&pd.sctp_multihome_jobs);
 	if (default_actions != NULL)
 		memcpy(&pd.act, default_actions, sizeof(pd.act));
 	pd.pf_mtag = pf_find_mtag(m);
@@ -7613,6 +7859,8 @@ pf_test(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0,
 				pd.act.log |= PF_LOG_FORCE;
 			goto done;
 		}
+		pd.p_len = pd.tot_len - off;
+
 		pd.sport = &pd.hdr.sctp.src_port;
 		pd.dport = &pd.hdr.sctp.dest_port;
 		if (pd.hdr.sctp.src_port == 0 || pd.hdr.sctp.dest_port == 0) {
@@ -7896,7 +8144,7 @@ done:
 		/* pf_route() returns unlocked. */
 		if (rt) {
 			pf_route(m0, r, kif->pfik_ifp, s, &pd, inp);
-			return (action);
+			goto out;
 		}
 		if (pf_dummynet(&pd, s, r, m0) != 0) {
 			action = PF_DROP;
@@ -7909,6 +8157,9 @@ done:
 
 	if (s)
 		PF_STATE_UNLOCK(s);
+
+out:
+	pf_sctp_multihome_delayed(&pd, off, kif, s);
 
 	return (action);
 }
@@ -7959,6 +8210,7 @@ pf_test6(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0, struct inpcb 
 	}
 
 	memset(&pd, 0, sizeof(pd));
+	TAILQ_INIT(&pd.sctp_multihome_jobs);
 	if (default_actions != NULL)
 		memcpy(&pd.act, default_actions, sizeof(pd.act));
 	pd.pf_mtag = pf_find_mtag(m);
@@ -8441,7 +8693,7 @@ done:
 		/* pf_route6() returns unlocked. */
 		if (rt) {
 			pf_route6(m0, r, kif->pfik_ifp, s, &pd, inp);
-			return (action);
+			goto out;
 		}
 		if (pf_dummynet(&pd, s, r, m0) != 0) {
 			action = PF_DROP;
@@ -8458,7 +8710,10 @@ done:
 	    (mtag = m_tag_find(m, PACKET_TAG_PF_REASSEMBLED, NULL)) != NULL)
 		action = pf_refragment6(ifp, m0, mtag, pflags & PFIL_FWD);
 
+out:
 	SDT_PROBE4(pf, ip, test6, done, action, reason, r, s);
+
+	pf_sctp_multihome_delayed(&pd, off, kif, s);
 
 	return (action);
 }
