@@ -900,7 +900,10 @@ struct pf_state_scrub {
 #define PFSS_DATA_NOTS	0x0080		/* no timestamp on data packets	*/
 	u_int8_t	pfss_ttl;	/* stashed TTL			*/
 	u_int8_t	pad;
-	u_int32_t	pfss_ts_mod;	/* timestamp modulation		*/
+	union {
+		u_int32_t	pfss_ts_mod;	/* timestamp modulation		*/
+		u_int32_t	pfss_v_tag;	/* SCTP verification tag	*/
+	};
 };
 
 struct pf_state_host {
@@ -1531,6 +1534,9 @@ struct pfi_kkif {
 #define PFI_IFLAG_SKIP		0x0100	/* skip filtering on interface */
 
 #ifdef _KERNEL
+struct pf_sctp_multihome_job;
+TAILQ_HEAD(pf_sctp_multihome_jobs, pf_sctp_multihome_job);
+
 struct pf_pdesc {
 	struct {
 		int	 done;
@@ -1578,10 +1584,24 @@ struct pf_pdesc {
 #define PFDESC_SCTP_SHUTDOWN	0x0010
 #define PFDESC_SCTP_SHUTDOWN_COMPLETE	0x0020
 #define PFDESC_SCTP_DATA	0x0040
-#define PFDESC_SCTP_OTHER	0x0080
+#define PFDESC_SCTP_ASCONF	0x0080
+#define PFDESC_SCTP_OTHER	0x0100
+#define PFDESC_SCTP_ADD_IP	0x0200
 	u_int16_t	 sctp_flags;
 	u_int32_t	 sctp_initiate_tag;
+
+	struct pf_sctp_multihome_jobs	sctp_multihome_jobs;
 };
+
+struct pf_sctp_multihome_job {
+	TAILQ_ENTRY(pf_sctp_multihome_job)	next;
+	struct pf_pdesc				 pd;
+	struct pf_addr				 src;
+	struct pf_addr				 dst;
+	struct mbuf				*m;
+	int					 op;
+};
+
 #endif
 
 /* flags for RDR options */
@@ -2249,6 +2269,11 @@ void	pf_addr_inc(struct pf_addr *, sa_family_t);
 int	pf_refragment6(struct ifnet *, struct mbuf **, struct m_tag *, bool);
 #endif /* INET6 */
 
+int	pf_multihome_scan_init(struct mbuf *, int, int, struct pf_pdesc *,
+	    struct pfi_kkif *);
+int	pf_multihome_scan_asconf(struct mbuf *, int, int, struct pf_pdesc *,
+	    struct pfi_kkif *);
+
 u_int32_t	pf_new_isn(struct pf_kstate *);
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
@@ -2277,6 +2302,8 @@ int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
 int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 	    u_short *, struct tcphdr *, struct pf_kstate *,
 	    struct pf_state_peer *, struct pf_state_peer *, int *);
+int	pf_normalize_sctp_init(struct mbuf *, int, struct pf_pdesc *,
+	    struct pf_state_peer *, struct pf_state_peer *);
 int	pf_normalize_sctp(int, struct pfi_kkif *, struct mbuf *, int,
 	    int, void *, struct pf_pdesc *);
 u_int32_t
