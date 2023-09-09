@@ -2,6 +2,7 @@
 MDSRCS+= \
 	amd64_archlevel.c \
 	bcmp.S \
+	memchr.S \
 	memcmp.S \
 	memcpy.S \
 	memmove.S \
@@ -10,5 +11,8 @@ MDSRCS+= \
 	strcat.S \
 	strchrnul.S \
 	strcmp.S \
+	strcpy.c \
+	strcspn.S \
 	strlen.S \
-	strcpy.c
+	strnlen.c \
+	strspn.S
