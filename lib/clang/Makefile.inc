@@ -1,6 +1,12 @@
 
 .include <bsd.compiler.mk>
 
+<<<<<<< HEAD
+=======
+PACKAGE=	clang
+MK_PIE:=	no	# Explicit libXXX.a references
+
+>>>>>>> internal/freebsd/current/main
 .if ${COMPILER_TYPE} == "clang"
 DEBUG_FILES_CFLAGS= -gline-tables-only
 .else
