@@ -41,7 +41,6 @@ static const char sccsid[] = "@(#)split.c	8.2 (Berkeley) 4/16/94";
 #endif
 
 #include <sys/param.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 
 #include <ctype.h>
@@ -65,6 +64,7 @@ static const char sccsid[] = "@(#)split.c	8.2 (Berkeley) 4/16/94";
 
 static off_t	 bytecnt;		/* Byte count to split on. */
 static off_t	 chunks = 0;		/* Chunks count to split into. */
+static bool      clobber = true;        /* Whether to overwrite existing output files. */
 static long	 numlines;		/* Line count to split on. */
 static int	 file_open;		/* If a file open. */
 static int	 ifd = -1, ofd = -1;	/* Input/output file descriptors. */
@@ -73,24 +73,25 @@ static regex_t	 rgx;
 static int	 pflag;
 static bool	 dflag;
 static long	 sufflen = 2;		/* File name suffix length. */
+static int	 autosfx = 1;		/* Whether to auto-extend the suffix length. */
 
 static void newfile(void);
 static void split1(void);
 static void split2(void);
 static void split3(void);
-static void usage(void);
+static void usage(void) __dead2;
 
 int
 main(int argc, char **argv)
 {
-	int ch;
-	int error;
-	char *ep, *p;
+	const char *p;
+	char *ep;
+	int ch, error;
 
 	setlocale(LC_ALL, "");
 
 	dflag = false;
-	while ((ch = getopt(argc, argv, "0123456789a:b:dl:n:p:")) != -1)
+	while ((ch = getopt(argc, argv, "0::1::2::3::4::5::6::7::8::9::a:b:cdl:n:p:")) != -1)
 		switch (ch) {
 		case '0': case '1': case '2': case '3': case '4':
 		case '5': case '6': case '7': case '8': case '9':
@@ -98,28 +99,30 @@ main(int argc, char **argv)
 			 * Undocumented kludge: split was originally designed
 			 * to take a number after a dash.
 			 */
-			if (numlines == 0) {
-				p = argv[optind - 1];
-				if (p[0] == '-' && p[1] == ch && !p[2])
-					numlines = strtol(++p, &ep, 10);
-				else
-					numlines =
-					    strtol(argv[optind] + 1, &ep, 10);
-				if (numlines <= 0 || *ep)
-					errx(EX_USAGE,
-					    "%s: illegal line count", optarg);
-			}
+			if (numlines != 0)
+				usage();
+			numlines = ch - '0';
+			p = optarg ? optarg : "";
+			while (numlines >= 0 && *p >= '0' && *p <= '9')
+				numlines = numlines * 10 + *p++ - '0';
+			if (numlines <= 0 || *p != '\0')
+				errx(EX_USAGE, "%c%s: illegal line count", ch,
+				    optarg ? optarg : "");
 			break;
 		case 'a':		/* Suffix length */
 			if ((sufflen = strtol(optarg, &ep, 10)) <= 0 || *ep)
 				errx(EX_USAGE,
 				    "%s: illegal suffix length", optarg);
+			autosfx = 0;
 			break;
 		case 'b':		/* Byte count. */
 			errno = 0;
 			error = expand_number(optarg, &bytecnt);
 			if (error == -1)
 				errx(EX_USAGE, "%s: offset too large", optarg);
+			break;
+		case 'c':               /* Continue, don't overwrite output files. */
+			clobber = false;
 			break;
 		case 'd':		/* Decimal suffix */
 			dflag = true;
@@ -151,17 +154,22 @@ main(int argc, char **argv)
 	argv += optind;
 	argc -= optind;
 
-	if (*argv != NULL) {			/* Input file. */
+	if (argc > 0) {			/* Input file. */
 		if (strcmp(*argv, "-") == 0)
 			ifd = STDIN_FILENO;
 		else if ((ifd = open(*argv, O_RDONLY, 0)) < 0)
 			err(EX_NOINPUT, "%s", *argv);
 		++argv;
+		--argc;
 	}
-	if (*argv != NULL)			/* File name prefix. */
-		if (strlcpy(fname, *argv++, sizeof(fname)) >= sizeof(fname))
-			errx(EX_USAGE, "file name prefix is too long");
-	if (*argv != NULL)
+	if (argc > 0) {			/* File name prefix. */
+		if (strlcpy(fname, *argv, sizeof(fname)) >= sizeof(fname))
+			errx(EX_USAGE, "file name prefix is too long: %s",
+			    *argv);
+		++argv;
+		--argc;
+	}
+	if (argc > 0)
 		usage();
 
 	if (strlen(fname) + (unsigned long)sufflen >= sizeof(fname))
@@ -343,6 +351,10 @@ newfile(void)
 	static char *fpnt;
 	char beg, end;
 	int pattlen;
+	int flags = O_WRONLY | O_CREAT | O_TRUNC;
+
+	if (!clobber)
+		flags |= O_EXCL;
 
 	if (ofd == -1) {
 		if (fname[0] == '\0') {
@@ -351,9 +363,10 @@ newfile(void)
 		} else {
 			fpnt = fname + strlen(fname);
 		}
-		ofd = fileno(stdout);
-	}
+	} else if (close(ofd) != 0)
+		err(1, "%s", fname);
 
+	again:
 	if (dflag) {
 		beg = '0';
 		end = '9';
@@ -363,6 +376,34 @@ newfile(void)
 		end = 'z';
 	}
 	pattlen = end - beg + 1;
+
+	/*
+	 * If '-a' is not specified, then we automatically expand the
+	 * suffix length to accomodate splitting all input.  We do this
+	 * by moving the suffix pointer (fpnt) forward and incrementing
+	 * sufflen by one, thereby yielding an additional two characters
+	 * and allowing all output files to sort such that 'cat *' yields
+	 * the input in order.  I.e., the order is '... xyy xyz xzaaa
+	 * xzaab ... xzyzy, xzyzz, xzzaaaa, xzzaaab' and so on.
+	 */
+	if (!dflag && autosfx && (fpnt[0] == 'y') &&
+			strspn(fpnt+1, "z") == strlen(fpnt+1)) {
+		fpnt = fname + strlen(fname) - sufflen;
+		fpnt[sufflen + 2] = '\0';
+		fpnt[0] = end;
+		fpnt[1] = beg;
+
+		/*  Basename | Suffix
+		 *  before:
+		 *  x        | yz
+		 *  after:
+		 *  xz       | a.. */
+		fpnt++;
+		sufflen++;
+
+		/* Reset so we start back at all 'a's in our extended suffix. */
+		fnum = 0;
+	}
 
 	/* maxfiles = pattlen^sufflen, but don't use libm. */
 	for (maxfiles = 1, i = 0; i < sufflen; i++)
@@ -384,8 +425,11 @@ newfile(void)
 	fpnt[sufflen] = '\0';
 
 	++fnum;
-	if (!freopen(fname, "w", stdout))
+	if ((ofd = open(fname, flags, DEFFILEMODE)) < 0) {
+		if (!clobber && errno == EEXIST)
+			goto again;
 		err(EX_IOERR, "%s", fname);
+	}
 	file_open = 1;
 }
 
@@ -393,9 +437,9 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-"usage: split [-l line_count] [-a suffix_length] [file [prefix]]\n"
-"       split -b byte_count[K|k|M|m|G|g] [-a suffix_length] [file [prefix]]\n"
-"       split -n chunk_count [-a suffix_length] [file [prefix]]\n"
-"       split -p pattern [-a suffix_length] [file [prefix]]\n");
+"usage: split [-cd] [-l line_count] [-a suffix_length] [file [prefix]]\n"
+"       split [-cd] -b byte_count[K|k|M|m|G|g] [-a suffix_length] [file [prefix]]\n"
+"       split [-cd] -n chunk_count [-a suffix_length] [file [prefix]]\n"
+"       split [-cd] -p pattern [-a suffix_length] [file [prefix]]\n");
 	exit(EX_USAGE);
 }
