@@ -1477,6 +1477,10 @@ vnlru_recalc(void)
  */
 static struct proc *vnlruproc;
 static int vnlruproc_sig;
+static u_long vnlruproc_kicks;
+
+SYSCTL_ULONG(_vfs_vnode_vnlru, OID_AUTO, kicks, CTLFLAG_RD, &vnlruproc_kicks, 0,
+    "Number of times vnlru got woken up due to vnode shortage");
 
 /*
  * The main freevnodes counter is only updated when a counter local to CPU
@@ -1528,21 +1532,22 @@ vfs_freevnodes_dec(void)
 static u_long
 vnlru_read_freevnodes(void)
 {
-	long slop, rfreevnodes;
+	long slop, rfreevnodes, rfreevnodes_old;
 	int cpu;
 
 	rfreevnodes = atomic_load_long(&freevnodes);
+	rfreevnodes_old = atomic_load_long(&freevnodes_old);
 
-	if (rfreevnodes > freevnodes_old)
-		slop = rfreevnodes - freevnodes_old;
+	if (rfreevnodes > rfreevnodes_old)
+		slop = rfreevnodes - rfreevnodes_old;
 	else
-		slop = freevnodes_old - rfreevnodes;
+		slop = rfreevnodes_old - rfreevnodes;
 	if (slop < VNLRU_FREEVNODES_SLOP)
 		return (rfreevnodes >= 0 ? rfreevnodes : 0);
-	freevnodes_old = rfreevnodes;
 	CPU_FOREACH(cpu) {
-		freevnodes_old += cpuid_to_pcpu[cpu]->pc_vfs_freevnodes;
+		rfreevnodes += cpuid_to_pcpu[cpu]->pc_vfs_freevnodes;
 	}
+	atomic_store_long(&freevnodes_old, rfreevnodes);
 	return (freevnodes_old >= 0 ? freevnodes_old : 0);
 }
 
@@ -1570,6 +1575,7 @@ vnlru_kick_locked(void)
 	mtx_assert(&vnode_list_mtx, MA_OWNED);
 	if (vnlruproc_sig == 0) {
 		vnlruproc_sig = 1;
+		vnlruproc_kicks++;
 		wakeup(vnlruproc);
 	}
 }
