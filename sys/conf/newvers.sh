@@ -75,7 +75,7 @@ do
 	esac
 done
 
-RELEASE="${RELEASE:-${REVISION}${BRANCH}}"
+RELEASE="${RELEASE:-${REVISION}-${BRANCH}}"
 VERSION="${VERSION:-${TYPE} ${RELEASE}}"
 
 RELDATE=$(awk '/^#define[[:space:]]*__FreeBSD_version/ {print $3}' ${PARAMFILE:-${SYSDIR}/sys/param.h})
