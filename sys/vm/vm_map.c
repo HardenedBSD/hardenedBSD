@@ -2898,7 +2898,8 @@ again:
 			return (rv);
 		}
 
-		if (((new_prot & ~entry->protection) & VM_PROT_WRITE) == 0 ||
+		if ((flags & VM_MAP_PROTECT_SET_PROT) == 0 ||
+		    ((new_prot & ~entry->protection) & VM_PROT_WRITE) == 0 ||
 		    ENTRY_CHARGED(entry) ||
 		    (entry->eflags & MAP_ENTRY_GUARD) != 0) {
 			continue;
