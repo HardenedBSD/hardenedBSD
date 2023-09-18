@@ -1,8 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2000 Marcel Moolenaar
- * All rights reserved.
+ * Copyright (c) 2023 Beckhoff Automation GmbH & Co. KG
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +25,9 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUX_SIGNAL_H_
-#define _LINUX_SIGNAL_H_
+#ifndef _ZYNQMP_CLK_GATE_H_
+#define	_ZYNQMP_CLK_GATE_H_
 
-int linux_do_sigaction(struct thread *, int, l_sigaction_t *, l_sigaction_t *);
-void siginfo_to_lsiginfo(const siginfo_t *si, l_siginfo_t *lsi, l_int sig);
-int linux_copyin_sigset(struct thread *td, l_sigset_t *, l_size_t, sigset_t *,
-    sigset_t **);
+int zynqmp_clk_gate_register(struct clkdom *clkdom, device_t fw, struct clknode_init_def *clkdef);
 
-#endif /* _LINUX_SIGNAL_H_ */
+#endif /* _ZYNQMP_CLK_GATE_H_ */
