@@ -107,9 +107,6 @@ SYSCTL_INT(_compat_linuxkpi_80211, OID_AUTO, debug, CTLFLAG_RWTUN,
 #define	PREP_TX_INFO_DURATION	0 /* Let the driver do its thing. */
 #endif
 
-/* c.f. ieee80211_ioctl.c */
-static const uint8_t zerobssid[IEEE80211_ADDR_LEN];
-
 /* This is DSAP | SSAP | CTRL | ProtoID/OrgCode{3}. */
 const uint8_t rfc1042_header[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
 
@@ -269,8 +266,16 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 			sta->deflink.supp_rates[band] |= BIT(i);
 		}
 	}
+	sta->deflink.smps_mode = IEEE80211_SMPS_OFF;
 	IMPROVE("ht, vht, he, ... bandwidth, smps_mode, ..");
 	/* bandwidth = IEEE80211_STA_RX_... */
+
+	/* Link configuration. */
+	IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
+	sta->link[0] = &sta->deflink;
+	for (i = 1; i < nitems(sta->link); i++) {
+		IMPROVE("more links; only link[0] = deflink currently.");
+	}
 
 	/* Deferred TX path. */
 	mtx_init(&lsta->txq_mtx, "lsta_txq", NULL, MTX_DEF);
@@ -743,7 +748,7 @@ lkpi_update_dtim_tsf(struct ieee80211_vif *vif, struct ieee80211_node *ni,
 		    "dtim_period %u sync_dtim_count %u sync_tsf %ju "
 		    "sync_device_ts %u bss_changed %#08x\n",
 			__func__, __LINE__, _f, _l,
-			vif->bss_conf.assoc, vif->bss_conf.aid,
+			vif->cfg.assoc, vif->cfg.aid,
 			vif->bss_conf.beacon_int, vif->bss_conf.dtim_period,
 			vif->bss_conf.sync_dtim_count,
 			(uintmax_t)vif->bss_conf.sync_tsf,
@@ -774,7 +779,7 @@ lkpi_update_dtim_tsf(struct ieee80211_vif *vif, struct ieee80211_node *ni,
 		    "dtim_period %u sync_dtim_count %u sync_tsf %ju "
 		    "sync_device_ts %u bss_changed %#08x\n",
 			__func__, __LINE__, _f, _l,
-			vif->bss_conf.assoc, vif->bss_conf.aid,
+			vif->cfg.assoc, vif->cfg.aid,
 			vif->bss_conf.beacon_int, vif->bss_conf.dtim_period,
 			vif->bss_conf.sync_dtim_count,
 			(uintmax_t)vif->bss_conf.sync_tsf,
@@ -845,7 +850,7 @@ lkpi_disassoc(struct ieee80211_sta *sta, struct ieee80211_vif *vif,
     struct lkpi_hw *lhw)
 {
 	sta->aid = 0;
-	if (vif->bss_conf.assoc) {
+	if (vif->cfg.assoc) {
 		struct ieee80211_hw *hw;
 		enum ieee80211_bss_changed changed;
 
@@ -853,8 +858,8 @@ lkpi_disassoc(struct ieee80211_sta *sta, struct ieee80211_vif *vif,
 		lkpi_update_mcast_filter(lhw->ic, true);
 
 		changed = 0;
-		vif->bss_conf.assoc = false;
-		vif->bss_conf.aid = 0;
+		vif->cfg.assoc = false;
+		vif->cfg.aid = 0;
 		changed |= BSS_CHANGED_ASSOC;
 		/*
 		 * This will remove the sta from firmware for iwlwifi.
@@ -969,6 +974,23 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	conf->min_def.center_freq2 = 0;
 	IMPROVE("currently 20_NOHT only");
 
+	/* Set bss info (bss_info_changed). */
+	bss_changed = 0;
+	vif->bss_conf.bssid = ni->ni_bssid;
+	bss_changed |= BSS_CHANGED_BSSID;
+	vif->bss_conf.txpower = ni->ni_txpower;
+	bss_changed |= BSS_CHANGED_TXPOWER;
+	vif->cfg.idle = false;
+	bss_changed |= BSS_CHANGED_IDLE;
+
+	/* vif->bss_conf.basic_rates ? Where exactly? */
+
+	/* Should almost assert it is this. */
+	vif->cfg.assoc = false;
+	vif->cfg.aid = 0;
+
+	bss_changed |= lkpi_update_dtim_tsf(vif, ni, vap, __func__, __LINE__);
+
 	error = 0;
 	if (vif->chanctx_conf != NULL) {
 		changed = IEEE80211_CHANCTX_CHANGE_MIN_WIDTH;
@@ -988,9 +1010,13 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 		} else {
 			goto out;
 		}
+
+		vif->bss_conf.chanctx_conf = conf;
+
 		/* Assign vif chanctx. */
 		if (error == 0)
-			error = lkpi_80211_mo_assign_vif_chanctx(hw, vif, conf);
+			error = lkpi_80211_mo_assign_vif_chanctx(hw, vif,
+			    &vif->bss_conf, conf);
 		if (error == EOPNOTSUPP)
 			error = 0;
 		if (error != 0) {
@@ -1000,21 +1026,6 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 		}
 	}
 	IMPROVE("update radiotap chan fields too");
-
-	/* Set bss info (bss_info_changed). */
-	bss_changed = 0;
-	vif->bss_conf.bssid = ni->ni_bssid;
-	bss_changed |= BSS_CHANGED_BSSID;
-	vif->bss_conf.txpower = ni->ni_txpower;
-	bss_changed |= BSS_CHANGED_TXPOWER;
-	vif->bss_conf.idle = false;
-	bss_changed |= BSS_CHANGED_IDLE;
-
-	/* Should almost assert it is this. */
-	vif->bss_conf.assoc = false;
-	vif->bss_conf.aid = 0;
-
-	bss_changed |= lkpi_update_dtim_tsf(vif, ni, vap, __func__, __LINE__);
 
 	/* RATES */
 	IMPROVE("bss info: not all needs to come now and rates are missing");
@@ -1171,7 +1182,7 @@ lkpi_sta_auth_to_scan(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 
 		conf = vif->chanctx_conf;
 		/* Remove vif context. */
-		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->chanctx_conf);
+		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->bss_conf, &vif->chanctx_conf);
 		/* NB: vif->chanctx_conf is NULL now. */
 
 		/* Remove chan ctx. */
@@ -1431,8 +1442,8 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 	bss_changed = 0;
 	vif->bss_conf.qos = 0;
 	bss_changed |= BSS_CHANGED_QOS;
-	vif->bss_conf.ssid_len = 0;
-	memset(vif->bss_conf.ssid, '\0', sizeof(vif->bss_conf.ssid));
+	vif->cfg.ssid_len = 0;
+	memset(vif->cfg.ssid, '\0', sizeof(vif->cfg.ssid));
 	bss_changed |= BSS_CHANGED_BSSID;
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, bss_changed);
 
@@ -1446,7 +1457,7 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 
 		conf = vif->chanctx_conf;
 		/* Remove vif context. */
-		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->chanctx_conf);
+		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->bss_conf, &vif->chanctx_conf);
 		/* NB: vif->chanctx_conf is NULL now. */
 
 		/* Remove chan ctx. */
@@ -1547,14 +1558,14 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 #ifdef LKPI_80211_WME
 	bss_changed |= lkpi_wme_update(lhw, vap, true);
 #endif
-	if (!vif->bss_conf.assoc || vif->bss_conf.aid != IEEE80211_NODE_AID(ni)) {
-		vif->bss_conf.assoc = true;
-		vif->bss_conf.aid = IEEE80211_NODE_AID(ni);
+	if (!vif->cfg.assoc || vif->cfg.aid != IEEE80211_NODE_AID(ni)) {
+		vif->cfg.assoc = true;
+		vif->cfg.aid = IEEE80211_NODE_AID(ni);
 		bss_changed |= BSS_CHANGED_ASSOC;
 	}
 	/* We set SSID but this is not BSSID! */
-	vif->bss_conf.ssid_len = ni->ni_esslen;
-	memcpy(vif->bss_conf.ssid, ni->ni_essid, ni->ni_esslen);
+	vif->cfg.ssid_len = ni->ni_esslen;
+	memcpy(vif->cfg.ssid, ni->ni_essid, ni->ni_esslen);
 	if ((vap->iv_flags & IEEE80211_F_SHPREAMBLE) !=
 	    vif->bss_conf.use_short_preamble) {
 		vif->bss_conf.use_short_preamble ^= 1;
@@ -1893,8 +1904,8 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	bss_changed = 0;
 	vif->bss_conf.qos = 0;
 	bss_changed |= BSS_CHANGED_QOS;
-	vif->bss_conf.ssid_len = 0;
-	memset(vif->bss_conf.ssid, '\0', sizeof(vif->bss_conf.ssid));
+	vif->cfg.ssid_len = 0;
+	memset(vif->cfg.ssid, '\0', sizeof(vif->cfg.ssid));
 	bss_changed |= BSS_CHANGED_BSSID;
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, bss_changed);
 
@@ -1908,7 +1919,7 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 
 		conf = vif->chanctx_conf;
 		/* Remove vif context. */
-		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->chanctx_conf);
+		lkpi_80211_mo_unassign_vif_chanctx(hw, vif, &vif->bss_conf, &vif->chanctx_conf);
 		/* NB: vif->chanctx_conf is NULL now. */
 
 		/* Remove chan ctx. */
@@ -2130,12 +2141,14 @@ lkpi_iv_update_bss(struct ieee80211vap *vap, struct ieee80211_node *ni)
 		lsta->ni = ni;
 		sta = LSTA_TO_STA(lsta);
 		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
+		IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
 	}
 	lsta = obss->ni_drv_data;
 	if (lsta != NULL) {
 		lsta->ni = obss;
 		sta = LSTA_TO_STA(lsta);
 		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
+		IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
 	}
 
 out:
@@ -2199,7 +2212,7 @@ lkpi_wme_update(struct lkpi_hw *lhw, struct ieee80211vap *vap, bool planned)
 		txqp.cw_max = wmep->wmep_logcwmax;
 		txqp.txop = wmep->wmep_txopLimit;
 		txqp.aifs = wmep->wmep_aifsn;
-		error = lkpi_80211_mo_conf_tx(hw, vif, ac, &txqp);
+		error = lkpi_80211_mo_conf_tx(hw, vif, /* link_id */0, ac, &txqp);
 		if (error != 0)
 			ic_printf(ic, "%s: conf_tx ac %u failed %d\n",
 			    __func__, ac, error);
@@ -2243,9 +2256,11 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	struct lkpi_vif *lvif;
 	struct ieee80211vap *vap;
 	struct ieee80211_vif *vif;
+	struct ieee80211_tx_queue_params txqp;
 	enum ieee80211_bss_changed changed;
 	size_t len;
 	int error, i;
+	uint16_t ac;
 
 	if (!TAILQ_EMPTY(&ic->ic_vaps))	/* 1 so far. Add <n> once this works. */
 		return (NULL);
@@ -2274,25 +2289,26 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 #if 1
 	vif->chanctx_conf = NULL;
 	vif->bss_conf.vif = vif;
-	vif->bss_conf.idle = true;
-	vif->bss_conf.ps = false;
+	/* vap->iv_myaddr is not set until net80211::vap_setup or vap_attach. */
+	IEEE80211_ADDR_COPY(vif->bss_conf.addr, mac);
+	vif->bss_conf.link_id = 0;	/* Non-MLO operation. */
 	vif->bss_conf.chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
 	vif->bss_conf.use_short_preamble = false;	/* vap->iv_flags IEEE80211_F_SHPREAMBLE */
 	vif->bss_conf.use_short_slot = false;		/* vap->iv_flags IEEE80211_F_SHSLOT */
 	vif->bss_conf.qos = false;
 	vif->bss_conf.use_cts_prot = false;		/* vap->iv_protmode */
 	vif->bss_conf.ht_operation_mode = IEEE80211_HT_OP_MODE_PROTECTION_NONE;
-	vif->bss_conf.assoc = false;
-	vif->bss_conf.aid = 0;
+	vif->cfg.aid = 0;
+	vif->cfg.assoc = false;
+	vif->cfg.idle = true;
+	vif->cfg.ps = false;
+	IMPROVE("Check other fields and then figure out whats is left elsewhere of them");
 	/*
 	 * We need to initialize it to something as the bss_info_changed call
 	 * will try to copy from it in iwlwifi and NULL is a panic.
 	 * We will set the proper one in scan_to_auth() before being assoc.
-	 * NB: the logic there with using an array as bssid_override and checking
-	 * for non-NULL later is flawed but in their workflow does not seem to
-	 * matter.
 	 */
-	vif->bss_conf.bssid = zerobssid;
+	vif->bss_conf.bssid = ieee80211broadcastaddr;
 #endif
 #if 0
 	vif->bss_conf.dtim_period = 0; /* IEEE80211_DTIM_DEFAULT ; must stay 0. */
@@ -2302,6 +2318,12 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	if (vif->bss_conf.beacon_int < 16)
 		vif->bss_conf.beacon_int = 16;
 #endif
+
+	/* Link Config */
+	vif->link_conf[0] = &vif->bss_conf;
+	for (i = 0; i < nitems(vif->link_conf); i++) {
+		IMPROVE("more than 1 link one day");
+	}
 
 	/* Setup queue defaults; driver may override in (*add_interface). */
 	for (i = 0; i < IEEE80211_NUM_ACS; i++) {
@@ -2344,7 +2366,24 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	changed = 0;
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, changed);
 
-	/* conf_tx setup; default WME? */
+	/* Configure tx queues (conf_tx), default WME & send BSS_CHANGED_QOS. */
+	IMPROVE("Hardcoded values; to fix see 802.11-2016, 9.4.2.29 EDCA Parameter Set element");
+	LKPI_80211_LHW_LOCK(lhw);
+	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
+
+		bzero(&txqp, sizeof(txqp));
+		txqp.cw_min = 15;
+		txqp.cw_max = 1023;
+		txqp.txop = 0;
+		txqp.aifs = 2;
+		error = lkpi_80211_mo_conf_tx(hw, vif, /* link_id */0, ac, &txqp);
+		if (error != 0)
+			ic_printf(ic, "%s: conf_tx ac %u failed %d\n",
+			    __func__, ac, error);
+	}
+	LKPI_80211_LHW_UNLOCK(lhw);
+	changed = BSS_CHANGED_QOS;
+	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, changed);
 
 	/* Force MC init. */
 	lkpi_update_mcast_filter(ic, true);
@@ -2459,24 +2498,32 @@ static void
 lkpi_ic_parent(struct ieee80211com *ic)
 {
 	struct lkpi_hw *lhw;
+#ifdef HW_START_STOP
 	struct ieee80211_hw *hw;
 	int error;
+#endif
 	bool start_all;
 
 	IMPROVE();
 
 	lhw = ic->ic_softc;
+#ifdef HW_START_STOP
 	hw = LHW_TO_HW(lhw);
+#endif
 	start_all = false;
 
 	/* IEEE80211_UNLOCK(ic); */
 	LKPI_80211_LHW_LOCK(lhw);
 	if (ic->ic_nrunning > 0) {
+#ifdef HW_START_STOP
 		error = lkpi_80211_mo_start(hw);
 		if (error == 0)
+#endif
 			start_all = true;
 	} else {
+#ifdef HW_START_STOP
 		lkpi_80211_mo_stop(hw);
+#endif
 	}
 	LKPI_80211_LHW_UNLOCK(lhw);
 	/* IEEE80211_LOCK(ic); */
@@ -4693,7 +4740,7 @@ linuxkpi_ieee80211_pspoll_get(struct ieee80211_hw *hw,
 	psp = skb_put_zero(skb, sizeof(*psp));
 	psp->i_fc[0] = IEEE80211_FC0_VERSION_0;
 	psp->i_fc[0] |= IEEE80211_FC0_SUBTYPE_PS_POLL | IEEE80211_FC0_TYPE_CTL;
-	v = htole16(vif->bss_conf.aid | 1<<15 | 1<<16);
+	v = htole16(vif->cfg.aid | 1<<15 | 1<<16);
 	memcpy(&psp->i_aid, &v, sizeof(v));
 	IEEE80211_ADDR_COPY(psp->i_bssid, vap->iv_bss->ni_macaddr);
 	IEEE80211_ADDR_COPY(psp->i_ta, vif->addr);
