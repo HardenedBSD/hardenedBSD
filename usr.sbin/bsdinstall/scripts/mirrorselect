@@ -36,27 +36,27 @@ BSDCFG_SHARE="/usr/share/bsdconfig"
 : ${BSDDIALOG_ERROR=255}
 
 case `uname -r` in
-13.*)
-	_hbsd_dist_dir="pub/hardenedbsd/13-stable/`uname -m`/`uname -p`/BUILD-LATEST"
+14.*)
+	_hbsd_dist_dir="pub/14-stable/`uname -m`/`uname -p`/installer/LATEST"
 	;;
-12.*)
-	_hbsd_dist_dir="pub/hardenedbsd/12-stable/`uname -m`/`uname -p`/BUILD-LATEST"
+13.*)
+	_hbsd_dist_dir="pub/13-stable/`uname -m`/`uname -p`/installer/LATEST"
 	;;
 *)
-	_hbsd_dist_dir="pub/hardenedbsd/current/`uname -m`/`uname -p`/BUILD-LATEST"
+	_hbsd_dist_dir="pub/current/`uname -m`/`uname -p`/LATEST"
 	;;
 esac
 
-exec 3>&1
+exec 5>&1
 MIRROR=`bsddialog --backtitle "$OSNAME Installer" \
     --title "Mirror Selection" --extra-button --extra-label "Other" \
     --menu "Please select the best suitable site for you or \"other\" if you want to specify a different choice. The \"Main Site\" directs users to the nearest project managed mirror via GeoDNS (they carry the full range of possible distributions and support both IPv4 and IPv6). All other sites are known as \"Community Mirrors\"; not every site listed here carries more than the base distribution kits. Select a site!" \
     0 0 16 \
-	https://ci-01.nyi.hardenedbsd.org	"Main Site (NYI)"\
+	https://installers.hardenedbsd.org	"Main Site (NYI)"\
 	http://qspcqclhifj3tcpojsbwoxgwanlo2wakti2ia4wozxjcldkxmw2yj3yd.onion "Onion Service" \
-    2>&1 1>&3`
+    2>&1 1>&5`
 MIRROR_BUTTON=$?
-exec 3>&-
+exec 5>&-
 
 BSDINSTALL_DISTSITE="$MIRROR/${_hbsd_dist_dir}"
 
@@ -68,13 +68,13 @@ $BSDDIALOG_ERROR | $BSDDIALOG_CANCEL | $BSDDIALOG_ESC)
 $BSDDIALOG_OK)
 	;;
 $BSDDIALOG_EXTRA)
-	exec 3>&1
+	exec 5>&1
 	BSDINSTALL_DISTSITE=`bsddialog --backtitle "$OSNAME Installer" \
 	    --title "Mirror Selection" \
 	    --inputbox "Please enter the URL to an alternate $OSNAME mirror:" \
-	    0 74 "$BSDINSTALL_DISTSITE" 2>&1 1>&3`
+	    0 74 "$BSDINSTALL_DISTSITE" 2>&1 1>&5`
 	MIRROR_BUTTON=$?
-	exec 3>&-
+	exec 5>&-
 	test $MIRROR_BUTTON -eq $BSDDIALOG_OK || exec $0 $@
 	;;
 esac
