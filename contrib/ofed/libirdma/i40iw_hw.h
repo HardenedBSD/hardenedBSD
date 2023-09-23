@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: GPL-2.0 or Linux-OpenIB
  *
- * Copyright (c) 2015 - 2022 Intel Corporation
+ * Copyright (c) 2015 - 2023 Intel Corporation
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -31,7 +31,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-/*$FreeBSD$*/
 
 #ifndef I40IW_HW_H
 #define I40IW_HW_H
@@ -41,8 +40,8 @@ enum i40iw_device_caps_const {
 	I40IW_MAX_SGE_RD			= 1,
 	I40IW_MAX_PUSH_PAGE_COUNT		= 0,
 	I40IW_MAX_INLINE_DATA_SIZE		= 48,
-	I40IW_MAX_IRD_SIZE			= 63,
-	I40IW_MAX_ORD_SIZE			= 127,
+	I40IW_MAX_IRD_SIZE			= 64,
+	I40IW_MAX_ORD_SIZE			= 64,
 	I40IW_MAX_WQ_ENTRIES			= 2048,
 	I40IW_MAX_WQE_SIZE_RQ			= 128,
 	I40IW_MAX_PDS				= 32768,

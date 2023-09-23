@@ -31,7 +31,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-/*$FreeBSD$*/
 
 
 #include <sys/mman.h>
@@ -49,7 +48,7 @@
 /**
  *  Driver version
  */
-char libirdma_version[] = "1.1.5-k";
+char libirdma_version[] = "1.2.17-k";
 
 unsigned int irdma_dbg;
 
@@ -170,7 +169,7 @@ irdma_init_context(struct verbs_device *vdev,
 	iwvctx->uk_attrs.max_hw_sq_chunk = resp.max_hw_sq_chunk;
 	iwvctx->uk_attrs.max_hw_cq_size = resp.max_hw_cq_size;
 	iwvctx->uk_attrs.min_hw_cq_size = resp.min_hw_cq_size;
-	iwvctx->uk_attrs.min_hw_wq_size = IRDMA_MIN_WQ_SIZE_GEN2;
+	iwvctx->uk_attrs.min_hw_wq_size = IRDMA_QP_SW_MIN_WQSIZE;
 	iwvctx->abi_ver = IRDMA_ABI_VER;
 	mmap_key = resp.db_mmap_key;
 

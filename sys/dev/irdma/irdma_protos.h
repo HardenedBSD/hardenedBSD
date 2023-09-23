@@ -60,16 +60,12 @@ int irdma_cqp_gather_stats_cmd(struct irdma_sc_dev *dev,
 			       struct irdma_vsi_pestat *pestat, bool wait);
 int irdma_cqp_ws_node_cmd(struct irdma_sc_dev *dev, u8 cmd,
 			  struct irdma_ws_node_info *node_info);
-int irdma_cqp_up_map_cmd(struct irdma_sc_dev *dev, u8 cmd,
-			 struct irdma_up_info *map_info);
 int irdma_cqp_ceq_cmd(struct irdma_sc_dev *dev, struct irdma_sc_ceq *sc_ceq,
 		      u8 op);
 int irdma_cqp_aeq_cmd(struct irdma_sc_dev *dev, struct irdma_sc_aeq *sc_aeq,
 		      u8 op);
 int irdma_cqp_stats_inst_cmd(struct irdma_sc_vsi *vsi, u8 cmd,
 			     struct irdma_stats_inst_info *stats_info);
-u16 irdma_alloc_ws_node_id(struct irdma_sc_dev *dev);
-void irdma_free_ws_node_id(struct irdma_sc_dev *dev, u16 node_id);
 void irdma_update_stats(struct irdma_dev_hw_stats *hw_stats,
 			struct irdma_gather_stats *gather_stats,
 			struct irdma_gather_stats *last_gather_stats,
@@ -132,8 +128,6 @@ int irdma_cqp_commit_fpm_val_cmd(struct irdma_sc_dev *dev,
 				 struct irdma_dma_mem *val_mem, u16 hmc_fn_id);
 int irdma_alloc_query_fpm_buf(struct irdma_sc_dev *dev,
 			      struct irdma_dma_mem *mem);
-int irdma_cqp_manage_hmc_fcn_cmd(struct irdma_sc_dev *dev,
-				 struct irdma_hmc_fcn_info *hmcfcninfo,
-				 u16 *pmf_idx);
 void *irdma_remove_cqp_head(struct irdma_sc_dev *dev);
+u64 irdma_mac_to_u64(const u8 *eth_add);
 #endif /* IRDMA_PROTOS_H */

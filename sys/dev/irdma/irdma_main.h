@@ -129,6 +129,8 @@ extern bool irdma_upload_context;
 #define IRDMA_REFLUSH		BIT(2)
 #define IRDMA_FLUSH_WAIT	BIT(3)
 
+#define IRDMA_IRQ_NAME_STR_LEN 64
+
 enum init_completion_state {
 	INVALID_STATE = 0,
 	INITIAL_STATE,
@@ -144,6 +146,11 @@ enum init_completion_state {
 	PBLE_CHUNK_MEM,
 	AEQ_CREATED,
 	IP_ADDR_REGISTERED,  /* Last state of open */
+};
+
+struct ae_desc {
+	u16 id;
+	const char *desc;
 };
 
 struct irdma_rsrc_limits {
@@ -174,8 +181,8 @@ struct irdma_cqp_request {
 	void (*callback_fcn)(struct irdma_cqp_request *cqp_request);
 	void *param;
 	struct irdma_cqp_compl_info compl_info;
+	bool request_done; /* READ/WRITE_ONCE macros operate on it */
 	bool waiting:1;
-	bool request_done:1;
 	bool dynamic:1;
 };
 
@@ -218,7 +225,7 @@ struct irdma_aeq {
 
 struct irdma_arp_entry {
 	u32 ip_addr[4];
-	u8 mac_addr[ETH_ALEN];
+	u8 mac_addr[ETHER_ADDR_LEN];
 };
 
 struct irdma_msix_vector {
@@ -226,6 +233,7 @@ struct irdma_msix_vector {
 	u32 irq;
 	u32 cpu_affinity;
 	u32 ceq_id;
+	char name[IRDMA_IRQ_NAME_STR_LEN];
 	struct resource *res;
 	void  *tag;
 };
@@ -356,7 +364,7 @@ struct irdma_pci_f {
 struct irdma_device {
 	struct ib_device ibdev;
 	struct irdma_pci_f *rf;
-	struct ifnet *netdev;
+	if_t netdev;
 	struct notifier_block nb_netdevice_event;
 	struct irdma_handler *hdl;
 	struct workqueue_struct *cleanup_wq;
@@ -372,6 +380,7 @@ struct irdma_device {
 	u16 vsi_num;
 	u8 rcv_wscale;
 	u8 iw_status;
+	u8 roce_rtomin;
 	u8 rd_fence_rate;
 	bool override_rcv_wnd:1;
 	bool override_cwnd:1;
@@ -516,8 +525,9 @@ void irdma_free_cqp_request(struct irdma_cqp *cqp,
 void irdma_put_cqp_request(struct irdma_cqp *cqp,
 			   struct irdma_cqp_request *cqp_request);
 int irdma_alloc_local_mac_entry(struct irdma_pci_f *rf, u16 *mac_tbl_idx);
-int irdma_add_local_mac_entry(struct irdma_pci_f *rf, u8 *mac_addr, u16 idx);
+int irdma_add_local_mac_entry(struct irdma_pci_f *rf, const u8 *mac_addr, u16 idx);
 void irdma_del_local_mac_entry(struct irdma_pci_f *rf, u16 idx);
+const char *irdma_get_ae_desc(u16 ae_id);
 
 u32 irdma_initialize_hw_rsrc(struct irdma_pci_f *rf);
 void irdma_port_ibevent(struct irdma_device *iwdev);
@@ -562,8 +572,9 @@ void irdma_gen_ae(struct irdma_pci_f *rf, struct irdma_sc_qp *qp,
 		  struct irdma_gen_ae_info *info, bool wait);
 void irdma_copy_ip_ntohl(u32 *dst, __be32 *src);
 void irdma_copy_ip_htonl(__be32 *dst, u32 *src);
-u16 irdma_get_vlan_ipv4(u32 *addr);
-struct ifnet *irdma_netdev_vlan_ipv6(u32 *addr, u16 *vlan_id, u8 *mac);
+u16 irdma_get_vlan_ipv4(struct iw_cm_id *cm_id, u32 *addr);
+if_t irdma_netdev_vlan_ipv6(struct iw_cm_id *cm_id, u32 *addr, u16 *vlan_id,
+			    u8 *mac);
 struct ib_mr *irdma_reg_phys_mr(struct ib_pd *ib_pd, u64 addr, u64 size,
 				int acc, u64 *iova_start);
 int irdma_upload_qp_context(struct irdma_qp *iwqp, bool freeze, bool raw);
@@ -576,6 +587,7 @@ int irdma_ah_cqp_op(struct irdma_pci_f *rf, struct irdma_sc_ah *sc_ah, u8 cmd,
 		    void (*callback_fcn)(struct irdma_cqp_request *cqp_request),
 		    void *cb_param);
 void irdma_gsi_ud_qp_ah_cb(struct irdma_cqp_request *cqp_request);
+void irdma_udqp_qs_worker(struct work_struct *work);
 bool irdma_cq_empty(struct irdma_cq *iwcq);
 int irdma_netdevice_event(struct notifier_block *notifier, unsigned long event,
 			  void *ptr);
@@ -586,4 +598,5 @@ void irdma_add_ip(struct irdma_device *iwdev);
 void irdma_add_handler(struct irdma_handler *hdl);
 void irdma_del_handler(struct irdma_handler *hdl);
 void cqp_compl_worker(struct work_struct *work);
+void irdma_cleanup_dead_qps(struct irdma_sc_vsi *vsi);
 #endif /* IRDMA_MAIN_H */

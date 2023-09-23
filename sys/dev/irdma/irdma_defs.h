@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: GPL-2.0 or Linux-OpenIB
  *
- * Copyright (c) 2015 - 2022 Intel Corporation
+ * Copyright (c) 2015 - 2023 Intel Corporation
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -137,6 +137,9 @@
 #define IRDMA_AE_SOURCE_OUT_RR		0xd
 #define IRDMA_AE_SOURCE_OUT_RR_1111	0xf
 
+#define IRDMA_AE_SOURCE_RSRC_EXHT_Q1	0x1
+#define IRDMA_AE_SOURCE_RSRC_EXHT_XT_RR	0x5
+
 #define IRDMA_TCP_STATE_NON_EXISTENT	0
 #define IRDMA_TCP_STATE_CLOSED		1
 #define IRDMA_TCP_STATE_LISTEN		2
@@ -192,6 +195,7 @@
 #define IRDMA_CQE_QTYPE_RQ	0
 #define IRDMA_CQE_QTYPE_SQ	1
 
+#define IRDMA_QP_SW_MIN_WQSIZE	8 /* in WRs*/
 #define IRDMA_QP_WQE_MIN_SIZE	32
 #define IRDMA_QP_WQE_MAX_SIZE	256
 #define IRDMA_QP_WQE_MIN_QUANTA 1
@@ -245,40 +249,38 @@ enum irdma_cqp_op_type {
 	IRDMA_OP_MANAGE_HMC_PM_FUNC_TABLE	= 22,
 	IRDMA_OP_SUSPEND			= 23,
 	IRDMA_OP_RESUME				= 24,
-	IRDMA_OP_MANAGE_VF_PBLE_BP		= 25,
+	IRDMA_OP_MANAGE_VCHNL_REQ_PBLE_BP	= 25,
 	IRDMA_OP_QUERY_FPM_VAL			= 26,
 	IRDMA_OP_COMMIT_FPM_VAL			= 27,
-	IRDMA_OP_REQ_CMDS			= 28,
-	IRDMA_OP_CMPL_CMDS			= 29,
-	IRDMA_OP_AH_CREATE			= 30,
-	IRDMA_OP_AH_MODIFY			= 31,
-	IRDMA_OP_AH_DESTROY			= 32,
-	IRDMA_OP_MC_CREATE			= 33,
-	IRDMA_OP_MC_DESTROY			= 34,
-	IRDMA_OP_MC_MODIFY			= 35,
-	IRDMA_OP_STATS_ALLOCATE			= 36,
-	IRDMA_OP_STATS_FREE			= 37,
-	IRDMA_OP_STATS_GATHER			= 38,
-	IRDMA_OP_WS_ADD_NODE			= 39,
-	IRDMA_OP_WS_MODIFY_NODE			= 40,
-	IRDMA_OP_WS_DELETE_NODE			= 41,
-	IRDMA_OP_WS_FAILOVER_START		= 42,
-	IRDMA_OP_WS_FAILOVER_COMPLETE		= 43,
-	IRDMA_OP_SET_UP_MAP			= 44,
-	IRDMA_OP_GEN_AE				= 45,
-	IRDMA_OP_QUERY_RDMA_FEATURES		= 46,
-	IRDMA_OP_ALLOC_LOCAL_MAC_ENTRY		= 47,
-	IRDMA_OP_ADD_LOCAL_MAC_ENTRY		= 48,
-	IRDMA_OP_DELETE_LOCAL_MAC_ENTRY		= 49,
-	IRDMA_OP_CQ_MODIFY			= 50,
+	IRDMA_OP_AH_CREATE			= 28,
+	IRDMA_OP_AH_MODIFY			= 29,
+	IRDMA_OP_AH_DESTROY			= 30,
+	IRDMA_OP_MC_CREATE			= 31,
+	IRDMA_OP_MC_DESTROY			= 32,
+	IRDMA_OP_MC_MODIFY			= 33,
+	IRDMA_OP_STATS_ALLOCATE			= 34,
+	IRDMA_OP_STATS_FREE			= 35,
+	IRDMA_OP_STATS_GATHER			= 36,
+	IRDMA_OP_WS_ADD_NODE			= 37,
+	IRDMA_OP_WS_MODIFY_NODE			= 38,
+	IRDMA_OP_WS_DELETE_NODE			= 39,
+	IRDMA_OP_WS_FAILOVER_START		= 40,
+	IRDMA_OP_WS_FAILOVER_COMPLETE		= 41,
+	IRDMA_OP_SET_UP_MAP			= 42,
+	IRDMA_OP_GEN_AE				= 43,
+	IRDMA_OP_QUERY_RDMA_FEATURES		= 44,
+	IRDMA_OP_ALLOC_LOCAL_MAC_ENTRY		= 45,
+	IRDMA_OP_ADD_LOCAL_MAC_ENTRY		= 46,
+	IRDMA_OP_DELETE_LOCAL_MAC_ENTRY		= 47,
+	IRDMA_OP_CQ_MODIFY			= 48,
 
 	/* Must be last entry */
-	IRDMA_MAX_CQP_OPS			= 51,
+	IRDMA_MAX_CQP_OPS			= 49,
 };
 
 /* CQP SQ WQES */
-#define IRDMA_CQP_OP_CREATE_QP				0
-#define IRDMA_CQP_OP_MODIFY_QP				0x1
+#define IRDMA_CQP_OP_CREATE_QP				0x00
+#define IRDMA_CQP_OP_MODIFY_QP				0x01
 #define IRDMA_CQP_OP_DESTROY_QP				0x02
 #define IRDMA_CQP_OP_CREATE_CQ				0x03
 #define IRDMA_CQP_OP_MODIFY_CQ				0x04
@@ -290,12 +292,11 @@ enum irdma_cqp_op_type {
 #define IRDMA_CQP_OP_DEALLOC_STAG			0x0d
 #define IRDMA_CQP_OP_MANAGE_LOC_MAC_TABLE		0x0e
 #define IRDMA_CQP_OP_MANAGE_ARP				0x0f
-#define IRDMA_CQP_OP_MANAGE_VF_PBLE_BP			0x10
+#define IRDMA_CQP_OP_MANAGE_VCHNL_REQ_PBLE_BP		0x10
 #define IRDMA_CQP_OP_MANAGE_PUSH_PAGES			0x11
 #define IRDMA_CQP_OP_QUERY_RDMA_FEATURES		0x12
 #define IRDMA_CQP_OP_UPLOAD_CONTEXT			0x13
 #define IRDMA_CQP_OP_ALLOCATE_LOC_MAC_TABLE_ENTRY	0x14
-#define IRDMA_CQP_OP_UPLOAD_CONTEXT			0x13
 #define IRDMA_CQP_OP_MANAGE_HMC_PM_FUNC_TABLE		0x15
 #define IRDMA_CQP_OP_CREATE_CEQ				0x16
 #define IRDMA_CQP_OP_DESTROY_CEQ			0x18
@@ -695,7 +696,6 @@ enum irdma_cqp_op_type {
 #define IRDMA_CQPSQ_QP_MACVALID BIT_ULL(51)
 #define IRDMA_CQPSQ_QP_MSSCHANGE_S 52
 #define IRDMA_CQPSQ_QP_MSSCHANGE BIT_ULL(52)
-
 #define IRDMA_CQPSQ_QP_IGNOREMWBOUND_S 54
 #define IRDMA_CQPSQ_QP_IGNOREMWBOUND BIT_ULL(54)
 #define IRDMA_CQPSQ_QP_REMOVEHASHENTRY_S 55
@@ -1391,6 +1391,17 @@ enum irdma_cqp_op_type {
 		((_ring).tail + (_idx)) % (_ring).size \
 	)
 
+#define IRDMA_GET_RING_OFFSET(_ring, _i) \
+	( \
+		((_ring).head + (_i)) % (_ring).size \
+	)
+
+#define IRDMA_GET_CQ_ELEM_AT_OFFSET(_cq, _i, _cqe) \
+	{ \
+		__u32 offset; \
+		offset = IRDMA_GET_RING_OFFSET((_cq)->cq_ring, _i); \
+		(_cqe) = (_cq)->cq_base[offset].buf; \
+	}
 #define IRDMA_GET_CURRENT_CQ_ELEM(_cq) \
 	( \
 		(_cq)->cq_base[IRDMA_RING_CURRENT_HEAD((_cq)->cq_ring)].buf  \
@@ -1413,7 +1424,7 @@ enum irdma_cqp_op_type {
 
 #define IRDMA_RING_MOVE_HEAD(_ring, _retcode) \
 	{ \
-		register u32 size; \
+		u32 size; \
 		size = (_ring).size;  \
 		if (!IRDMA_RING_FULL_ERR(_ring)) { \
 			(_ring).head = ((_ring).head + 1) % size; \
@@ -1424,7 +1435,7 @@ enum irdma_cqp_op_type {
 	}
 #define IRDMA_RING_MOVE_HEAD_BY_COUNT(_ring, _count, _retcode) \
 	{ \
-		register u32 size; \
+		u32 size; \
 		size = (_ring).size; \
 		if ((IRDMA_RING_USED_QUANTA(_ring) + (_count)) < size) { \
 			(_ring).head = ((_ring).head + (_count)) % size; \
@@ -1435,7 +1446,7 @@ enum irdma_cqp_op_type {
 	}
 #define IRDMA_SQ_RING_MOVE_HEAD(_ring, _retcode) \
 	{ \
-		register u32 size; \
+		u32 size; \
 		size = (_ring).size;  \
 		if (!IRDMA_SQ_RING_FULL_ERR(_ring)) { \
 			(_ring).head = ((_ring).head + 1) % size; \
@@ -1446,7 +1457,7 @@ enum irdma_cqp_op_type {
 	}
 #define IRDMA_SQ_RING_MOVE_HEAD_BY_COUNT(_ring, _count, _retcode) \
 	{ \
-		register u32 size; \
+		u32 size; \
 		size = (_ring).size; \
 		if ((IRDMA_RING_USED_QUANTA(_ring) + (_count)) < (size - 256)) { \
 			(_ring).head = ((_ring).head + (_count)) % size; \
@@ -1538,6 +1549,19 @@ enum irdma_qp_wqe_size {
 	IRDMA_WQE_SIZE_256 = 256,
 };
 
+enum irdma_ws_op_type {
+	IRDMA_WS_OP_TYPE_NODE = 0,
+	IRDMA_WS_OP_TYPE_LEAF_NODE_GROUP,
+};
+
+enum irdma_ws_rate_limit_flags {
+	IRDMA_WS_RATE_LIMIT_FLAGS_VALID = 0x1,
+	IRDMA_WS_NO_RDMA_RATE_LIMIT = 0x2,
+	IRDMA_WS_LEAF_NODE_IS_PART_GROUP = 0x4,
+	IRDMA_WS_TREE_RATE_LIMITING = 0x8,
+	IRDMA_WS_PACING_CONTROL = 0x10,
+};
+
 enum irdma_ws_node_op {
 	IRDMA_ADD_NODE = 0,
 	IRDMA_MODIFY_NODE,
@@ -1562,12 +1586,6 @@ enum irdma_alignment {
 	IRDMA_CQ0_ALIGNMENT	    = 0x100,
 	IRDMA_SD_BUF_ALIGNMENT      = 0x80,
 	IRDMA_FEATURE_BUF_ALIGNMENT = 0x10,
-};
-
-enum icrdma_protocol_used {
-	ICRDMA_ANY_PROTOCOL	   = 0,
-	ICRDMA_IWARP_PROTOCOL_ONLY = 1,
-	ICRDMA_ROCE_PROTOCOL_ONLY  = 2,
 };
 
 /**

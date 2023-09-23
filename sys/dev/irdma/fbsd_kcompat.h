@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: GPL-2.0 or Linux-OpenIB
  *
- * Copyright (c) 2021 - 2022 Intel Corporation
+ * Copyright (c) 2021 - 2023 Intel Corporation
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -53,16 +53,12 @@
 	ibdev.dma_device = (dev)
 #define set_max_sge(props, rf)  \
 	((props)->max_sge = (rf)->sc_dev.hw_attrs.uk_attrs.max_hw_wq_frags)
-#define kc_set_props_ip_gid_caps(props) \
-	((props)->port_cap_flags  |= IB_PORT_IP_BASED_GIDS)
 #define rdma_query_gid(ibdev, port, index, gid) \
 	ib_get_cached_gid(ibdev, port, index, gid, NULL)
 #define kmap(pg) page_address(pg)
 #define kmap_local_page(pg) page_address(pg)
 #define kunmap(pg)
 #define kunmap_local(pg)
-#define kc_free_lsmm_dereg_mr(iwdev, iwqp) \
-	((iwdev)->ibdev.dereg_mr((iwqp)->lsmm_mr))
 
 #define IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION IB_CQ_FLAGS_TIMESTAMP_COMPLETION
 #define kc_irdma_destroy_qp(ibqp, udata) irdma_destroy_qp(ibqp)
@@ -75,16 +71,42 @@
 
 #define IRDMA_VER_LEN 24
 
+#ifndef EVNT_HNDLR_CRITERR
+#if ICE_RDMA_MAJOR_VERSION == 1 && ICE_RDMA_MINOR_VERSION == 1
+#define EVNT_HNDLR_CRITERR
+#else
+#undef EVNT_HNDLR_CRITERR
+#endif
+
+#endif
 void kc_set_roce_uverbs_cmd_mask(struct irdma_device *iwdev);
 void kc_set_rdma_uverbs_cmd_mask(struct irdma_device *iwdev);
 
 struct irdma_tunable_info {
 	struct sysctl_ctx_list irdma_sysctl_ctx;
 	struct sysctl_oid *irdma_sysctl_tree;
+	struct sysctl_oid *sws_sysctl_tree;
 	char drv_ver[IRDMA_VER_LEN];
 	u8 roce_ena;
 };
 
+typedef u_int if_addr_cb_t(void *, struct ifaddr *, u_int);
+u_int if_foreach_addr_type(if_t ifp, int type, if_addr_cb_t cb, void *cb_arg);
+typedef int (*if_foreach_cb_t)(if_t, void *);
+int if_foreach(if_foreach_cb_t cb, void *cb_arg);
+#ifndef if_iter
+struct if_iter {
+	void *context[4];
+};
+#endif
+if_t if_iter_start(struct if_iter *iter);
+if_t if_iter_next(struct if_iter *iter);
+void if_iter_finish(struct if_iter *iter);
+#define if_getdunit(ifp) ifp->if_dunit
+#define if_getindex(ifp) ifp->if_index
+#define if_getlinkstate(ndev) ndev->if_link_state
+#define if_getvlantrunk(ifp) ifp->if_vlantrunk
+#define if_getvnet(ndev) ndev->if_vnet
 static inline int irdma_iw_query_pkey(struct ib_device *ibdev, u8 port, u16 index,
 				      u16 *pkey)
 {
@@ -100,6 +122,7 @@ static inline int cq_validate_flags(u32 flags, u8 hw_rev)
 
 	return flags & ~IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION ? -EOPNOTSUPP : 0;
 }
+
 static inline u64 *irdma_next_pbl_addr(u64 *pbl, struct irdma_pble_info **pinfo,
 				       u32 *idx)
 {
@@ -111,6 +134,20 @@ static inline u64 *irdma_next_pbl_addr(u64 *pbl, struct irdma_pble_info **pinfo,
 
 	return (*pinfo)->addr;
 }
+
+static inline struct vnet *
+irdma_cmid_to_vnet(struct iw_cm_id *cm_id)
+{
+	struct rdma_cm_id *rdma_id;
+
+	if (!cm_id)
+		return &init_net;
+
+	rdma_id = (struct rdma_cm_id *)cm_id->context;
+
+	return rdma_id->route.addr.dev_addr.net;
+}
+
 struct ib_cq *irdma_create_cq(struct ib_device *ibdev,
 			      const struct ib_cq_init_attr *attr,
 			      struct ib_ucontext *context,
@@ -125,13 +162,11 @@ struct ib_ah *irdma_create_ah_stub(struct ib_pd *ibpd,
 				   struct ib_ah_attr *attr,
 				   struct ib_udata *udata);
 void irdma_ether_copy(u8 *dmac, struct ib_ah_attr *attr);
-
 int irdma_destroy_ah(struct ib_ah *ibah);
 int irdma_destroy_ah_stub(struct ib_ah *ibah);
 int irdma_destroy_qp(struct ib_qp *ibqp);
 int irdma_dereg_mr(struct ib_mr *ib_mr);
-void irdma_get_eth_speed_and_width(u32 link_speed, u8 *active_speed,
-				   u8 *active_width);
+int ib_get_eth_speed(struct ib_device *dev, u32 port_num, u8 *speed, u8 *width);
 enum rdma_link_layer irdma_get_link_layer(struct ib_device *ibdev,
 					  u8 port_num);
 int irdma_roce_port_immutable(struct ib_device *ibdev, u8 port_num,
@@ -151,6 +186,7 @@ int irdma_get_hw_stats(struct ib_device *ibdev,
 		       struct rdma_hw_stats *stats, u8 port_num,
 		       int index);
 
+void irdma_request_reset(struct irdma_pci_f *rf);
 int irdma_register_qset(struct irdma_sc_vsi *vsi,
 			struct irdma_ws_node *tc_node);
 void irdma_unregister_qset(struct irdma_sc_vsi *vsi,
@@ -162,8 +198,6 @@ void irdma_disassociate_ucontext(struct ib_ucontext *context);
 int kc_irdma_set_roce_cm_info(struct irdma_qp *iwqp,
 			      struct ib_qp_attr *attr,
 			      u16 *vlan_id);
-struct irdma_device *kc_irdma_get_device(struct ifnet *netdev);
-void kc_irdma_put_device(struct irdma_device *iwdev);
 
 void kc_set_loc_seq_num_mss(struct irdma_cm_node *cm_node);
 u16 kc_rdma_get_udp_sport(u32 fl, u32 lqpn, u32 rqpn);
@@ -181,6 +215,8 @@ int irdma_addr_resolve_neigh(struct irdma_cm_node *cm_node, u32 dst_ip,
 int irdma_addr_resolve_neigh_ipv6(struct irdma_cm_node *cm_node, u32 *dest,
 				  int arpindex);
 void irdma_dcqcn_tunables_init(struct irdma_pci_f *rf);
+void irdma_sysctl_settings(struct irdma_pci_f *rf);
+void irdma_sw_stats_tunables_init(struct irdma_pci_f *rf);
 u32 irdma_create_stag(struct irdma_device *iwdev);
 void irdma_free_stag(struct irdma_device *iwdev, u32 stag);
 
@@ -262,6 +298,15 @@ static inline size_t irdma_ib_umem_num_dma_blocks(struct ib_umem *umem, unsigned
 
 	return (size_t)((ALIGN(iova + umem->length, pgsz) -
 			 ALIGN_DOWN(iova, pgsz))) / pgsz;
+}
+
+static inline void addrconf_addr_eui48(u8 *deui, const char *const addr)
+{
+	memcpy(deui, addr, 3);
+	deui[3] = 0xFF;
+	deui[4] = 0xFE;
+	memcpy(deui + 5, addr + 3, 3);
+	deui[0] ^= 2;
 }
 
 #endif /* FBSD_KCOMPAT_H */

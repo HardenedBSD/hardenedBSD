@@ -47,6 +47,7 @@ static void irdma_ieq_tx_compl(struct irdma_sc_vsi *vsi, void *sqwrid);
 static void
 irdma_ilq_putback_rcvbuf(struct irdma_sc_qp *qp,
 			 struct irdma_puda_buf *buf, u32 wqe_idx);
+
 /**
  * irdma_puda_get_listbuf - get buffer from puda list
  * @list: list to use for buffers (ILQ or IEQ)
@@ -229,7 +230,6 @@ irdma_puda_dele_buf(struct irdma_sc_dev *dev,
  */
 static __le64 * irdma_puda_get_next_send_wqe(struct irdma_qp_uk *qp,
 					     u32 *wqe_idx){
-	__le64 *wqe = NULL;
 	int ret_code = 0;
 
 	*wqe_idx = IRDMA_RING_CURRENT_HEAD(qp->sq_ring);
@@ -237,11 +237,9 @@ static __le64 * irdma_puda_get_next_send_wqe(struct irdma_qp_uk *qp,
 		qp->swqe_polarity = !qp->swqe_polarity;
 	IRDMA_RING_MOVE_HEAD(qp->sq_ring, ret_code);
 	if (ret_code)
-		return wqe;
+		return NULL;
 
-	wqe = qp->sq_base[*wqe_idx].elem;
-
-	return wqe;
+	return qp->sq_base[*wqe_idx].elem;
 }
 
 /**
@@ -272,6 +270,9 @@ irdma_puda_poll_info(struct irdma_sc_cq *cq,
 	if (valid_bit != cq_uk->polarity)
 		return -ENOENT;
 
+	/* Ensure CQE contents are read after valid bit is checked */
+	rmb();
+
 	if (cq->dev->hw_attrs.uk_attrs.hw_rev >= IRDMA_GEN_2)
 		ext_valid = (bool)FIELD_GET(IRDMA_CQ_EXTCQE, qword3);
 
@@ -284,6 +285,9 @@ irdma_puda_poll_info(struct irdma_sc_cq *cq,
 			polarity ^= 1;
 		if (polarity != cq_uk->polarity)
 			return -ENOENT;
+
+		/* Ensure ext CQE contents are read after ext valid bit is checked */
+		rmb();
 
 		IRDMA_RING_MOVE_HEAD_NOCHECK(cq_uk->cq_ring);
 		if (!IRDMA_RING_CURRENT_HEAD(cq_uk->cq_ring))
@@ -932,6 +936,7 @@ irdma_puda_dele_rsrc(struct irdma_sc_vsi *vsi, enum puda_rsrc_type type,
 	struct irdma_sc_ceq *ceq;
 
 	ceq = vsi->dev->ceq[0];
+
 	switch (type) {
 	case IRDMA_PUDA_RSRC_TYPE_ILQ:
 		rsrc = vsi->ilq;
@@ -1515,8 +1520,7 @@ irdma_ieq_handle_partial(struct irdma_puda_rsrc *ieq,
 error:
 	while (!list_empty(&pbufl)) {
 		buf = (struct irdma_puda_buf *)(&pbufl)->prev;
-		list_del(&buf->list);
-		list_add(&buf->list, rxlist);
+		list_move(&buf->list, rxlist);
 	}
 	if (txbuf)
 		irdma_puda_ret_bufpool(ieq, txbuf);
@@ -1701,6 +1705,7 @@ irdma_ieq_handle_exception(struct irdma_puda_rsrc *ieq,
 	struct irdma_pfpdu *pfpdu = &qp->pfpdu;
 	u32 *hw_host_ctx = (u32 *)qp->hw_host_ctx;
 	u32 rcv_wnd = hw_host_ctx[23];
+
 	/* first partial seq # in q2 */
 u32 fps = *(u32 *)(qp->q2_buf + Q2_FPSN_OFFSET);
 	struct list_head *rxlist = &pfpdu->rxlist;

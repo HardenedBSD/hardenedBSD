@@ -208,7 +208,6 @@ enum irdma_device_caps_const {
 	IRDMA_Q2_BUF_SIZE =			256,
 	IRDMA_QP_CTX_SIZE =			256,
 	IRDMA_MAX_PDS =				262144,
-	IRDMA_MIN_WQ_SIZE_GEN2 =		8,
 };
 
 enum irdma_addressing_type {
@@ -407,8 +406,6 @@ int irdma_uk_inline_rdma_write(struct irdma_qp_uk *qp,
 			       struct irdma_post_sq_info *info, bool post_sq);
 int irdma_uk_inline_send(struct irdma_qp_uk *qp,
 			 struct irdma_post_sq_info *info, bool post_sq);
-int irdma_uk_mw_bind(struct irdma_qp_uk *qp, struct irdma_post_sq_info *info,
-		     bool post_sq);
 int irdma_uk_post_nop(struct irdma_qp_uk *qp, u64 wr_id, bool signaled,
 		      bool post_sq);
 int irdma_uk_post_receive(struct irdma_qp_uk *qp,
@@ -518,7 +515,6 @@ struct irdma_cq_uk {
 	u32 cq_size;
 	struct irdma_ring cq_ring;
 	u8 polarity;
-	bool armed:1;
 	bool avoid_mem_cflct:1;
 };
 
@@ -571,7 +567,6 @@ void irdma_get_wqe_shift(struct irdma_uk_attrs *uk_attrs, u32 sge,
 			 u32 inline_data, u8 *shift);
 int irdma_get_sqdepth(struct irdma_uk_attrs *uk_attrs, u32 sq_size, u8 shift, u32 *sqdepth);
 int irdma_get_rqdepth(struct irdma_uk_attrs *uk_attrs, u32 rq_size, u8 shift, u32 *rqdepth);
-int irdma_get_srqdepth(struct irdma_uk_attrs *uk_attrs, u32 srq_size, u8 shift, u32 *srqdepth);
 void irdma_qp_push_wqe(struct irdma_qp_uk *qp, __le64 *wqe, u16 quanta,
 		       u32 wqe_idx, bool post_sq);
 void irdma_clr_wqes(struct irdma_qp_uk *qp, u32 qp_wqe_idx);

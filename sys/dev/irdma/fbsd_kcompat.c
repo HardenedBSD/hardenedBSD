@@ -92,6 +92,18 @@ irdma_wr64(struct irdma_dev_ctx *dev_ctx, u32 reg, u64 value)
 
 }
 
+void
+irdma_request_reset(struct irdma_pci_f *rf)
+{
+	struct ice_rdma_peer *peer = rf->peer_info;
+	struct ice_rdma_request req = {0};
+
+	req.type = ICE_RDMA_EVENT_RESET;
+
+	printf("%s:%d requesting pf-reset\n", __func__, __LINE__);
+	IRDMA_DI_REQ_HANDLER(peer, &req);
+}
+
 int
 irdma_register_qset(struct irdma_sc_vsi *vsi, struct irdma_ws_node *tc_node)
 {
@@ -170,6 +182,31 @@ irdma_ieq_check_mpacrc(void *desc,
 	return ret_code;
 }
 
+static u_int
+irdma_add_ipv6_cb(void *arg, struct ifaddr *addr, u_int count __unused){
+	struct irdma_device *iwdev = arg;
+	struct sockaddr_in6 *sin6;
+	u32 local_ipaddr6[4] = {};
+	char ip6buf[INET6_ADDRSTRLEN];
+	u8 *mac_addr;
+
+	sin6 = (struct sockaddr_in6 *)addr->ifa_addr;
+
+	irdma_copy_ip_ntohl(local_ipaddr6, (u32 *)&sin6->sin6_addr);
+
+	mac_addr = if_getlladdr(addr->ifa_ifp);
+
+	printf("%s:%d IP=%s, MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+	       __func__, __LINE__,
+	       ip6_sprintf(ip6buf, &sin6->sin6_addr),
+	       mac_addr[0], mac_addr[1], mac_addr[2],
+	       mac_addr[3], mac_addr[4], mac_addr[5]);
+
+	irdma_manage_arp_cache(iwdev->rf, mac_addr, local_ipaddr6,
+			       IRDMA_ARP_ADD);
+	return (0);
+}
+
 /**
  * irdma_add_ipv6_addr - add ipv6 address to the hw arp table
  * @iwdev: irdma device
@@ -178,32 +215,36 @@ irdma_ieq_check_mpacrc(void *desc,
 static void
 irdma_add_ipv6_addr(struct irdma_device *iwdev, struct ifnet *ifp)
 {
-	struct ifaddr *ifa, *tmp;
-	struct sockaddr_in6 *sin6;
-	u32 local_ipaddr6[4];
-	u8 *mac_addr;
-	char ip6buf[INET6_ADDRSTRLEN];
-
 	if_addr_rlock(ifp);
-	IRDMA_TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrhead, ifa_link, tmp) {
-		sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-		if (sin6->sin6_family != AF_INET6)
-			continue;
-
-		irdma_copy_ip_ntohl(local_ipaddr6, (u32 *)&sin6->sin6_addr);
-		mac_addr = IF_LLADDR(ifp);
-
-		printf("%s:%d IP=%s, MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
-		       __func__, __LINE__,
-		       ip6_sprintf(ip6buf, &sin6->sin6_addr),
-		       mac_addr[0], mac_addr[1], mac_addr[2],
-		       mac_addr[3], mac_addr[4], mac_addr[5]);
-
-		irdma_manage_arp_cache(iwdev->rf, mac_addr, local_ipaddr6,
-				       IRDMA_ARP_ADD);
-
-	}
+	if_foreach_addr_type(ifp, AF_INET6, irdma_add_ipv6_cb, iwdev);
 	if_addr_runlock(ifp);
+}
+
+static u_int
+irdma_add_ipv4_cb(void *arg, struct ifaddr *addr, u_int count __unused){
+	struct irdma_device *iwdev = arg;
+	struct sockaddr_in *sin;
+	u32 ip_addr[4] = {};
+	uint8_t *mac_addr;
+
+	sin = (struct sockaddr_in *)addr->ifa_addr;
+
+	ip_addr[0] = ntohl(sin->sin_addr.s_addr);
+
+	mac_addr = if_getlladdr(addr->ifa_ifp);
+
+	printf("%s:%d IP=%d.%d.%d.%d, MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
+	       __func__, __LINE__,
+	       ip_addr[0] >> 24,
+	       (ip_addr[0] >> 16) & 0xFF,
+	       (ip_addr[0] >> 8) & 0xFF,
+	       ip_addr[0] & 0xFF,
+	       mac_addr[0], mac_addr[1], mac_addr[2],
+	       mac_addr[3], mac_addr[4], mac_addr[5]);
+
+	irdma_manage_arp_cache(iwdev->rf, mac_addr, ip_addr,
+			       IRDMA_ARP_ADD);
+	return (0);
 }
 
 /**
@@ -214,32 +255,8 @@ irdma_add_ipv6_addr(struct irdma_device *iwdev, struct ifnet *ifp)
 static void
 irdma_add_ipv4_addr(struct irdma_device *iwdev, struct ifnet *ifp)
 {
-	struct ifaddr *ifa;
-	struct sockaddr_in *sin;
-	u32 ip_addr[4] = {};
-	u8 *mac_addr;
-
 	if_addr_rlock(ifp);
-	IRDMA_TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
-		sin = (struct sockaddr_in *)ifa->ifa_addr;
-		if (sin->sin_family != AF_INET)
-			continue;
-
-		ip_addr[0] = ntohl(sin->sin_addr.s_addr);
-		mac_addr = IF_LLADDR(ifp);
-
-		printf("%s:%d IP=%d.%d.%d.%d, MAC=%02x:%02x:%02x:%02x:%02x:%02x\n",
-		       __func__, __LINE__,
-		       ip_addr[0] >> 24,
-		       (ip_addr[0] >> 16) & 0xFF,
-		       (ip_addr[0] >> 8) & 0xFF,
-		       ip_addr[0] & 0xFF,
-		       mac_addr[0], mac_addr[1], mac_addr[2],
-		       mac_addr[3], mac_addr[4], mac_addr[5]);
-
-		irdma_manage_arp_cache(iwdev->rf, mac_addr, ip_addr,
-				       IRDMA_ARP_ADD);
-	}
+	if_foreach_addr_type(ifp, AF_INET, irdma_add_ipv4_cb, iwdev);
 	if_addr_runlock(ifp);
 }
 
@@ -254,12 +271,15 @@ irdma_add_ip(struct irdma_device *iwdev)
 {
 	struct ifnet *ifp = iwdev->netdev;
 	struct ifnet *ifv;
+	struct epoch_tracker et;
 	int i;
 
 	irdma_add_ipv4_addr(iwdev, ifp);
 	irdma_add_ipv6_addr(iwdev, ifp);
-	for (i = 0; ifp->if_vlantrunk != NULL && i < VLAN_N_VID; ++i) {
+	for (i = 0; if_getvlantrunk(ifp) != NULL && i < VLAN_N_VID; ++i) {
+		NET_EPOCH_ENTER(et);
 		ifv = VLAN_DEVAT(ifp, i);
+		NET_EPOCH_EXIT(et);
 		if (!ifv)
 			continue;
 		irdma_add_ipv4_addr(iwdev, ifv);
@@ -280,7 +300,7 @@ irdma_ifaddrevent_handler(void *arg, struct ifnet *ifp, struct ifaddr *ifa, int 
 	if (!ifa || !ifa->ifa_addr || !ifp)
 		return;
 	if (rf->iwdev->netdev != ifp) {
-		for (i = 0; rf->iwdev->netdev->if_vlantrunk != NULL && i < VLAN_N_VID; ++i) {
+		for (i = 0; if_getvlantrunk(rf->iwdev->netdev) != NULL && i < VLAN_N_VID; ++i) {
 			NET_EPOCH_ENTER(et);
 			ifv = VLAN_DEVAT(rf->iwdev->netdev, i);
 			NET_EPOCH_EXIT(et);
@@ -342,7 +362,8 @@ irdma_get_route_ifp(struct sockaddr *dst_sin, struct ifnet *netdev,
 	struct nhop_object *nh;
 
 	if (dst_sin->sa_family == AF_INET6)
-		nh = fib6_lookup(RT_DEFAULT_FIB, &((struct sockaddr_in6 *)dst_sin)->sin6_addr, 0, NHR_NONE, 0);
+		nh = fib6_lookup(RT_DEFAULT_FIB, &((struct sockaddr_in6 *)dst_sin)->sin6_addr,
+				 ((struct sockaddr_in6 *)dst_sin)->sin6_scope_id, NHR_NONE, 0);
 	else
 		nh = fib4_lookup(RT_DEFAULT_FIB, ((struct sockaddr_in *)dst_sin)->sin_addr, 0, NHR_NONE, 0);
 	if (!nh || (nh->nh_ifp != netdev &&
@@ -370,8 +391,7 @@ irdma_get_dst_mac(struct irdma_cm_node *cm_node, struct sockaddr *dst_sin, u8 *d
 {
 	struct ifnet *netdev = cm_node->iwdev->netdev;
 #ifdef VIMAGE
-	struct rdma_cm_id *rdma_id = (struct rdma_cm_id *)cm_node->cm_id->context;
-	struct vnet *vnet = rdma_id->route.addr.dev_addr.net;
+	struct vnet *vnet = irdma_cmid_to_vnet(cm_node->cm_id);
 #endif
 	struct ifnet *ifp;
 	struct llentry *lle;
@@ -454,7 +474,7 @@ irdma_addr_resolve_neigh_ipv6(struct irdma_cm_node *cm_node,
 
 	dst_addr.sin6_family = AF_INET6;
 	dst_addr.sin6_len = sizeof(dst_addr);
-	dst_addr.sin6_scope_id = iwdev->netdev->if_index;
+	dst_addr.sin6_scope_id = if_getindex(iwdev->netdev);
 
 	irdma_copy_ip_htonl(dst_addr.sin6_addr.__u6_addr.__u6_addr32, dest);
 	err = irdma_get_dst_mac(cm_node, (struct sockaddr *)&dst_addr, dst_mac);
@@ -469,8 +489,7 @@ irdma_resolve_neigh_lpb_chk(struct irdma_device *iwdev, struct irdma_cm_node *cm
 			    struct irdma_cm_info *cm_info)
 {
 #ifdef VIMAGE
-	struct rdma_cm_id *rdma_id = (struct rdma_cm_id *)cm_node->cm_id->context;
-	struct vnet *vnet = rdma_id->route.addr.dev_addr.net;
+	struct vnet *vnet = irdma_cmid_to_vnet(cm_node->cm_id);
 #endif
 	int arpindex;
 	int oldarpindex;
@@ -572,6 +591,186 @@ irdma_sysctl_dcqcn_update(SYSCTL_HANDLER_ARGS)
 	return 0;
 }
 
+enum irdma_cqp_stats_info {
+	IRDMA_CQP_REQ_CMDS = 28,
+	IRDMA_CQP_CMPL_CMDS = 29
+};
+
+static int
+irdma_sysctl_cqp_stats(SYSCTL_HANDLER_ARGS)
+{
+	struct irdma_sc_cqp *cqp = (struct irdma_sc_cqp *)arg1;
+	char rslt[192] = "no cqp available yet";
+	int rslt_size = sizeof(rslt) - 1;
+	int option = (int)arg2;
+
+	if (!cqp) {
+		return sysctl_handle_string(oidp, rslt, sizeof(rslt), req);
+	}
+
+	snprintf(rslt, sizeof(rslt), "");
+	switch (option) {
+	case IRDMA_CQP_REQ_CMDS:
+		snprintf(rslt, rslt_size, "%lu", cqp->requested_ops);
+		break;
+	case IRDMA_CQP_CMPL_CMDS:
+		snprintf(rslt, rslt_size, "%lu", atomic64_read(&cqp->completed_ops));
+		break;
+	}
+
+	return sysctl_handle_string(oidp, rslt, sizeof(rslt), req);
+}
+
+struct irdma_sw_stats_tunable_info {
+	u8 op_type;
+	const char name[32];
+	const char desc[32];
+	uintptr_t value;
+};
+
+static const struct irdma_sw_stats_tunable_info irdma_sws_list[] = {
+	{IRDMA_OP_CEQ_DESTROY, "ceq_destroy", "ceq_destroy", 0},
+	{IRDMA_OP_AEQ_DESTROY, "aeq_destroy", "aeq_destroy", 0},
+	{IRDMA_OP_DELETE_ARP_CACHE_ENTRY, "delete_arp_cache_entry",
+	"delete_arp_cache_entry", 0},
+	{IRDMA_OP_MANAGE_APBVT_ENTRY, "manage_apbvt_entry",
+	"manage_apbvt_entry", 0},
+	{IRDMA_OP_CEQ_CREATE, "ceq_create", "ceq_create", 0},
+	{IRDMA_OP_AEQ_CREATE, "aeq_create", "aeq_create", 0},
+	{IRDMA_OP_MANAGE_QHASH_TABLE_ENTRY, "manage_qhash_table_entry",
+	"manage_qhash_table_entry", 0},
+	{IRDMA_OP_QP_MODIFY, "qp_modify", "qp_modify", 0},
+	{IRDMA_OP_QP_UPLOAD_CONTEXT, "qp_upload_context", "qp_upload_context",
+	0},
+	{IRDMA_OP_CQ_CREATE, "cq_create", "cq_create", 0},
+	{IRDMA_OP_CQ_DESTROY, "cq_destroy", "cq_destroy", 0},
+	{IRDMA_OP_QP_CREATE, "qp_create", "qp_create", 0},
+	{IRDMA_OP_QP_DESTROY, "qp_destroy", "qp_destroy", 0},
+	{IRDMA_OP_ALLOC_STAG, "alloc_stag", "alloc_stag", 0},
+	{IRDMA_OP_MR_REG_NON_SHARED, "mr_reg_non_shared", "mr_reg_non_shared",
+	0},
+	{IRDMA_OP_DEALLOC_STAG, "dealloc_stag", "dealloc_stag", 0},
+	{IRDMA_OP_MW_ALLOC, "mw_alloc", "mw_alloc", 0},
+	{IRDMA_OP_QP_FLUSH_WQES, "qp_flush_wqes", "qp_flush_wqes", 0},
+	{IRDMA_OP_ADD_ARP_CACHE_ENTRY, "add_arp_cache_entry",
+	"add_arp_cache_entry", 0},
+	{IRDMA_OP_MANAGE_PUSH_PAGE, "manage_push_page", "manage_push_page", 0},
+	{IRDMA_OP_UPDATE_PE_SDS, "update_pe_sds", "update_pe_sds", 0},
+	{IRDMA_OP_MANAGE_HMC_PM_FUNC_TABLE, "manage_hmc_pm_func_table",
+	"manage_hmc_pm_func_table", 0},
+	{IRDMA_OP_SUSPEND, "suspend", "suspend", 0},
+	{IRDMA_OP_RESUME, "resume", "resume", 0},
+	{IRDMA_OP_MANAGE_VCHNL_REQ_PBLE_BP, "manage_vchnl_req_pble_bp",
+	"manage_vchnl_req_pble_bp", 0},
+	{IRDMA_OP_QUERY_FPM_VAL, "query_fpm_val", "query_fpm_val", 0},
+	{IRDMA_OP_COMMIT_FPM_VAL, "commit_fpm_val", "commit_fpm_val", 0},
+	{IRDMA_OP_AH_CREATE, "ah_create", "ah_create", 0},
+	{IRDMA_OP_AH_MODIFY, "ah_modify", "ah_modify", 0},
+	{IRDMA_OP_AH_DESTROY, "ah_destroy", "ah_destroy", 0},
+	{IRDMA_OP_MC_CREATE, "mc_create", "mc_create", 0},
+	{IRDMA_OP_MC_DESTROY, "mc_destroy", "mc_destroy", 0},
+	{IRDMA_OP_MC_MODIFY, "mc_modify", "mc_modify", 0},
+	{IRDMA_OP_STATS_ALLOCATE, "stats_allocate", "stats_allocate", 0},
+	{IRDMA_OP_STATS_FREE, "stats_free", "stats_free", 0},
+	{IRDMA_OP_STATS_GATHER, "stats_gather", "stats_gather", 0},
+	{IRDMA_OP_WS_ADD_NODE, "ws_add_node", "ws_add_node", 0},
+	{IRDMA_OP_WS_MODIFY_NODE, "ws_modify_node", "ws_modify_node", 0},
+	{IRDMA_OP_WS_DELETE_NODE, "ws_delete_node", "ws_delete_node", 0},
+	{IRDMA_OP_WS_FAILOVER_START, "ws_failover_start", "ws_failover_start",
+	0},
+	{IRDMA_OP_WS_FAILOVER_COMPLETE, "ws_failover_complete",
+	"ws_failover_complete", 0},
+	{IRDMA_OP_SET_UP_MAP, "set_up_map", "set_up_map", 0},
+	{IRDMA_OP_GEN_AE, "gen_ae", "gen_ae", 0},
+	{IRDMA_OP_QUERY_RDMA_FEATURES, "query_rdma_features",
+	"query_rdma_features", 0},
+	{IRDMA_OP_ALLOC_LOCAL_MAC_ENTRY, "alloc_local_mac_entry",
+	"alloc_local_mac_entry", 0},
+	{IRDMA_OP_ADD_LOCAL_MAC_ENTRY, "add_local_mac_entry",
+	"add_local_mac_entry", 0},
+	{IRDMA_OP_DELETE_LOCAL_MAC_ENTRY, "delete_local_mac_entry",
+	"delete_local_mac_entry", 0},
+	{IRDMA_OP_CQ_MODIFY, "cq_modify", "cq_modify", 0}
+};
+
+static const struct irdma_sw_stats_tunable_info irdma_cmcs_list[] = {
+	{0, "cm_nodes_created", "cm_nodes_created",
+	offsetof(struct irdma_cm_core, stats_nodes_created)},
+	{0, "cm_nodes_destroyed", "cm_nodes_destroyed",
+	offsetof(struct irdma_cm_core, stats_nodes_destroyed)},
+	{0, "cm_listen_created", "cm_listen_created",
+	offsetof(struct irdma_cm_core, stats_listen_created)},
+	{0, "cm_listen_destroyed", "cm_listen_destroyed",
+	offsetof(struct irdma_cm_core, stats_listen_destroyed)},
+	{0, "cm_listen_nodes_created", "cm_listen_nodes_created",
+	offsetof(struct irdma_cm_core, stats_listen_nodes_created)},
+	{0, "cm_listen_nodes_destroyed", "cm_listen_nodes_destroyed",
+	offsetof(struct irdma_cm_core, stats_listen_nodes_destroyed)},
+	{0, "cm_lpbs", "cm_lpbs", offsetof(struct irdma_cm_core, stats_lpbs)},
+	{0, "cm_accepts", "cm_accepts", offsetof(struct irdma_cm_core,
+						 stats_accepts)},
+	{0, "cm_rejects", "cm_rejects", offsetof(struct irdma_cm_core,
+						 stats_rejects)},
+	{0, "cm_connect_errs", "cm_connect_errs",
+	offsetof(struct irdma_cm_core, stats_connect_errs)},
+	{0, "cm_passive_errs", "cm_passive_errs",
+	offsetof(struct irdma_cm_core, stats_passive_errs)},
+	{0, "cm_pkt_retrans", "cm_pkt_retrans", offsetof(struct irdma_cm_core,
+							 stats_pkt_retrans)},
+	{0, "cm_backlog_drops", "cm_backlog_drops",
+	offsetof(struct irdma_cm_core, stats_backlog_drops)},
+};
+
+static const struct irdma_sw_stats_tunable_info irdma_ilqs32_list[] = {
+	{0, "ilq_avail_buf_count", "ilq_avail_buf_count",
+	offsetof(struct irdma_puda_rsrc, avail_buf_count)},
+	{0, "ilq_alloc_buf_count", "ilq_alloc_buf_count",
+	offsetof(struct irdma_puda_rsrc, alloc_buf_count)}
+};
+static const struct irdma_sw_stats_tunable_info irdma_ilqs_list[] = {
+	{0, "ilq_stats_buf_alloc_fail", "ilq_stats_buf_alloc_fail",
+	offsetof(struct irdma_puda_rsrc, stats_buf_alloc_fail)},
+	{0, "ilq_stats_pkt_rcvd", "ilq_stats_pkt_rcvd",
+	offsetof(struct irdma_puda_rsrc, stats_pkt_rcvd)},
+	{0, "ilq_stats_pkt_sent", "ilq_stats_pkt_sent",
+	offsetof(struct irdma_puda_rsrc, stats_pkt_sent)},
+	{0, "ilq_stats_rcvd_pkt_err", "ilq_stats_rcvd_pkt_err",
+	offsetof(struct irdma_puda_rsrc, stats_rcvd_pkt_err)},
+	{0, "ilq_stats_sent_pkt_q", "ilq_stats_sent_pkt_q",
+	offsetof(struct irdma_puda_rsrc, stats_sent_pkt_q)}
+};
+
+static const struct irdma_sw_stats_tunable_info irdma_ieqs32_list[] = {
+	{0, "ieq_avail_buf_count", "ieq_avail_buf_count",
+	offsetof(struct irdma_puda_rsrc, avail_buf_count)},
+	{0, "ieq_alloc_buf_count", "ieq_alloc_buf_count",
+	offsetof(struct irdma_puda_rsrc, alloc_buf_count)}
+};
+static const struct irdma_sw_stats_tunable_info irdma_ieqs_list[] = {
+	{0, "ieq_stats_buf_alloc_fail", "ieq_stats_buf_alloc_fail",
+	offsetof(struct irdma_puda_rsrc, stats_buf_alloc_fail)},
+	{0, "ieq_stats_pkt_rcvd", "ieq_stats_pkt_rcvd",
+	offsetof(struct irdma_puda_rsrc, stats_pkt_rcvd)},
+	{0, "ieq_stats_pkt_sent", "ieq_stats_pkt_sent",
+	offsetof(struct irdma_puda_rsrc, stats_pkt_sent)},
+	{0, "ieq_stats_rcvd_pkt_err", "ieq_stats_rcvd_pkt_err",
+	offsetof(struct irdma_puda_rsrc, stats_rcvd_pkt_err)},
+	{0, "ieq_stats_sent_pkt_q", "ieq_stats_sent_pkt_q",
+	offsetof(struct irdma_puda_rsrc, stats_sent_pkt_q)},
+	{0, "ieq_stats_bad_qp_id", "ieq_stats_bad_qp_id",
+	offsetof(struct irdma_puda_rsrc, stats_bad_qp_id)},
+	{0, "ieq_fpdu_processed", "ieq_fpdu_processed",
+	offsetof(struct irdma_puda_rsrc, fpdu_processed)},
+	{0, "ieq_bad_seq_num", "ieq_bad_seq_num",
+	offsetof(struct irdma_puda_rsrc, bad_seq_num)},
+	{0, "ieq_crc_err", "ieq_crc_err", offsetof(struct irdma_puda_rsrc,
+						   crc_err)},
+	{0, "ieq_pmode_count", "ieq_pmode_count",
+	offsetof(struct irdma_puda_rsrc, pmode_count)},
+	{0, "ieq_partials_handled", "ieq_partials_handled",
+	offsetof(struct irdma_puda_rsrc, partials_handled)},
+};
+
 /**
  * irdma_dcqcn_tunables_init - create tunables for dcqcn settings
  * @rf: RDMA PCI function
@@ -610,32 +809,122 @@ irdma_dcqcn_tunables_init(struct irdma_pci_f *rf)
 		      &rf->dcqcn_params.min_rate, 0,
 		      "set minimum rate limit value, in MBits per second, default=0");
 
+	rf->dcqcn_params.dcqcn_f = 5;
 	SYSCTL_ADD_U8(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		      OID_AUTO, "dcqcn_F", CTLFLAG_RDTUN, &rf->dcqcn_params.dcqcn_f, 0,
-		      "set number of times to stay in each stage of bandwidth recovery, default=0");
+		      "set number of times to stay in each stage of bandwidth recovery, default=5");
 
+	rf->dcqcn_params.dcqcn_t = 0x37;
 	SYSCTL_ADD_U16(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		       OID_AUTO, "dcqcn_T", CTLFLAG_RDTUN, &rf->dcqcn_params.dcqcn_t, 0,
-		       "set number of usecs that should elapse before increasing the CWND in DCQCN mode, default=0");
+		       "number of us to elapse before increasing the CWND in DCQCN mode, default=0x37");
 
+	rf->dcqcn_params.dcqcn_b = 0x249f0;
 	SYSCTL_ADD_U32(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		       OID_AUTO, "dcqcn_B", CTLFLAG_RDTUN, &rf->dcqcn_params.dcqcn_b, 0,
-		       "set number of MSS to add to the congestion window in additive increase mode, default=0");
+		       "set number of MSS to add to the congestion window in additive increase mode, default=0x249f0");
 
+	rf->dcqcn_params.rai_factor = 1;
 	SYSCTL_ADD_U16(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		       OID_AUTO, "dcqcn_rai_factor", CTLFLAG_RDTUN,
 		       &rf->dcqcn_params.rai_factor, 0,
-		       "set number of MSS to add to the congestion window in additive increase mode, default=0");
+		       "set number of MSS to add to the congestion window in additive increase mode, default=1");
 
+	rf->dcqcn_params.hai_factor = 5;
 	SYSCTL_ADD_U16(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		       OID_AUTO, "dcqcn_hai_factor", CTLFLAG_RDTUN,
 		       &rf->dcqcn_params.hai_factor, 0,
-		       "set number of MSS to add to the congestion window in hyperactive increase mode, default=0");
+		       "set number of MSS to add to the congestion window in hyperactive increase mode, default=5");
 
+	rf->dcqcn_params.rreduce_mperiod = 50;
 	SYSCTL_ADD_U32(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
 		       OID_AUTO, "dcqcn_rreduce_mperiod", CTLFLAG_RDTUN,
 		       &rf->dcqcn_params.rreduce_mperiod, 0,
-		       "set minimum time between 2 consecutive rate reductions for a single flow, default=0");
+		       "set minimum time between 2 consecutive rate reductions for a single flow, default=50");
+}
+
+/**
+ * irdma_sysctl_settings - sysctl runtime settings init
+ * @rf: RDMA PCI function
+ */
+void
+irdma_sysctl_settings(struct irdma_pci_f *rf)
+{
+	struct sysctl_oid_list *irdma_sysctl_oid_list;
+
+	irdma_sysctl_oid_list = SYSCTL_CHILDREN(rf->tun_info.irdma_sysctl_tree);
+
+	SYSCTL_ADD_BOOL(&rf->tun_info.irdma_sysctl_ctx, irdma_sysctl_oid_list,
+			OID_AUTO, "upload_context", CTLFLAG_RWTUN,
+			&irdma_upload_context, 0,
+			"allow for generating QP's upload context, default=0");
+}
+
+void
+irdma_sw_stats_tunables_init(struct irdma_pci_f *rf)
+{
+	struct sysctl_oid_list *sws_oid_list;
+	struct sysctl_ctx_list *irdma_ctx = &rf->tun_info.irdma_sysctl_ctx;
+	struct irdma_sc_dev *dev = &rf->sc_dev;
+	struct irdma_cm_core *cm_core = &rf->iwdev->cm_core;
+	struct irdma_puda_rsrc *ilq = rf->iwdev->vsi.ilq;
+	struct irdma_puda_rsrc *ieq = rf->iwdev->vsi.ieq;
+	u64 *ll_ptr;
+	u32 *l_ptr;
+	int cqp_stat_cnt = sizeof(irdma_sws_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int cmcore_stat_cnt = sizeof(irdma_cmcs_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int ilqs_stat_cnt = sizeof(irdma_ilqs_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int ilqs32_stat_cnt = sizeof(irdma_ilqs32_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int ieqs_stat_cnt = sizeof(irdma_ieqs_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int ieqs32_stat_cnt = sizeof(irdma_ieqs32_list) / sizeof(struct irdma_sw_stats_tunable_info);
+	int i;
+
+	sws_oid_list = SYSCTL_CHILDREN(rf->tun_info.sws_sysctl_tree);
+
+	for (i = 0; i < cqp_stat_cnt; ++i) {
+		SYSCTL_ADD_U64(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_sws_list[i].name, CTLFLAG_RD,
+			       &dev->cqp_cmd_stats[irdma_sws_list[i].op_type],
+			       0, irdma_sws_list[i].desc);
+	}
+	SYSCTL_ADD_PROC(irdma_ctx, sws_oid_list, OID_AUTO,
+			"req_cmds", CTLFLAG_RD | CTLTYPE_STRING,
+			dev->cqp, IRDMA_CQP_REQ_CMDS, irdma_sysctl_cqp_stats, "A",
+			"req_cmds");
+	SYSCTL_ADD_PROC(irdma_ctx, sws_oid_list, OID_AUTO,
+			"cmpl_cmds", CTLFLAG_RD | CTLTYPE_STRING,
+			dev->cqp, IRDMA_CQP_CMPL_CMDS, irdma_sysctl_cqp_stats, "A",
+			"cmpl_cmds");
+	for (i = 0; i < cmcore_stat_cnt; ++i) {
+		ll_ptr = (u64 *)((uintptr_t)cm_core + irdma_cmcs_list[i].value);
+		SYSCTL_ADD_U64(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_cmcs_list[i].name, CTLFLAG_RD, ll_ptr,
+			       0, irdma_cmcs_list[i].desc);
+	}
+	for (i = 0; ilq && i < ilqs_stat_cnt; ++i) {
+		ll_ptr = (u64 *)((uintptr_t)ilq + irdma_ilqs_list[i].value);
+		SYSCTL_ADD_U64(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_ilqs_list[i].name, CTLFLAG_RD, ll_ptr,
+			       0, irdma_ilqs_list[i].desc);
+	}
+	for (i = 0; ilq && i < ilqs32_stat_cnt; ++i) {
+		l_ptr = (u32 *)((uintptr_t)ilq + irdma_ilqs32_list[i].value);
+		SYSCTL_ADD_U32(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_ilqs32_list[i].name, CTLFLAG_RD, l_ptr,
+			       0, irdma_ilqs32_list[i].desc);
+	}
+	for (i = 0; ieq && i < ieqs_stat_cnt; ++i) {
+		ll_ptr = (u64 *)((uintptr_t)ieq + irdma_ieqs_list[i].value);
+		SYSCTL_ADD_U64(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_ieqs_list[i].name, CTLFLAG_RD, ll_ptr,
+			       0, irdma_ieqs_list[i].desc);
+	}
+	for (i = 0; ieq && i < ieqs32_stat_cnt; ++i) {
+		l_ptr = (u32 *)((uintptr_t)ieq + irdma_ieqs32_list[i].value);
+		SYSCTL_ADD_U32(irdma_ctx, sws_oid_list, OID_AUTO,
+			       irdma_ieqs32_list[i].name, CTLFLAG_RD, l_ptr,
+			       0, irdma_ieqs32_list[i].desc);
+	}
 }
 
 /**
@@ -737,8 +1026,99 @@ irdma_free_dma_mem(struct irdma_hw *hw, struct irdma_dma_mem *mem)
 	return 0;
 }
 
-inline void
-irdma_prm_rem_bitmapmem(struct irdma_hw *hw, struct irdma_chunk *chunk)
+u_int
+if_foreach_addr_type(if_t ifp, int type, if_addr_cb_t cb, void *cb_arg){
+	struct epoch_tracker et;
+	struct ifaddr *ifa;
+	u_int count;
+
+	MPASS(cb);
+
+	count = 0;
+	NET_EPOCH_ENTER(et);
+	CK_STAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
+		if (ifa->ifa_addr->sa_family != type)
+			continue;
+		count += (*cb) (cb_arg, ifa, count);
+	}
+	NET_EPOCH_EXIT(et);
+
+	return (count);
+}
+
+int
+if_foreach(if_foreach_cb_t cb, void *cb_arg)
 {
-	kfree(chunk->bitmapmem.va);
+	if_t ifp;
+	int error;
+
+	NET_EPOCH_ASSERT();
+	MPASS(cb);
+
+	error = 0;
+	CK_STAILQ_FOREACH(ifp, &V_ifnet, if_link) {
+		error = cb(ifp, cb_arg);
+		if (error != 0)
+			break;
+	}
+
+	return (error);
+}
+
+if_t
+if_iter_start(struct if_iter *iter){
+	if_t ifp;
+
+	NET_EPOCH_ASSERT();
+	bzero(iter, sizeof(*iter));
+	ifp = CK_STAILQ_FIRST(&V_ifnet);
+	if (ifp != NULL)
+		iter->context[0] = CK_STAILQ_NEXT(ifp, if_link);
+	else
+		iter->context[0] = NULL;
+	return (ifp);
+}
+
+if_t
+if_iter_next(struct if_iter *iter){
+	if_t cur_ifp = iter->context[0];
+
+	if (cur_ifp != NULL)
+		iter->context[0] = CK_STAILQ_NEXT(cur_ifp, if_link);
+	return (cur_ifp);
+}
+
+void
+if_iter_finish(struct if_iter *iter)
+{
+	/* NOP */
+}
+
+
+void
+irdma_cleanup_dead_qps(struct irdma_sc_vsi *vsi)
+{
+	struct irdma_sc_qp *qp = NULL;
+	struct irdma_qp *iwqp;
+	struct irdma_pci_f *rf;
+	u8 i;
+
+	for (i = 0; i < IRDMA_MAX_USER_PRIORITY; i++) {
+		qp = irdma_get_qp_from_list(&vsi->qos[i].qplist, qp);
+		while (qp) {
+			if (qp->qp_uk.qp_type == IRDMA_QP_TYPE_UDA) {
+				qp = irdma_get_qp_from_list(&vsi->qos[i].qplist, qp);
+				continue;
+			}
+			iwqp = qp->qp_uk.back_qp;
+			rf = iwqp->iwdev->rf;
+			irdma_free_dma_mem(rf->sc_dev.hw, &iwqp->q2_ctx_mem);
+			irdma_free_dma_mem(rf->sc_dev.hw, &iwqp->kqp.dma_mem);
+
+			kfree(iwqp->kqp.sq_wrid_mem);
+			kfree(iwqp->kqp.rq_wrid_mem);
+			qp = irdma_get_qp_from_list(&vsi->qos[i].qplist, qp);
+			kfree(iwqp);
+		}
+	}
 }
