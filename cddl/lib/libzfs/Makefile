@@ -103,6 +103,7 @@ CFLAGS+= -DHAVE_ISSETUGID
 CFLAGS+= -include ${SRCTOP}/sys/modules/zfs/zfs_config.h
 CFLAGS+= -DSYSCONFDIR=\"/etc\"
 CFLAGS+= -DPKGDATADIR=\"/usr/share/zfs\"
+CFLAGS+= -DZFSEXECDIR=\"${LIBEXECDIR}/zfs\"
 
 CFI_OVERRIDE=	-fno-sanitize=cfi-icall
 
