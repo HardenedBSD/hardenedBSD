@@ -299,8 +299,15 @@ data_abort(struct thread *td, struct trapframe *frame, uint64_t esr,
 	    pmap_fault(map->pmap, esr, far) == KERN_SUCCESS)
 		return;
 
-	KASSERT(td->td_md.md_spinlock_count == 0,
-	    ("data abort with spinlock held"));
+#ifdef INVARIANTS
+	if (td->td_md.md_spinlock_count != 0) {
+		print_registers(frame);
+		print_gp_register("far", far);
+		printf(" esr: %.16lx\n", esr);
+		panic("data abort with spinlock held (spinlock count %d != 0)",
+		    td->td_md.md_spinlock_count);
+	}
+#endif
 	if (td->td_critnest != 0 || WITNESS_CHECK(WARN_SLEEPOK |
 	    WARN_GIANTOK, NULL, "Kernel page fault") != 0) {
 		print_registers(frame);
@@ -513,9 +520,12 @@ do_el1h_sync(struct thread *td, struct trapframe *frame)
 	case EXCP_UNKNOWN:
 		if (undef_insn(1, frame))
 			break;
-		printf("Undefined instruction: %08x\n",
+		far = READ_SPECIALREG(far_el1);
+		print_registers(frame);
+		print_gp_register("far", far);
+		panic("Undefined instruction: %08x",
 		    *(uint32_t *)frame->tf_elr);
-		/* FALLTHROUGH */
+		break;
 	default:
 		print_registers(frame);
 		print_gp_register("far", READ_SPECIALREG(far_el1));
