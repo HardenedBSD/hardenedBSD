@@ -319,9 +319,19 @@ fi
 
 vers_content_new=$(cat << EOF
 $COPYRIGHT
+/*
+ * The SCCS stuff is a marker that by convention identifies the kernel.  While
+ * the convention originated with SCCS, the current use is more generic and is
+ * used by different organizations to identify the kernel, the crash dump,
+ * etc. The what(1) utility prints these markers. Better methods exist, so this
+ * method is deprecated and will be removed in a future version of FreeBSD. Orgs
+ * that use it are encouraged to migrate before then.
+ */
+#define SCCSSTR "@(#)${VERINFO}"
 #define VERSTR "${VERSTR}"
 #define RELSTR "${RELEASE}"
 
+char sccs[sizeof(SCCSSTR) > 128 ? sizeof(SCCSSTR) : 128] = SCCSSTR;
 char version[sizeof(VERSTR) > 256 ? sizeof(VERSTR) : 256] = VERSTR;
 char compiler_version[] = "${compiler_v}";
 char ostype[] = "${TYPE}";
