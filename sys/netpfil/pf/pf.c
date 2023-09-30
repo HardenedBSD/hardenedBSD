@@ -310,7 +310,7 @@ static int		 pf_test_state_icmp(struct pf_kstate **,
 			    struct pfi_kkif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
 static void		 pf_sctp_multihome_delayed(struct pf_pdesc *, int,
-			    struct pfi_kkif *, struct pf_kstate *);
+			    struct pfi_kkif *, struct pf_kstate *, int);
 static int		 pf_test_state_sctp(struct pf_kstate **,
 			    struct pfi_kkif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
@@ -5921,10 +5921,10 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 
 static void
 pf_sctp_multihome_delayed(struct pf_pdesc *pd, int off, struct pfi_kkif *kif,
-    struct pf_kstate *s)
+    struct pf_kstate *s, int action)
 {
 	struct pf_sctp_multihome_job	*j, *tmp;
-	int			 action __unused;
+	int			 ret __unused;;
 	struct pf_kstate	*sm = NULL;
 	struct pf_krule		*ra = NULL;
 	struct pf_krule		*r = &V_pf_default_rule;
@@ -5933,11 +5933,14 @@ pf_sctp_multihome_delayed(struct pf_pdesc *pd, int off, struct pfi_kkif *kif,
 	PF_RULES_RLOCK_TRACKER;
 
 	TAILQ_FOREACH_SAFE(j, &pd->sctp_multihome_jobs, next, tmp) {
+		if (s == NULL || action != PF_PASS)
+			goto free;
+
 		switch (j->op) {
 		case  SCTP_ADD_IP_ADDRESS: {
 			j->pd.sctp_flags |= PFDESC_SCTP_ADD_IP;
 			PF_RULES_RLOCK();
-			action = pf_test_rule(&r, &sm, kif,
+			ret = pf_test_rule(&r, &sm, kif,
 			    j->m, off, &j->pd, &ra, &rs, NULL);
 			PF_RULES_RUNLOCK();
 			SDT_PROBE4(pf, sctp, multihome, test, kif, r, j->m, action);
@@ -5986,6 +5989,7 @@ pf_sctp_multihome_delayed(struct pf_pdesc *pd, int off, struct pfi_kkif *kif,
 		}
 		}
 
+free:
 		free(j, M_PFTEMP);
 	}
 }
@@ -7698,6 +7702,9 @@ pf_test(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0,
 	pd.af = AF_INET;
 	pd.act.rtableid = -1;
 
+	h = mtod(m, struct ip *);
+	off = h->ip_hl << 2;
+
 	if (__predict_false(ip_divert_ptr != NULL) &&
 	    ((ipfwtag = m_tag_locate(m, MTAG_IPFW_RULE, 0, NULL)) != NULL)) {
 		struct ipfw_rule_ref *rr = (struct ipfw_rule_ref *)(ipfwtag+1);
@@ -8151,7 +8158,7 @@ done:
 		PF_STATE_UNLOCK(s);
 
 out:
-	pf_sctp_multihome_delayed(&pd, off, kif, s);
+	pf_sctp_multihome_delayed(&pd, off, kif, s, action);
 
 	return (action);
 }
@@ -8249,6 +8256,9 @@ pf_test6(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0, struct inpcb 
 	pd.af = AF_INET6;
 	pd.act.rtableid = -1;
 
+	h = mtod(m, struct ip6_hdr *);
+	off = ((caddr_t)h - m->m_data) + sizeof(struct ip6_hdr);
+
 	/* We do IP header normalization and packet reassembly here */
 	if (pf_normalize_ip6(m0, kif, &reason, &pd) != PF_PASS) {
 		action = PF_DROP;
@@ -8256,6 +8266,7 @@ pf_test6(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0, struct inpcb 
 	}
 	m = *m0;	/* pf_normalize messes with m0 */
 	h = mtod(m, struct ip6_hdr *);
+	off = ((caddr_t)h - m->m_data) + sizeof(struct ip6_hdr);
 
 	/*
 	 * we do not support jumbogram.  if we keep going, zero ip6_plen
@@ -8272,7 +8283,6 @@ pf_test6(int dir, int pflags, struct ifnet *ifp, struct mbuf **m0, struct inpcb 
 	pd.tos = IPV6_DSCP(h);
 	pd.tot_len = ntohs(h->ip6_plen) + sizeof(struct ip6_hdr);
 
-	off = ((caddr_t)h - m->m_data) + sizeof(struct ip6_hdr);
 	pd.proto = h->ip6_nxt;
 	do {
 		switch (pd.proto) {
@@ -8705,7 +8715,7 @@ done:
 out:
 	SDT_PROBE4(pf, ip, test6, done, action, reason, r, s);
 
-	pf_sctp_multihome_delayed(&pd, off, kif, s);
+	pf_sctp_multihome_delayed(&pd, off, kif, s, action);
 
 	return (action);
 }

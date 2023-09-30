@@ -1426,6 +1426,15 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
 
+	/* Update bss info (bss_info_changed) (assoc, aid, ..). */
+	/*
+	 * We need to do this now, before sta changes to IEEE80211_STA_NOTEXIST
+	 * as otherwise drivers (iwlwifi at least) will silently not remove
+	 * the sta from the firmware and when we will add a new one trigger
+	 * a fw assert.
+	 */
+	lkpi_disassoc(sta, vif, lhw);
+
 	/* Adjust sta and change state (from NONE) to NOTEXIST. */
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
@@ -1435,15 +1444,8 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
 	}
-#if 0
-	lsta->added_to_drv = false;	/* mo manages. */
-#endif
 
-	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
-
-	/* Update bss info (bss_info_changed) (assoc, aid, ..). */
-	/* We need to do this now, can only do after sta is IEEE80211_STA_NOTEXIST. */
-	lkpi_disassoc(sta, vif, lhw);
+	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);	/* sta no longer save to use. */
 
 	IMPROVE("Any bss_info changes to announce?");
 	bss_changed = 0;
@@ -1887,6 +1889,13 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
 
+	/* Update bss info (bss_info_changed) (assoc, aid, ..). */
+	/*
+	 * One would expect this to happen when going off AUTHORIZED.
+	 * See comment there; removes the sta from fw.
+	 */
+	lkpi_disassoc(sta, vif, lhw);
+
 	/* Adjust sta and change state (from NONE) to NOTEXIST. */
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
@@ -1896,18 +1905,8 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 		IMPROVE("do we need to undo the chan ctx?");
 		goto out;
 	}
-#if 0
-	lsta->added_to_drv = false;	/* mo manages. */
-#endif
 
-	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
-
-	/* Update bss info (bss_info_changed) (assoc, aid, ..). */
-	/*
-	 * One would expect this to happen when going off AUTHORIZED.
-	 * See comment there; removes the sta from fw.
-	 */
-	lkpi_disassoc(sta, vif, lhw);
+	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);	/* sta no longer save to use. */
 
 	IMPROVE("Any bss_info changes to announce?");
 	bss_changed = 0;
@@ -2474,10 +2473,14 @@ lkpi_ic_vap_delete(struct ieee80211vap *vap)
 	LKPI_80211_LHW_LVIF_LOCK(lhw);
 	TAILQ_REMOVE(&lhw->lvif_head, lvif, lvif_entry);
 	LKPI_80211_LHW_LVIF_UNLOCK(lhw);
-	lkpi_80211_mo_remove_interface(hw, vif);
 
 	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
+
+	IMPROVE("clear up other bits in this state");
+
+	lkpi_80211_mo_remove_interface(hw, vif);
+
 	mtx_destroy(&lvif->mtx);
 	free(lvif, M_80211_VAP);
 }

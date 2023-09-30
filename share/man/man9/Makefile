@@ -68,10 +68,12 @@ MAN=	accept_filter.9 \
 	copy.9 \
 	counter.9 \
 	cpuset.9 \
+	cr_bsd_visible.9 \
 	cr_cansee.9 \
+	cr_canseejailproc.9 \
+	cr_canseeothergids.9 \
+	cr_canseeotheruids.9 \
 	critical_enter.9 \
-	cr_seeothergids.9 \
-	cr_seeotheruids.9 \
 	crypto.9 \
 	crypto_buffer.9 \
 	crypto_driver.9 \
@@ -1155,6 +1157,7 @@ MLINKS+=g_provider.9 g_destroy_provider.9 \
 	g_provider.9 g_error_provider.9 \
 	g_provider.9 g_new_providerf.9
 MLINKS+=gone_in.9 gone_in_dev.9
+MLINKS+=groupmember.9 realgroupmember.9
 MLINKS+=hash.9 hash32.9 \
 	hash.9 hash32_buf.9 \
 	hash.9 hash32_str.9 \
