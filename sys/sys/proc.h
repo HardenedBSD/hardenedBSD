@@ -1171,11 +1171,9 @@ void	ast_sched(struct thread *td, int tda);
 void	ast_unsched_locked(struct thread *td, int tda);
 
 struct	thread *choosethread(void);
+int	cr_bsd_visible(struct ucred *u1, struct ucred *u2);
 int	cr_cansee(struct ucred *u1, struct ucred *u2);
 int	cr_canseesocket(struct ucred *cred, struct socket *so);
-int	cr_canseeothergids(struct ucred *u1, struct ucred *u2);
-int	cr_canseeotheruids(struct ucred *u1, struct ucred *u2);
-int	cr_canseejailproc(struct ucred *u1, struct ucred *u2);
 int	cr_cansignal(struct ucred *cred, struct proc *proc, int signum);
 int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *pgrp,
 	    struct session *sess);

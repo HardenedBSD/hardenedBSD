@@ -51,6 +51,10 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20230927: Man pages renamed to match the actual functions
+OLD_FILES+=usr/share/man/man9/cr_seeothergids.9.gz
+OLD_FILES+=usr/share/man/man9/cr_seeotheruids.9.gz
+
 # 20230925
 OLD_FILES+=usr/share/examples/diskless/ME
 OLD_FILES+=usr/share/examples/diskless/README.BOOTP
@@ -454,8 +458,6 @@ OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-i386.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-powerpc.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-powerpc64.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-powerpc64le.a
-OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-powerpc64le.a
-OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-powerpc64lele.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-riscv64.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.profile-x86_64.a
 OLD_FILES+=usr/lib/clang/15.0.7/lib/freebsd/libclang_rt.safestack-aarch64.a
