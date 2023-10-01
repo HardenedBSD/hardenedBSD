@@ -1202,10 +1202,10 @@ fetch_progress () {
 continuep () {
 	while read -p "Does this look reasonable (y/n)? " CONTINUE; do
 		case "${CONTINUE}" in
-		y*)
+		[yY]*)
 			return 0
 			;;
-		n*)
+		[nN]*)
 			return 1
 			;;
 		esac
@@ -2903,7 +2903,13 @@ install_from_index () {
 	    while read FPATH TYPE OWNER GROUP PERM FLAGS HASH LINK; do
 		case ${TYPE} in
 		d)
-			# Create a directory
+			# Create a directory.  A file may change to a directory
+			# on upgrade (PR273661).  If that happens, remove the
+			# file first.
+			if [ -e "${BASEDIR}/${FPATH}" ] && \
+			    ! [ -d "${BASEDIR}/${FPATH}" ]; then
+				rm -f -- "${BASEDIR}/${FPATH}"
+			fi
 			install -d -o ${OWNER} -g ${GROUP}		\
 			    -m ${PERM} ${BASEDIR}/${FPATH}
 			;;
