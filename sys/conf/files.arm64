@@ -336,10 +336,9 @@ ice_ddp.fw					optional ice_ddp	\
 	no-obj no-implicit-rule				\
 	clean		"ice_ddp.fw"
 
-dev/iicbus/sy8106a.c				optional sy8106a fdt
-dev/iicbus/twsi/mv_twsi.c			optional twsi fdt
-dev/iicbus/twsi/a10_twsi.c			optional twsi fdt
-dev/iicbus/twsi/twsi.c				optional twsi fdt
+dev/iicbus/controller/twsi/mv_twsi.c		optional twsi fdt
+dev/iicbus/controller/twsi/a10_twsi.c		optional twsi fdt
+dev/iicbus/controller/twsi/twsi.c		optional twsi fdt
 
 dev/ipmi/ipmi.c					optional ipmi
 dev/ipmi/ipmi_acpi.c				optional ipmi acpi
@@ -697,6 +696,7 @@ arm64/rockchip/clk/rk3568_pmucru.c		optional fdt soc_rockchip_rk3568
 # Xilinx
 arm/xilinx/uart_dev_cdnc.c			optional uart soc_xilinx_zynq fdt
 arm/xilinx/zy7_gpio.c				optional gpio soc_xilinx_zynq fdt
+dev/iicbus/controller/cadence/cdnc_i2c.c	optional cdnc_i2c iicbus soc_xilinx_zynq fdt
 dev/usb/controller/xlnx_dwc3.c			optional xhci soc_xilinx_zynq fdt
 dev/firmware/xilinx/zynqmp_firmware.c		optional fdt soc_xilinx_zynq
 dev/firmware/xilinx/zynqmp_firmware_if.m	optional fdt soc_xilinx_zynq
