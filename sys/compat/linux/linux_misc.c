@@ -81,7 +81,6 @@
 #include <compat/linux/linux_signal.h>
 #include <compat/linux/linux_time.h>
 #include <compat/linux/linux_util.h>
-#include <compat/linux/linux_sysproto.h>
 #include <compat/linux/linux_emul.h>
 #include <compat/linux/linux_misc.h>
 
@@ -1506,13 +1505,6 @@ linux_getsid(struct thread *td, struct linux_getsid_args *args)
 {
 
 	return (kern_getsid(td, args->pid));
-}
-
-int
-linux_nosys(struct thread *td, struct nosys_args *ignore)
-{
-
-	return (ENOSYS);
 }
 
 int
