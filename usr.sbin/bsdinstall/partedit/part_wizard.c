@@ -73,16 +73,26 @@ startwizard:
 		return (1);
 	}
 
+<<<<<<< HEAD
 	bsddialog_clearterminal();
 	bsddialog_backtitle(&conf, "HardenedBSD Installer");
+=======
+	bsddialog_clear(0);
+	bsddialog_backtitle(&conf, "FreeBSD Installer");
+>>>>>>> internal/freebsd/current/main
 	schemeroot = wizard_partition(&mesh, disk);
 	free(disk);
 	geom_deletetree(&mesh);
 	if (schemeroot == NULL)
 		return (1);
 
+<<<<<<< HEAD
 	bsddialog_clearterminal();
 	bsddialog_backtitle(&conf, "HardenedBSD Installer");
+=======
+	bsddialog_clear(0);
+	bsddialog_backtitle(&conf, "FreeBSD Installer");
+>>>>>>> internal/freebsd/current/main
 	error = geom_gettree(&mesh);
 	if (error != 0) {
 		free(schemeroot);
