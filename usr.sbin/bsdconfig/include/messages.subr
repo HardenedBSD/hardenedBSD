@@ -164,12 +164,7 @@ msg_http_proxy="HTTP Proxy"
 msg_hungarian_desc="Ported software for the Hungarian market."
 msg_iceland="Iceland"
 msg_install_from_a_dos_partition="Install from a DOS partition"
-<<<<<<< HEAD
-msg_install_from_a_floppy_disk_set="Install from a floppy disk set"
 msg_install_from_a_freebsd_cd_dvd="Install from a HardenedBSD CD/DVD"
-=======
-msg_install_from_a_freebsd_cd_dvd="Install from a FreeBSD CD/DVD"
->>>>>>> internal/freebsd/current/main
 msg_install_from_a_ufs_partition="Install from a UFS partition"
 msg_install_from_a_usb_drive="Install from a USB drive"
 msg_install_from_an_ftp_server_thru_proxy="Install from an FTP server through an HTTP proxy"
@@ -291,15 +286,8 @@ msg_please_enter_the_password_for_this_user="Please enter the password for this 
 msg_please_enter_the_username_you_wish_to_login_as="Please enter the username you wish to login as:"
 msg_please_enter_username_password="Please enter a username and password for sudo(8):"
 msg_please_select_a_category_to_display="Please select a category to display."
-<<<<<<< HEAD
 msg_please_select_a_cd_dvd_drive="HardenedBSD can be installed directly from a CD/DVD containing a valid\nHardenedBSD distribution.  If you are seeing this menu it is because\nmore than one CD/DVD drive was found on your system.  Please select\none of the following CD/DVD drives as your installation drive."
-msg_please_select_a_floppy_drive="You have more than one floppy drive.  Please choose which drive\nyou would like to use."
-msg_please_select_a_freebsd_ftp_distribution_site="Please select a HardenedBSD FTP distribution site"
 msg_please_select_a_freebsd_http_distribution_site="Please select a HardenedBSD HTTP distribution site"
-=======
-msg_please_select_a_cd_dvd_drive="FreeBSD can be installed directly from a CD/DVD containing a valid\nFreeBSD distribution.  If you are seeing this menu it is because\nmore than one CD/DVD drive was found on your system.  Please select\none of the following CD/DVD drives as your installation drive."
-msg_please_select_a_freebsd_http_distribution_site="Please select a FreeBSD HTTP distribution site"
->>>>>>> internal/freebsd/current/main
 msg_please_select_a_usb_drive="You have more than one USB drive. Please choose which drive\nyou would like to use."
 msg_please_select_dos_partition="HardenedBSD can be installed directly from a DOS partition assuming,\nof course, that you have copied the relevant distributions into\nyour DOS partition before starting this installation.  If this is\nnot the case then you should reboot DOS at this time and copy the\ndistributions you wish to install into a \"FREEBSD\" subdirectory\non one of your DOS partitions.  Otherwise, please select the DOS\npartition containing the HardenedBSD distribution files."
 msg_please_select_ethernet_device_to_configure="Please select the ethernet or PLIP device to configure."
