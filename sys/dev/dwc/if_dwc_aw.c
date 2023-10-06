@@ -33,17 +33,23 @@
 #include <sys/module.h>
 
 #include <net/if.h>
+#include <net/if_media.h>
 
 #include <machine/bus.h>
 
-#include <dev/dwc/if_dwc.h>
-#include <dev/dwc/if_dwcvar.h>
+#include <dev/mii/miivar.h>
+
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <arm/allwinner/aw_machdep.h>
 #include <dev/extres/clk/clk.h>
+#include <dev/extres/hwreset/hwreset.h>
 #include <dev/extres/regulator/regulator.h>
+
+#include <arm/allwinner/aw_machdep.h>
+
+#include <dev/dwc/if_dwcvar.h>
+#include <dev/dwc/dwc1000_reg.h>
 
 #include "if_dwc_if.h"
 
@@ -73,10 +79,13 @@ a20_if_dwc_init(device_t dev)
 
 	/* Configure PHY for MII or RGMII mode */
 	switch(sc->phy_mode) {
-	case PHY_MODE_RGMII:
+	case MII_CONTYPE_RGMII:
+	case MII_CONTYPE_RGMII_ID:
+	case MII_CONTYPE_RGMII_RXID:
+	case MII_CONTYPE_RGMII_TXID:
 		tx_parent_name = "gmac_int_tx";
 		break;
-	case PHY_MODE_MII:
+	case MII_CONTYPE_MII:
 		tx_parent_name = "mii_phy_tx";
 		break;
 	default:
@@ -115,13 +124,6 @@ a20_if_dwc_init(device_t dev)
 }
 
 static int
-a20_if_dwc_mac_type(device_t dev)
-{
-
-	return (DWC_GMAC_NORMAL_DESC);
-}
-
-static int
 a20_if_dwc_mii_clk(device_t dev)
 {
 
@@ -132,7 +134,6 @@ static device_method_t a20_dwc_methods[] = {
 	DEVMETHOD(device_probe,		a20_if_dwc_probe),
 
 	DEVMETHOD(if_dwc_init,		a20_if_dwc_init),
-	DEVMETHOD(if_dwc_mac_type,	a20_if_dwc_mac_type),
 	DEVMETHOD(if_dwc_mii_clk,	a20_if_dwc_mii_clk),
 
 	DEVMETHOD_END

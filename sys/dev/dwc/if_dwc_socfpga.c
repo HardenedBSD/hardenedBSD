@@ -42,10 +42,14 @@
 
 #include <machine/bus.h>
 
-#include <dev/dwc/if_dwc.h>
-#include <dev/dwc/if_dwcvar.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
+
+#include <dev/extres/clk/clk.h>
+#include <dev/extres/hwreset/hwreset.h>
+
+#include <dev/dwc/if_dwcvar.h>
+#include <dev/dwc/dwc1000_reg.h>
 
 #include "if_dwc_if.h"
 
@@ -72,13 +76,6 @@ if_dwc_socfpga_init(device_t dev)
 }
 
 static int
-if_dwc_socfpga_mac_type(device_t dev)
-{
-
-	return (DWC_GMAC_EXT_DESC);
-}
-
-static int
 if_dwc_socfpga_mii_clk(device_t dev)
 {
 	phandle_t root;
@@ -96,7 +93,6 @@ static device_method_t dwc_socfpga_methods[] = {
 	DEVMETHOD(device_probe,		if_dwc_socfpga_probe),
 
 	DEVMETHOD(if_dwc_init,		if_dwc_socfpga_init),
-	DEVMETHOD(if_dwc_mac_type,	if_dwc_socfpga_mac_type),
 	DEVMETHOD(if_dwc_mii_clk,	if_dwc_socfpga_mii_clk),
 
 	DEVMETHOD_END

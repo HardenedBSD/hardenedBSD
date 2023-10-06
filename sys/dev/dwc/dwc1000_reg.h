@@ -1,6 +1,5 @@
 /*-
  * Copyright (c) 2014 Ruslan Bukin <br@bsdpad.com>
- * All rights reserved.
  *
  * This software was developed by SRI International and the University of
  * Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-10-C-0237)
@@ -32,13 +31,8 @@
  * Register names were taken almost as is from the documentation.
  */
 
-#ifndef __IF_DWC_H__
-#define __IF_DWC_H__
-
-#define	PHY_MODE_UNKNOWN	0x0
-#define	PHY_MODE_RMII		0x1
-#define	PHY_MODE_RGMII		0x2
-#define	PHY_MODE_MII		0x3
+#ifndef __DWC1000_REG_H__
+#define __DWC1000_REG_H__
 
 #define	MAC_CONFIGURATION	0x0
 #define	 CONF_JD		(1 << 22)	/* jabber timer disable */
@@ -219,6 +213,8 @@
 
 /* DMA */
 #define	BUS_MODE		0x1000
+#define	 BUS_MODE_MIXEDBURST	(1 << 26)
+#define	 BUS_MODE_AAL		(1 << 25)
 #define	 BUS_MODE_EIGHTXPBL	(1 << 24) /* Multiplies PBL by 8 */
 #define	 BUS_MODE_USP		(1 << 23)
 #define	 BUS_MODE_RPBL_SHIFT	17 /* Single block transfer size */
@@ -230,7 +226,6 @@
 #define	 BUS_MODE_PRIORXTX_11	0
 #define	 BUS_MODE_PBL_SHIFT	8 /* Single block transfer size */
 #define	 BUS_MODE_SWR		(1 << 0) /* Reset */
-#define	 BUS_MODE_DEFAULT_PBL	8
 #define	TRANSMIT_POLL_DEMAND	0x1004
 #define	RECEIVE_POLL_DEMAND	0x1008
 #define	RX_DESCR_LIST_ADDR	0x100C
@@ -280,7 +275,9 @@
 #define	CURRENT_HOST_RECEIVE_DESCR	0x104C
 #define	CURRENT_HOST_TRANSMIT_BUF_ADDR	0x1050
 #define	CURRENT_HOST_RECEIVE_BUF_ADDR	0x1054
+
 #define	HW_FEATURE			0x1058
+#define	 HW_FEATURE_EXT_DESCRIPTOR	(1 << 24)
 
 #define	DWC_GMAC_NORMAL_DESC		0x1
 #define	DWC_GMAC_EXT_DESC		0x2
@@ -300,4 +297,4 @@
 #define	GMAC_MII_CLK_DIV16		0xe
 #define	GMAC_MII_CLK_DIV18		0xf
 
-#endif	/* __IF_DWC_H__ */
+#endif	/* __DWC1000_REG_H__ */
