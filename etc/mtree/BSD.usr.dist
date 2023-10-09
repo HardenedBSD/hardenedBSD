@@ -352,6 +352,8 @@
                 print
                 ..
             ..
+            sound
+            ..
             sunrpc
                 dir
                 ..
