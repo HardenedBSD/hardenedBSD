@@ -1584,6 +1584,9 @@ static void
 vnlru_kick_cond(void)
 {
 
+	if (vnlru_read_freevnodes() > wantfreevnodes)
+		return;
+
 	if (vnlruproc_sig)
 		return;
 	mtx_lock(&vnode_list_mtx);
@@ -1674,7 +1677,12 @@ vnlru_proc(void)
 		target = target / 10 + 1;
 		done = vlrureclaim(reclaim_nc_src, trigger, target);
 		mtx_unlock(&vnode_list_mtx);
-		if (onumvnodes > desiredvnodes && numvnodes <= desiredvnodes)
+		/*
+		 * Total number of vnodes can transiently go slightly above the
+		 * limit (see vn_alloc_hard), no need to call uma_reclaim if
+		 * this happens.
+		 */
+		if (onumvnodes + 1000 > desiredvnodes && numvnodes <= desiredvnodes)
 			uma_reclaim(UMA_RECLAIM_DRAIN);
 		if (done == 0) {
 			if (force == 0 || force == 1) {
@@ -1802,11 +1810,19 @@ vn_alloc_hard(struct mount *mp)
 		mtx_unlock(&vnode_list_mtx);
 		goto alloc;
 	}
-	rfreevnodes = vnlru_read_freevnodes();
-	if (vn_alloc_cyclecount++ >= rfreevnodes) {
-		vn_alloc_cyclecount = 0;
-		vstir = true;
+
+	if (vn_alloc_cyclecount != 0) {
+		rfreevnodes = vnlru_read_freevnodes();
+		if (rfreevnodes < wantfreevnodes) {
+			if (vn_alloc_cyclecount++ >= rfreevnodes) {
+				vn_alloc_cyclecount = 0;
+				vstir = true;
+			}
+		} else {
+			vn_alloc_cyclecount = 0;
+		}
 	}
+
 	/*
 	 * Grow the vnode cache if it will not be above its target max
 	 * after growing.  Otherwise, if the free list is nonempty, try
@@ -1836,9 +1852,8 @@ vn_alloc_hard(struct mount *mp)
 	}
 alloc:
 	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
-	rnumvnodes = atomic_fetchadd_long(&numvnodes, 1) + 1;
-	if (vnlru_under(rnumvnodes, vlowat))
-		vnlru_kick_cond();
+	atomic_add_long(&numvnodes, 1);
+	vnlru_kick_cond();
 	return (uma_zalloc_smr(vnode_zone, M_WAITOK));
 }
 
