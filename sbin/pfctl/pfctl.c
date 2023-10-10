@@ -233,7 +233,7 @@ static const char * const clearopt_list[] = {
 static const char * const showopt_list[] = {
 	"ether", "nat", "queue", "rules", "Anchors", "Sources", "states",
 	"info", "Interfaces", "labels", "timeouts", "memory", "Tables",
-	"osfp", "Running", "all", NULL
+	"osfp", "Running", "all", "creatorids", NULL
 };
 
 static const char * const tblcmdopt_list[] = {
@@ -1514,29 +1514,40 @@ done:
 	return (0);
 }
 
+struct pfctl_show_state_arg {
+	int opts;
+	int dotitle;
+	const char *iface;
+};
+
+static int
+pfctl_show_state(struct pfctl_state *s, void *arg)
+{
+	struct pfctl_show_state_arg *a = (struct pfctl_show_state_arg *)arg;
+
+	if (a->iface != NULL && strcmp(s->ifname, a->iface))
+		return (0);
+
+	if (a->dotitle) {
+		pfctl_print_title("STATES:");
+		a->dotitle = 0;
+	}
+	print_state(s, a->opts);
+
+	return (0);
+}
+
 int
 pfctl_show_states(int dev, const char *iface, int opts)
 {
-	struct pfctl_states states;
-	struct pfctl_state *s;
-	int dotitle = (opts & PF_OPT_SHOWALL);
+	struct pfctl_show_state_arg arg;
 
-	memset(&states, 0, sizeof(states));
+	arg.opts = opts;
+	arg.dotitle = opts & PF_OPT_SHOWALL;
+	arg.iface = iface;
 
-	if (pfctl_get_states(dev, &states))
+	if (pfctl_get_states_iter(pfctl_show_state, &arg))
 		return (-1);
-
-	TAILQ_FOREACH(s, &states.states, entry) {
-		if (iface != NULL && strcmp(s->ifname, iface))
-			continue;
-		if (dotitle) {
-			pfctl_print_title("STATES:");
-			dotitle = 0;
-		}
-		print_state(s, opts);
-	}
-
-	pfctl_free_states(&states);
 
 	return (0);
 }
@@ -1626,6 +1637,22 @@ pfctl_show_limits(int dev, int opts)
 			printf("hard limit %8u\n", pl.limit);
 	}
 	return (0);
+}
+
+void
+pfctl_show_creators(int opts)
+{
+	int ret;
+	uint32_t creators[16];
+	size_t count = nitems(creators);
+
+	ret = pfctl_get_creatorids(creators, &count);
+	if (ret != 0)
+		errx(ret, "Failed to retrieve creators");
+
+	printf("Creator IDs:\n");
+	for (size_t i = 0; i < count; i++)
+		printf("%08x\n", creators[i]);
 }
 
 /* callbacks for rule/nat/rdr/addr */
@@ -3109,6 +3136,9 @@ main(int argc, char *argv[])
 			break;
 		case 'I':
 			pfctl_show_ifaces(ifaceopt, opts);
+			break;
+		case 'c':
+			pfctl_show_creators(opts);
 			break;
 		}
 	}
