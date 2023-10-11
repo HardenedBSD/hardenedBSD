@@ -232,35 +232,6 @@ nvme_ctrlr_fail(struct nvme_controller *ctrlr)
 	nvme_notify_fail_consumers(ctrlr);
 }
 
-void
-nvme_ctrlr_post_failed_request(struct nvme_controller *ctrlr,
-    struct nvme_request *req)
-{
-
-	mtx_lock(&ctrlr->lock);
-	STAILQ_INSERT_TAIL(&ctrlr->fail_req, req, stailq);
-	mtx_unlock(&ctrlr->lock);
-	if (!ctrlr->is_dying)
-		taskqueue_enqueue(ctrlr->taskqueue, &ctrlr->fail_req_task);
-}
-
-static void
-nvme_ctrlr_fail_req_task(void *arg, int pending)
-{
-	struct nvme_controller	*ctrlr = arg;
-	struct nvme_request	*req;
-
-	mtx_lock(&ctrlr->lock);
-	while ((req = STAILQ_FIRST(&ctrlr->fail_req)) != NULL) {
-		STAILQ_REMOVE_HEAD(&ctrlr->fail_req, stailq);
-		mtx_unlock(&ctrlr->lock);
-		nvme_qpair_manual_complete_request(req->qpair, req,
-		    NVME_SCT_GENERIC, NVME_SC_ABORTED_BY_REQUEST);
-		mtx_lock(&ctrlr->lock);
-	}
-	mtx_unlock(&ctrlr->lock);
-}
-
 /*
  * Wait for RDY to change.
  *
@@ -1162,29 +1133,12 @@ nvme_ctrlr_start_config_hook(void *arg)
 
 	TSENTER();
 
-	/*
-	 * Don't call pre/post reset here. We've not yet created the qpairs,
-	 * haven't setup the ISRs, so there's no need to 'drain' them or
-	 * 'exclude' them.
-	 */
 	if (nvme_ctrlr_hw_reset(ctrlr) != 0) {
 fail:
 		nvme_ctrlr_fail(ctrlr);
 		config_intrhook_disestablish(&ctrlr->config_hook);
 		return;
 	}
-
-#ifdef NVME_2X_RESET
-	/*
-	 * Reset controller twice to ensure we do a transition from cc.en==1 to
-	 * cc.en==0.  This is because we don't really know what status the
-	 * controller was left in when boot handed off to OS.  Linux doesn't do
-	 * this, however, and when the controller is in state cc.en == 0, no
-	 * I/O can happen.
-	 */
-	if (nvme_ctrlr_hw_reset(ctrlr) != 0)
-		goto fail;
-#endif
 
 	nvme_qpair_reset(&ctrlr->adminq);
 	nvme_admin_qpair_enable(&ctrlr->adminq);
@@ -1487,7 +1441,6 @@ nvme_ctrlr_construct(struct nvme_controller *ctrlr, device_t dev)
 	ctrlr->is_initialized = 0;
 	ctrlr->notification_sent = 0;
 	TASK_INIT(&ctrlr->reset_task, 0, nvme_ctrlr_reset_task, ctrlr);
-	TASK_INIT(&ctrlr->fail_req_task, 0, nvme_ctrlr_fail_req_task, ctrlr);
 	STAILQ_INIT(&ctrlr->fail_req);
 	ctrlr->is_failed = false;
 
