@@ -109,7 +109,7 @@ static void	delmntque(struct vnode *vp);
 static int	flushbuflist(struct bufv *bufv, int flags, struct bufobj *bo,
 		    int slpflag, int slptimeo);
 static void	syncer_shutdown(void *arg, int howto);
-static int	vtryrecycle(struct vnode *vp);
+static int	vtryrecycle(struct vnode *vp, bool isvnlru);
 static void	v_init_counters(struct vnode *);
 static void	vn_seqc_init(struct vnode *);
 static void	vn_seqc_write_end_free(struct vnode *vp);
@@ -198,17 +198,25 @@ static long wantfreevnodes;
 static long __exclusive_cache_line freevnodes;
 static long freevnodes_old;
 
-static counter_u64_t recycles_count;
-SYSCTL_COUNTER_U64(_vfs, OID_AUTO, recycles, CTLFLAG_RD, &recycles_count,
+static u_long recycles_count;
+SYSCTL_ULONG(_vfs, OID_AUTO, recycles, CTLFLAG_RD | CTLFLAG_STATS, &recycles_count, 0,
     "Number of vnodes recycled to meet vnode cache targets (legacy)");
-SYSCTL_COUNTER_U64(_vfs_vnode_vnlru, OID_AUTO, recycles, CTLFLAG_RD, &recycles_count,
+SYSCTL_ULONG(_vfs_vnode_vnlru, OID_AUTO, recycles, CTLFLAG_RD | CTLFLAG_STATS,
+    &recycles_count, 0,
     "Number of vnodes recycled to meet vnode cache targets");
 
-static counter_u64_t recycles_free_count;
-SYSCTL_COUNTER_U64(_vfs, OID_AUTO, recycles_free, CTLFLAG_RD, &recycles_free_count,
+static u_long recycles_free_count;
+SYSCTL_ULONG(_vfs, OID_AUTO, recycles_free, CTLFLAG_RD | CTLFLAG_STATS,
+    &recycles_free_count, 0,
     "Number of free vnodes recycled to meet vnode cache targets (legacy)");
-SYSCTL_COUNTER_U64(_vfs_vnode_vnlru, OID_AUTO, recycles_free, CTLFLAG_RD, &recycles_free_count,
+SYSCTL_ULONG(_vfs_vnode_vnlru, OID_AUTO, recycles_free, CTLFLAG_RD | CTLFLAG_STATS,
+    &recycles_free_count, 0,
     "Number of free vnodes recycled to meet vnode cache targets");
+
+static counter_u64_t direct_recycles_free_count;
+SYSCTL_COUNTER_U64(_vfs_vnode_vnlru, OID_AUTO, direct_recycles_free, CTLFLAG_RD,
+    &direct_recycles_free_count,
+    "Number of free vnodes recycled by vn_alloc callers to meet vnode cache targets");
 
 static counter_u64_t vnode_skipped_requeues;
 SYSCTL_COUNTER_U64(_vfs_vnode_stats, OID_AUTO, skipped_requeues, CTLFLAG_RD, &vnode_skipped_requeues,
@@ -454,7 +462,6 @@ sysctl_try_reclaim_vnode(SYSCTL_HANDLER_ARGS)
 		goto putvnode;
 	}
 
-	counter_u64_add(recycles_count, 1);
 	vgone(vp);
 putvnode:
 	NDFREE(&nd, 0);
@@ -487,7 +494,6 @@ sysctl_ftry_reclaim_vnode(SYSCTL_HANDLER_ARGS)
 	if (error != 0)
 		goto drop;
 
-	counter_u64_add(recycles_count, 1);
 	vgone(vp);
 	VOP_UNLOCK(vp);
 drop:
@@ -763,8 +769,7 @@ vntblinit(void *dummy __unused)
 	uma_prealloc(buf_trie_zone, nbuf);
 
 	vnodes_created = counter_u64_alloc(M_WAITOK);
-	recycles_count = counter_u64_alloc(M_WAITOK);
-	recycles_free_count = counter_u64_alloc(M_WAITOK);
+	direct_recycles_free_count = counter_u64_alloc(M_WAITOK);
 	vnode_skipped_requeues = counter_u64_alloc(M_WAITOK);
 
 	/*
@@ -1266,7 +1271,7 @@ restart:
 			vn_finished_write(mp);
 			goto next_iter_unlocked;
 		}
-		counter_u64_add(recycles_count, 1);
+		recycles_count++;
 		vgonel(vp);
 		VOP_UNLOCK(vp);
 		vdropl_recycle(vp);
@@ -1296,16 +1301,18 @@ next_iter:
 	return (done);
 }
 
-static int max_vnlru_free = 10000; /* limit on vnode free requests per call */
-SYSCTL_INT(_debug, OID_AUTO, max_vnlru_free, CTLFLAG_RW, &max_vnlru_free,
-    0,
+static int max_free_per_call = 10000;
+SYSCTL_INT(_debug, OID_AUTO, max_vnlru_free, CTLFLAG_RW, &max_free_per_call, 0,
+    "limit on vnode free requests per call to the vnlru_free routine (legacy)");
+SYSCTL_INT(_vfs_vnode_vnlru, OID_AUTO, max_free_per_call, CTLFLAG_RW,
+    &max_free_per_call, 0,
     "limit on vnode free requests per call to the vnlru_free routine");
 
 /*
  * Attempt to reduce the free list by the requested amount.
  */
 static int
-vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp)
+vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp, bool isvnlru)
 {
 	struct vnode *vp;
 	struct mount *mp;
@@ -1313,8 +1320,8 @@ vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp)
 	bool retried;
 
 	mtx_assert(&vnode_list_mtx, MA_OWNED);
-	if (count > max_vnlru_free)
-		count = max_vnlru_free;
+	if (count > max_free_per_call)
+		count = max_free_per_call;
 	if (count == 0) {
 		mtx_unlock(&vnode_list_mtx);
 		return (0);
@@ -1391,7 +1398,7 @@ vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp)
 		 *
 		 * Check nullfs for one example (null_getwritemount).
 		 */
-		vtryrecycle(vp);
+		vtryrecycle(vp, isvnlru);
 		count--;
 		if (count == 0) {
 			break;
@@ -1407,14 +1414,33 @@ vnlru_free_impl(int count, struct vfsops *mnt_op, struct vnode *mvp)
  * XXX: returns without vnode_list_mtx locked!
  */
 static int
-vnlru_free_locked(int count)
+vnlru_free_locked_direct(int count)
 {
 	int ret;
 
 	mtx_assert(&vnode_list_mtx, MA_OWNED);
-	ret = vnlru_free_impl(count, NULL, vnode_list_free_marker);
+	ret = vnlru_free_impl(count, NULL, vnode_list_free_marker, false);
 	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
 	return (ret);
+}
+
+static int
+vnlru_free_locked_vnlru(int count)
+{
+	int ret;
+
+	mtx_assert(&vnode_list_mtx, MA_OWNED);
+	ret = vnlru_free_impl(count, NULL, vnode_list_free_marker, true);
+	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
+	return (ret);
+}
+
+static int
+vnlru_free_vnlru(int count)
+{
+
+	mtx_lock(&vnode_list_mtx);
+	return (vnlru_free_locked_vnlru(count));
 }
 
 void
@@ -1425,7 +1451,7 @@ vnlru_free_vfsops(int count, struct vfsops *mnt_op, struct vnode *mvp)
 	MPASS(mvp != NULL);
 	VNPASS(mvp->v_type == VMARKER, mvp);
 	mtx_lock(&vnode_list_mtx);
-	vnlru_free_impl(count, mnt_op, mvp);
+	vnlru_free_impl(count, mnt_op, mvp, true);
 	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
 }
 
@@ -1441,7 +1467,7 @@ vnlru_free(int count, struct vfsops *mnt_op)
 		return;
 	mtx_lock(&vnode_list_mtx);
 	mvp = vnode_list_free_marker;
-	if (vnlru_free_impl(count, mnt_op, mvp) == 0) {
+	if (vnlru_free_impl(count, mnt_op, mvp, true) == 0) {
 		/*
 		 * It is possible the marker was moved over eligible vnodes by
 		 * callers which filtered by different ops. If so, start from
@@ -1451,7 +1477,7 @@ vnlru_free(int count, struct vfsops *mnt_op)
 			TAILQ_REMOVE(&vnode_list, mvp, v_vnodelist);
 			TAILQ_INSERT_HEAD(&vnode_list, mvp, v_vnodelist);
 		}
-		vnlru_free_impl(count, mnt_op, mvp);
+		vnlru_free_impl(count, mnt_op, mvp, true);
 	}
 	mtx_unlock(&vnode_list_mtx);
 }
@@ -1498,6 +1524,8 @@ static u_long vnlruproc_kicks;
 
 SYSCTL_ULONG(_vfs_vnode_vnlru, OID_AUTO, kicks, CTLFLAG_RD, &vnlruproc_kicks, 0,
     "Number of times vnlru got woken up due to vnode shortage");
+
+#define VNLRU_COUNT_SLOP 100
 
 /*
  * The main freevnodes counter is only updated when a counter local to CPU
@@ -1601,12 +1629,124 @@ static void
 vnlru_kick_cond(void)
 {
 
+	if (vnlru_read_freevnodes() > wantfreevnodes)
+		return;
+
 	if (vnlruproc_sig)
 		return;
 	mtx_lock(&vnode_list_mtx);
 	vnlru_kick_locked();
 	mtx_unlock(&vnode_list_mtx);
 }
+
+static void
+vnlru_proc_sleep(void)
+{
+
+	if (vnlruproc_sig) {
+		vnlruproc_sig = 0;
+		wakeup(&vnlruproc_sig);
+	}
+	msleep(vnlruproc, &vnode_list_mtx, PVFS|PDROP, "vlruwt", hz);
+}
+
+/*
+ * A lighter version of the machinery below.
+ *
+ * Tries to reach goals only by recycling free vnodes and does not invoke
+ * uma_reclaim(UMA_RECLAIM_DRAIN).
+ *
+ * This works around pathological behavior in vnlru in presence of tons of free
+ * vnodes, but without having to rewrite the machinery at this time. Said
+ * behavior boils down to continuously trying to reclaim all kinds of vnodes
+ * (cycling through all levels of "force") when the count is transiently above
+ * limit. This happens a lot when all vnodes are used up and vn_alloc
+ * speculatively increments the counter.
+ *
+ * Sample testcase: vnode limit 8388608, 20 separate directory trees each with
+ * 1 million files in total and 20 find(1) processes stating them in parallel
+ * (one per each tree).
+ *
+ * On a kernel with only stock machinery this needs anywhere between 60 and 120
+ * seconds to execute (time varies *wildly* between runs). With the workaround
+ * it consistently stays around 20 seconds [it got further down with later
+ * changes].
+ *
+ * That is to say the entire thing needs a fundamental redesign (most notably
+ * to accommodate faster recycling), the above only tries to get it ouf the way.
+ *
+ * Return values are:
+ * -1 -- fallback to regular vnlru loop
+ *  0 -- do nothing, go to sleep
+ * >0 -- recycle this many vnodes
+ */
+static long
+vnlru_proc_light_pick(void)
+{
+	u_long rnumvnodes, rfreevnodes;
+
+	if (vstir || vnlruproc_sig == 1)
+		return (-1);
+
+	rnumvnodes = atomic_load_long(&numvnodes);
+	rfreevnodes = vnlru_read_freevnodes();
+
+	/*
+	 * vnode limit might have changed and now we may be at a significant
+	 * excess. Bail if we can't sort it out with free vnodes.
+	 *
+	 * Due to atomic updates the count can legitimately go above
+	 * the limit for a short period, don't bother doing anything in
+	 * that case.
+	 */
+	if (rnumvnodes > desiredvnodes + VNLRU_COUNT_SLOP + 10) {
+		if (rnumvnodes - rfreevnodes >= desiredvnodes ||
+		    rfreevnodes <= wantfreevnodes) {
+			return (-1);
+		}
+
+		return (rnumvnodes - desiredvnodes);
+	}
+
+	/*
+	 * Don't try to reach wantfreevnodes target if there are too few vnodes
+	 * to begin with.
+	 */
+	if (rnumvnodes < wantfreevnodes) {
+		return (0);
+	}
+
+	if (rfreevnodes < wantfreevnodes) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+static bool
+vnlru_proc_light(void)
+{
+	long freecount;
+
+	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
+
+	freecount = vnlru_proc_light_pick();
+	if (freecount == -1)
+		return (false);
+
+	if (freecount != 0) {
+		vnlru_free_vnlru(freecount);
+	}
+
+	mtx_lock(&vnode_list_mtx);
+	vnlru_proc_sleep();
+	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
+	return (true);
+}
+
+static u_long uma_reclaim_calls;
+SYSCTL_ULONG(_vfs_vnode_vnlru, OID_AUTO, uma_reclaim_calls, CTLFLAG_RD | CTLFLAG_STATS,
+    &uma_reclaim_calls, 0, "Number of calls to uma_reclaim");
 
 static void
 vnlru_proc(void)
@@ -1623,6 +1763,10 @@ vnlru_proc(void)
 	want_reread = false;
 	for (;;) {
 		kproc_suspend_check(vnlruproc);
+
+		if (force == 0 && vnlru_proc_light())
+			continue;
+
 		mtx_lock(&vnode_list_mtx);
 		rnumvnodes = atomic_load_long(&numvnodes);
 
@@ -1636,8 +1780,8 @@ vnlru_proc(void)
 		 * adjusted using its sysctl, or emergency growth), first
 		 * try to reduce it by discarding from the free list.
 		 */
-		if (rnumvnodes > desiredvnodes) {
-			vnlru_free_locked(rnumvnodes - desiredvnodes);
+		if (rnumvnodes > desiredvnodes + 10) {
+			vnlru_free_locked_vnlru(rnumvnodes - desiredvnodes);
 			mtx_lock(&vnode_list_mtx);
 			rnumvnodes = atomic_load_long(&numvnodes);
 		}
@@ -1653,10 +1797,7 @@ vnlru_proc(void)
 			vstir = false;
 		}
 		if (force == 0 && !vnlru_under(rnumvnodes, vlowat)) {
-			vnlruproc_sig = 0;
-			wakeup(&vnlruproc_sig);
-			msleep(vnlruproc, &vnode_list_mtx,
-			    PVFS|PDROP, "vlruwt", hz);
+			vnlru_proc_sleep();
 			continue;
 		}
 		rfreevnodes = vnlru_read_freevnodes();
@@ -1691,8 +1832,16 @@ vnlru_proc(void)
 		target = target / 10 + 1;
 		done = vlrureclaim(reclaim_nc_src, trigger, target);
 		mtx_unlock(&vnode_list_mtx);
-		if (onumvnodes > desiredvnodes && numvnodes <= desiredvnodes)
+		/*
+		 * Total number of vnodes can transiently go slightly above the
+		 * limit (see vn_alloc_hard), no need to call uma_reclaim if
+		 * this happens.
+		 */
+		if (onumvnodes + VNLRU_COUNT_SLOP + 1000 > desiredvnodes &&
+		    numvnodes <= desiredvnodes) {
+			uma_reclaim_calls++;
 			uma_reclaim(UMA_RECLAIM_DRAIN);
+		}
 		if (done == 0) {
 			if (force == 0 || force == 1) {
 				force = 2;
@@ -1732,7 +1881,7 @@ SYSINIT(vnlru, SI_SUB_KTHREAD_UPDATE, SI_ORDER_FIRST, kproc_start,
  * through vgone().
  */
 static int
-vtryrecycle(struct vnode *vp)
+vtryrecycle(struct vnode *vp, bool isvnlru)
 {
 	struct mount *vnmp;
 
@@ -1778,7 +1927,10 @@ vtryrecycle(struct vnode *vp)
 		return (EBUSY);
 	}
 	if (!VN_IS_DOOMED(vp)) {
-		counter_u64_add(recycles_free_count, 1);
+		if (isvnlru)
+			recycles_free_count++;
+		else
+			counter_u64_add(direct_recycles_free_count, 1);
 		vgonel(vp);
 	}
 	VOP_UNLOCK(vp);
@@ -1809,22 +1961,38 @@ SYSCTL_ULONG(_vfs_vnode_stats, OID_AUTO, alloc_sleeps, CTLFLAG_RD, &vn_alloc_sle
     "Number of times vnode allocation blocked waiting on vnlru");
 
 static struct vnode * __noinline
-vn_alloc_hard(struct mount *mp)
+vn_alloc_hard(struct mount *mp, u_long rnumvnodes, bool bumped)
 {
-	u_long rnumvnodes, rfreevnodes;
+	u_long rfreevnodes;
+
+	if (bumped) {
+		if (rnumvnodes > desiredvnodes + VNLRU_COUNT_SLOP) {
+			atomic_subtract_long(&numvnodes, 1);
+			bumped = false;
+		}
+	}
 
 	mtx_lock(&vnode_list_mtx);
-	rnumvnodes = atomic_load_long(&numvnodes);
-	if (rnumvnodes + 1 < desiredvnodes) {
-		vn_alloc_cyclecount = 0;
-		mtx_unlock(&vnode_list_mtx);
-		goto alloc;
+
+	if (vn_alloc_cyclecount != 0) {
+		rnumvnodes = atomic_load_long(&numvnodes);
+		if (rnumvnodes + 1 < desiredvnodes) {
+			vn_alloc_cyclecount = 0;
+			mtx_unlock(&vnode_list_mtx);
+			goto alloc;
+		}
+
+		rfreevnodes = vnlru_read_freevnodes();
+		if (rfreevnodes < wantfreevnodes) {
+			if (vn_alloc_cyclecount++ >= rfreevnodes) {
+				vn_alloc_cyclecount = 0;
+				vstir = true;
+			}
+		} else {
+			vn_alloc_cyclecount = 0;
+		}
 	}
-	rfreevnodes = vnlru_read_freevnodes();
-	if (vn_alloc_cyclecount++ >= rfreevnodes) {
-		vn_alloc_cyclecount = 0;
-		vstir = true;
-	}
+
 	/*
 	 * Grow the vnode cache if it will not be above its target max
 	 * after growing.  Otherwise, if the free list is nonempty, try
@@ -1835,28 +2003,32 @@ vn_alloc_hard(struct mount *mp)
 	 * should be chosen so that we never wait or even reclaim from
 	 * the free list to below its target minimum.
 	 */
-	if (vnlru_free_locked(1) > 0)
+	if (vnlru_free_locked_direct(1) > 0)
 		goto alloc;
 	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
 	if (mp == NULL || (mp->mnt_kern_flag & MNTK_SUSPEND) == 0) {
 		/*
 		 * Wait for space for a new vnode.
 		 */
+		if (bumped) {
+			atomic_subtract_long(&numvnodes, 1);
+			bumped = false;
+		}
 		mtx_lock(&vnode_list_mtx);
 		vnlru_kick_locked();
 		vn_alloc_sleeps++;
 		msleep(&vnlruproc_sig, &vnode_list_mtx, PVFS, "vlruwk", hz);
 		if (atomic_load_long(&numvnodes) + 1 > desiredvnodes &&
 		    vnlru_read_freevnodes() > 1)
-			vnlru_free_locked(1);
+			vnlru_free_locked_direct(1);
 		else
 			mtx_unlock(&vnode_list_mtx);
 	}
 alloc:
 	mtx_assert(&vnode_list_mtx, MA_NOTOWNED);
-	rnumvnodes = atomic_fetchadd_long(&numvnodes, 1) + 1;
-	if (vnlru_under(rnumvnodes, vlowat))
-		vnlru_kick_cond();
+	if (!bumped)
+		atomic_add_long(&numvnodes, 1);
+	vnlru_kick_cond();
 	return (uma_zalloc_smr(vnode_zone, M_WAITOK));
 }
 
@@ -1866,11 +2038,10 @@ vn_alloc(struct mount *mp)
 	u_long rnumvnodes;
 
 	if (__predict_false(vn_alloc_cyclecount != 0))
-		return (vn_alloc_hard(mp));
+		return (vn_alloc_hard(mp, 0, false));
 	rnumvnodes = atomic_fetchadd_long(&numvnodes, 1) + 1;
 	if (__predict_false(vnlru_under(rnumvnodes, vlowat))) {
-		atomic_subtract_long(&numvnodes, 1);
-		return (vn_alloc_hard(mp));
+		return (vn_alloc_hard(mp, rnumvnodes, true));
 	}
 
 	return (uma_zalloc_smr(vnode_zone, M_WAITOK));
