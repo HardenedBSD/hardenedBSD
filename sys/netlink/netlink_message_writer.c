@@ -25,9 +25,12 @@
  * SUCH DAMAGE.
  */
 
+<<<<<<< HEAD
 #include "opt_netlink.h"
 #include "opt_pax.h"
 
+=======
+>>>>>>> internal/freebsd/current/main
 #include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/malloc.h>
