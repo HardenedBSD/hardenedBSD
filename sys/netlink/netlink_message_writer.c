@@ -25,7 +25,6 @@
  * SUCH DAMAGE.
  */
 
-#include "opt_netlink.h"
 #include "opt_pax.h"
 
 #include <sys/cdefs.h>
