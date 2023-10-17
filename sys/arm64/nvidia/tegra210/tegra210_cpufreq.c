@@ -226,7 +226,7 @@ build_speed_points(struct tegra210_cpufreq_softc *sc) {
 	}
 	sc->speed_points = malloc(sizeof(struct cpu_speed_point) *
 	    sc->nspeed_points, M_DEVBUF, M_NOWAIT);
-	if (sc->speed_point == NULL) {
+	if (sc->speed_points == NULL) {
 		return;
 	}
 	for (i = 0; i < sc->nspeed_points; i++) {
