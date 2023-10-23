@@ -1770,6 +1770,7 @@ struct pf_kstate_kill {
 	char			psk_label[PF_RULE_LABEL_SIZE];
 	u_int			psk_killed;
 	bool			psk_kill_match;
+	bool			psk_nat;
 };
 #endif
 
@@ -2464,6 +2465,10 @@ int			 pf_keth_anchor_nvcopyout(
 			    const struct pf_keth_rule *, nvlist_t *);
 struct pf_keth_ruleset	*pf_find_or_create_keth_ruleset(const char *);
 void			 pf_keth_anchor_remove(struct pf_keth_rule *);
+
+int			 pf_ioctl_addrule(struct pf_krule *, uint32_t,
+			    uint32_t, const char *, const char *, uid_t uid,
+			    pid_t);
 
 void			 pf_krule_free(struct pf_krule *);
 #endif
