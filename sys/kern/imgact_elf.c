@@ -1250,7 +1250,14 @@ __elfN(freebsd_copyout_auxargs)(struct image_params *imgp, uintptr_t base)
 {
 	Elf_Auxargs *args = (Elf_Auxargs *)imgp->auxargs;
 	Elf_Auxinfo *argarray, *pos;
+<<<<<<< HEAD
 	int error;
+=======
+	struct vmspace *vmspace;
+	rlim_t stacksz;
+	int error, oc;
+	uint32_t bsdflags;
+>>>>>>> internal/freebsd/current/main
 
 	argarray = pos = malloc(AT_COUNT * sizeof(*pos), M_TEMP,
 	    M_WAITOK | M_ZERO);
