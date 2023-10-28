@@ -29,8 +29,13 @@ MKMODULESENV+=  MODULE_TIED=yes
 MKMODULESENV+=	CONF_CFLAGS="${CONF_CFLAGS}"
 .endif
 
+<<<<<<< HEAD
 .if defined(WITH_EXTRA_TCP_STACKS)
 MKMODULESENV+=	WITH_EXTRA_TCP_STACKS="${WITH_EXTRA_TCP_STACKS}"
+=======
+.if defined(WITH_CTF)
+MKMODULESENV+=	WITH_CTF="${WITH_CTF}"
+>>>>>>> internal/hardened/current/master
 .endif
 
 .if !empty(KCSAN_ENABLED)
@@ -460,6 +465,15 @@ embedfs_${MFS_IMAGE:T:R}.o: ${MFS_IMAGE} $S/dev/md/embedfs.S
 	${CC} ${CFLAGS} ${ACFLAGS} -DMFS_IMAGE=\""${MFS_IMAGE}"\" -c \
 	    $S/dev/md/embedfs.S -o ${.TARGET}
 .endif
+.endif
+
+# Generate the .bin (booti images) kernel as an extra build output.
+# The targets and rules to generate these appear in Makefile.$MACHINE
+# if the platform supports it.
+.if ${MK_KERNEL_BIN} != "no"
+KERNEL_EXTRA+= ${KERNEL_KO}.bin
+KERNEL_EXTRA_INSTALL+= ${KERNEL_KO}.bin
+CLEAN+=	${KERNEL_KO}.bin
 .endif
 
 .include "kern.mk"

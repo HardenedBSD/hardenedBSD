@@ -51,6 +51,12 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20231018: pmc.k7(3) removed
+OLD_FILES+=usr/share/man/man3/pmc.k7.3.gz
+
+# 20231018: Remove misspelled man page link
+OLD_FILES+=usr/share/man/man3/dbm_dirnfo.3.gz
+
 # 20231006: rename tcp6_v4unmapped_bind_test
 OLD_FILES+=usr/tests/sys/netinet/tcp6_v4unmapped_bind_test
 
@@ -2772,6 +2778,11 @@ OLD_FILES+=usr/share/man/man4/ng_h4.4.gz
 
 # 20210923: rename boot(9) to kern_reboot(9)
 OLD_FILES+=usr/share/man/man9/boot.9.gz
+
+# 20210922: Old mixer(8) tests removed
+OLD_FILES+=usr/tests/usr.sbin/mixer/Kyuafile
+OLD_FILES+=usr/tests/usr.sbin/mixer/mixer_test
+OLD_DIRS+=usr/tests/usr.sbin/mixer
 
 # 20210921: remove cloudabi
 OLD_FILES+=usr/share/man/man4/cloudabi.4.gz
