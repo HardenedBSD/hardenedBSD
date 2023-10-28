@@ -29,15 +29,6 @@ MKMODULESENV+=  MODULE_TIED=yes
 MKMODULESENV+=	CONF_CFLAGS="${CONF_CFLAGS}"
 .endif
 
-<<<<<<< HEAD
-.if defined(WITH_EXTRA_TCP_STACKS)
-MKMODULESENV+=	WITH_EXTRA_TCP_STACKS="${WITH_EXTRA_TCP_STACKS}"
-=======
-.if defined(WITH_CTF)
-MKMODULESENV+=	WITH_CTF="${WITH_CTF}"
->>>>>>> internal/hardened/current/master
-.endif
-
 .if !empty(KCSAN_ENABLED)
 MKMODULESENV+=	KCSAN_ENABLED="yes"
 .endif
