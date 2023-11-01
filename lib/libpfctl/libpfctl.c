@@ -72,7 +72,6 @@ pfctl_do_ioctl(int dev, uint cmd, size_t size, nvlist_t **nvl)
 retry:
 	nv.data = malloc(size);
 	memcpy(nv.data, data, nvlen);
-	free(data);
 
 	nv.len = nvlen;
 	nv.size = size;
@@ -90,13 +89,15 @@ retry:
 	if (ret == 0) {
 		*nvl = nvlist_unpack(nv.data, nv.len, 0);
 		if (*nvl == NULL) {
-			free(nv.data);
-			return (EIO);
+			ret = EIO;
+			goto out;
 		}
 	} else {
 		ret = errno;
 	}
 
+out:
+	free(data);
 	free(nv.data);
 
 	return (ret);
@@ -635,9 +636,9 @@ pfctl_add_rule(int dev, const struct pfctl_rule *r, const char *anchor,
 	pfctl_nv_add_rule_addr(nvlr, "dst", &r->dst);
 
 	labelcount = 0;
-	while (r->label[labelcount][0] != 0 &&
-	    labelcount < PF_RULE_MAX_LABEL_COUNT) {
-		nvlist_append_string_array(nvlr, "labels",
+	while (labelcount < PF_RULE_MAX_LABEL_COUNT &&
+	    r->label[labelcount][0] != 0) {
+		nvlist_append_string_array(nvl, "labels",
 		    r->label[labelcount]);
 		labelcount++;
 	}
