@@ -1072,7 +1072,7 @@ fork1(struct thread *td, struct fork_req *fr)
 	 * XXX: This is ugly; when we copy resource usage, we need to bump
 	 *      per-cred resource counters.
 	 */
-	proc_set_cred_init(newproc, td->td_ucred);
+	newproc->p_ucred = crcowget(td->td_ucred);
 
 	/*
 	 * Initialize resource accounting for the child process.
@@ -1186,8 +1186,14 @@ fork_exit(void (*callout)(void *, struct trapframe *), void *arg,
 	}
 	mtx_assert(&Giant, MA_NOTOWNED);
 
+	/*
+	 * Now going to return to userland.
+	 */
+
 	if (p->p_sysent->sv_schedtail != NULL)
 		(p->p_sysent->sv_schedtail)(td);
+
+	userret(td, frame);
 }
 
 /*
@@ -1237,8 +1243,6 @@ fork_return(struct thread *td, struct trapframe *frame)
 	 */
 	if (!prison_isalive(td->td_ucred->cr_prison))
 		exit1(td, 0, SIGKILL);
-
-	userret(td, frame);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_SYSRET))
