@@ -63,7 +63,6 @@ _libc_other_objects= sigsetjmp lstat stat fstat fstatat fstatfs syscall \
     _sigprocmask _write readlink __realpathat _setjmp setjmp setjmperr \
     __sysctlbyname
 
-
 # Finally add additional architecture-dependent libc dependencies
 .if ${LIBC_ARCH} == "arm"
 # ARM needs aeabi_unwind_cpp for _setjmp
