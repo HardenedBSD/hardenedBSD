@@ -20,9 +20,6 @@
  * SUCH DAMAGE.
  */
 
-<<<<<<< HEAD:lib/csu/powerpc64/reloc.c
-#include <sys/cdefs.h>
-=======
 static uint32_t cpu_features;
 static uint32_t cpu_features2;
 
@@ -48,7 +45,6 @@ init_cpu_features(char **env)
 		}
 	}
 }
->>>>>>> internal/freebsd/current/main:lib/libc/csu/powerpc64/reloc.c
 
 static void
 crt1_handle_rela(const Elf_Rela *r)
