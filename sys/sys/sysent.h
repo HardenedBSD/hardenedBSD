@@ -151,6 +151,7 @@ struct sysentvec {
 	vm_offset_t	sv_fxrng_gen_base;
 	void		(*sv_onexec_old)(struct thread *td);
 	int		(*sv_onexec)(struct proc *, struct image_params *);
+	void		(*sv_protect)(struct image_params *, int);
 	void		(*sv_onexit)(struct proc *);
 	void		(*sv_ontdexit)(struct thread *td);
 	int		(*sv_setid_allowed)(struct thread *td,
@@ -188,6 +189,10 @@ struct sysentvec {
 #define	SVC_PT_COREDUMP	0x00000001	/* dump requested by ptrace(2) */
 #define	SVC_NOCOMPRESS	0x00000002	/* disable compression. */
 #define	SVC_ALL		0x00000004	/* dump everything */
+
+/* sv_protect flags */
+#define	SVP_IMAGE	0x00000001
+#define	SVP_INTERP	0x00000002
 
 #ifdef _KERNEL
 extern struct sysent sysent[];
