@@ -12,6 +12,8 @@ CFLAGS+=	-I${OBJTOP}/lib/clang/libllvm
 LIBDEPS+=	llvmminimal
 .else
 LIBDEPS+=	llvm
+LIBADD+=	z
+LIBADD+=	zstd
 .endif
 
 .for lib in ${LIBDEPS}
@@ -26,8 +28,6 @@ LIBADD+=	execinfo
 LIBADD+=	tinfow
 .endif
 LIBADD+=	pthread
-LIBADD+=	z
-LIBADD+=	zstd
 
 NOCFI=		yes
 
