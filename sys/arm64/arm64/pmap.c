@@ -1259,21 +1259,15 @@ pmap_bootstrap_allocate_kasan_l2(vm_paddr_t start_pa, vm_paddr_t end_pa,
  *	Bootstrap the system enough to run with virtual memory.
  */
 void
-pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
+pmap_bootstrap(vm_size_t kernlen)
 {
 	vm_offset_t dpcpu, msgbufpv;
 	vm_paddr_t start_pa, pa, min_pa;
-	uint64_t kern_delta;
 	int i;
 
 	/* Verify that the ASID is set through TTBR0. */
 	KASSERT((READ_SPECIALREG(tcr_el1) & TCR_A1) == 0,
 	    ("pmap_bootstrap: TCR_EL1.A1 != 0"));
-
-	kern_delta = KERNBASE - kernstart;
-
-	printf("pmap_bootstrap %lx %lx\n", kernstart, kernlen);
-	printf("%lx\n", (KERNBASE >> L1_SHIFT) & Ln_ADDR_MASK);
 
 	/* Set this early so we can use the pagetable walking functions */
 	kernel_pmap_store.pm_l0 = pagetable_l0_ttbr1;
@@ -1289,7 +1283,7 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
 	kernel_pmap->pm_asid_set = &asids;
 
 	/* Assume the address we were loaded to is a valid physical address */
-	min_pa = KERNBASE - kern_delta;
+	min_pa = pmap_early_vtophys(KERNBASE);
 
 	physmap_idx = physmem_avail(physmap, nitems(physmap));
 	physmap_idx /= 2;
@@ -1317,7 +1311,7 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
 	 */
 	bs_state.table_attrs &= ~TATTR_PXN_TABLE;
 
-	start_pa = pa = KERNBASE - kern_delta;
+	start_pa = pa = pmap_early_vtophys(KERNBASE);
 
 	/*
 	 * Create the l2 tables up to VM_MAX_KERNEL_ADDRESS.  We assume that the
@@ -1366,10 +1360,13 @@ pmap_bootstrap(vm_paddr_t kernstart, vm_size_t kernlen)
  * - Map that entire range using L2 superpages.
  */
 void
-pmap_bootstrap_san(vm_paddr_t kernstart)
+pmap_bootstrap_san(void)
 {
 	vm_offset_t va;
+	vm_paddr_t kernstart;
 	int i, shadow_npages, nkasan_l2;
+
+	kernstart = pmap_early_vtophys(KERNBASE);
 
 	/*
 	 * Rebuild physmap one more time, we may have excluded more regions from
@@ -7846,7 +7843,7 @@ void __nosanitizeaddress
 pmap_san_bootstrap(struct arm64_bootparams *abp)
 {
 
-	pmap_san_early_kernstart = KERNBASE - abp->kern_delta;
+	pmap_san_early_kernstart = pmap_early_vtophys(KERNBASE);
 	kasan_init_early(abp->kern_stack, KSTACK_PAGES * PAGE_SIZE);
 }
 
