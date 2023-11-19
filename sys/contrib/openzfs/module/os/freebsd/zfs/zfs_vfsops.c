@@ -90,9 +90,9 @@ SYSCTL_INT(_vfs_zfs, OID_AUTO, debug, CTLFLAG_RWTUN, &zfs_debug_level, 0,
 	"Debug level");
 
 #ifdef HBSD_NOTYET
-int zfs_bclone_enabled = 0;
-#else
 int zfs_bclone_enabled = 1;
+#else
+int zfs_bclone_enabled = 0;
 #endif
 SYSCTL_INT(_vfs_zfs, OID_AUTO, bclone_enabled, CTLFLAG_RWTUN,
 	&zfs_bclone_enabled, 0, "Enable block cloning");
