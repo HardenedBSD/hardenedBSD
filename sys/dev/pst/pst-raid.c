@@ -184,7 +184,7 @@ pst_shutdown_post_sync(device_t dev, int howto __unused)
 
     if (SCHEDULER_STOPPED()) {
 	/* Request polled shutdown. */
-	psc->reg->oqueue_intr_mask = 0xffffffff;
+	psc->iop->reg->oqueue_intr_mask = 0xffffffff;
     }
 
     mfa = iop_get_mfa(psc->iop);
