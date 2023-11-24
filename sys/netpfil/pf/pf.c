@@ -5341,7 +5341,7 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 			dst->scrub->pfss_v_tag = pd->sctp_initiate_tag;
 	}
 
-	if (pd->sctp_flags & PFDESC_SCTP_COOKIE) {
+	if (pd->sctp_flags & (PFDESC_SCTP_COOKIE | PFDESC_SCTP_HEARTBEAT_ACK)) {
 		if (src->state < SCTP_ESTABLISHED) {
 			pf_set_protostate(*state, psrc, SCTP_ESTABLISHED);
 			(*state)->timeout = PFTM_SCTP_ESTABLISHED;
@@ -5540,8 +5540,12 @@ again:
 			j->pd.sctp_flags |= PFDESC_SCTP_ADD_IP;
 			PF_RULES_RLOCK();
 			sm = NULL;
-			/* XXX: May generated unwanted abort if we try to insert a duplicate state. */
-			ret = pf_test_rule(&r, &sm, pd->dir, kif,
+			/*
+			 * New connections need to be floating, because
+			 * we cannot know what interfaces it will use.
+			 * That's why we pass V_pfi_all rather than kif.
+			 */
+			ret = pf_test_rule(&r, &sm, pd->dir, V_pfi_all,
 			    j->m, off, &j->pd, &ra, &rs, NULL);
 			PF_RULES_RUNLOCK();
 			SDT_PROBE4(pf, sctp, multihome, test, kif, r, j->m, ret);
@@ -6565,6 +6569,9 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kkif *kif,
 
 	if (af != AF_INET && af != AF_INET6)
 		return (0);
+
+	if (kif == V_pfi_all)
+		return (1);
 
 	/* Skip checks for ipsec interfaces */
 	if (kif != NULL && kif->pfik_ifp->if_type == IFT_ENC)
