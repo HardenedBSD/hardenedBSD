@@ -171,11 +171,7 @@ NOBINMODE?=	444
 KMODDIR?=	/boot/modules
 KMODOWN?=	${BINOWN}
 KMODGRP?=	${BINGRP}
-<<<<<<< HEAD
-KMODMODE?=	500
-=======
 KMODMODE?=	${NOBINMODE}
->>>>>>> internal/freebsd/current/main
 DTBDIR?=	/boot/dtb
 DTBODIR?=	/boot/dtb/overlays
 DTBOWN?=	root

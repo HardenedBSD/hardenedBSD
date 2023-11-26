@@ -426,15 +426,6 @@ kernel-install: .PHONY
 	fi
 .endif
 	mkdir -p ${DESTDIR}${KODIR}
-<<<<<<< HEAD
-	${INSTALL} -p -m 500 -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO} ${DESTDIR}${KODIR}/
-.if defined(DEBUG) && !defined(INSTALL_NODEBUG) && ${MK_KERNEL_SYMBOLS} != "no"
-	mkdir -p ${DESTDIR}${KERN_DEBUGDIR}${KODIR}
-	${INSTALL} -p -m 500 -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO}.debug ${DESTDIR}${KERN_DEBUGDIR}${KODIR}/
-.endif
-.if defined(KERNEL_EXTRA_INSTALL)
-	${INSTALL} -p -m 500 -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_EXTRA_INSTALL} ${DESTDIR}${KODIR}/
-=======
 	${INSTALL} -p -m ${KMODMODE} -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO} ${DESTDIR}${KODIR}/
 .if defined(DEBUG) && !defined(INSTALL_NODEBUG) && ${MK_KERNEL_SYMBOLS} != "no"
 	mkdir -p ${DESTDIR}${KERN_DEBUGDIR}${KODIR}
@@ -442,22 +433,15 @@ kernel-install: .PHONY
 .endif
 .if defined(KERNEL_EXTRA_INSTALL)
 	${INSTALL} -p -m ${KMODMODE} -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_EXTRA_INSTALL} ${DESTDIR}${KODIR}/
->>>>>>> internal/freebsd/current/main
 .endif
 
 
 
 kernel-reinstall:
 	@-chflags -R noschg ${DESTDIR}${KODIR}
-<<<<<<< HEAD
-	${INSTALL} -p -m 500 -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO} ${DESTDIR}${KODIR}/
-.if defined(DEBUG) && !defined(INSTALL_NODEBUG) && ${MK_KERNEL_SYMBOLS} != "no"
-	${INSTALL} -p -m 500 -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO}.debug ${DESTDIR}${KERN_DEBUGDIR}${KODIR}/
-=======
 	${INSTALL} -p -m ${KMODMODE} -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO} ${DESTDIR}${KODIR}/
 .if defined(DEBUG) && !defined(INSTALL_NODEBUG) && ${MK_KERNEL_SYMBOLS} != "no"
 	${INSTALL} -p -m ${KMODMODE} -o ${KMODOWN} -g ${KMODGRP} ${KERNEL_KO}.debug ${DESTDIR}${KERN_DEBUGDIR}${KODIR}/
->>>>>>> internal/freebsd/current/main
 .endif
 
 config.o env.o hints.o vers.o vnode_if.o:
