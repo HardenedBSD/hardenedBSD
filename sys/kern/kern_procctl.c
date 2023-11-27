@@ -27,9 +27,12 @@
  * SUCH DAMAGE.
  */
 
+<<<<<<< HEAD
 #include "opt_pax.h"
 
 #include <sys/cdefs.h>
+=======
+>>>>>>> internal/freebsd/current/main
 #include <sys/param.h>
 #include <sys/_unrhdr.h>
 #include <sys/systm.h>

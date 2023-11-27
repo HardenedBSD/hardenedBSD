@@ -32,14 +32,15 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)kern_resource.c	8.5 (Berkeley) 1/21/94
  */
 
+<<<<<<< HEAD
 #include <sys/cdefs.h>
 
 #include "opt_pax.h"
 
+=======
+>>>>>>> internal/freebsd/current/main
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
