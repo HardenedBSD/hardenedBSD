@@ -31,13 +31,8 @@
  * SUCH DAMAGE.
  */
 
-<<<<<<< HEAD
-#include <sys/cdefs.h>
-
 #include "opt_pax.h"
 
-=======
->>>>>>> internal/freebsd/current/main
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ktr.h>

@@ -25,12 +25,8 @@
  * SUCH DAMAGE.
  */
 
-<<<<<<< HEAD
 #include "opt_pax.h"
 
-#include <sys/cdefs.h>
-=======
->>>>>>> internal/freebsd/current/main
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>

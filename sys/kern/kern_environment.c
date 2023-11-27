@@ -36,13 +36,9 @@
  * the kernel.
  */
 
-<<<<<<< HEAD
-#include <sys/cdefs.h>
 
 #include "opt_pax.h"
 
-=======
->>>>>>> internal/freebsd/current/main
 #include <sys/param.h>
 #include <sys/eventhandler.h>
 #include <sys/systm.h>
