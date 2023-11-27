@@ -31,8 +31,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *      @(#)ip_mroute.c 8.2 (Berkeley) 11/15/93
  */
 
 /*
@@ -708,6 +706,10 @@ ip_mrouter_init(struct socket *so, int version)
 
 	V_mfchashtbl = hashinit_flags(mfchashsize, M_MRTABLE, &V_mfchash,
 	    HASH_NOWAIT);
+	if (V_mfchashtbl == NULL) {
+		MRW_WUNLOCK();
+		return (ENOMEM);
+	}
 
 	/* Create upcall ring */
 	mtx_init(&V_bw_upcalls_ring_mtx, "mroute upcall buf_ring mtx", NULL, MTX_DEF);

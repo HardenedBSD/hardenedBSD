@@ -32,7 +32,6 @@
  *  From i386/busdma_machdep.c 191438 2009-04-23 20:24:19Z jhb
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -149,6 +148,7 @@ struct bus_dmamap {
 	struct memdesc		mem;
 	bus_dmamap_callback_t	*callback;
 	void			*callback_arg;
+	__sbintime_t		queued_time;
 	int			flags;
 #define	DMAMAP_COHERENT		(1 << 0)
 #define	DMAMAP_DMAMEM_ALLOC	(1 << 1)

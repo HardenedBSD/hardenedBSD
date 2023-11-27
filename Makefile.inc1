@@ -2204,7 +2204,7 @@ sign-packages:	_pkgbootstrap .PHONY
 	@[ -L "${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/latest" ] && \
 		unlink ${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/latest ; \
 	${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname repo \
-		-o OSVERSION="${OSRELDATE}" \
+		-o OSVERSION="${SRCRELDATE}" \
 		-m ${WSTAGEDIR}/meta \
 		-o ${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/${PKG_VERSION} \
 		${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/${PKG_VERSION} \
@@ -2544,11 +2544,6 @@ _other_bootstrap_tools+=tools/build/cross-build/fake_chflags
 _basic_bootstrap_tools+=usr.bin/mkfifo
 # jot is needed for the mkimg tests
 _basic_bootstrap_tools+=usr.bin/jot
-
-.if ${MK_BOOT} != "no"
-# md5 is used by boot/beri (and possibly others)
-_basic_bootstrap_tools+=sbin/md5
-.endif
 
 # tzsetup is needed as an install tool
 .if ${MK_ZONEINFO} != "no"

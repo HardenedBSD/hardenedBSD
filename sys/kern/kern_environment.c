@@ -36,7 +36,6 @@
  * the kernel.
  */
 
-#include <sys/cdefs.h>
 
 #include "opt_pax.h"
 

@@ -30,7 +30,6 @@
  * From amd64/busdma_machdep.c, r204214
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -97,6 +96,7 @@ struct bus_dmamap {
 	int		       nsegs;
 	bus_dmamap_callback_t *callback;
 	void		      *callback_arg;
+	__sbintime_t	       queued_time;
 	STAILQ_ENTRY(bus_dmamap) links;
 	int		       contigalloc;
 };

@@ -126,7 +126,6 @@ __DEFAULT_YES_OPTIONS = \
     LEGACY_CONSOLE \
     LLD \
     LLD_BOOTSTRAP \
-    LLD_IS_LD \
     LLVM_ASSERTIONS \
     LLVM_BINUTILS \
     LLVM_COV \
@@ -520,6 +519,7 @@ MK_LLVM_COV:= no
 MK_SAFESTACK:=	no
 .endif
 
+<<<<<<< HEAD
 .if ${MK_LLD_IS_LD} == "no" || ${MK_LLD_BOOTSTRAP} == "no"
 MK_CFI:=	no
 MK_RETPOLINE:=	no
@@ -553,6 +553,8 @@ MK_CTF:=	no
 MK_PMC:=	no
 .endif
 
+=======
+>>>>>>> internal/hardened/current/master
 .if ${MK_ASAN} == "yes"
 # In order to get sensible backtraces from ASAN we have to install
 # llvm-symbolizer as /usr/bin/addr2line instead of the elftoolchain version.

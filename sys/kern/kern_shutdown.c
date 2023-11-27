@@ -32,8 +32,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)kern_shutdown.c	8.3 (Berkeley) 1/21/94
  */
 
 #include <sys/cdefs.h>
@@ -493,9 +491,6 @@ kern_reboot(int howto)
 	/* We're in the process of rebooting. */
 	rebooting = 1;
 	reboottrace(howto);
-
-	/* We are out of the debugger now. */
-	kdb_active = 0;
 
 	/*
 	 * Do any callouts that should be done BEFORE syncing the filesystems.
@@ -1016,7 +1011,7 @@ kproc_shutdown(void *arg, int howto)
 	struct proc *p;
 	int error;
 
-	if (KERNEL_PANICKED())
+	if (SCHEDULER_STOPPED())
 		return;
 
 	p = (struct proc *)arg;
@@ -1036,7 +1031,7 @@ kthread_shutdown(void *arg, int howto)
 	struct thread *td;
 	int error;
 
-	if (KERNEL_PANICKED())
+	if (SCHEDULER_STOPPED())
 		return;
 
 	td = (struct thread *)arg;

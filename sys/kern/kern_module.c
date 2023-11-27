@@ -26,8 +26,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include "opt_pax.h"
 
 #include <sys/param.h>

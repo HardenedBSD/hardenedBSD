@@ -29,7 +29,6 @@
 
 #include "opt_pax.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/_unrhdr.h>
 #include <sys/systm.h>

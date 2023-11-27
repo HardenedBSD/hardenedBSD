@@ -33,8 +33,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	From: @(#)tcp_usrreq.c	8.2 (Berkeley) 1/3/94
  */
 
 #include <sys/cdefs.h>
@@ -767,17 +765,14 @@ tcp6_usr_accept(struct socket *so, struct sockaddr **nam)
 	struct tcpcb *tp;
 	struct in_addr addr;
 	struct in6_addr addr6;
-	struct epoch_tracker et;
 	in_port_t port = 0;
 	int v4 = 0;
 
 	inp = sotoinpcb(so);
 	KASSERT(inp != NULL, ("tcp6_usr_accept: inp == NULL"));
-	NET_EPOCH_ENTER(et); /* XXXMT Why is this needed? */
 	INP_WLOCK(inp);
 	if (inp->inp_flags & INP_DROPPED) {
 		INP_WUNLOCK(inp);
-		NET_EPOCH_EXIT(et);
 		return (ECONNABORTED);
 	}
 	tp = intotcpcb(inp);
@@ -804,7 +799,6 @@ out:
 	tcp_bblog_pru(tp, PRU_ACCEPT, error);
 	TCP_PROBE2(debug__user, tp, PRU_ACCEPT);
 	INP_WUNLOCK(inp);
-	NET_EPOCH_EXIT(et);
 	if (error == 0) {
 		if (v4)
 			*nam = in6_v4mapsin6_sockaddr(port, &addr);

@@ -32,8 +32,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)in_pcb.h	8.1 (Berkeley) 6/10/93
  */
 
 #ifndef _NETINET_IN_PCB_H_
@@ -686,8 +684,6 @@ struct inpcb *
 struct inpcb *
 	in_pcblookup_mbuf(struct inpcbinfo *, struct in_addr, u_int,
 	    struct in_addr, u_int, int, struct ifnet *, struct mbuf *);
-void	in_pcbnotifyall(struct inpcbinfo *pcbinfo, struct in_addr,
-	    int, struct inpcb *(*)(struct inpcb *, int));
 void	in_pcbref(struct inpcb *);
 void	in_pcbrehash(struct inpcb *);
 void	in_pcbremhash_locked(struct inpcb *);

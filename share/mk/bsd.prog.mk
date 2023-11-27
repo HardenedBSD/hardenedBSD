@@ -106,9 +106,6 @@ LDFLAGS+=	-fsanitize=safe-stack
 
 .if !defined(NOCFI) && defined(MK_CFI)
 .if ${MK_CFI} != "no"
-.if ${MK_LLD_IS_LD} == "no"
-.error WITH_CFI requires WITH_LLD_IS_LD
-.endif
 
 CFLAGS+=	-fsanitize=cfi -fvisibility=hidden -flto ${CFI_OVERRIDE}
 CXXFLAGS+=	-fsanitize=cfi -fvisibility=hidden -flto ${CFI_OVERRIDE}

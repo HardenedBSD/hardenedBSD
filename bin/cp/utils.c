@@ -29,12 +29,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)utils.c	8.3 (Berkeley) 4/1/94";
-#endif
-#endif /* not lint */
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/acl.h>
 #include <sys/stat.h>

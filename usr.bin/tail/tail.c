@@ -33,16 +33,6 @@
  */
 
 
-#ifndef lint
-static const char copyright[] =
-"@(#) Copyright (c) 1991, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif
-
-#ifndef lint
-static const char sccsid[] = "@(#)tail.c	8.1 (Berkeley) 6/6/93";
-#endif
-
 #include <sys/capsicum.h>
 #include <sys/types.h>
 #include <sys/stat.h>
