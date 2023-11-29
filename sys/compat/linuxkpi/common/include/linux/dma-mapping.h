@@ -181,7 +181,7 @@ dma_map_page_attrs(struct device *dev, struct page *page, size_t offset,
     size_t size, enum dma_data_direction dir, unsigned long attrs)
 {
 
-	return (linux_dma_map_phys(dev, VM_PAGE_TO_PHYS(page) + offset, size));
+	return (linux_dma_map_phys(dev, page_to_phys(page) + offset, size));
 }
 
 /* linux_dma_(un)map_sg_attrs does not support attrs yet */
@@ -196,7 +196,7 @@ dma_map_page(struct device *dev, struct page *page,
     unsigned long offset, size_t size, enum dma_data_direction direction)
 {
 
-	return (linux_dma_map_phys(dev, VM_PAGE_TO_PHYS(page) + offset, size));
+	return (linux_dma_map_phys(dev, page_to_phys(page) + offset, size));
 }
 
 static inline void
@@ -286,11 +286,15 @@ dma_sync_single_range_for_device(struct device *dev, dma_addr_t dma_handle,
 {
 }
 
+#define	DMA_MAPPING_ERROR	(~(dma_addr_t)0)
+
 static inline int
 dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
 {
 
-	return (dma_addr == 0);
+	if (dma_addr == 0 || dma_addr == DMA_MAPPING_ERROR)
+		return (-ENOMEM);
+	return (0);
 }
 
 static inline unsigned int dma_set_max_seg_size(struct device *dev,

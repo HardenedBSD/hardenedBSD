@@ -555,7 +555,6 @@ _mthca=		mthca
 _mlx4ib=	mlx4ib
 _mlx5ib=	mlx5ib
 .endif
-
 _ossl=		ossl
 _rtw88=		rtw88
 .if ${MK_SOURCELESS_UCODE} != "no"

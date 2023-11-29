@@ -147,6 +147,10 @@ struct ieee80211_scan_state {
 	unsigned long	ss_maxdwell;		/* max dwell on channel */
 };
 
+#define	IEEE80211_SS_FLAGS_BITS \
+	"\20\1NOPICK\2ACTIVE\3PICK1ST\4BGSCAN\5ONCE\6NOBCAST\7NOJOIN" \
+	"\15GOTPICK"
+
 /*
  * The upper 16 bits of the flags word is used to communicate
  * information to the scanning code that is NOT recorded in
@@ -210,6 +214,7 @@ enum {
 	IEEE80211_BPARSE_OFFCHAN	= 0x20,	/* DSPARMS chan != curchan */
 	IEEE80211_BPARSE_BINTVAL_INVALID= 0x40,	/* invalid beacon interval */
 	IEEE80211_BPARSE_CSA_INVALID	= 0x80,	/* invalid CSA ie */
+	IEEE80211_BPARSE_MESHID_INVALID = 0x100, /* invalid Mesh ID ie */
 };
 
 /*
@@ -220,7 +225,7 @@ enum {
  * All multi-byte values must be in host byte order.
  */
 struct ieee80211_scanparams {
-	uint8_t		status;		/* bitmask of IEEE80211_BPARSE_* */
+	uint32_t	status;		/* bitmask of IEEE80211_BPARSE_* */
 	uint8_t		chan;		/* channel # from FH/DSPARMS */
 	uint8_t		bchan;		/* curchan's channel # */
 	uint8_t		fhindex;
@@ -327,7 +332,7 @@ struct ieee80211_scanner {
 	void	(*scan_spare0)(void);
 	void	(*scan_spare1)(void);
 	void	(*scan_spare2)(void);
-	void	(*scan_spare4)(void);
+	void	(*scan_spare3)(void);
 };
 void	ieee80211_scanner_register(enum ieee80211_opmode,
 		const struct ieee80211_scanner *);
