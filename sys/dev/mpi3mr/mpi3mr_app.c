@@ -335,7 +335,7 @@ mpi3mr_app_build_nvme_prp(struct mpi3mr_softc *sc,
 	sc->nvme_encap_prp_sz = 0;
 	if (bus_dma_tag_create(sc->mpi3mr_parent_dmat,		/* parent */
 				4, 0,				/* algnmnt, boundary */
-				BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+				sc->dma_loaddr,			/* lowaddr */
 				BUS_SPACE_MAXADDR,		/* highaddr */
 				NULL, NULL,			/* filter, filterarg */
 				dev_pgsz,			/* maxsize */
@@ -357,7 +357,7 @@ mpi3mr_app_build_nvme_prp(struct mpi3mr_softc *sc,
 	bzero(sc->nvme_encap_prp_list, dev_pgsz);
 	bus_dmamap_load(sc->nvme_encap_prp_list_dmatag, sc->nvme_encap_prp_list_dma_dmamap,
 			sc->nvme_encap_prp_list, dev_pgsz, mpi3mr_memaddr_cb, &sc->nvme_encap_prp_list_dma,
-			0);
+			BUS_DMA_NOWAIT);
 	
 	if (!sc->nvme_encap_prp_list) {
 		printf(IOCNAME "%s:%d Cannot load ioctl NVME dma memory for size: %d\n", sc->name,
