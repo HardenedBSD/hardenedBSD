@@ -242,6 +242,11 @@ CFLAGS+=	-mretpoline
 CFLAGS+=	-ftrivial-auto-var-init=uninitialized
 .endif
 
+.if defined(KCFI_SAFE)
+CFLAGS+=	-fsanitize=kcfi
+LDFLAGS+=	-fsanitize=kcfi
+.endif
+
 CFLAGS+= ${CWARNFLAGS:M*} ${CWARNFLAGS.${.IMPSRC:T}}
 CFLAGS+= ${CWARNFLAGS.${COMPILER_TYPE}}
 CFLAGS+= ${CFLAGS.${COMPILER_TYPE}} ${CFLAGS.${.IMPSRC:T}}
