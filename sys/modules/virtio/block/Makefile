@@ -29,4 +29,6 @@ SRCS=	virtio_blk.c
 SRCS+=	virtio_bus_if.h virtio_if.h
 SRCS+=	bus_if.h device_if.h 
 
+KCFI_SAFE=	yes
+
 .include <bsd.kmod.mk>

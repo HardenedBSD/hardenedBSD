@@ -33,4 +33,6 @@ SRCS+=	bus_if.h device_if.h
 
 EXPORT_SYMS=	YES
 
+KCFI_SAFE=	yes
+
 .include <bsd.kmod.mk>

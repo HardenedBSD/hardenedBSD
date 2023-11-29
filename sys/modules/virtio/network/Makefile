@@ -31,5 +31,6 @@ SRCS+=	bus_if.h device_if.h
 SRCS+=	opt_inet.h opt_inet6.h
 
 TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
+KCFI_SAFE=				yes
 
 .include <bsd.kmod.mk>
