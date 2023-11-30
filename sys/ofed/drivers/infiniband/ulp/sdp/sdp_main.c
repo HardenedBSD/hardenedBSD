@@ -206,37 +206,37 @@ sdp_sockaddr(in_port_t port, struct in_addr *addr_p)
 }
 
 static int
-sdp_getsockaddr(struct socket *so, struct sockaddr **nam)
+sdp_getsockaddr(struct socket *so, struct sockaddr *sa)
 {
-	struct sdp_sock *ssk;
-	struct in_addr addr;
-	in_port_t port;
+	struct sdp_sock *ssk = sdp_sk(so);
 
-	ssk = sdp_sk(so);
 	SDP_RLOCK(ssk);
-	port = ssk->lport;
-	addr.s_addr = ssk->laddr;
+	*(struct sockaddr_in *)sa = (struct sockaddr_in ){
+		.sin_family = AF_INET,
+		.sin_len = sizeof(struct sockaddr_in),
+		.sin_addr.s_addr = ssk->laddr,
+		.sin_port = ssk->lport,
+	};
 	SDP_RUNLOCK(ssk);
 
-	*nam = sdp_sockaddr(port, &addr);
-	return 0;
+	return (0);
 }
 
 static int
-sdp_getpeeraddr(struct socket *so, struct sockaddr **nam)
+sdp_getpeeraddr(struct socket *so, struct sockaddr *sa)
 {
-	struct sdp_sock *ssk;
-	struct in_addr addr;
-	in_port_t port;
+	struct sdp_sock *ssk = sdp_sk(so);
 
-	ssk = sdp_sk(so);
 	SDP_RLOCK(ssk);
-	port = ssk->fport;
-	addr.s_addr = ssk->faddr;
+	*(struct sockaddr_in *)sa = (struct sockaddr_in ){
+		.sin_family = AF_INET,
+		.sin_len = sizeof(struct sockaddr_in),
+		.sin_addr.s_addr = ssk->faddr,
+		.sin_port = ssk->fport,
+	};
 	SDP_RUNLOCK(ssk);
 
-	*nam = sdp_sockaddr(port, &addr);
-	return 0;
+	return (0);
 }
 
 #if 0
@@ -776,32 +776,29 @@ out:
  * are fully initialized.
  */
 static int
-sdp_accept(struct socket *so, struct sockaddr **nam)
+sdp_accept(struct socket *so, struct sockaddr *sa)
 {
 	struct sdp_sock *ssk = NULL;
-	struct in_addr addr;
-	in_port_t port;
 	int error;
 
 	if (so->so_state & SS_ISDISCONNECTED)
 		return (ECONNABORTED);
 
-	port = 0;
-	addr.s_addr = 0;
 	error = 0;
 	ssk = sdp_sk(so);
 	SDP_WLOCK(ssk);
-	if (ssk->flags & (SDP_TIMEWAIT | SDP_DROPPED)) {
+	if (ssk->flags & (SDP_TIMEWAIT | SDP_DROPPED))
 		error = ECONNABORTED;
-		goto out;
-	}
-	port = ssk->fport;
-	addr.s_addr = ssk->faddr;
-out:
+	else
+		*(struct sockaddr_in *)sa = (struct sockaddr_in ){
+			.sin_family = AF_INET,
+			.sin_len = sizeof(struct sockaddr_in),
+			.sin_addr.s_addr = ssk->faddr,
+			.sin_port = ssk->fport,
+		};
 	SDP_WUNLOCK(ssk);
-	if (error == 0)
-		*nam = sdp_sockaddr(port, &addr);
-	return error;
+
+	return (error);
 }
 
 /*
