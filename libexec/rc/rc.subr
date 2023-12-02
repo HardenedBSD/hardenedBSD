@@ -790,6 +790,8 @@ startmsg()
 #
 #	${name}_oomprotect n	Don't kill ${command} when swap space is exhausted.
 #
+#	${name}_umask	n	The file creation mask to run ${command} with.
+#
 #	${name}_user	n	User to run ${command} as, using su(1) if not
 #				using ${name}_chroot.
 #				Requires /usr to be mounted.
@@ -802,6 +804,8 @@ startmsg()
 #				Requires /usr to be mounted.
 #
 #	${name}_prepend	n	Command added before ${command}.
+#
+#	${name}_setup	n	Command executed before ${command}.
 #
 #	${name}_login_class n	Login class to use, else "daemon".
 #
@@ -987,8 +991,9 @@ run_rc_command()
 	    _group=\$${name}_group	_groups=\$${name}_groups \
 	    _fib=\$${name}_fib		_env=\$${name}_env \
 	    _prepend=\$${name}_prepend	_login_class=\${${name}_login_class:-daemon} \
-	    _limits=\$${name}_limits    _oomprotect=\$${name}_oomprotect \
-	    _env_file=\$${name}_env_file
+	    _limits=\$${name}_limits	_oomprotect=\$${name}_oomprotect \
+	    _setup=\$${name}_setup	_env_file=\$${name}_env_file \
+	    _umask=\$${name}_umask
 
 	if [ -n "$_env_file" ] && [ -r "${_env_file}" ]; then	# load env from file
 		set -a
@@ -1141,6 +1146,12 @@ $command $rc_flags $command_args"
 				fi
 				if [ -n "$_prepend" ]; then
 					_doit="$_prepend $_doit"
+				fi
+			fi
+
+			if [ -n "$_setup" ]; then
+				if ! _run_rc_doit "$_setup"; then
+					warn "failed to setup ${name}"
 				fi
 			fi
 
@@ -1344,9 +1355,14 @@ _run_rc_postcmd()
 
 _run_rc_doit()
 {
+	local _m
+
 	debug "run_rc_command: doit: $*"
+	_m=$(umask)
+	${_umask:+umask ${_umask}}
 	eval "$@"
 	_return=$?
+	umask ${_m}
 
 	# If command failed and force isn't set, request exit.
 	if [ $_return -ne 0 ] && [ -z "$rc_force" ]; then
@@ -2160,7 +2176,7 @@ check_kern_features()
 # check_namevarlist var
 #	Return "0" if ${name}_var is reserved in rc.subr.
 
-_rc_namevarlist="program chroot chdir env flags fib nice user group groups prepend"
+_rc_namevarlist="program chroot chdir env flags fib nice user group groups prepend setup"
 check_namevarlist()
 {
 	local _v
