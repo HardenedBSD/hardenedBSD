@@ -2313,9 +2313,6 @@ tcp_newtcpcb(struct inpcb *inp)
 	 * which may match an IPv4-mapped IPv6 address.
 	 */
 	inp->inp_ip_ttl = V_ip_defttl;
-#ifdef TCPHPTS
-	tcp_hpts_init(tp);
-#endif
 #ifdef TCPPCAP
 	/*
 	 * Init the TCP PCAP queues.
@@ -2382,9 +2379,6 @@ tcp_discardcb(struct tcpcb *tp)
 	INP_WLOCK_ASSERT(inp);
 
 	tcp_timer_stop(tp);
-	if (tp->t_fb->tfb_tcp_timer_stop_all) {
-		tp->t_fb->tfb_tcp_timer_stop_all(tp);
-	}
 
 	/* free the reassembly queue, if any */
 	tcp_reass_flush(tp);
@@ -2524,9 +2518,8 @@ tcp_close(struct tcpcb *tp)
 		tcp_fastopen_decrement_counter(tp->t_tfo_pending);
 		tp->t_tfo_pending = NULL;
 	}
-#ifdef TCPHPTS
-	tcp_hpts_remove(tp);
-#endif
+	if (tp->t_fb->tfb_tcp_timer_stop_all != NULL)
+		tp->t_fb->tfb_tcp_timer_stop_all(tp);
 	in_pcbdrop(inp);
 	TCPSTAT_INC(tcps_closed);
 	if (tp->t_state != TCPS_CLOSED)
@@ -4314,9 +4307,7 @@ tcp_req_log_req_info(struct tcpcb *tp, struct tcp_sendfile_track *req,
 		struct timeval tv;
 
 		memset(&log.u_bbr, 0, sizeof(log.u_bbr));
-#ifdef TCPHPTS
 		log.u_bbr.inhpts = tcp_in_hpts(tp);
-#endif
 		log.u_bbr.flex8 = val;
 		log.u_bbr.rttProp = req->timestamp;
 		log.u_bbr.delRate = req->start;
