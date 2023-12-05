@@ -1630,17 +1630,41 @@ NO_KERNELOBJ=		t
 KERNCONF=${KERNFAST}
 .endif
 .endif
+<<<<<<< HEAD
 .if ${TARGET_ARCH} == "powerpc64"
 KERNCONF?=	HARDENEDBSD64
 .else
 KERNCONF?=	HARDENEDBSD
 .endif
+=======
+GENERIC_KERNCONF_SUFX_powerpc64=	64
+GENERIC_KERNCONF_SUFX_powerpc64le=	64LE
+GENERIC_KERNCONF_powerpcspe=	MPC85XXSPE
+GENERIC_KERNCONF?=	${GENERIC_KERNCONF_${TARGET_ARCH}:UGENERIC${GENERIC_KERNCONF_SUFX_${TARGET_ARCH}}}
+>>>>>>> internal/freebsd/13-stable/main
 INSTKERNNAME?=	kernel
 
 KERNSRCDIR?=	${.CURDIR}/sys
 KRNLCONFDIR=	${KERNSRCDIR}/${TARGET}/conf
 KRNLOBJDIR=	${OBJTOP}${KERNSRCDIR:C,^${.CURDIR},,}
 KERNCONFDIR?=	${KRNLCONFDIR}
+
+.for _k in ${GENERIC_KERNCONF} MINIMAL${GENERIC_KERNCONF_SUFX_${TARGET_ARCH}} ${GENERIC_KERNCONF}-MMCCAM
+.if exists(${KERNCONFDIR}/${_k})
+PKG_KERNCONF+=	${_k}
+.for _dbg in NODEBUG DEBUG
+.if exists(${KERNCONFDIR}/${_k}-${_dbg})
+PKG_KERNCONF+= ${_k}-${_dbg}
+.endif
+.endfor
+.endif
+.endfor
+
+.if defined(PACKAGE_BUILDING)
+KERNCONF?=	${PKG_KERNCONF}
+.else
+KERNCONF?=	${GENERIC_KERNCONF}
+.endif
 
 BUILDKERNELS=
 INSTALLKERNEL=
@@ -1889,7 +1913,7 @@ PORTSDIR?=	/usr/ports
 WSTAGEDIR?=	${OBJTOP}/worldstage
 KSTAGEDIR?=	${OBJTOP}/kernelstage
 REPODIR?=	${OBJROOT}repo
-PKG_FORMAT?=	txz
+PKG_FORMAT?=	tzst
 PKG_REPO_SIGNING_KEY?=	# empty
 PKG_OUTPUT_DIR?=	${PKG_VERSION}
 
@@ -2123,6 +2147,7 @@ sign-packages:	_pkgbootstrap .PHONY
 	@[ -L "${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/latest" ] && \
 		unlink ${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/latest ; \
 	${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname repo \
+		-o OSVERSION="${SRCRELDATE}" \
 		-m ${WSTAGEDIR}/meta \
 		-o ${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/${PKG_VERSION} \
 		${REPODIR}/$$(${PKG_CMD} -o ABI_FILE=${WSTAGEDIR}/usr/bin/uname config ABI)/${PKG_VERSION} \
