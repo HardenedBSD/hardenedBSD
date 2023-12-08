@@ -542,6 +542,9 @@ tcp_switch_back_to_default(struct tcpcb *tp)
 	KASSERT(tp->t_fb != &tcp_def_funcblk,
 	    ("%s: called by the built-in default stack", __func__));
 
+	if (tp->t_fb->tfb_tcp_timer_stop_all != NULL)
+		tp->t_fb->tfb_tcp_timer_stop_all(tp);
+
 	/*
 	 * Now, we'll find a new function block to use.
 	 * Start by trying the current user-selected
@@ -2270,6 +2273,9 @@ tcp_newtcpcb(struct inpcb *inp)
 
 	/* All mbuf queue/ack compress flags should be off */
 	tcp_lro_features_off(tp);
+
+	tp->t_hpts_cpu = HPTS_CPU_NONE;
+	tp->t_lro_cpu = HPTS_CPU_NONE;
 
 	callout_init_rw(&tp->t_callout, &inp->inp_lock, CALLOUT_RETURNUNLOCKED);
 	for (int i = 0; i < TT_N; i++)
