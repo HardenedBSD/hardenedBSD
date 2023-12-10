@@ -7,6 +7,10 @@
     bin
     ..
     include
+        c++
+            v1
+            ..
+        ..
         private
             bsddialog
             ..
@@ -35,6 +39,10 @@
         ..
     ..
     lib
+        c++
+            v1
+            ..
+        ..
         clang
             17
                 include
