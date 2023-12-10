@@ -1646,6 +1646,7 @@ SRCS_MIW+=	TextAPI/ArchitectureSet.cpp
 SRCS_MIW+=	TextAPI/InterfaceFile.cpp
 SRCS_MIW+=	TextAPI/PackedVersion.cpp
 SRCS_MIW+=	TextAPI/Platform.cpp
+SRCS_MIW+=	TextAPI/Symbol.cpp
 SRCS_MIW+=	TextAPI/SymbolSet.cpp
 SRCS_MIW+=	TextAPI/Target.cpp
 SRCS_MIW+=	TextAPI/TextStub.cpp
