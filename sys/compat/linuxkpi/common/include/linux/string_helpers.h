@@ -1,9 +1,7 @@
 /*-
- * Copyright (c) 2010 Isilon Systems, Inc.
- * Copyright (c) 2010 iX Systems, Inc.
- * Copyright (c) 2010 Panasas, Inc.
- * Copyright (c) 2013-2018 Mellanox Technologies, Ltd.
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2023 Jean-Sébastien Pédron <dumbbell@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +24,19 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef	_LINUXKPI_LINUX_SHMEM_FS_H_
-#define	_LINUXKPI_LINUX_SHMEM_FS_H_
 
-#include <linux/pagemap.h>
+#ifndef	_LINUXKPI_LINUX_STRING_HELPERS_H_
+#define	_LINUXKPI_LINUX_STRING_HELPERS_H_
 
-/* Shared memory support */
-struct page *linux_shmem_read_mapping_page_gfp(vm_object_t obj, int pindex,
-    gfp_t gfp);
-struct linux_file *linux_shmem_file_setup(const char *name, loff_t size,
-    unsigned long flags);
-void linux_shmem_truncate_range(vm_object_t obj, loff_t lstart,
-    loff_t lend);
+#include <sys/types.h>
 
-#define	shmem_read_mapping_page(...) \
-  linux_shmem_read_mapping_page_gfp(__VA_ARGS__, 0)
+static inline const char *
+str_yes_no(bool value)
+{
+	if (value)
+		return "yes";
+	else
+		return "no";
+}
 
-#define	shmem_read_mapping_page_gfp(...) \
-  linux_shmem_read_mapping_page_gfp(__VA_ARGS__)
-
-#define	shmem_file_setup(...) \
-  linux_shmem_file_setup(__VA_ARGS__)
-
-#define	shmem_truncate_range(...) \
-  linux_shmem_truncate_range(__VA_ARGS__)
-
-#endif /* _LINUXKPI_LINUX_SHMEM_FS_H_ */
+#endif	/* _LINUXKPI_LINUX_STRING_HELPERS_H_ */
