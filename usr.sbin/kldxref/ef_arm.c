@@ -1,9 +1,10 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2005 Peter Grehan.
+ * Copyright (c) 2003 Jake Burkholder.
  * Copyright 1996-1998 John D. Polstra.
  * All rights reserved.
+ * Copyright (c) 2023 Jessica Clarke <jrtc27@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,52 +37,53 @@
 #include "ef.h"
 
 /*
- * Apply relocations to the values obtained from the file. `relbase' is the
- * target relocation address of the section, and `dataoff/len' is the region
- * that is to be relocated, and has been copied to *dest
+ * Apply relocations to the values we got from the file. `relbase' is the
+ * target relocation address of the section, and `dataoff' is the target
+ * relocation address of the data in `dest'.
  */
-int
-ef_ppc_reloc(struct elf_file *ef, const void *reldata, Elf_Type reltype,
+static int
+ef_arm_reloc(struct elf_file *ef, const void *reldata, Elf_Type reltype,
     GElf_Addr relbase, GElf_Addr dataoff, size_t len, void *dest)
 {
 	char *where;
-	GElf_Addr addend, val;
+	GElf_Addr addr, addend;
 	GElf_Size rtype, symidx;
+	const GElf_Rel *rel;
 	const GElf_Rela *rela;
 
-	if (reltype != ELF_T_RELA)
+	switch (reltype) {
+	case ELF_T_REL:
+		rel = (const GElf_Rel *)reldata;
+		where = (char *)dest + relbase + rel->r_offset - dataoff;
+		addend = 0;
+		rtype = GELF_R_TYPE(rel->r_info);
+		symidx = GELF_R_SYM(rel->r_info);
+		break;
+	case ELF_T_RELA:
+		rela = (const GElf_Rela *)reldata;
+		where = (char *)dest + relbase + rela->r_offset - dataoff;
+		addend = rela->r_addend;
+		rtype = GELF_R_TYPE(rela->r_info);
+		symidx = GELF_R_SYM(rela->r_info);
+		break;
+	default:
 		return (EINVAL);
-
-	rela = (const GElf_Rela *)reldata;
-	where = (char *)dest - dataoff + rela->r_offset;
-	addend = rela->r_addend;
-	rtype = GELF_R_TYPE(rela->r_info);
-	symidx = GELF_R_SYM(rela->r_info);
+	}
 
 	if (where < (char *)dest || where >= (char *)dest + len)
 		return (0);
 
+	if (reltype == ELF_T_REL)
+		addend = le32dec(where);
+
 	switch (rtype) {
-	case R_PPC_RELATIVE: /* word32|doubleword64 B + A */
-		val = relbase + addend;
-		if (elf_class(ef) == ELFCLASS64) {
-			if (elf_encoding(ef) == ELFDATA2LSB)
-				le64enc(where, val);
-			else
-				be64enc(where, val);
-		} else
-			be32enc(where, val);
+	case R_ARM_ABS32:	/* S + A */
+		addr = EF_SYMADDR(ef, symidx) + addend;
+		le32enc(where, addr);
 		break;
-	case R_PPC_ADDR32:	/* word32 S + A */
-		val = EF_SYMADDR(ef, symidx) + addend;
-		be32enc(where, val);
-		break;
-	case R_PPC64_ADDR64:	/* doubleword64 S + A */
-		val = EF_SYMADDR(ef, symidx) + addend;
-		if (elf_encoding(ef) == ELFDATA2LSB)
-			le64enc(where, val);
-		else
-			be64enc(where, val);
+	case R_ARM_RELATIVE:	/* B + A */
+		addr = addend + relbase;
+		le32enc(where, addr);
 		break;
 	default:
 		warnx("unhandled relocation type %d", (int)rtype);
@@ -89,6 +91,4 @@ ef_ppc_reloc(struct elf_file *ef, const void *reldata, Elf_Type reltype,
 	return (0);
 }
 
-ELF_RELOC(ELFCLASS32, ELFDATA2MSB, EM_PPC, ef_ppc_reloc);
-ELF_RELOC(ELFCLASS64, ELFDATA2LSB, EM_PPC64, ef_ppc_reloc);
-ELF_RELOC(ELFCLASS64, ELFDATA2MSB, EM_PPC64, ef_ppc_reloc);
+ELF_RELOC(ELFCLASS32, ELFDATA2LSB, EM_ARM, ef_arm_reloc);
