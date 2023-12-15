@@ -432,6 +432,8 @@
         rc
         ..
         rtld-elf
+            rtld_deepbind
+            ..
         ..
         tftpd
         ..
@@ -1054,6 +1056,8 @@
         limits
         ..
         locale
+        ..
+        lockf
         ..
         m4
         ..
