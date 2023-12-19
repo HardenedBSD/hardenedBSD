@@ -79,8 +79,8 @@
 #
 #  1.  `cd /usr/src'       (or to the directory containing your source tree).
 #  2.  `make buildworld'
-#  3.  `make buildkernel KERNCONF=YOUR_KERNEL_HERE'     (default is GENERIC).
-#  4.  `make installkernel KERNCONF=YOUR_KERNEL_HERE'   (default is GENERIC).
+#  3.  `make buildkernel KERNCONF=YOUR_KERNEL_HERE'     (default is HARDENEDBSD).
+#  4.  `make installkernel KERNCONF=YOUR_KERNEL_HERE'   (default is HARDENEDBSD).
 #       [steps 3. & 4. can be combined by using the "kernel" target]
 #  5.  `reboot'        (in single user mode: boot -s from the loader prompt).
 #  6.  `etcupdate -p'
