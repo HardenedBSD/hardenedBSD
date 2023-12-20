@@ -1668,7 +1668,7 @@ installetc: .MAKE .PHONY
 # buildkernel and installkernel
 #
 # Which kernels to build and/or install is specified by setting
-# KERNCONF. If not defined a GENERIC kernel is built/installed.
+# KERNCONF. If not defined a HARDENEDBSD kernel is built/installed.
 # Only the existing (depending TARGET) config files are used
 # for building kernels and only the first of these is designated
 # as the one being installed.
