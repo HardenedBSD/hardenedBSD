@@ -1,8 +1,7 @@
 .\"
-.\" Copyright (c) 2006 Ceri Davies <ceri@FreeBSD.org>
-.\" Copyright (c) 2023 Olivier Certner <olce.freebsd@certner.fr>
+.\" SPDX-License-Identifier: BSD-2-Clause
 .\"
-.\" All rights reserved.
+.\" Copyright (c) 2023 Olivier Certner <olce.freebsd@certner.fr>
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -25,59 +24,58 @@
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
 .Dd August 18, 2023
-.Dt CR_CANSEE 9
+.Dt CR_CANSEEJAILPROC 9
 .Os
 .Sh NAME
-.Nm cr_cansee
-.Nd "determine visibility of objects given their user credentials"
+.Nm cr_canseejailproc
+.Nd determine if subjects may see entities in sub-jails
 .Sh SYNOPSIS
-.In sys/proc.h
 .Ft int
-.Fn cr_cansee "struct ucred *u1" "struct ucred *u2"
+.Fn cr_canseejailproc "struct ucred *u1" "struct ucred *u2"
 .Sh DESCRIPTION
-This function determines if a subject with credential
-.Fa u1
-can see a subject or object associated to credential
-.Fa u2 .
-.Pp
-Specific types of subjects may need to submit to additional or different
-restrictions.
-As an example, for processes, see
-.Xr p_cansee 9 ,
-which calls this function.
-.Pp
-The implementation relies on
-.Xr cr_bsd_visible 9
-and consequently the
-.Xr sysctl 8
-variables referenced in its manual page influence the result.
-.Sh RETURN VALUES
-This function returns zero if the subject with credential
-.Fa u1
-can
-.Dq see
-the subject or object with credential
-.Fa u2 ,
-or
-.Er ESRCH
-otherwise.
-.Sh ERRORS
-.Bl -tag -width Er
-.It Bq Er ESRCH
-The subject with credential
-.Fa u1
-has been jailed and the subject or object with credential
-.Fa u2
-does not belong to the same jail or one of its sub-jails, as determined by
-.Xr prison_check 9 .
-.It Bq Er ESRCH
-The MAC subsystem denied visibility.
-.It Bq Er ESRCH
-.Xr cr_bsd_visible 9
-denied visibility according to the BSD security policies in force.
-.El
-.Sh SEE ALSO
-.Xr prison_check 9 ,
-.Xr mac 9 ,
+.Bf -emphasis
+This function is internal.
+Its functionality is integrated into the function
 .Xr cr_bsd_visible 9 ,
-.Xr p_cansee 9
+which should be called instead.
+.Ef
+.Pp
+This function checks if a subject associated to credentials
+.Fa u1
+is denied seeing a subject or object associated to credentials
+.Fa u2
+by a policy that requires both credentials to be associated to the same jail.
+This is a restriction to the baseline jail policy that a subject can see
+subjects or objects in its own jail or any sub-jail of it.
+.Pp
+This policy is active if and only if the
+.Xr sysctl 8
+variable
+.Va security.bsd.see_jail_proc
+is set to zero.
+.Pp
+As usual, the superuser (effective user ID 0) is exempt from this policy
+provided that the
+.Xr sysctl 8
+variable
+.Va security.bsd.suser_enabled
+is non-zero and no active MAC policy explicitly denies the exemption
+.Po
+see
+.Xr priv_check_cred 9
+.Pc .
+.Sh RETURN VALUES
+The
+.Fn cr_canseejailproc
+function returns 0 if the policy is disabled, both credentials are associated to
+the same jail, or if
+.Fa u1
+has privilege exempting it from the policy.
+Otherwise, it returns
+.Er ESRCH .
+.Sh SEE ALSO
+.Xr cr_bsd_visible 9 ,
+.Xr priv_check_cred 9
+.Sh AUTHORS
+This manual page was written by
+.An Olivier Certner Aq Mt olce.freebsd@certner.fr .
