@@ -1,5 +1,7 @@
 /*-
- * Copyright (c) 2020 Emmanuel Vadot <manu@FreeBSD.org>
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +15,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -23,40 +25,33 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_SHRINKER_H_
-#define	_LINUXKPI_LINUX_SHRINKER_H_
+#ifndef _LINUXKPI_LINUX_IOPORT_H
+#define _LINUXKPI_LINUX_IOPORT_H
 
-#include <sys/queue.h>
-#include <linux/gfp.h>
+#include <linux/compiler.h>
+#include <linux/types.h>
 
-struct shrink_control {
-	gfp_t		gfp_mask;
-	unsigned long	nr_to_scan;
-	unsigned long	nr_scanned;
+#define DEFINE_RES_MEM(_start, _size)		\
+	(struct resource) {			\
+		.start = (_start),		\
+		.end = (_start) + (_size) - 1,	\
+	}
+
+struct resource {
+	resource_size_t start;
+	resource_size_t end;
 };
 
-struct shrinker {
-	unsigned long		(*count_objects)(struct shrinker *, struct shrink_control *);
-	unsigned long		(*scan_objects)(struct shrinker *, struct shrink_control *);
-	int			seeks;
-	long			batch;
-	TAILQ_ENTRY(shrinker)	next;
-};
+static inline resource_size_t
+resource_size(const struct resource *r)
+{
+	return (r->end - r->start + 1);
+}
 
-#define	SHRINK_STOP	(~0UL)
+static inline bool
+resource_contains(struct resource *a, struct resource *b)
+{
+	return (a->start <= b->start && a->end >= b->end);
+}
 
-#define	DEFAULT_SEEKS	2
-
-int	linuxkpi_register_shrinker(struct shrinker *s);
-void	linuxkpi_unregister_shrinker(struct shrinker *s);
-void	linuxkpi_synchronize_shrinkers(void);
-
-#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60000
-#define	register_shrinker(s, ...)	linuxkpi_register_shrinker(s)
-#else
-#define	register_shrinker(s)	linuxkpi_register_shrinker(s)
 #endif
-#define	unregister_shrinker(s)	linuxkpi_unregister_shrinker(s)
-#define	synchronize_shrinkers()	linuxkpi_synchronize_shrinkers()
-
-#endif	/* _LINUXKPI_LINUX_SHRINKER_H_ */
