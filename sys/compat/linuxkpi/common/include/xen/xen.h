@@ -1,5 +1,7 @@
 /*-
- * Copyright (c) 2020 Emmanuel Vadot <manu@FreeBSD.org>
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +15,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -23,40 +25,13 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_SHRINKER_H_
-#define	_LINUXKPI_LINUX_SHRINKER_H_
+#ifndef _LINUXKPI_XEN_XEN_H_
+#define	_LINUXKPI_XEN_XEN_H_
 
-#include <sys/queue.h>
-#include <linux/gfp.h>
+#define xen_initial_domain()	lkpi_xen_initial_domain()
+#define	xen_pv_domain()		lkpi_xen_pv_domain()
 
-struct shrink_control {
-	gfp_t		gfp_mask;
-	unsigned long	nr_to_scan;
-	unsigned long	nr_scanned;
-};
+bool lkpi_xen_initial_domain(void);
+bool lkpi_xen_pv_domain(void);
 
-struct shrinker {
-	unsigned long		(*count_objects)(struct shrinker *, struct shrink_control *);
-	unsigned long		(*scan_objects)(struct shrinker *, struct shrink_control *);
-	int			seeks;
-	long			batch;
-	TAILQ_ENTRY(shrinker)	next;
-};
-
-#define	SHRINK_STOP	(~0UL)
-
-#define	DEFAULT_SEEKS	2
-
-int	linuxkpi_register_shrinker(struct shrinker *s);
-void	linuxkpi_unregister_shrinker(struct shrinker *s);
-void	linuxkpi_synchronize_shrinkers(void);
-
-#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60000
-#define	register_shrinker(s, ...)	linuxkpi_register_shrinker(s)
-#else
-#define	register_shrinker(s)	linuxkpi_register_shrinker(s)
-#endif
-#define	unregister_shrinker(s)	linuxkpi_unregister_shrinker(s)
-#define	synchronize_shrinkers()	linuxkpi_synchronize_shrinkers()
-
-#endif	/* _LINUXKPI_LINUX_SHRINKER_H_ */
+#endif /* _LINUXKPI_XEN_XEN_H_ */

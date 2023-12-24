@@ -1,7 +1,9 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause
- *
- * Copyright (c) 2023 Jean-Sébastien Pédron <dumbbell@FreeBSD.org>
+ * Copyright (c) 2010 Isilon Systems, Inc.
+ * Copyright (c) 2010 iX Systems, Inc.
+ * Copyright (c) 2010 Panasas, Inc.
+ * Copyright (c) 2017 Matt Macy <mmacy@FreeBSD.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,45 +27,20 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	_LINUXKPI_LINUX_STRING_HELPERS_H_
-#define	_LINUXKPI_LINUX_STRING_HELPERS_H_
+#ifndef _LINUXKPI_LINUX_CONTAINER_OF_H
+#define	_LINUXKPI_LINUX_CONTAINER_OF_H
 
-#include <sys/types.h>
+#include <sys/stdint.h>
 
-static inline const char *
-str_yes_no(bool value)
-{
-	if (value)
-		return "yes";
-	else
-		return "no";
-}
+#include <linux/build_bug.h>
+#include <linux/stddef.h>
 
-static inline const char *
-str_on_off(bool value)
-{
-	if (value)
-		return "on";
-	else
-		return "off";
-}
+#define	container_of(ptr, type, member)				\
+({								\
+	const __typeof(((type *)0)->member) *__p = (ptr);	\
+	(type *)((uintptr_t)__p - offsetof(type, member));	\
+})
 
-static inline const char *
-str_enabled_disabled(bool value)
-{
-	if (value)
-		return "enabled";
-	else
-		return "disabled";
-}
-
-static inline const char *
-str_enable_disable(bool value)
-{
-	if (value)
-		return "enable";
-	else
-		return "disable";
-}
+#define	typeof_member(type, member)	__typeof(((type *)0)->member)
 
 #endif
