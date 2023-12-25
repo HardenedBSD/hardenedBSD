@@ -28,17 +28,19 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/mman.h>
 #include <assert.h>
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <atf-c.h>
 
-static char *(*stpncpy_fn)(char *restrict, const char *restrict, size_t);
+void *(*memccpy_fn)(void *restrict, const void *restrict, int, size_t);
 
 static char *
 makebuf(size_t len, int guard_at_end)
@@ -61,10 +63,10 @@ makebuf(size_t len, int guard_at_end)
 }
 
 static void
-test_stpncpy(const char *s)
+test_memccpy(const char *s)
 {
-	char *src, *dst;
-	size_t size, len, bufsize, x;
+	char *src, *dst, *expected;
+	size_t size, bufsize, x;
 	int i, j;
 
 	size = strlen(s) + 1;
@@ -75,11 +77,11 @@ test_stpncpy(const char *s)
 				memcpy(src, s, size);
 				dst = makebuf(bufsize, j);
 				memset(dst, 'X', bufsize);
-				len = (bufsize < size) ? bufsize : size - 1;
-				assert(stpncpy_fn(dst, src, bufsize) == dst+len);
-				assert(memcmp(src, dst, len) == 0);
-				for (x = len; x < bufsize; x++)
-					assert(dst[x] == '\0');
+				expected = bufsize >= size ? dst + size : NULL;
+				assert(memccpy_fn(dst, src, src[size-1], bufsize) == expected);
+				assert(bufsize == 0 || strncmp(src, dst, bufsize - 1) == 0);
+				for (x = size; x < bufsize; x++)
+					assert(dst[x] == 'X');
 			}
 		}
 	}
@@ -88,64 +90,85 @@ test_stpncpy(const char *s)
 static void
 test_sentinel(char *dest, char *src, size_t destlen, size_t srclen)
 {
-	size_t i;
-	const char *res, *wantres;
+	size_t i, effective_len;
+	void *res, *wantres;
 	const char *fail = NULL;
+	char terminator;
 
 	for (i = 0; i < srclen; i++)
 		/* src will never include (){} */
 		src[i] = '0' + i;
-	src[srclen] = '\0';
 
 	/* source sentinels: not to be copied */
 	src[-1] = '(';
-	src[srclen+1] = ')';
+	src[srclen] = ')';
 
-	memset(dest, 0xee, destlen);
+	memset(dest, '\xee', destlen);
 
 	/* destination sentinels: not to be touched */
 	dest[-1] = '{';
 	dest[destlen] = '}';
 
-	wantres = dest + (srclen > destlen ? destlen : srclen);
-	res = stpncpy_fn(dest, src, destlen);
+	effective_len = srclen < destlen ? srclen : destlen;
+	wantres = srclen <= destlen ? dest + srclen : NULL;
+	terminator = src[srclen-1];
+	res = memccpy_fn(dest, src, terminator, destlen);
 
 	if (dest[-1] != '{')
 		fail = "start sentinel overwritten";
 	else if (dest[destlen] != '}')
 		fail = "end sentinel overwritten";
-	else if (strncmp(src, dest, destlen) != 0)
-		fail = "string not copied correctly";
 	else if (res != wantres)
 		fail = "incorrect return value";
+	else if (destlen > 0 && memcmp(src, dest, effective_len) != 0)
+		fail = "string not copied correctly";
 	else for (i = srclen; i < destlen; i++)
-		if (dest[i] != '\0') {
-			fail = "incomplete NUL padding";
+		if (dest[i] != '\xee') {
+			fail = "buffer mutilated behind string";
 			break;
 		}
 
 	if (fail)
 		atf_tc_fail_nonfatal("%s\n"
-		    "stpncpy(%p \"%s\", %p \"%s\", %zu) = %p (want %p)\n",
-		    fail, dest, dest, src, src, destlen, res, wantres);
+		    "memccpy(%p \"%s\", %p \"%s\", %u '%c', %zu) = %p (want %p)\n",
+		    fail, dest, dest, src, src, terminator, terminator, destlen, res, wantres);
 }
 
 ATF_TC_WITHOUT_HEAD(null);
 ATF_TC_BODY(null, tc)
 {
-	ATF_CHECK_EQ(stpncpy_fn(NULL, NULL, 0), NULL);
+	ATF_CHECK_EQ(memccpy_fn(NULL, "foo", 42, 0), NULL);
+}
+
+ATF_TC(zero_extension);
+ATF_TC_HEAD(zero_extension, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "Ensure the upper bits of the terminator are ignored");
+}
+ATF_TC_BODY(zero_extension, tc)
+{
+	int mask = -1 & ~UCHAR_MAX;
+	char buf[16];
+
+	memset(buf, 0xcc, sizeof(buf));
+	ATF_CHECK_EQ(memccpy(buf, "foobar", 'r', sizeof(buf)), buf + sizeof("foobar") - 1);
+	ATF_CHECK_EQ(memcmp(buf, "foobar", sizeof("foobar") - 1), 0);
+
+	memset(buf, 0xcc, sizeof(buf));
+	ATF_CHECK_EQ(memccpy(buf, "foobar", mask | 'r', sizeof(buf)), buf + sizeof("foobar") - 1);
+	ATF_CHECK_EQ(memcmp(buf, "foobar", sizeof("foobar") - 1), 0);
 }
 
 ATF_TC_WITHOUT_HEAD(bounds);
 ATF_TC_BODY(bounds, tc)
 {
 	size_t i;
-	char buf[64+1];
+	char buf[64];
 
 	for (i = 0; i < sizeof(buf) - 1; i++) {
 		buf[i] = ' ' + i;
-		buf[i+1] = '\0';
-		test_stpncpy(buf);
+		test_memccpy(buf);
 	}
 }
 
@@ -153,12 +176,12 @@ ATF_TC_WITHOUT_HEAD(alignments);
 ATF_TC_BODY(alignments, tc)
 {
 	size_t srcalign, destalign, srclen, destlen;
-	char src[15+3+64]; /* 15 offsets + 64 max length + NUL + sentinels */
+	char src[15+2+64]; /* 15 offsets + 64 max length + sentinels */
 	char dest[15+2+64]; /* 15 offsets + 64 max length + sentinels */
 
 	for (srcalign = 0; srcalign < 16; srcalign++)
 		for (destalign = 0; destalign < 16; destalign++)
-			for (srclen = 0; srclen < 64; srclen++)
+			for (srclen = 1; srclen < 64; srclen++)
 				for (destlen = 0; destlen < 64; destlen++)
 					test_sentinel(dest+destalign+1,
 					    src+srcalign+1, destlen, srclen);
@@ -169,11 +192,12 @@ ATF_TP_ADD_TCS(tp)
 	void *dl_handle;
 
 	dl_handle = dlopen(NULL, RTLD_LAZY);
-	stpncpy_fn = dlsym(dl_handle, "test_stpncpy");
-	if (stpncpy_fn == NULL)
-		stpncpy_fn = stpncpy;
+	memccpy_fn = dlsym(dl_handle, "test_memccpy");
+	if (memccpy_fn == NULL)
+		memccpy_fn = memccpy;
 
 	ATF_TP_ADD_TC(tp, null);
+	ATF_TP_ADD_TC(tp, zero_extension);
 	ATF_TP_ADD_TC(tp, bounds);
 	ATF_TP_ADD_TC(tp, alignments);
 
