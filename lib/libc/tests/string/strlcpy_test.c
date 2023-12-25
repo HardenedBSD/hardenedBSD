@@ -28,6 +28,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/mman.h>
 #include <assert.h>
@@ -38,7 +39,7 @@
 
 #include <atf-c.h>
 
-static char *(*stpncpy_fn)(char *restrict, const char *restrict, size_t);
+size_t (*strlcpy_fn)(char *restrict, const char *restrict, size_t);
 
 static char *
 makebuf(size_t len, int guard_at_end)
@@ -61,10 +62,10 @@ makebuf(size_t len, int guard_at_end)
 }
 
 static void
-test_stpncpy(const char *s)
+test_strlcpy(const char *s)
 {
 	char *src, *dst;
-	size_t size, len, bufsize, x;
+	size_t size, bufsize, x;
 	int i, j;
 
 	size = strlen(s) + 1;
@@ -75,11 +76,10 @@ test_stpncpy(const char *s)
 				memcpy(src, s, size);
 				dst = makebuf(bufsize, j);
 				memset(dst, 'X', bufsize);
-				len = (bufsize < size) ? bufsize : size - 1;
-				assert(stpncpy_fn(dst, src, bufsize) == dst+len);
-				assert(memcmp(src, dst, len) == 0);
-				for (x = len; x < bufsize; x++)
-					assert(dst[x] == '\0');
+				assert(strlcpy_fn(dst, src, bufsize) == size-1);
+				assert(bufsize == 0 || strncmp(src, dst, bufsize - 1) == 0);
+				for (x = size; x < bufsize; x++)
+					assert(dst[x] == 'X');
 			}
 		}
 	}
@@ -89,7 +89,7 @@ static void
 test_sentinel(char *dest, char *src, size_t destlen, size_t srclen)
 {
 	size_t i;
-	const char *res, *wantres;
+	size_t res, wantres;
 	const char *fail = NULL;
 
 	for (i = 0; i < srclen; i++)
@@ -101,39 +101,41 @@ test_sentinel(char *dest, char *src, size_t destlen, size_t srclen)
 	src[-1] = '(';
 	src[srclen+1] = ')';
 
-	memset(dest, 0xee, destlen);
+	memset(dest, '\xee', destlen);
 
 	/* destination sentinels: not to be touched */
 	dest[-1] = '{';
 	dest[destlen] = '}';
 
-	wantres = dest + (srclen > destlen ? destlen : srclen);
-	res = stpncpy_fn(dest, src, destlen);
+	wantres = srclen;
+	res = strlcpy_fn(dest, src, destlen);
 
 	if (dest[-1] != '{')
 		fail = "start sentinel overwritten";
 	else if (dest[destlen] != '}')
 		fail = "end sentinel overwritten";
-	else if (strncmp(src, dest, destlen) != 0)
-		fail = "string not copied correctly";
 	else if (res != wantres)
 		fail = "incorrect return value";
-	else for (i = srclen; i < destlen; i++)
-		if (dest[i] != '\0') {
-			fail = "incomplete NUL padding";
+	else if (destlen > 0 && strncmp(src, dest, destlen - 1) != 0)
+		fail = "string not copied correctly";
+	else if (destlen > 0 && srclen >= destlen - 1 && dest[destlen-1] != '\0')
+		fail = "string not NUL terminated";
+	else for (i = srclen + 1; i < destlen; i++)
+		if (dest[i] != '\xee') {
+			fail = "buffer mutilated behind string";
 			break;
 		}
 
 	if (fail)
 		atf_tc_fail_nonfatal("%s\n"
-		    "stpncpy(%p \"%s\", %p \"%s\", %zu) = %p (want %p)\n",
+		    "strlcpy(%p \"%s\", %p \"%s\", %zu) = %zu (want %zu)\n",
 		    fail, dest, dest, src, src, destlen, res, wantres);
 }
 
 ATF_TC_WITHOUT_HEAD(null);
 ATF_TC_BODY(null, tc)
 {
-	ATF_CHECK_EQ(stpncpy_fn(NULL, NULL, 0), NULL);
+	ATF_CHECK_EQ(strlcpy_fn(NULL, "foo", 0), 3);
 }
 
 ATF_TC_WITHOUT_HEAD(bounds);
@@ -145,7 +147,7 @@ ATF_TC_BODY(bounds, tc)
 	for (i = 0; i < sizeof(buf) - 1; i++) {
 		buf[i] = ' ' + i;
 		buf[i+1] = '\0';
-		test_stpncpy(buf);
+		test_strlcpy(buf);
 	}
 }
 
@@ -169,9 +171,9 @@ ATF_TP_ADD_TCS(tp)
 	void *dl_handle;
 
 	dl_handle = dlopen(NULL, RTLD_LAZY);
-	stpncpy_fn = dlsym(dl_handle, "test_stpncpy");
-	if (stpncpy_fn == NULL)
-		stpncpy_fn = stpncpy;
+	strlcpy_fn = dlsym(dl_handle, "test_strlcpy");
+	if (strlcpy_fn == NULL)
+		strlcpy_fn = strlcpy;
 
 	ATF_TP_ADD_TC(tp, null);
 	ATF_TP_ADD_TC(tp, bounds);

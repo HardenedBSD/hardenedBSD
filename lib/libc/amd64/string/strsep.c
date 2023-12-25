@@ -1,8 +1,8 @@
 /*-
- * SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2023 The FreeBSD Foundation
  *
- * Copyright (c) 1990, 1993
- *	The Regents of the University of California.  All rights reserved.
+ * This software was developed by Robert Clausecker <fuz@FreeBSD.org>
+ * under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,37 +12,46 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ''AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
  * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * SUCH DAMAGE
  */
 
+#include <sys/cdefs.h>
 #include <string.h>
 
-void *
-memccpy(void * restrict t, const void * restrict f, int c, size_t n)
-{
+size_t __strcspn(const char *, const char *);
 
-	if (n) {
-		unsigned char *tp = t;
-		const unsigned char *fp = f;
-		unsigned char uc = c;
-		do {
-			if ((*tp++ = *fp++) == uc)
-				return (tp);
-		} while (--n != 0);
+/*
+ * We have a fast strcspn() on amd64.  Use it over a direct
+ * implementation of strsep for better performance.
+ */
+char *
+strsep(char **stringp, const char *delim)
+{
+	size_t n;
+	char *s;
+
+	s = *stringp;
+	if (s == NULL)
+		return (NULL);
+
+	n = __strcspn(s, delim);
+	if (s[n] == '\0')
+		*stringp = NULL;
+	else {
+		s[n] = '\0';
+		*stringp = s + n + 1;
 	}
-	return (0);
+
+	return (s);
 }
