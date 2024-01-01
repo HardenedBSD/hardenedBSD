@@ -34,7 +34,7 @@
 #endif
 
 #define COPYRIGHT_HardenedBSD \
-	"Copyright (c) 2013-2023 The HardenedBSD Project.\n"
+	"Copyright (c) 2013-2024 The HardenedBSD Project.\n"
 
 /* FreeBSD */
 #define COPYRIGHT_FreeBSD \
