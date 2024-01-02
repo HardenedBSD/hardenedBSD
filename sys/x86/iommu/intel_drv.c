@@ -28,7 +28,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include "opt_acpi.h"
 #if defined(__amd64__)
 #define	DEV_APIC
@@ -158,6 +157,8 @@ dmar_count_iter(ACPI_DMAR_HEADER *dmarh, void *arg)
 	return (1);
 }
 
+int dmar_rmrr_enable = 1;
+
 static int dmar_enable = 0;
 static void
 dmar_identify(driver_t *driver, device_t parent)
@@ -172,6 +173,8 @@ dmar_identify(driver_t *driver, device_t parent)
 	TUNABLE_INT_FETCH("hw.dmar.enable", &dmar_enable);
 	if (!dmar_enable)
 		return;
+	TUNABLE_INT_FETCH("hw.dmar.rmrr_enable", &dmar_rmrr_enable);
+
 	status = AcpiGetTable(ACPI_SIG_DMAR, 1, (ACPI_TABLE_HEADER **)&dmartbl);
 	if (ACPI_FAILURE(status))
 		return;
@@ -896,6 +899,9 @@ dmar_rmrr_iter(ACPI_DMAR_HEADER *dmarh, void *arg)
 	char *ptr, *ptrend;
 	int match;
 
+	if (!dmar_rmrr_enable)
+		return (1);
+
 	if (dmarh->Type != ACPI_DMAR_TYPE_RESERVED_MEMORY)
 		return (1);
 
@@ -982,6 +988,9 @@ dmar_inst_rmrr_iter(ACPI_DMAR_HEADER *dmarh, void *arg)
 
 	iria = arg;
 
+	if (!dmar_rmrr_enable)
+		return (1);
+
 	if (dmarh->Type != ACPI_DMAR_TYPE_RESERVED_MEMORY)
 		return (1);
 
@@ -1009,10 +1018,10 @@ dmar_inst_rmrr_iter(ACPI_DMAR_HEADER *dmarh, void *arg)
 			if (bootverbose) {
 				printf("dmar%d no dev found for RMRR "
 				    "[%#jx, %#jx] rid %#x scope path ",
-				     iria->dmar->iommu.unit,
-				     (uintmax_t)resmem->BaseAddress,
-				     (uintmax_t)resmem->EndAddress,
-				     rid);
+				    iria->dmar->iommu.unit,
+				    (uintmax_t)resmem->BaseAddress,
+				    (uintmax_t)resmem->EndAddress,
+				    rid);
 				dmar_print_path(devscope->Bus, dev_path_len,
 				    (const ACPI_DMAR_PCI_PATH *)(devscope + 1));
 				printf("\n");

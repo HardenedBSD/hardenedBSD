@@ -2139,7 +2139,7 @@ freebsd32_do_sendfile(struct thread *td,
 	fdrop(fp, td);
 
 	if (uap->sbytes != NULL)
-		copyout(&sbytes, uap->sbytes, sizeof(off_t));
+		(void)copyout(&sbytes, uap->sbytes, sizeof(off_t));
 
 out:
 	if (hdr_uio)
@@ -2534,9 +2534,9 @@ freebsd32___sysctl(struct thread *td, struct freebsd32___sysctl_args *uap)
 		uap->new, uap->newlen, &j, SCTL_MASK32);
 	if (error)
 		return (error);
-	if (uap->oldlenp)
-		suword32(uap->oldlenp, j);
-	return (0);
+	if (uap->oldlenp != NULL && suword32(uap->oldlenp, j) != 0)
+		error = EFAULT;
+	return (error);
 }
 
 int
