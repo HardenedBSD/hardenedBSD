@@ -53,11 +53,7 @@ errmsg() {
 usage() {
 	local msg=$1
 
-<<<<<<< HEAD
-	echo "Usage: vmrun.sh [-aAEhiSTv] [-c <CPUs>] [-C <console>]" \
-=======
-	echo "Usage: vmrun.sh [-aAEhiTuvw] [-c <CPUs>] [-C <console>]" \
->>>>>>> internal/freebsd/current/main
+	echo "Usage: vmrun.sh [-aAEhiSTuvw] [-c <CPUs>] [-C <console>]" \
 	    "[-d <disk file>]"
 	echo "                [-e <name=value>] [-f <path of firmware>]" \
 	    "[-F <size>]"
@@ -66,12 +62,8 @@ usage() {
 	echo "                [-L <VNC IP for UEFI framebuffer>]"
 	echo "                [-m <memsize>]" \
 	    "[-n <network adapter emulation type>]"
-<<<<<<< HEAD
-	echo "                [-P <port>] [-s password] [-t <tapdev>] <vmname>"
-=======
 	echo "                [-p <pcidev|bus/slot/func>]"
 	echo "                [-P <port>] [-t <tapdev>] <vmname>"
->>>>>>> internal/freebsd/current/main
 	echo ""
 	echo "       -h: display this help message"
 	echo "       -a: force memory mapped local APIC access"
