@@ -47,8 +47,6 @@
 #include <netlink/netlink_debug.h>
 _DECLARE_DEBUG(LOG_INFO);
 
-int __insecure_kmod = 1;
-
 static int dump_family(struct nlmsghdr *hdr, struct genlmsghdr *ghdr,
     const struct genl_family *gf, struct nl_writer *nw);
 
