@@ -89,6 +89,16 @@
 
 #define	NDISKS	32
 
+/*
+ * Reason for our loader reload and reentry, though these aren't really used
+ * at the moment.
+ */
+enum {
+	/* 0 cannot be allocated; setjmp(3) return. */
+	JMP_SWAPLOADER = 0x01,
+	JMP_REBOOT,
+};
+
 static struct termios term, oldterm;
 static int disk_fd[NDISKS];
 static int ndisks;
@@ -543,6 +553,8 @@ cb_exit(void *arg __unused, int v)
 {
 
 	tcsetattr(consout_fd, TCSAFLUSH, &oldterm);
+	if (v == USERBOOT_EXIT_REBOOT)
+		longjmp(jb, JMP_REBOOT);
 	exit(v);
 }
 
@@ -628,7 +640,7 @@ cb_swap_interpreter(void *arg __unused, const char *interp_req)
 
 	if (asprintf(&loader, "userboot_%s.so", interp_req) == -1)
 		err(EX_OSERR, "malloc");
-	longjmp(jb, 1);
+	longjmp(jb, JMP_SWAPLOADER);
 }
 
 static struct loader_callbacks cb = {
@@ -734,12 +746,17 @@ usage(void)
 static void
 hostbase_open(const char *base)
 {
+	cap_rights_t rights;
 
 	if (hostbase_fd != -1)
 		close(hostbase_fd);
 	hostbase_fd = open(base, O_DIRECTORY | O_PATH);
 	if (hostbase_fd == -1)
 		err(EX_OSERR, "open");
+
+	if (caph_rights_limit(hostbase_fd, cap_rights_init(&rights, CAP_FSTATAT,
+	    CAP_LOOKUP, CAP_READ)) < 0)
+		err(EX_OSERR, "caph_rights_limit");
 }
 
 static void
@@ -764,6 +781,8 @@ loader_open(int bootfd)
 	loader_hdl = fdlopen(fd, RTLD_LOCAL);
 	if (!loader_hdl)
 		errx(EX_OSERR, "dlopen: %s", dlerror());
+	if (fd != explicit_loader_fd)
+		close(fd);
 }
 
 int
@@ -860,9 +879,22 @@ main(int argc, char** argv)
 	 * guest requesting a different one.
 	 */
 	if (explicit_loader_fd == -1) {
+		cap_rights_t rights;
+
 		bootfd = open("/boot", O_DIRECTORY | O_PATH);
 		if (bootfd == -1) {
 			perror("open");
+			exit(1);
+		}
+
+		/*
+		 * bootfd will be used to do a lookup of our loader and do an
+		 * fdlopen(3) on the loader; thus, we need mmap(2) in addition
+		 * to the more usual lookup rights.
+		*/
+		if (caph_rights_limit(bootfd, cap_rights_init(&rights,
+		    CAP_FSTATAT, CAP_LOOKUP, CAP_MMAP_RX, CAP_READ)) < 0) {
+			perror("caph_rights_limit");
 			exit(1);
 		}
 	}
