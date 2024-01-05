@@ -146,7 +146,7 @@ nlmsg_ignore_limit_stub(struct nl_writer *nw __unused)
 }
 
 static bool
-nlmsg_refill_buffer_stub(struct nl_writer *nw __unused, int required_len __unused)
+nlmsg_refill_buffer_stub(struct nl_writer *nw __unused, u_int required_len __unused)
 {
 	return (false);
 }

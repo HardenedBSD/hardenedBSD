@@ -105,7 +105,7 @@ nlmsg_ignore_limit(struct nl_writer *nw)
 }
 
 static inline bool
-nlmsg_refill_buffer(struct nl_writer *nw, int required_size)
+nlmsg_refill_buffer(struct nl_writer *nw, u_int required_size)
 {
 	return (_nlmsg_refill_buffer(nw, required_size));
 }
