@@ -444,7 +444,10 @@ cc_cong_signal(struct tcpcb *tp, struct tcphdr *th, uint32_t type)
 	case CC_RTO:
 		tp->t_dupacks = 0;
 		tp->t_bytes_acked = 0;
-		EXIT_RECOVERY(tp->t_flags);
+		if ((tp->t_rxtshift > 1) ||
+		    !((tp->t_flags & TF_SACK_PERMIT) &&
+		      (!TAILQ_EMPTY(&tp->snd_holes))))
+			EXIT_RECOVERY(tp->t_flags);
 		if (tp->t_flags2 & TF2_ECN_PERMIT)
 			tp->t_flags2 |= TF2_ECN_SND_CWR;
 		break;
@@ -2504,7 +2507,8 @@ tcp_do_segment(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 			goto dropafterack;
 		}
 		if (tcp_is_sack_recovery(tp, &to)) {
-			if (((sack_changed = tcp_sack_doack(tp, &to, th->th_ack)) != 0) &&
+			sack_changed = tcp_sack_doack(tp, &to, th->th_ack);
+			if ((sack_changed != SACK_NOCHANGE) &&
 			    (tp->t_flags & TF_LRD)) {
 				tcp_sack_lost_retransmission(tp, th);
 			}
