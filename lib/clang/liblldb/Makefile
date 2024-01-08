@@ -430,13 +430,6 @@ SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCTrampolineHandler
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCTypeEncodingParser.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleThreadPlanStepThroughObjCTrampoline.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.cpp
-<<<<<<< HEAD
-SRCS+=		Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptScriptGroup.cpp
-SRCS+=		Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptRuntime.cpp
-SRCS+=		Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptExpressionOpts.cpp
-SRCS+=		Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptx86ABIFixups.cpp
-=======
->>>>>>> internal/freebsd/13-stable/main
 SRCS+=		Plugins/MemoryHistory/asan/MemoryHistoryASan.cpp
 SRCS+=		Plugins/ObjectContainer/BSD-Archive/ObjectContainerBSDArchive.cpp
 SRCS+=		Plugins/ObjectFile/Breakpad/BreakpadRecords.cpp
