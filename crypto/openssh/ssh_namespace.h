@@ -21,6 +21,7 @@
 #define _ssh_host_key_sign			Fssh__ssh_host_key_sign
 #define _ssh_host_private_key			Fssh__ssh_host_private_key
 #define _ssh_host_public_key			Fssh__ssh_host_public_key
+#define _ssh_mkstemp				Fssh__ssh_mkstemp
 #define _ssh_order_hostkeyalgs			Fssh__ssh_order_hostkeyalgs
 #define _ssh_read_banner			Fssh__ssh_read_banner
 #define _ssh_send_banner			Fssh__ssh_send_banner
@@ -266,6 +267,7 @@
 #define encode_dest_constraint_hop		Fssh_encode_dest_constraint_hop
 #define exited_cleanly				Fssh_exited_cleanly
 #define export_dns_rr				Fssh_export_dns_rr
+#define extension_section			Fssh_extension_section
 #define fd_ready				Fssh_fd_ready
 #define fe25519_reduce_add_sub			Fssh_fe25519_reduce_add_sub
 #define filter_list				Fssh_filter_list
@@ -342,6 +344,7 @@
 #define kex_ecdh_enc				Fssh_kex_ecdh_enc
 #define kex_ecdh_keypair			Fssh_kex_ecdh_keypair
 #define kex_exchange_identification		Fssh_kex_exchange_identification
+#define kex_ext_info_check_ver			Fssh_kex_ext_info_check_ver
 #define kex_free				Fssh_kex_free
 #define kex_free_newkeys			Fssh_kex_free_newkeys
 #define kex_gen_client				Fssh_kex_gen_client
@@ -375,6 +378,7 @@
 #define kexgex_hash				Fssh_kexgex_hash
 #define kexgex_server				Fssh_kexgex_server
 #define krl_dump				Fssh_krl_dump
+#define lib_contains_symbol			Fssh_lib_contains_symbol
 #define load_hostkeys				Fssh_load_hostkeys
 #define load_hostkeys_file			Fssh_load_hostkeys_file
 #define log_change_level			Fssh_log_change_level
@@ -482,6 +486,7 @@
 #define private2_uudecode			Fssh_private2_uudecode
 #define proposals_match				Fssh_proposals_match
 #define ptimeout_deadline_monotime		Fssh_ptimeout_deadline_monotime
+#define ptimeout_deadline_monotime_tsp		Fssh_ptimeout_deadline_monotime_tsp
 #define ptimeout_deadline_ms			Fssh_ptimeout_deadline_ms
 #define ptimeout_deadline_sec			Fssh_ptimeout_deadline_sec
 #define ptimeout_get_ms				Fssh_ptimeout_get_ms
@@ -673,6 +678,7 @@
 #define ssh_packet_get_state			Fssh_ssh_packet_get_state
 #define ssh_packet_have_data_to_write		Fssh_ssh_packet_have_data_to_write
 #define ssh_packet_inc_alive_timeouts		Fssh_ssh_packet_inc_alive_timeouts
+#define ssh_packet_interactive_data_to_write	Fssh_ssh_packet_interactive_data_to_write
 #define ssh_packet_is_interactive		Fssh_ssh_packet_is_interactive
 #define ssh_packet_is_rekeying			Fssh_ssh_packet_is_rekeying
 #define ssh_packet_log_type			Fssh_ssh_packet_log_type

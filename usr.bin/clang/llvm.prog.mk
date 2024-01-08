@@ -8,10 +8,12 @@ CFLAGS+=	-I${OBJTOP}/lib/clang/libllvm
 # Special case for the bootstrap-tools phase.
 .if (defined(TOOLS_PREFIX) || ${MACHINE} == "host") && \
     (${PROG_CXX} == "clang-tblgen" || ${PROG_CXX} == "lldb-tblgen" || \
-     ${PROG_CXX} == "llvm-tblgen")
+     ${PROG_CXX} == "llvm-min-tblgen" || ${PROG_CXX} == "llvm-tblgen")
 LIBDEPS+=	llvmminimal
 .else
 LIBDEPS+=	llvm
+LIBADD+=	z
+LIBADD+=	zstd
 .endif
 
 .for lib in ${LIBDEPS}
@@ -26,8 +28,6 @@ LIBADD+=	execinfo
 LIBADD+=	ncursesw
 .endif
 LIBADD+=	pthread
-LIBADD+=	z
-LIBADD+=	zstd
 
 NOCFI=		yes
 

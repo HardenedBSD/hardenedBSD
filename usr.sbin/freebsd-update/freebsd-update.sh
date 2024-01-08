@@ -2544,7 +2544,11 @@ Press Enter to edit this file in ${EDITOR} and resolve the conflicts
 manually...
 			EOF
 			while true; do
-				read dummy </dev/tty
+				read response </dev/tty
+				if expr "${response}" : '[Aa][Cc][Cc][Ee][Pp][Tt]' > /dev/null; then
+					echo
+					break
+				fi
 				${EDITOR} `pwd`/merge/new/${F} < /dev/tty
 
 				if ! grep -qE '^(<<<<<<<|=======|>>>>>>>)([[:space:]].*)?$' $(pwd)/merge/new/${F} ; then
@@ -2555,7 +2559,8 @@ manually...
 Merge conflict markers remain in: ${F}
 These must be resolved for the system to be functional.
 
-Press Enter to return to editing this file.
+Press Enter to return to editing this file, or type "ACCEPT" to carry on with
+these lines remaining in the file.
 				EOF
 			done
 		done < failed.merges
@@ -2894,6 +2899,15 @@ backup_kernel () {
 	set +f
 }
 
+# Check for and remove an existing directory that conflicts with the file or
+# symlink that we are going to install.
+dir_conflict () {
+	if [ -d "$1" ]; then
+		echo "Removing conflicting directory $1"
+		rm -rf -- "$1"
+	fi
+}
+
 # Install new files
 install_from_index () {
 	# First pass: Do everything apart from setting file flags.  We
@@ -2914,6 +2928,7 @@ install_from_index () {
 			    -m ${PERM} ${BASEDIR}/${FPATH}
 			;;
 		f)
+			dir_conflict "${BASEDIR}/${FPATH}"
 			if [ -z "${LINK}" ]; then
 				# Create a file, without setting flags.
 				gunzip < files/${HASH}.gz > ${HASH}
@@ -2926,6 +2941,7 @@ install_from_index () {
 			fi
 			;;
 		L)
+			dir_conflict "${BASEDIR}/${FPATH}"
 			# Create a symlink
 			ln -sfh ${HASH} ${BASEDIR}/${FPATH}
 			;;
@@ -2962,10 +2978,14 @@ install_delete () {
 			rmdir ${BASEDIR}/${FPATH}
 			;;
 		f)
-			rm ${BASEDIR}/${FPATH}
+			if [ -f "${BASEDIR}/${FPATH}" ]; then
+				rm "${BASEDIR}/${FPATH}"
+			fi
 			;;
 		L)
-			rm ${BASEDIR}/${FPATH}
+			if [ -L "${BASEDIR}/${FPATH}" ]; then
+				rm "${BASEDIR}/${FPATH}"
+			fi
 			;;
 		esac
 	done < killfiles
@@ -3176,6 +3196,11 @@ rollback_setup_rollback () {
 
 # Install old files, delete new files, and update linker.hints
 rollback_files () {
+	# Create directories first.  They may be needed by files we will
+	# install in subsequent steps (PR273950).
+	awk -F \| '{if ($2 == "d") print }' $1/INDEX-OLD > INDEX-OLD
+	install_from_index INDEX-OLD || return 1
+
 	# Install old shared library files which don't have the same path as
 	# a new shared library file.
 	grep -vE '^/boot/' $1/INDEX-NEW |
