@@ -740,15 +740,11 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	TAILQ_FOREACH(nb, &sb->nl_queue, tailq) {
 		u_int offset;
 
-		/*
-		 * XXXGL: zero length buffer may be at the tail of a queue
-		 * when a writer overflows socket buffer.  When this is
-		 * improved, use MPASS(nb->offset < nb->datalen).
-		 */
-		MPASS(nb->offset <= nb->datalen);
+		MPASS(nb->offset < nb->datalen);
 		offset = nb->offset;
 		while (offset < nb->datalen) {
 			hdr = (struct nlmsghdr *)&nb->data[offset];
+			MPASS(nb->offset + hdr->nlmsg_len <= nb->datalen);
 			if (uio->uio_resid < len + hdr->nlmsg_len) {
 				overflow = len + hdr->nlmsg_len -
 				    uio->uio_resid;
@@ -762,11 +758,23 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 				} else if (len == 0 && uio->uio_resid > 0) {
 					flags |= MSG_TRUNC;
 					partlen = uio->uio_resid;
-					if (!peek) {
-						/* XXX: may leave empty nb */
+					if (peek)
+						goto nospace;
+					datalen += hdr->nlmsg_len;
+					if (nb->offset + hdr->nlmsg_len ==
+					    nb->datalen) {
+						/*
+						 * Avoid leaving empty nb.
+						 * Process last nb normally.
+						 * Trust uiomove() to care
+						 * about negative uio_resid.
+						 */
+						nb = TAILQ_NEXT(nb, tailq);
+						overflow = 0;
+						partlen = 0;
+					} else
 						nb->offset += hdr->nlmsg_len;
-						datalen += hdr->nlmsg_len;
-					}
+					msgrcv++;
 				} else
 					partlen = 0;
 				goto nospace;
@@ -777,7 +785,7 @@ nl_soreceive(struct socket *so, struct sockaddr **psa, struct uio *uio,
 			msgrcv++;
 		}
 		MPASS(offset == nb->datalen);
-		datalen += nb->datalen;
+		datalen += nb->datalen - nb->offset;
 	}
 nospace:
 	last = nb;
@@ -789,6 +797,7 @@ nospace:
 			TAILQ_FIRST(&sb->nl_queue) = last;
 			last->tailq.tqe_prev = &TAILQ_FIRST(&sb->nl_queue);
 		}
+		MPASS(sb->sb_acc >= datalen);
 		sb->sb_acc -= datalen;
 		sb->sb_ccc -= datalen;
 	}
