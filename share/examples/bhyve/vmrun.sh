@@ -53,7 +53,11 @@ errmsg() {
 usage() {
 	local msg=$1
 
+<<<<<<< HEAD
 	echo "Usage: vmrun.sh [-aAEhiSTv] [-c <CPUs>] [-C <console>]" \
+=======
+	echo "Usage: vmrun.sh [-aAEhiTuvw] [-c <CPUs>] [-C <console>]" \
+>>>>>>> internal/freebsd/13-stable/main
 	    "[-d <disk file>]"
 	echo "                [-e <name=value>] [-f <path of firmware>]" \
 	    "[-F <size>]"
@@ -62,7 +66,12 @@ usage() {
 	echo "                [-L <VNC IP for UEFI framebuffer>]"
 	echo "                [-m <memsize>]" \
 	    "[-n <network adapter emulation type>]"
+<<<<<<< HEAD
 	echo "                [-P <port>] [-s password] [-t <tapdev>] <vmname>"
+=======
+	echo "                [-p <pcidev|bus/slot/func>]"
+	echo "                [-P <port>] [-t <tapdev>] <vmname>"
+>>>>>>> internal/freebsd/13-stable/main
 	echo ""
 	echo "       -h: display this help message"
 	echo "       -a: force memory mapped local APIC access"
@@ -86,8 +95,8 @@ usage() {
 	echo "       -m: memory size (default: ${DEFAULT_MEMSIZE})"
 	echo "       -n: network adapter emulation type" \
 	    "(default: ${DEFAULT_NIC})"
-	echo "       -p: pass-through a host PCI device at bus/slot/func" \
-	    "(e.g. 10/0/0)"
+	echo "       -p: pass-through a host PCI device (e.g ppt0 or" \
+	    "bus/slot/func)"
 	echo "       -P: UEFI GOP VNC port (default: ${DEFAULT_VNCPORT})"
 	echo "       -s: UEFI GOP VNC password"
 	echo "       -S: Unconditionally wire guest memory"
@@ -362,10 +371,21 @@ while [ 1 ]; do
 
 	i=0
 	while [ $i -lt $pass_total ] ; do
-	    eval "pass=\$pass_dev${i}"
-	    devargs="$devargs -s $nextslot:0,passthru,${pass} "
-	    nextslot=$(($nextslot + 1))
-	    i=$(($i + 1))
+		eval "pass=\$pass_dev${i}"
+		bsfform="$(echo "${pass}" | grep "^[0-9]\+/[0-9]\+/[0-9]\+$")"
+		if [ -z "${bsfform}" ]; then
+			bsf="$(pciconf -l "${pass}" 2>/dev/null)"
+			if [ $? -ne 0 ]; then
+				errmsg "${pass} is not a host PCI device"
+				exit 1
+			fi
+			bsf="$(echo "${bsf}" | awk -F: '{print $2"/"$3"/"$4}')"
+		else
+			bsf="${pass}"
+		fi
+		devargs="$devargs -s $nextslot:0,passthru,${bsf} "
+		nextslot=$(($nextslot + 1))
+		i=$(($i + 1))
         done
 
 	efiargs=""
