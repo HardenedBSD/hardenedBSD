@@ -2683,8 +2683,8 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 }
 
 SYSCTL_PROC(_vm, OID_AUTO, objects, CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP |
-    CTLFLAG_MPSAFE, NULL, 0, sysctl_vm_object_list, "S,kinfo_vmobject",
-    "List of VM objects");
+    CTLFLAG_ROOTONLY | CTLFLAG_MPSAFE, NULL, 0, sysctl_vm_object_list,
+    "S,kinfo_vmobject", "List of VM objects");
 
 static int
 sysctl_vm_object_list_swap(SYSCTL_HANDLER_ARGS)
@@ -2700,8 +2700,8 @@ sysctl_vm_object_list_swap(SYSCTL_HANDLER_ARGS)
  * pager, we must report them.
  */
 SYSCTL_PROC(_vm, OID_AUTO, swap_objects,
-    CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP | CTLFLAG_MPSAFE, NULL, 0,
-    sysctl_vm_object_list_swap, "S,kinfo_vmobject",
+    CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP | CTLFLAG_MPSAFE |
+    CTLFLAG_ROOTONLY, NULL, 0, sysctl_vm_object_list_swap, "S,kinfo_vmobject",
     "List of swap VM objects");
 
 #include "opt_ddb.h"
