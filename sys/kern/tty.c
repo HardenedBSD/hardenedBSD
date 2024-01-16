@@ -1681,7 +1681,7 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		/* This device supports non-blocking operation. */
 		return (0);
 	case FIONREAD:
-		*(int *)data = ttyinq_bytescanonicalized(&tp->t_inq);
+		*(int *)data = ttydisc_bytesavail(tp);
 		return (0);
 	case FIONWRITE:
 	case TIOCOUTQ:
@@ -1713,6 +1713,7 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 	case TIOCSETAW:
 	case TIOCSETAF: {
 		struct termios *t = data;
+		bool canonicalize = false;
 
 		/*
 		 * Who makes up these funny rules? According to POSIX,
@@ -1762,6 +1763,19 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 				return (error);
 		}
 
+		/*
+		 * We'll canonicalize any partial input if we're transitioning
+		 * ICANON one way or the other.  If we're going from -ICANON ->
+		 * ICANON, then in the worst case scenario we're in the middle
+		 * of a line but both ttydisc_read() and FIONREAD will search
+		 * for one of our line terminals.
+		 */
+		if ((t->c_lflag & ICANON) != (tp->t_termios.c_lflag & ICANON))
+			canonicalize = true;
+		else if (tp->t_termios.c_cc[VEOF] != t->c_cc[VEOF] ||
+		    tp->t_termios.c_cc[VEOL] != t->c_cc[VEOL])
+			canonicalize = true;
+
 		/* Copy new non-device driver parameters. */
 		tp->t_termios.c_iflag = t->c_iflag;
 		tp->t_termios.c_oflag = t->c_oflag;
@@ -1770,13 +1784,15 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 
 		ttydisc_optimize(tp);
 
+		if (canonicalize)
+			ttydisc_canonicalize(tp);
 		if ((t->c_lflag & ICANON) == 0) {
 			/*
 			 * When in non-canonical mode, wake up all
-			 * readers. Canonicalize any partial input. VMIN
-			 * and VTIME could also be adjusted.
+			 * readers. Any partial input has already been
+			 * canonicalized above if we were in canonical mode.
+			 * VMIN and VTIME could also be adjusted.
 			 */
-			ttyinq_canonicalize(&tp->t_inq);
 			tty_wakeup(tp, FREAD);
 		}
 
