@@ -169,6 +169,8 @@
         ..
         hyperv
         ..
+        kgdb
+        ..
         lpr
             ru
             ..
