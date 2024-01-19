@@ -36,7 +36,6 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/linker.h>
-#include <sys/firmware.h>
 #include <sys/bus.h>
 #include <sys/stdint.h>
 #include <dev/pci/pcireg.h>
@@ -97,6 +96,16 @@ static struct ispmdvec mdvec_2700 = {
 	NULL
 };
 
+static struct ispmdvec mdvec_2800 = {
+	isp_pci_run_isr_2400,
+	isp_pci_rd_reg_2600,
+	isp_pci_wr_reg_2600,
+	isp_pci_mbxdma,
+	isp_send_cmd,
+	isp_pci_irqsetup,
+	NULL
+};
+
 #ifndef	PCIM_CMD_INVEN
 #define	PCIM_CMD_INVEN			0x10
 #endif
@@ -141,6 +150,8 @@ static struct ispmdvec mdvec_2700 = {
 #define	PCI_PRODUCT_QLOGIC_ISP2692	0x2b61
 #define	PCI_PRODUCT_QLOGIC_ISP2714	0x2071
 #define	PCI_PRODUCT_QLOGIC_ISP2722	0x2261
+#define	PCI_PRODUCT_QLOGIC_ISP2812	0x2281
+#define	PCI_PRODUCT_QLOGIC_ISP2814	0x2081
 
 #define	PCI_QLOGIC_ISP2422	\
 	((PCI_PRODUCT_QLOGIC_ISP2422 << 16) | PCI_VENDOR_QLOGIC)
@@ -162,6 +173,10 @@ static struct ispmdvec mdvec_2700 = {
 	((PCI_PRODUCT_QLOGIC_ISP2714 << 16) | PCI_VENDOR_QLOGIC)
 #define	PCI_QLOGIC_ISP2722	\
 	((PCI_PRODUCT_QLOGIC_ISP2722 << 16) | PCI_VENDOR_QLOGIC)
+#define	PCI_QLOGIC_ISP2812	\
+	((PCI_PRODUCT_QLOGIC_ISP2812 << 16) | PCI_VENDOR_QLOGIC)
+#define	PCI_QLOGIC_ISP2814	\
+	((PCI_PRODUCT_QLOGIC_ISP2814 << 16) | PCI_VENDOR_QLOGIC)
 
 #define	PCI_DFLT_LTNCY	0x40
 #define	PCI_DFLT_LNSZ	0x10
@@ -242,6 +257,12 @@ isp_pci_probe(device_t dev)
 		break;
 	case PCI_QLOGIC_ISP2722:
 		device_set_desc(dev, "Qlogic ISP 2722 PCI FC Adapter");
+		break;
+	case PCI_QLOGIC_ISP2812:
+		device_set_desc(dev, "Qlogic ISP 2812 PCI FC Adapter");
+		break;
+	case PCI_QLOGIC_ISP2814:
+		device_set_desc(dev, "Qlogic ISP 2814 PCI FC Adapter");
 		break;
 	default:
 		return (ENXIO);
@@ -441,9 +462,8 @@ isp_pci_attach(device_t dev)
 	struct isp_pcisoftc *pcs = device_get_softc(dev);
 	ispsoftc_t *isp = &pcs->pci_isp;
 	int i;
-	uint32_t data, cmd, linesz, did;
+	uint32_t data, cmd, linesz;
 	size_t psize, xsize;
-	char fwname[32];
 
 	isp->isp_dev = dev;
 	isp->isp_nchan = 1;
@@ -463,23 +483,23 @@ isp_pci_attach(device_t dev)
 	switch (pci_get_devid(dev)) {
 	case PCI_QLOGIC_ISP2422:
 	case PCI_QLOGIC_ISP2432:
-		did = 0x2400;
+		isp->isp_did = 0x2400;
 		isp->isp_mdvec = &mdvec_2400;
 		isp->isp_type = ISP_HA_FC_2400;
 		break;
 	case PCI_QLOGIC_ISP2532:
-		did = 0x2500;
+		isp->isp_did = 0x2500;
 		isp->isp_mdvec = &mdvec_2500;
 		isp->isp_type = ISP_HA_FC_2500;
 		break;
 	case PCI_QLOGIC_ISP5432:
-		did = 0x2500;
+		isp->isp_did = 0x2500;
 		isp->isp_mdvec = &mdvec_2500;
 		isp->isp_type = ISP_HA_FC_2500;
 		break;
 	case PCI_QLOGIC_ISP2031:
 	case PCI_QLOGIC_ISP8031:
-		did = 0x2600;
+		isp->isp_did = 0x2600;
 		isp->isp_mdvec = &mdvec_2600;
 		isp->isp_type = ISP_HA_FC_2600;
 		break;
@@ -487,9 +507,15 @@ isp_pci_attach(device_t dev)
 	case PCI_QLOGIC_ISP2692:
 	case PCI_QLOGIC_ISP2714:
 	case PCI_QLOGIC_ISP2722:
-		did = 0x2700;
+		isp->isp_did = 0x2700;
 		isp->isp_mdvec = &mdvec_2700;
 		isp->isp_type = ISP_HA_FC_2700;
+		break;
+	case PCI_QLOGIC_ISP2812:
+	case PCI_QLOGIC_ISP2814:
+		isp->isp_did = 0x2800;
+		isp->isp_mdvec = &mdvec_2800;
+		isp->isp_type = ISP_HA_FC_2800;
 		break;
 	default:
 		device_printf(dev, "unknown device type\n");
@@ -554,16 +580,6 @@ isp_pci_attach(device_t dev)
 		isp_get_specific_options(dev, i, isp);
 	}
 
-	isp->isp_osinfo.fw = NULL;
-	if (isp->isp_osinfo.fw == NULL) {
-		snprintf(fwname, sizeof (fwname), "isp_%04x", did);
-		isp->isp_osinfo.fw = firmware_get(fwname);
-	}
-	if (isp->isp_osinfo.fw != NULL) {
-		isp_prt(isp, ISP_LOGCONFIG, "loaded firmware %s", fwname);
-		isp->isp_mdvec->dv_ispfw = isp->isp_osinfo.fw->data;
-	}
-
 	/*
 	 * Make sure that SERR, PERR, WRITE INVALIDATE and BUSMASTER are set.
 	 */
@@ -622,15 +638,6 @@ isp_pci_attach(device_t dev)
 	return (0);
 
 bad:
-	if (isp->isp_osinfo.fw == NULL && !IS_26XX(isp)) {
-		/*
-		 * Failure to attach at boot time might have been caused
-		 * by a missing ispfw(4).  Except for 16Gb adapters,
-		 * there's no loadable firmware for them.
-		 */
-		isp_prt(isp, ISP_LOGWARN, "See the ispfw(4) man page on "
-		    "how to load known good firmware at boot time");
-	}
 	for (i = 0; i < isp->isp_nirq; i++) {
 		(void) bus_teardown_intr(dev, pcs->irq[i].irq, pcs->irq[i].ih);
 		(void) bus_release_resource(dev, SYS_RES_IRQ, pcs->irq[i].iqd,
