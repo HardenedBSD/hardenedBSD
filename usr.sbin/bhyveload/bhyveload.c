@@ -78,6 +78,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <capsicum_helpers.h>
 #include <vmmapi.h>
 
 #include "userboot.h"
@@ -88,17 +89,25 @@
 
 #define	NDISKS	32
 
+/*
+ * Reason for our loader reload and reentry, though these aren't really used
+ * at the moment.
+ */
+enum {
+	/* 0 cannot be allocated; setjmp(3) return. */
+	JMP_SWAPLOADER = 0x01,
+	JMP_REBOOT,
+};
+
 static struct termios term, oldterm;
 static int disk_fd[NDISKS];
 static int ndisks;
 static int consin_fd, consout_fd;
 static int hostbase_fd = -1;
 
-static int need_reinit;
-
 static void *loader_hdl;
 static char *loader;
-static int explicit_loader;
+static int explicit_loader_fd = -1;
 static jmp_buf jb;
 
 static char *vmname, *progname;
@@ -543,6 +552,8 @@ cb_exit(void *arg __unused, int v)
 {
 
 	tcsetattr(consout_fd, TCSAFLUSH, &oldterm);
+	if (v == USERBOOT_EXIT_REBOOT)
+		longjmp(jb, JMP_REBOOT);
 	exit(v);
 }
 
@@ -615,7 +626,7 @@ cb_swap_interpreter(void *arg __unused, const char *interp_req)
 	 * not try to pivot to a different loader on them.
 	 */
 	free(loader);
-	if (explicit_loader == 1) {
+	if (explicit_loader_fd != -1) {
 		perror("requested loader interpreter does not match guest userboot");
 		cb_exit(NULL, 1);
 	}
@@ -624,10 +635,9 @@ cb_swap_interpreter(void *arg __unused, const char *interp_req)
 		cb_exit(NULL, 1);
 	}
 
-	if (asprintf(&loader, "/boot/userboot_%s.so", interp_req) == -1)
+	if (asprintf(&loader, "userboot_%s.so", interp_req) == -1)
 		err(EX_OSERR, "malloc");
-	need_reinit = 1;
-	longjmp(jb, 1);
+	longjmp(jb, JMP_SWAPLOADER);
 }
 
 static struct loader_callbacks cb = {
@@ -733,12 +743,43 @@ usage(void)
 static void
 hostbase_open(const char *base)
 {
+	cap_rights_t rights;
 
 	if (hostbase_fd != -1)
 		close(hostbase_fd);
 	hostbase_fd = open(base, O_DIRECTORY | O_PATH);
 	if (hostbase_fd == -1)
 		err(EX_OSERR, "open");
+
+	if (caph_rights_limit(hostbase_fd, cap_rights_init(&rights, CAP_FSTATAT,
+	    CAP_LOOKUP, CAP_PREAD)) < 0)
+		err(EX_OSERR, "caph_rights_limit");
+}
+
+static void
+loader_open(int bootfd)
+{
+	int fd;
+
+	if (loader == NULL) {
+		loader = strdup("userboot.so");
+		if (loader == NULL)
+			err(EX_OSERR, "malloc");
+	}
+
+	assert(bootfd >= 0 || explicit_loader_fd >= 0);
+	if (explicit_loader_fd >= 0)
+		fd = explicit_loader_fd;
+	else
+		fd = openat(bootfd, loader, O_RDONLY | O_RESOLVE_BENEATH);
+	if (fd == -1)
+		err(EX_OSERR, "openat");
+
+	loader_hdl = fdlopen(fd, RTLD_LOCAL);
+	if (!loader_hdl)
+		errx(EX_OSERR, "dlopen: %s", dlerror());
+	if (fd != explicit_loader_fd)
+		close(fd);
 }
 
 int
@@ -746,8 +787,9 @@ main(int argc, char** argv)
 {
 	void (*func)(struct loader_callbacks *, void *, int, int);
 	uint64_t mem_size;
-	int opt, error, memflags;
+	int bootfd, opt, error, memflags, need_reinit;
 
+	bootfd = -1;
 	progname = basename(argv[0]);
 
 	memflags = 0;
@@ -784,7 +826,9 @@ main(int argc, char** argv)
 			loader = strdup(optarg);
 			if (loader == NULL)
 				err(EX_OSERR, "malloc");
-			explicit_loader = 1;
+			explicit_loader_fd = open(loader, O_RDONLY);
+			if (explicit_loader_fd == -1)
+				err(EX_OSERR, "%s", loader);
 			break;
 
 		case 'm':
@@ -814,60 +858,67 @@ main(int argc, char** argv)
 	need_reinit = 0;
 	error = vm_create(vmname);
 	if (error) {
-		if (errno != EEXIST) {
-			perror("vm_create");
-			exit(1);
-		}
+		if (errno != EEXIST)
+			err(1, "vm_create");
 		need_reinit = 1;
 	}
 
 	ctx = vm_open(vmname);
-	if (ctx == NULL) {
-		perror("vm_open");
-		exit(1);
+	if (ctx == NULL)
+		err(1, "vm_open");
+
+	/*
+	 * If we weren't given an explicit loader to use, we need to support the
+	 * guest requesting a different one.
+	 */
+	if (explicit_loader_fd == -1) {
+		cap_rights_t rights;
+
+		bootfd = open("/boot", O_DIRECTORY | O_PATH);
+		if (bootfd == -1)
+			err(1, "open");
+
+		/*
+		 * bootfd will be used to do a lookup of our loader and do an
+		 * fdlopen(3) on the loader; thus, we need mmap(2) in addition
+		 * to the more usual lookup rights.
+		 */
+		if (caph_rights_limit(bootfd, cap_rights_init(&rights,
+		    CAP_FSTATAT, CAP_LOOKUP, CAP_MMAP_RX, CAP_PREAD)) < 0)
+			err(1, "caph_rights_limit");
 	}
+
+	caph_cache_catpages();
+	if (caph_enter() < 0)
+		err(1, "caph_enter");
 
 	/*
 	 * setjmp in the case the guest wants to swap out interpreter,
 	 * cb_swap_interpreter will swap out loader as appropriate and set
 	 * need_reinit so that we end up in a clean state once again.
 	 */
-	setjmp(jb);
+	if (setjmp(jb) != 0) {
+		dlclose(loader_hdl);
+		loader_hdl = NULL;
+
+		need_reinit = 1;
+	}
 
 	if (need_reinit) {
 		error = vm_reinit(ctx);
-		if (error) {
-			perror("vm_reinit");
-			exit(1);
-		}
+		if (error)
+			err(1, "vm_reinit");
 	}
 
 	vm_set_memflags(ctx, memflags);
 	error = vm_setup_memory(ctx, mem_size, VM_MMAP_ALL);
-	if (error) {
-		perror("vm_setup_memory");
-		exit(1);
-	}
+	if (error)
+		err(1, "vm_setup_memory");
 
-	if (loader == NULL) {
-		loader = strdup("/boot/userboot.so");
-		if (loader == NULL)
-			err(EX_OSERR, "malloc");
-	}
-	if (loader_hdl != NULL)
-		dlclose(loader_hdl);
-	loader_hdl = dlopen(loader, RTLD_LOCAL);
-	if (!loader_hdl) {
-		printf("%s\n", dlerror());
-		free(loader);
-		return (1);
-	}
+	loader_open(bootfd);
 	func = dlsym(loader_hdl, "loader_main");
-	if (!func) {
-		printf("%s\n", dlerror());
-		free(loader);
-		return (1);
-	}
+	if (!func)
+		errx(1, "dlsym: %s", dlerror());
 
 	tcgetattr(consout_fd, &term);
 	oldterm = term;
