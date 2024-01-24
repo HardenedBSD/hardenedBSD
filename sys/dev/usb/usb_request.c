@@ -27,6 +27,8 @@
  * SUCH DAMAGE.
  */ 
 
+#include "opt_pax.h"
+
 #ifdef USB_GLOBAL_INCLUDE_FILE
 #include USB_GLOBAL_INCLUDE_FILE
 #else
@@ -70,6 +72,50 @@
 #include <dev/usb/usb_bus.h>
 #include <sys/ctype.h>
 #endif			/* USB_GLOBAL_INCLUDE_FILE */
+
+#ifdef PAX_HARDENING
+/*
+ * Acceptable values:
+ * 	0: disabled
+ * 	1: enabled
+ * 	2: enabled without possibility to disable
+ */
+static int prohibit_new_usb = 0;
+
+static int sysctl_prohibit_new_usb(SYSCTL_HANDLER_ARGS);
+
+SYSCTL_DECL(_hardening);
+SYSCTL_DECL(_hardening_pax);
+
+SYSCTL_PROC(_hardening_pax, OID_AUTO, prohibit_new_usb,
+    CTLTYPE_INT | CTLFLAG_RWTUN, NULL, 0,
+    sysctl_prohibit_new_usb, "I",
+    "Prohibit new USB device attachments");
+
+static int
+sysctl_prohibit_new_usb(SYSCTL_HANDLER_ARGS)
+{
+	int err, val;
+
+	val = prohibit_new_usb;
+	err = sysctl_handle_int(oidp, &val, sizeof(val), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (prohibit_new_usb == 2) {
+		return (EPERM);
+	}
+
+	if (val < 0 || val > 2) {
+		return (EINVAL);
+	}
+
+	prohibit_new_usb = val;
+
+	return (0);
+}
+#endif
 
 static int usb_no_cs_fail;
 
@@ -1571,6 +1617,12 @@ usbd_req_set_address(struct usb_device *udev, struct mtx *mtx, uint16_t addr)
 {
 	struct usb_device_request req;
 	usb_error_t err;
+
+#ifdef PAX_HARDENING
+	if (prohibit_new_usb) {
+		return (USB_ERR_INVAL);
+	}
+#endif
 
 	DPRINTFN(6, "setting device address=%d\n", addr);
 

@@ -1,3 +1,20 @@
+[20240124] Provide mechanism to disable new USB connections
+__HardenedBSD_version = 1500001
+
+	HBSD: Provide support for prohibiting new USB device connections
+
+	This commit introduces the hardening.pax.prohibit_new_usb sysctl
+	tunable node. This node can be set to one of three values:
+
+	0: Disabled
+	1: Enabled
+	2: Enabled without possibility to disable
+
+	When set to 2, a reboot is required to end the prohibition on new USB
+	connections.
+
+	This is based on a patch by Loic F <loic.f@hardenedbsd.org>.
+
 [20230826] Catch up with FreeBSD version bump to 15
 __HardenedBSD_version = 1500000
 

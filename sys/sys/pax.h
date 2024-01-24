@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2023 by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2024 by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,7 @@
 #ifndef	_SYS_PAX_H
 #define	_SYS_PAX_H
 
-#define	__HardenedBSD_version	1500000UL
+#define	__HardenedBSD_version	1500001UL
 
 #if defined(_KERNEL) || defined(_WANT_PRISON)
 typedef	uint32_t	pax_state_t;
