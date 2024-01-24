@@ -651,8 +651,7 @@ after_sack_rexmit:
 	 * Don't send an independent window update if a delayed
 	 * ACK is pending (it will get piggy-backed on it) or the
 	 * remote side already has done a half-close and won't send
-	 * more data.  Skip this if the connection is in T/TCP
-	 * half-open state.
+	 * more data.
 	 */
 	if (recwin > 0 && !(tp->t_flags & TF_NEEDSYN) &&
 	    !(tp->t_flags & TF_DELACK) &&
@@ -1720,16 +1719,6 @@ timer:
 	tp->t_flags &= ~(TF_ACKNOW | TF_DELACK);
 	if (tcp_timer_active(tp, TT_DELACK))
 		tcp_timer_activate(tp, TT_DELACK, 0);
-#if 0
-	/*
-	 * This completely breaks TCP if newreno is turned on.  What happens
-	 * is that if delayed-acks are turned on on the receiver, this code
-	 * on the transmitter effectively destroys the TCP window, forcing
-	 * it to four packets (1.5Kx4 = 6K window).
-	 */
-	if (sendalot && --maxburst)
-		goto again;
-#endif
 	if (sendalot)
 		goto again;
 	return (0);
