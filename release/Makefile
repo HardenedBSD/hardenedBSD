@@ -77,12 +77,12 @@ VOLUME_LABEL=	${VENDOR_NAME}_Install
 NOPORTS= true
 .endif
 
-EXTRA_PACKAGES=
+DISTRIBUTIONS= base.txz kernel.txz
 .if !defined(NOPORTS)
-EXTRA_PACKAGES+= ports.txz
+DISTRIBUTIONS+= ports.txz
 .endif
 .if !defined(NOSRC)
-EXTRA_PACKAGES+= src.txz
+DISTRIBUTIONS+= src.txz
 .endif
 
 RELEASE_TARGETS= ftp
@@ -299,7 +299,7 @@ mini-memstick: mini-memstick.img
 mini-memstick.img: bootonly
 	cd bootonly && sh ${.CURDIR}/${TARGET}/make-memstick.sh .${NO_ROOT:D/METALOG} ../${.TARGET}
 
-packagesystem: base.txz kernel.txz ${EXTRA_PACKAGES}
+packagesystem: ${DISTRIBUTIONS}
 	sh ${.CURDIR}/scripts/make-manifest.sh *.txz > MANIFEST
 	touch ${.TARGET}
 
