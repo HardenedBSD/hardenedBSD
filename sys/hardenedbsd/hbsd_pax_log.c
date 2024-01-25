@@ -286,8 +286,12 @@ pax_log_log(struct proc *p, struct thread *td, pax_log_settings_t flags,
 	sbuf_vprintf(sb, fmt, ap);
 	if ((flags & PAX_LOG_SKIP_DETAILS) != PAX_LOG_SKIP_DETAILS) {
 		_pax_log_indent(sb, flags);
-		_pax_log_proc_details(sb, flags, p);
-		_pax_log_thread_details(sb, flags, td);
+		if (p != NULL) {
+			_pax_log_proc_details(sb, flags, p);
+		}
+		if (td != NULL) {
+			_pax_log_thread_details(sb, flags, td);
+		}
 		_pax_log_details_end(sb);
 	}
 
