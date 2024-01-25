@@ -49,6 +49,7 @@
 #include <sys/unistd.h>
 #include <sys/callout.h>
 #include <sys/malloc.h>
+#include <sys/pax.h>
 #include <sys/priv.h>
 
 #include <dev/usb/usb.h>
@@ -1620,6 +1621,17 @@ usbd_req_set_address(struct usb_device *udev, struct mtx *mtx, uint16_t addr)
 
 #ifdef PAX_HARDENING
 	if (prohibit_new_usb) {
+		pax_log_internal(NULL, PAX_LOG_SKIP_DETAILS,
+		    "Prohibiting new USB device connection: "
+		    "addr=%d, rev=%02x, class=%d, "
+		    "subclass=%d, protocol=%d, maxpacket=%d, len=%d, speed=%d\n",
+		    addr, UGETW(udev->ddesc.bcdUSB),
+		    udev->ddesc.bDeviceClass,
+		    udev->ddesc.bDeviceSubClass,
+		    udev->ddesc.bDeviceProtocol,
+		    udev->ddesc.bMaxPacketSize,
+		    udev->ddesc.bLength,
+		    udev->speed);
 		return (USB_ERR_INVAL);
 	}
 #endif
