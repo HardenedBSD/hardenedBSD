@@ -330,9 +330,6 @@ again:
 			    __func__, off));
 			sack_rxmit = 1;
 			sendalot = 1;
-			TCPSTAT_INC(tcps_sack_rexmits);
-			TCPSTAT_ADD(tcps_sack_rexmit_bytes,
-			    min(len, tcp_maxseg(tp)));
 		}
 	}
 after_sack_rexmit:
@@ -395,10 +392,10 @@ after_sack_rexmit:
 	 * in which case len is already set.
 	 */
 	if (sack_rxmit == 0) {
-		if (sack_bytes_rxmt == 0)
+		if (sack_bytes_rxmt == 0) {
 			len = ((int32_t)min(sbavail(&so->so_snd), sendwin) -
 			    off);
-		else {
+		} else {
 			int32_t cwin;
 
 			/*
@@ -561,12 +558,8 @@ after_sack_rexmit:
 	    ipoptlen == 0 && !(flags & TH_SYN))
 		tso = 1;
 
-	if (sack_rxmit) {
-		if (SEQ_LT(p->rxmit + len, tp->snd_una + sbused(&so->so_snd)))
-			flags &= ~TH_FIN;
-	} else {
-		if (SEQ_LT(tp->snd_nxt + len, tp->snd_una +
-		    sbused(&so->so_snd)))
+	if (SEQ_LT((sack_rxmit ? p->rxmit : tp->snd_nxt) + len,
+		    tp->snd_una + sbused(&so->so_snd))) {
 			flags &= ~TH_FIN;
 	}
 
@@ -1036,6 +1029,10 @@ send:
 			tp->t_sndrexmitpack++;
 			TCPSTAT_INC(tcps_sndrexmitpack);
 			TCPSTAT_ADD(tcps_sndrexmitbyte, len);
+			if (sack_rxmit) {
+				TCPSTAT_INC(tcps_sack_rexmits);
+				TCPSTAT_ADD(tcps_sack_rexmit_bytes, len);
+			}
 #ifdef STATS
 			stats_voi_update_abs_u32(tp->t_stats, VOI_TCP_RETXPB,
 			    len);
