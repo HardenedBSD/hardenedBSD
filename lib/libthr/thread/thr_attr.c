@@ -117,8 +117,7 @@ _thr_attr_destroy(pthread_attr_t *attr)
 	if (attr == NULL || *attr == NULL)
 		return (EINVAL);
 
-	if ((*attr)->cpuset != NULL)
-		free((*attr)->cpuset);
+	free((*attr)->cpuset);
 	free(*attr);
 	*attr = NULL;
 	return (0);
@@ -130,8 +129,9 @@ __weak_reference(_thr_attr_get_np, _pthread_attr_get_np);
 int
 _thr_attr_get_np(pthread_t pthread, pthread_attr_t *dstattr)
 {
-	struct pthread_attr attr, *dst;
+	struct pthread_attr *dst;
 	struct pthread *curthread;
+	cpuset_t *cpuset;
 	size_t kern_size;
 	int error;
 
@@ -139,35 +139,43 @@ _thr_attr_get_np(pthread_t pthread, pthread_attr_t *dstattr)
 		return (EINVAL);
 
 	kern_size = _get_kern_cpuset_size();
-
 	if (dst->cpuset == NULL) {
-		dst->cpuset = calloc(1, kern_size);
-		dst->cpusetsize = kern_size;
-	}
+		if ((cpuset = malloc(kern_size)) == NULL)
+			return (ENOMEM);
+	} else
+		cpuset = dst->cpuset;
 
 	curthread = _get_curthread();
 	/* Arg 0 is to include dead threads. */
 	if ((error = _thr_find_thread(curthread, pthread, 0)) != 0)
-		return (error);
-
-	attr = pthread->attr;
-	if (pthread->flags & THR_FLAGS_DETACHED)
-		attr.flags |= PTHREAD_DETACHED;
+		goto free_and_exit;
 
 	error = cpuset_getaffinity(CPU_LEVEL_WHICH, CPU_WHICH_TID, TID(pthread),
-	    dst->cpusetsize, dst->cpuset);
-	if (error == -1)
+	    kern_size, cpuset);
+	if (error == -1) {
+		THR_THREAD_UNLOCK(curthread, pthread);
 		error = errno;
+		goto free_and_exit;
+	}
+
+	/*
+	 * From this point on, we can't fail, so we can start modifying 'dst'.
+	 */
+
+	*dst = pthread->attr;
+	if ((pthread->flags & THR_FLAGS_DETACHED) != 0)
+		dst->flags |= PTHREAD_DETACHED;
 
 	THR_THREAD_UNLOCK(curthread, pthread);
 
-	if (error == 0)
-		memcpy(&dst->pthread_attr_start_copy,
-		    &attr.pthread_attr_start_copy,
-		    offsetof(struct pthread_attr, pthread_attr_end_copy) -
-		    offsetof(struct pthread_attr, pthread_attr_start_copy));
-
+	dst->cpuset = cpuset;
+	dst->cpusetsize = kern_size;
 	return (0);
+
+free_and_exit:
+	if (dst->cpuset == NULL)
+		free(cpuset);
+	return (error);
 }
 
 __weak_reference(_thr_attr_getdetachstate, pthread_attr_getdetachstate);
@@ -180,7 +188,7 @@ _thr_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate)
 	if (attr == NULL || *attr == NULL || detachstate == NULL)
 		return (EINVAL);
 
-	if ((*attr)->flags & PTHREAD_DETACHED)
+	if (((*attr)->flags & PTHREAD_DETACHED) != 0)
 		*detachstate = PTHREAD_CREATE_DETACHED;
 	else
 		*detachstate = PTHREAD_CREATE_JOINABLE;
@@ -258,7 +266,7 @@ _thr_attr_getscope(const pthread_attr_t * __restrict attr,
 	if (attr == NULL || *attr == NULL || contentionscope == NULL)
 		return (EINVAL);
 
-	*contentionscope = (*attr)->flags & PTHREAD_SCOPE_SYSTEM ?
+	*contentionscope = ((*attr)->flags & PTHREAD_SCOPE_SYSTEM) != 0 ?
 	    PTHREAD_SCOPE_SYSTEM : PTHREAD_SCOPE_PROCESS;
 	return (0);
 }
@@ -321,7 +329,7 @@ _thr_attr_init(pthread_attr_t *attr)
 	if ((pattr = malloc(sizeof(*pattr))) == NULL)
 		return (ENOMEM);
 
-	memcpy(pattr, &_pthread_attr_default, sizeof(struct pthread_attr));
+	memcpy(pattr, &_pthread_attr_default, sizeof(*pattr));
 	*attr = pattr;
 	return (0);
 }
@@ -449,7 +457,7 @@ _thr_attr_setscope(pthread_attr_t *attr, int contentionscope)
 		return (EINVAL);
 
 	if (contentionscope == PTHREAD_SCOPE_SYSTEM)
-		(*attr)->flags |= contentionscope;
+		(*attr)->flags |= PTHREAD_SCOPE_SYSTEM;
 	else
 		(*attr)->flags &= ~PTHREAD_SCOPE_SYSTEM;
 	return (0);
@@ -546,12 +554,13 @@ _pthread_attr_setaffinity_np(pthread_attr_t *pattr, size_t cpusetsize,
 	if (cpusetsize > kern_size) {
 		/* Kernel checks invalid bits, we check it here too. */
 		size_t i;
+
 		for (i = kern_size; i < cpusetsize; ++i)
 			if (((const char *)cpusetp)[i] != 0)
 				return (EINVAL);
 	}
 	if (attr->cpuset == NULL) {
-		attr->cpuset = calloc(1, kern_size);
+		attr->cpuset = malloc(kern_size);
 		if (attr->cpuset == NULL)
 			return (errno);
 		attr->cpusetsize = kern_size;
