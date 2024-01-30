@@ -1461,8 +1461,12 @@ calculate_padding(struct wg_packet *pkt)
 {
 	unsigned int padded_size, last_unit = pkt->p_mbuf->m_pkthdr.len;
 
-	if (__predict_false(!pkt->p_mtu))
-		return (last_unit + (WG_PKT_PADDING - 1)) & ~(WG_PKT_PADDING - 1);
+	/* Keepalive packets don't set p_mtu, but also have a length of zero. */
+	if (__predict_false(pkt->p_mtu == 0)) {
+		padded_size = (last_unit + (WG_PKT_PADDING - 1)) &
+		    ~(WG_PKT_PADDING - 1);
+		return (padded_size - last_unit);
+	}
 
 	if (__predict_false(last_unit > pkt->p_mtu))
 		last_unit %= pkt->p_mtu;
@@ -1470,7 +1474,7 @@ calculate_padding(struct wg_packet *pkt)
 	padded_size = (last_unit + (WG_PKT_PADDING - 1)) & ~(WG_PKT_PADDING - 1);
 	if (pkt->p_mtu < padded_size)
 		padded_size = pkt->p_mtu;
-	return padded_size - last_unit;
+	return (padded_size - last_unit);
 }
 
 static void
@@ -2870,6 +2874,7 @@ wg_clone_destroy(struct if_clone *ifc, if_t ifp, uint32_t flags)
 
 	if (cred != NULL)
 		crfree(cred);
+	bpfdetach(sc->sc_ifp);
 	if_detach(sc->sc_ifp);
 	if_free(sc->sc_ifp);
 
