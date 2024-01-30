@@ -426,11 +426,6 @@ SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCDeclVendor.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntime.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV1.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV2.cpp
-<<<<<<< HEAD
-SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCClassDescriptorV2.cpp
-SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCDeclVendor.cpp
-=======
->>>>>>> internal/freebsd/13-stable/main
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCTrampolineHandler.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCTypeEncodingParser.cpp
 SRCS+=		Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleThreadPlanStepThroughObjCTrampoline.cpp
