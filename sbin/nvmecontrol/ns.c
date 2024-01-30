@@ -416,8 +416,7 @@ nsactive(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
@@ -462,8 +461,7 @@ nsallocated(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
@@ -508,8 +506,7 @@ nscontrollers(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
@@ -570,8 +567,7 @@ nscreate(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&nsdata, 0, sizeof(nsdata));
@@ -583,14 +579,12 @@ nscreate(const struct cmd *f, int argc, char *argv[])
 		/* Default to the first format, whatever it is. */
 		nsdata.flbas = 0;
 		if (create_opt.lbaf != NONE) {
-			nsdata.flbas |= (create_opt.lbaf &
-			    NVME_NS_DATA_FLBAS_FORMAT_MASK)
-			    << NVME_NS_DATA_FLBAS_FORMAT_SHIFT;
+			nsdata.flbas |= NVMEF(NVME_NS_DATA_FLBAS_FORMAT,
+			    create_opt.lbaf);
 		}
 		if (create_opt.mset != NONE) {
-			nsdata.flbas |= (create_opt.mset &
-			    NVME_NS_DATA_FLBAS_EXTENDED_MASK)
-			    << NVME_NS_DATA_FLBAS_EXTENDED_SHIFT;
+			nsdata.flbas |= NVMEF(NVME_NS_DATA_FLBAS_EXTENDED,
+			    create_opt.mset);
 		}
 	}
 	if (create_opt.dps != NONE) {
@@ -599,22 +593,19 @@ nscreate(const struct cmd *f, int argc, char *argv[])
 		/* Default to protection disabled. */
 		nsdata.dps = 0;
 		if (create_opt.pi != NONE) {
-			nsdata.dps |= (create_opt.pi &
-			    NVME_NS_DATA_DPS_MD_START_MASK)
-			    << NVME_NS_DATA_DPS_MD_START_SHIFT;
+			nsdata.dps |= NVMEF(NVME_NS_DATA_DPS_MD_START,
+			    create_opt.pi);
 		}
 		if (create_opt.pil != NONE) {
-			nsdata.dps |= (create_opt.pil &
-			    NVME_NS_DATA_DPS_PIT_MASK)
-			    << NVME_NS_DATA_DPS_PIT_SHIFT;
+			nsdata.dps |= NVMEF(NVME_NS_DATA_DPS_PIT,
+			    create_opt.pil);
 		}
 	}
 	if (create_opt.nmic != NONE) {
 		nsdata.nmic = create_opt.nmic;
 	} else {
 		/* Allow namespaces sharing if Multi-Path I/O is supported. */
-		nsdata.nmic = cd.mic ? (NVME_NS_DATA_NMIC_MAY_BE_SHARED_MASK <<
-		     NVME_NS_DATA_NMIC_MAY_BE_SHARED_SHIFT) : 0;
+		nsdata.nmic = NVMEF(NVME_NS_DATA_NMIC_MAY_BE_SHARED, !!cd.mic);
 	}
 	nvme_namespace_data_swapbytes(&nsdata);
 
@@ -629,8 +620,7 @@ nscreate(const struct cmd *f, int argc, char *argv[])
 
 	if (nvme_completion_is_error(&pt.cpl)) {
 		errx(EX_IOERR, "namespace creation failed: %s",
-		    get_res_str((pt.cpl.status >> NVME_STATUS_SC_SHIFT) &
-		    NVME_STATUS_SC_MASK));
+		    get_res_str(NVMEV(NVME_STATUS_SC, pt.cpl.status)));
 	}
 	printf("namespace %d created\n", pt.cpl.cdw0);
 	exit(0);
@@ -666,8 +656,7 @@ nsdelete(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
@@ -683,8 +672,7 @@ nsdelete(const struct cmd *f, int argc, char *argv[])
 
 	if (nvme_completion_is_error(&pt.cpl)) {
 		errx(EX_IOERR, "namespace deletion failed: %s",
-		    get_res_str((pt.cpl.status >> NVME_STATUS_SC_SHIFT) &
-		    NVME_STATUS_SC_MASK));
+		    get_res_str(NVMEV(NVME_STATUS_SC, pt.cpl.status)));
 	}
 	printf("namespace %d deleted\n", nsid);
 	exit(0);
@@ -733,8 +721,7 @@ nsattach(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	if (attach_opt.ctrlrid == NONE) {
@@ -770,8 +757,7 @@ nsattach(const struct cmd *f, int argc, char *argv[])
 
 	if (nvme_completion_is_error(&pt.cpl)) {
 		errx(EX_IOERR, "namespace attach failed: %s",
-		    get_res_str((pt.cpl.status >> NVME_STATUS_SC_SHIFT) &
-		    NVME_STATUS_SC_MASK));
+		    get_res_str(NVMEV(NVME_STATUS_SC, pt.cpl.status)));
 	}
 	printf("namespace %d attached\n", nsid);
 	exit(0);
@@ -805,8 +791,7 @@ nsdetach(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	if (detach_opt.ctrlrid == NONE) {
@@ -849,8 +834,7 @@ nsdetach(const struct cmd *f, int argc, char *argv[])
 
 	if (nvme_completion_is_error(&pt.cpl)) {
 		errx(EX_IOERR, "namespace detach failed: %s",
-		    get_res_str((pt.cpl.status >> NVME_STATUS_SC_SHIFT) &
-		    NVME_STATUS_SC_MASK));
+		    get_res_str(NVMEV(NVME_STATUS_SC, pt.cpl.status)));
 	}
 	printf("namespace %d detached\n", nsid);
 	exit(0);
@@ -884,8 +868,7 @@ nsattached(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
@@ -938,8 +921,7 @@ nsidentify(const struct cmd *f, int argc, char *argv[])
 		errx(EX_IOERR, "Identify request failed");
 
 	/* Check that controller can execute this command. */
-	if (((cd.oacs >> NVME_CTRLR_DATA_OACS_NSMGMT_SHIFT) &
-	    NVME_CTRLR_DATA_OACS_NSMGMT_MASK) == 0)
+	if (NVMEV(NVME_CTRLR_DATA_OACS_NSMGMT, cd.oacs) == 0)
 		errx(EX_UNAVAILABLE, "controller does not support namespace management");
 
 	memset(&pt, 0, sizeof(pt));
