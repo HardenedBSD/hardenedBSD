@@ -66,7 +66,11 @@ startwizard:
 	if (error != 0)
 		return (1);
 
+<<<<<<< HEAD
 	bsddialog_backtitle(&conf, "HardenedBSD Installer");
+=======
+	bsddialog_backtitle(&conf, OSNAME " Installer");
+>>>>>>> internal/freebsd/current/main
 	disk = boot_disk_select(&mesh);
 	if (disk == NULL) {
 		geom_deletetree(&mesh);
@@ -74,7 +78,11 @@ startwizard:
 	}
 
 	bsddialog_clear(0);
+<<<<<<< HEAD
 	bsddialog_backtitle(&conf, "HardenedBSD Installer");
+=======
+	bsddialog_backtitle(&conf, OSNAME " Installer");
+>>>>>>> internal/freebsd/current/main
 	schemeroot = wizard_partition(&mesh, disk);
 	free(disk);
 	geom_deletetree(&mesh);
@@ -82,7 +90,11 @@ startwizard:
 		return (1);
 
 	bsddialog_clear(0);
+<<<<<<< HEAD
 	bsddialog_backtitle(&conf, "HardenedBSD Installer");
+=======
+	bsddialog_backtitle(&conf, OSNAME " Installer");
+>>>>>>> internal/freebsd/current/main
 	error = geom_gettree(&mesh);
 	if (error != 0) {
 		free(schemeroot);

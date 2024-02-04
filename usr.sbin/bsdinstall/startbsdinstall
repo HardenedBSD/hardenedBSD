@@ -1,5 +1,8 @@
 #!/bin/sh
 
+BSDCFG_SHARE="/usr/share/bsdconfig"
+. $BSDCFG_SHARE/common.subr || exit 1
+
 : ${BSDDIALOG_OK=0}
 : ${BSDDIALOG_CANCEL=1}
 : ${BSDDIALOG_HELP=2}
@@ -27,7 +30,11 @@ if [ $? -eq 0 ]; then
 else
 	# Serial or other console
 	echo
+<<<<<<< HEAD
 	echo "Welcome to HardenedBSD!"
+=======
+	echo "Welcome to ${OSNAME}!"
+>>>>>>> internal/freebsd/current/main
 	echo
 	echo "Please choose the appropriate terminal type for your system."
 	echo "Common console types are:"
@@ -46,6 +53,7 @@ resizewin -z
 
 if [ -f /etc/installerconfig ]; then
 	if [ "$1" != "primary" ]; then
+<<<<<<< HEAD
 		bsddialog --backtitle "HardenedBSD Installer" --title "Installing" --msgbox "HardenedBSD is being installed from a script; please use the primary console." 0 0
 		. "$0"
 	elif bsdinstall script /etc/installerconfig; then
@@ -53,11 +61,24 @@ if [ -f /etc/installerconfig ]; then
 		reboot
 	else
 		bsddialog --backtitle "HardenedBSD Installer" --title "Error" --textbox /tmp/bsdinstall_log 0 0
+=======
+		bsddialog --backtitle "${OSNAME} Installer" --title "Installing" --msgbox "${OSNAME} is being installed from a script; please use the primary console." 0 0
+		. "$0"
+	elif bsdinstall script /etc/installerconfig; then
+		bsddialog --backtitle "${OSNAME} Installer" --title "Complete" --no-cancel --ok-label "Reboot" --pause "Installation of ${OSNAME} complete! Rebooting in 10 seconds" 10 30 10
+		reboot
+	else
+		bsddialog --backtitle "${OSNAME} Installer" --title "Error" --textbox /tmp/bsdinstall_log 0 0
+>>>>>>> internal/freebsd/current/main
 	fi
 	exit 
 fi
 
+<<<<<<< HEAD
 bsddialog --backtitle "HardenedBSD Installer" --title "Welcome" --extra-button --extra-label "Shell" --ok-label "Install" --cancel-label "Live System" --yesno "Welcome to HardenedBSD! Would you like to begin an installation or use the live system?" 0 0
+=======
+bsddialog --backtitle "${OSNAME} Installer" --title "Welcome" --extra-button --extra-label "Shell" --ok-label "Install" --cancel-label "Live System" --yesno "Welcome to ${OSNAME}! Would you like to begin an installation or use the live system?" 0 0
+>>>>>>> internal/freebsd/current/main
 
 case $? in
 $BSDDIALOG_OK)	# Install
@@ -70,7 +91,11 @@ $BSDDIALOG_OK)	# Install
 	trap true SIGINT	# Ignore cntrl-C here
 	bsdinstall
 	if [ $? -eq 0 ]; then
+<<<<<<< HEAD
 		bsddialog --backtitle "HardenedBSD Installer" --title "Complete" --ok-label "Reboot" --extra-button --extra-label "Shutdown" --cancel-label "Live System" --yesno "Installation of HardenedBSD complete! Would you like to reboot into the installed system now?" 0 0
+=======
+		bsddialog --backtitle "${OSNAME} Installer" --title "Complete" --ok-label "Reboot" --extra-button --extra-label "Shutdown" --cancel-label "Live System" --yesno "Installation of ${OSNAME} complete! Would you like to reboot into the installed system now?" 0 0
+>>>>>>> internal/freebsd/current/main
 
 		case $? in
 		$BSDDIALOG_OK)		# Reboot
