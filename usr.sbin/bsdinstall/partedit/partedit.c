@@ -125,11 +125,7 @@ main(int argc, const char **argv)
 	while (prompt != NULL) {
 		bsddialog_clear(0);
 		if (!sade_mode)
-<<<<<<< HEAD
-			bsddialog_backtitle(&conf, "HardenedBSD Installer");
-=======
 			bsddialog_backtitle(&conf, OSNAME " Installer");
->>>>>>> internal/freebsd/current/main
 
 		error = geom_gettree(&mesh);
 		if (error == 0)
