@@ -58,12 +58,16 @@
 #include <sys/zfs_vfsops.h>
 #include <sys/zfs_znode.h>
 
+#ifdef HBSD_NOTYET
 /*
  * Enable the experimental block cloning feature.  If this setting is 0, then
  * even if feature@block_cloning is enabled, attempts to clone blocks will act
  * as though the feature is disabled.
  */
 int zfs_bclone_enabled = 1;
+#else
+int zfs_bclone_enabled = 0;
+#endif
 
 /*
  * When set zfs_clone_range() waits for dirty data to be written to disk.
