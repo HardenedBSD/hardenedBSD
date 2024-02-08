@@ -14,8 +14,6 @@ MK_LTOLIB=	no
 LIB=thr
 SHLIB_MAJOR= 3
 
-LIBADD=	sys
-
 NO_WTHREAD_SAFETY=1
 NO_WCAST_ALIGN.gcc=1    # for gcc 4.2
 CFLAGS+=-DPTHREAD_KERNEL
@@ -48,6 +46,7 @@ CFLAGS+=-D_PTHREAD_FORCED_UNWIND
 .endif
 
 LDFLAGS+=-Wl,-znodelete
+LDFLAGS+=-Wl,--auxiliary,libsys.so.7
 
 VERSION_DEF=${SRCTOP}/lib/libc/Versions.def
 SYMBOL_MAPS=${.CURDIR}/pthread.map
@@ -77,7 +76,7 @@ LIBSYS_SRCTOP=	${.CURDIR:H}/libsys
 .else
 .PATH: ${LIBSYS_SRCTOP}
 .endif
-STATICOBJS+=	_umtx_op_err.o
+OBJS+=	_umtx_op_err.o
 
 .if ${MK_INSTALLLIB} != "no"
 SYMLINKS+=lib${LIB}.a ${LIBDIR}/libpthread.a
