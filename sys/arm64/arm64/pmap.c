@@ -115,6 +115,7 @@
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mman.h>
+#include <sys/msan.h>
 #include <sys/msgbuf.h>
 #include <sys/mutex.h>
 #include <sys/physmem.h>
@@ -729,6 +730,18 @@ pmap_ps_enabled(pmap_t pmap)
 	if (pmap->pm_stage != PM_STAGE1)
 		return (false);
 
+#ifdef KMSAN
+	/*
+	 * The break-before-make in pmap_update_entry() results in a situation
+	 * where a CPU may call into the KMSAN runtime while the entry is
+	 * invalid.  If the entry is used to map the current thread structure,
+	 * then the runtime will attempt to access unmapped memory.  Avoid this
+	 * by simply disabling superpage promotion for the kernel map.
+	 */
+	if (pmap == kernel_pmap)
+		return (false);
+#endif
+
 	return (superpages_enabled != 0);
 }
 
@@ -1213,53 +1226,6 @@ pmap_bootstrap_l3(vm_offset_t va)
 		pmap_bootstrap_l2_table(&bs_state);
 }
 
-#ifdef KASAN
-static void
-pmap_bootstrap_allocate_kasan_l2(vm_paddr_t start_pa, vm_paddr_t end_pa,
-    vm_offset_t *start_va, int *nkasan_l2)
-{
-	int i;
-	vm_paddr_t pa;
-	vm_offset_t va;
-	pd_entry_t *l2;
-
-	va = *start_va;
-	pa = rounddown2(end_pa - L2_SIZE, L2_SIZE);
-	l2 = pmap_l2(kernel_pmap, va);
-
-	for (i = 0; pa >= start_pa && i < *nkasan_l2;
-	    i++, va += L2_SIZE, pa -= L2_SIZE, l2++) {
-		/*
-		 * KASAN stack checking results in us having already allocated
-		 * part of our shadow map, so we can just skip those segments.
-		 */
-		if ((pmap_load(l2) & ATTR_DESCR_VALID) != 0) {
-			pa += L2_SIZE;
-			continue;
-		}
-
-		pmap_store(l2, PHYS_TO_PTE(pa) | PMAP_SAN_PTE_BITS | L2_BLOCK);
-	}
-
-	/*
-	 * Ended the allocation due to start_pa constraint, rather than because
-	 * we allocated everything.  Adjust back up to the start_pa and remove
-	 * the invalid L2 block from our accounting.
-	 */
-	if (pa < start_pa) {
-		va += L2_SIZE;
-		i--;
-		pa = start_pa;
-	}
-
-	bzero((void *)PHYS_TO_DMAP(pa), i * L2_SIZE);
-	physmem_exclude_region(pa, i * L2_SIZE, EXFLAG_NOALLOC);
-
-	*nkasan_l2 -= i;
-	*start_va = va;
-}
-#endif
-
 /*
  *	Bootstrap the system enough to run with virtual memory.
  */
@@ -1357,19 +1323,48 @@ pmap_bootstrap(vm_size_t kernlen)
 	cpu_tlb_flushID();
 }
 
-#if defined(KASAN)
+#if defined(KASAN) || defined(KMSAN)
+static void
+pmap_bootstrap_allocate_san_l2(vm_paddr_t start_pa, vm_paddr_t end_pa,
+    vm_offset_t *vap, vm_offset_t eva)
+{
+	vm_paddr_t pa;
+	vm_offset_t va;
+	pd_entry_t *l2;
+
+	va = *vap;
+	pa = rounddown2(end_pa - L2_SIZE, L2_SIZE);
+	for (; pa >= start_pa && va < eva; va += L2_SIZE, pa -= L2_SIZE) {
+		l2 = pmap_l2(kernel_pmap, va);
+
+		/*
+		 * KASAN stack checking results in us having already allocated
+		 * part of our shadow map, so we can just skip those segments.
+		 */
+		if ((pmap_load(l2) & ATTR_DESCR_VALID) != 0) {
+			pa += L2_SIZE;
+			continue;
+		}
+
+		bzero((void *)PHYS_TO_DMAP(pa), L2_SIZE);
+		physmem_exclude_region(pa, L2_SIZE, EXFLAG_NOALLOC);
+		pmap_store(l2, PHYS_TO_PTE(pa) | PMAP_SAN_PTE_BITS | L2_BLOCK);
+	}
+	*vap = va;
+}
+
 /*
  * Finish constructing the initial shadow map:
  * - Count how many pages from KERNBASE to virtual_avail (scaled for
  *   shadow map)
  * - Map that entire range using L2 superpages.
  */
-void
-pmap_bootstrap_san(void)
+static void
+pmap_bootstrap_san1(vm_offset_t va, int scale)
 {
-	vm_offset_t va;
+	vm_offset_t eva;
 	vm_paddr_t kernstart;
-	int i, shadow_npages, nkasan_l2;
+	int i;
 
 	kernstart = pmap_early_vtophys(KERNBASE);
 
@@ -1381,19 +1376,14 @@ pmap_bootstrap_san(void)
 	physmap_idx = physmem_avail(physmap, nitems(physmap));
 	physmap_idx /= 2;
 
-	shadow_npages = (virtual_avail - VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE;
-	shadow_npages = howmany(shadow_npages, KASAN_SHADOW_SCALE);
-	nkasan_l2 = howmany(shadow_npages, Ln_ENTRIES);
-
-	/* Map the valid KVA up to this point. */
-	va = KASAN_MIN_ADDRESS;
+	eva = va + (virtual_avail - VM_MIN_KERNEL_ADDRESS) / scale;
 
 	/*
 	 * Find a slot in the physmap large enough for what we needed.  We try to put
 	 * the shadow map as high up as we can to avoid depleting the lower 4GB in case
 	 * it's needed for, e.g., an xhci controller that can only do 32-bit DMA.
 	 */
-	for (i = (physmap_idx * 2) - 2; i >= 0 && nkasan_l2 > 0; i -= 2) {
+	for (i = (physmap_idx * 2) - 2; i >= 0; i -= 2) {
 		vm_paddr_t plow, phigh;
 
 		/* L2 mappings must be backed by memory that is L2-aligned */
@@ -1403,22 +1393,54 @@ pmap_bootstrap_san(void)
 			continue;
 		if (kernstart >= plow && kernstart < phigh)
 			phigh = kernstart;
-		if (phigh - plow >= L2_SIZE)
-			pmap_bootstrap_allocate_kasan_l2(plow, phigh, &va,
-			    &nkasan_l2);
+		if (phigh - plow >= L2_SIZE) {
+			pmap_bootstrap_allocate_san_l2(plow, phigh, &va, eva);
+			if (va >= eva)
+				break;
+		}
 	}
-
-	if (nkasan_l2 != 0)
+	if (i < 0)
 		panic("Could not find phys region for shadow map");
 
 	/*
 	 * Done. We should now have a valid shadow address mapped for all KVA
 	 * that has been mapped so far, i.e., KERNBASE to virtual_avail. Thus,
-	 * shadow accesses by the kasan(9) runtime will succeed for this range.
+	 * shadow accesses by the sanitizer runtime will succeed for this range.
 	 * When the kernel virtual address range is later expanded, as will
 	 * happen in vm_mem_init(), the shadow map will be grown as well. This
 	 * is handled by pmap_san_enter().
 	 */
+}
+
+void
+pmap_bootstrap_san(void)
+{
+#ifdef KASAN
+	pmap_bootstrap_san1(KASAN_MIN_ADDRESS, KASAN_SHADOW_SCALE);
+#else
+	static uint8_t kmsan_shad_ptp[PAGE_SIZE * 2] __aligned(PAGE_SIZE);
+	static uint8_t kmsan_orig_ptp[PAGE_SIZE * 2] __aligned(PAGE_SIZE);
+	pd_entry_t *l0, *l1;
+
+	if (virtual_avail - VM_MIN_KERNEL_ADDRESS > L1_SIZE)
+		panic("initial kernel map is too large");
+
+	l0 = pmap_l0(kernel_pmap, KMSAN_SHAD_MIN_ADDRESS);
+	pmap_store(l0, L0_TABLE | PHYS_TO_PTE(
+	    pmap_early_vtophys((vm_offset_t)kmsan_shad_ptp)));
+	l1 = pmap_l0_to_l1(l0, KMSAN_SHAD_MIN_ADDRESS);
+	pmap_store(l1, L1_TABLE | PHYS_TO_PTE(
+	    pmap_early_vtophys((vm_offset_t)kmsan_shad_ptp + PAGE_SIZE)));
+	pmap_bootstrap_san1(KMSAN_SHAD_MIN_ADDRESS, 1);
+
+	l0 = pmap_l0(kernel_pmap, KMSAN_ORIG_MIN_ADDRESS);
+	pmap_store(l0, L0_TABLE | PHYS_TO_PTE(
+	    pmap_early_vtophys((vm_offset_t)kmsan_orig_ptp)));
+	l1 = pmap_l0_to_l1(l0, KMSAN_ORIG_MIN_ADDRESS);
+	pmap_store(l1, L1_TABLE | PHYS_TO_PTE(
+	    pmap_early_vtophys((vm_offset_t)kmsan_orig_ptp + PAGE_SIZE)));
+	pmap_bootstrap_san1(KMSAN_ORIG_MIN_ADDRESS, 1);
+#endif
 }
 #endif
 
@@ -2722,8 +2744,10 @@ pmap_growkernel(vm_offset_t addr)
 	addr = roundup2(addr, L2_SIZE);
 	if (addr - 1 >= vm_map_max(kernel_map))
 		addr = vm_map_max(kernel_map);
-	if (kernel_vm_end < addr)
+	if (kernel_vm_end < addr) {
 		kasan_shadow_map(kernel_vm_end, addr - kernel_vm_end);
+		kmsan_shadow_map(kernel_vm_end, addr - kernel_vm_end);
+	}
 	while (kernel_vm_end < addr) {
 		l0 = pmap_l0(kernel_pmap, kernel_vm_end);
 		KASSERT(pmap_load(l0) != 0,
@@ -7861,7 +7885,7 @@ pmap_pte_bti(pmap_t pmap, vm_offset_t va __diagused)
 	return (0);
 }
 
-#if defined(KASAN)
+#if defined(KASAN) || defined(KMSAN)
 static pd_entry_t	*pmap_san_early_l2;
 
 #define	SAN_BOOTSTRAP_L2_SIZE	(1 * L2_SIZE)
@@ -7935,7 +7959,7 @@ pmap_san_enter_alloc_l2(void)
 	    Ln_ENTRIES, 0, ~0ul, L2_SIZE, 0, VM_MEMATTR_DEFAULT));
 }
 
-void __nosanitizeaddress
+void __nosanitizeaddress __nosanitizememory
 pmap_san_enter(vm_offset_t va)
 {
 	pd_entry_t *l1, *l2;
@@ -7997,7 +8021,7 @@ pmap_san_enter(vm_offset_t va)
 	    PMAP_SAN_PTE_BITS | L3_PAGE);
 	dmb(ishst);
 }
-#endif /* KASAN */
+#endif /* KASAN || KMSAN */
 
 #ifndef PAX_HARDENING
 /*
@@ -8176,6 +8200,12 @@ sysctl_kmaps(SYSCTL_HANDLER_ARGS)
 #ifdef KASAN
 		else if (i == pmap_l0_index(KASAN_MIN_ADDRESS))
 			sbuf_printf(sb, "\nKASAN shadow map:\n");
+#endif
+#ifdef KMSAN
+		else if (i == pmap_l0_index(KMSAN_SHAD_MIN_ADDRESS))
+			sbuf_printf(sb, "\nKMSAN shadow map:\n");
+		else if (i == pmap_l0_index(KMSAN_ORIG_MIN_ADDRESS))
+			sbuf_printf(sb, "\nKMSAN origin map:\n");
 #endif
 
 		l0e = kernel_pmap->pm_l0[i];

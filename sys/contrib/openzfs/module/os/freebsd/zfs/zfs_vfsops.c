@@ -89,6 +89,7 @@ int zfs_debug_level;
 SYSCTL_INT(_vfs_zfs, OID_AUTO, debug, CTLFLAG_RWTUN, &zfs_debug_level, 0,
 	"Debug level");
 
+<<<<<<< HEAD
 #ifdef HBSD_NOTYET
 int zfs_bclone_enabled = 1;
 #else
@@ -97,6 +98,8 @@ int zfs_bclone_enabled = 0;
 SYSCTL_INT(_vfs_zfs, OID_AUTO, bclone_enabled, CTLFLAG_RWTUN,
 	&zfs_bclone_enabled, 0, "Enable block cloning");
 
+=======
+>>>>>>> internal/freebsd/current/main
 struct zfs_jailparam {
 	int mount_snapshot;
 };
