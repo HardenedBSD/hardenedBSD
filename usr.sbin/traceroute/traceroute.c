@@ -19,16 +19,6 @@
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#ifndef lint
-static const char copyright[] =
-    "@(#) Copyright (c) 1988, 1989, 1991, 1994, 1995, 1996, 1997, 1998, 1999, 2000\n\
-The Regents of the University of California.  All rights reserved.\n";
-#if 0
-static const char rcsid[] =
-    "@(#)$Id: traceroute.c,v 1.68 2000/12/14 08:04:33 leres Exp $ (LBL)";
-#endif
-#endif
-
 /*
  * traceroute host  - trace the route ip packets follow going to "host".
  *
@@ -204,13 +194,9 @@ static const char rcsid[] =
 #include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
-#ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
-#endif
 #include <sys/socket.h>
-#ifdef HAVE_SYS_SYSCTL_H
 #include <sys/sysctl.h>
-#endif
 #include <sys/time.h>
 
 #include <netinet/in_systm.h>
@@ -241,9 +227,7 @@ static const char rcsid[] =
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef HAVE_MALLOC_H
 #include <malloc.h>
-#endif
 #include <memory.h>
 #include <netdb.h>
 #include <stdio.h>
@@ -304,14 +288,6 @@ struct outdata {
 	u_char ttl;		/* ttl packet left with */
 	struct timeval tv;	/* time packet left */
 };
-
-#ifndef HAVE_ICMP_NEXTMTU
-/* Path MTU Discovery (RFC1191) */
-struct my_pmtu {
-	u_short ipm_void;
-	u_short ipm_nextmtu;
-};
-#endif
 
 u_char	packet[512];		/* last inbound (icmp) packet */
 
@@ -396,9 +372,6 @@ void	tvsub(struct timeval *, struct timeval *);
 void usage(void);
 int	wait_for_reply(int, struct sockaddr_in *, const struct timeval *);
 void pkt_compare(const u_char *, int, const u_char *, int);
-#ifndef HAVE_USLEEP
-int	usleep(u_int);
-#endif
 
 void	udp_prep(struct outdata *);
 int	udp_check(const u_char *, int);
@@ -764,11 +737,7 @@ main(int argc, char **argv)
 		usage();
 	}
 
-#ifdef HAVE_SETLINEBUF
 	setlinebuf(stdout);
-#else
-	setvbuf(stdout, NULL, _IOLBF, 0);
-#endif
 
 	protlen = packlen - sizeof(*outip) - optlen;
 	if ((proto->num == IPPROTO_SCTP) && (packlen & 3)) {
@@ -791,16 +760,10 @@ main(int argc, char **argv)
 		outip->ip_tos &= ~IPTOS_ECN_MASK;
 		outip->ip_tos |= IPTOS_ECN_ECT1;
 	}
-#ifdef BYTESWAP_IP_HDR
 	outip->ip_len = htons(packlen);
 	outip->ip_off = htons(off);
-#else
-	outip->ip_len = packlen;
-	outip->ip_off = off;
-#endif
 	outip->ip_p = proto->num;
 	outp = (u_char *)(outip + 1);
-#ifdef HAVE_RAW_OPTIONS
 	if (lsrr > 0) {
 		register u_char *optlist;
 
@@ -822,7 +785,6 @@ main(int argc, char **argv)
 		optlist[3] = IPOPT_MINOFF;
 		memcpy(optlist + 4, gwlist + 1, i);
 	} else
-#endif
 		outip->ip_dst = to->sin_addr;
 
 	outip->ip_hl = (outp - (u_char *)outip) >> 2;
@@ -857,39 +819,6 @@ main(int argc, char **argv)
 		Fprintf(stderr, "%s: raw socket: %s\n", prog, strerror(errno));
 		exit(1);
 	}
-
-#if defined(IP_OPTIONS) && !defined(HAVE_RAW_OPTIONS)
-	if (lsrr > 0) {
-		u_char optlist[MAX_IPOPTLEN];
-
-		cp = "ip";
-		if ((pe = getprotobyname(cp)) == NULL) {
-			Fprintf(stderr, "%s: unknown protocol %s\n", prog, cp);
-			exit(1);
-		}
-
-		/* final hop */
-		gwlist[lsrr] = to->sin_addr.s_addr;
-		++lsrr;
-
-		/* force 4 byte alignment */
-		optlist[0] = IPOPT_NOP;
-		/* loose source route option */
-		optlist[1] = IPOPT_LSRR;
-		i = lsrr * sizeof(gwlist[0]);
-		optlist[2] = i + 3;
-		/* Pointer to LSRR addresses */
-		optlist[3] = IPOPT_MINOFF;
-		memcpy(optlist + 4, gwlist, i);
-
-		if ((setsockopt(sndsock, pe->p_proto, IP_OPTIONS,
-		    (char *)optlist, i + sizeof(gwlist[0]))) < 0) {
-			Fprintf(stderr, "%s: IP_OPTIONS: %s\n",
-			    prog, strerror(errno));
-			exit(1);
-		    }
-	}
-#endif
 
 #ifdef SO_SNDBUF
 	if (setsockopt(sndsock, SOL_SOCKET, SO_SNDBUF, (char *)&packlen,
@@ -1449,11 +1378,7 @@ packet_ok(register u_char *buf, int cc, register struct sockaddr_in *from,
 	if (code != ICMP_UNREACH_NEEDFRAG)
 		pmtu = 0;
 	else {
-#ifdef HAVE_ICMP_NEXTMTU
 		pmtu = ntohs(icp->icmp_nextmtu);
-#else
-		pmtu = ntohs(((struct my_pmtu *)&icp->icmp_void)->ipm_nextmtu);
-#endif
 	}
 	if (type == ICMP_ECHOREPLY
 	    && proto->num == IPPROTO_ICMP
@@ -2055,9 +1980,7 @@ setsin(register struct sockaddr_in *sin, register u_int32_t addr)
 {
 
 	memset(sin, 0, sizeof(*sin));
-#ifdef HAVE_SOCKADDR_SA_LEN
 	sin->sin_len = sizeof(*sin);
-#endif
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = addr;
 }
@@ -2146,9 +2069,6 @@ pkt_compare(const u_char *a, int la, const u_char *b, int lb) {
 void
 usage(void)
 {
-	extern char version[];
-
-	Fprintf(stderr, "Version %s\n", version);
 	Fprintf(stderr,
 	    "Usage: %s [-adDeEFInrSvx] [-A as_server] [-f first_ttl] [-g gateway]\n"
 	    "\t[-i iface] [-m max_ttl] [-M first_ttl] [-p port] [-P proto]\n"

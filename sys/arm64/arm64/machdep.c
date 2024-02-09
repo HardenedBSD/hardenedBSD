@@ -47,6 +47,7 @@
 #include <sys/ktr.h>
 #include <sys/limits.h>
 #include <sys/linker.h>
+#include <sys/msan.h>
 #include <sys/msgbuf.h>
 #include <sys/pcpu.h>
 #include <sys/physmem.h>
@@ -971,7 +972,7 @@ initarm(struct arm64_bootparams *abp)
 	 * we'll end up searching for segments that we can safely use.  Those
 	 * segments also get excluded from phys_avail.
 	 */
-#if defined(KASAN)
+#if defined(KASAN) || defined(KMSAN)
 	pmap_bootstrap_san();
 #endif
 
@@ -1019,6 +1020,7 @@ initarm(struct arm64_bootparams *abp)
 
 	kcsan_cpu_init(0);
 	kasan_init();
+	kmsan_init();
 
 	env = kern_getenv("kernelname");
 	if (env != NULL)
