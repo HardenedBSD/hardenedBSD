@@ -264,7 +264,7 @@ static	union cd_pages	*cdgetpage(struct cd_mode_params *mode_params);
 static	int		cdgetpagesize(int page_num);
 static	void		cdprevent(struct cam_periph *periph, int action);
 static	void		cdmediaprobedone(struct cam_periph *periph);
-static	int		cdcheckmedia(struct cam_periph *periph, int do_wait);
+static	int		cdcheckmedia(struct cam_periph *periph, bool do_wait);
 #if 0
 static	int		cdsize(struct cam_periph *periph, u_int32_t *size);
 #endif
@@ -775,7 +775,7 @@ cdopen(struct disk *dp)
 	 * if we don't have media, but then we don't allow anything but the
 	 * CDIOCEJECT/CDIOCCLOSE ioctls if there is no media.
 	 */
-	cdcheckmedia(periph, /*do_wait*/ 1);
+	cdcheckmedia(periph, /*do_wait*/ true);
 
 	CAM_DEBUG(periph->path, CAM_DEBUG_TRACE, ("leaving cdopen\n"));
 	cam_periph_unhold(periph);
@@ -881,7 +881,7 @@ cdstrategy(struct bio *bp)
 	 * check first.  The I/O will get executed after the media check.
 	 */
 	if ((softc->flags & CD_FLAG_VALID_MEDIA) == 0)
-		cdcheckmedia(periph, /*do_wait*/ 0);
+		cdcheckmedia(periph, /*do_wait*/ false);
 	else
 		xpt_schedule(periph, CAM_PRIORITY_NORMAL);
 
@@ -1782,7 +1782,7 @@ cdioctl(struct disk *dp, u_long cmd, void *addr, int flag, struct thread *td)
 	 && ((cmd != CDIOCCLOSE)
 	  && (cmd != CDIOCEJECT))
 	 && (IOCGROUP(cmd) == 'c')) {
-		error = cdcheckmedia(periph, /*do_wait*/ 1);
+		error = cdcheckmedia(periph, /*do_wait*/ true);
 		if (error != 0) {
 			cam_periph_unhold(periph);
 			cam_periph_unlock(periph);
@@ -2675,6 +2675,7 @@ cdmediaprobedone(struct cam_periph *periph)
 		softc->flags &= ~CD_FLAG_MEDIA_WAIT;
 		wakeup(&softc->toc);
 	}
+	cam_periph_release_locked(periph);
 }
 
 /*
@@ -2683,7 +2684,7 @@ cdmediaprobedone(struct cam_periph *periph)
  */
 
 static int
-cdcheckmedia(struct cam_periph *periph, int do_wait)
+cdcheckmedia(struct cam_periph *periph, bool do_wait)
 {
 	struct cd_softc *softc;
 	int error;
@@ -2692,31 +2693,29 @@ cdcheckmedia(struct cam_periph *periph, int do_wait)
 	softc = (struct cd_softc *)periph->softc;
 	error = 0;
 
-	if ((do_wait != 0)
-	 && ((softc->flags & CD_FLAG_MEDIA_WAIT) == 0)) {
+	/* Released by cdmediaprobedone(). */
+	error = cam_periph_acquire(periph);
+	if (error != 0)
+		return (error);
+
+	if (do_wait)
 		softc->flags |= CD_FLAG_MEDIA_WAIT;
-	}
 	if ((softc->flags & CD_FLAG_MEDIA_SCAN_ACT) == 0) {
 		softc->state = CD_STATE_MEDIA_PREVENT;
 		softc->flags |= CD_FLAG_MEDIA_SCAN_ACT;
 		xpt_schedule(periph, CAM_PRIORITY_NORMAL);
 	}
-
-	if (do_wait == 0)
-		goto bailout;
+	if (!do_wait)
+		return (0);
 
 	error = msleep(&softc->toc, cam_periph_mtx(periph), PRIBIO,"cdmedia",0);
-
-	if (error != 0)
-		goto bailout;
 
 	/*
 	 * Check to see whether we have a valid size from the media.  We
 	 * may or may not have a valid TOC.
 	 */
-	if ((softc->flags & CD_FLAG_VALID_MEDIA) == 0)
+	if (error == 0 && (softc->flags & CD_FLAG_VALID_MEDIA) == 0)
 		error = EINVAL;
-bailout:
 
 	return (error);
 }
