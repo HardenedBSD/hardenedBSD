@@ -353,8 +353,8 @@ CTASSERT(sizeof(struct nmi_pcpu) == 16);
  * slots as corresponding segments for i386 kernel.
  */
 struct soft_segment_descriptor gdt_segs[] = {
-/* GNULL_SEL	0 Null Descriptor */
-{	.ssd_base = 0x0,
+[GNULL_SEL] = { /* 0 Null Descriptor */
+	.ssd_base = 0x0,
 	.ssd_limit = 0x0,
 	.ssd_type = 0,
 	.ssd_dpl = 0,
@@ -362,8 +362,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 0,
 	.ssd_gran = 0		},
-/* GNULL2_SEL	1 Null Descriptor */
-{	.ssd_base = 0x0,
+[GNULL2_SEL] = { /*	1 Null Descriptor */
+	.ssd_base = 0x0,
 	.ssd_limit = 0x0,
 	.ssd_type = 0,
 	.ssd_dpl = 0,
@@ -371,8 +371,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 0,
 	.ssd_gran = 0		},
-/* GUFS32_SEL	2 32 bit %gs Descriptor for user */
-{	.ssd_base = 0x0,
+[GUFS32_SEL] = { /* 2 32 bit %gs Descriptor for user */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMRWA,
 	.ssd_dpl = SEL_UPL,
@@ -380,8 +380,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 1,
 	.ssd_gran = 1		},
-/* GUGS32_SEL	3 32 bit %fs Descriptor for user */
-{	.ssd_base = 0x0,
+[GUGS32_SEL] = { /* 3 32 bit %fs Descriptor for user */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMRWA,
 	.ssd_dpl = SEL_UPL,
@@ -389,8 +389,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 1,
 	.ssd_gran = 1		},
-/* GCODE_SEL	4 Code Descriptor for kernel */
-{	.ssd_base = 0x0,
+[GCODE_SEL] = { /* 4 Code Descriptor for kernel */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMERA,
 	.ssd_dpl = SEL_KPL,
@@ -398,8 +398,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 1,
 	.ssd_def32 = 0,
 	.ssd_gran = 1		},
-/* GDATA_SEL	5 Data Descriptor for kernel */
-{	.ssd_base = 0x0,
+[GDATA_SEL] = { /* 5 Data Descriptor for kernel */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMRWA,
 	.ssd_dpl = SEL_KPL,
@@ -407,8 +407,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 1,
 	.ssd_def32 = 0,
 	.ssd_gran = 1		},
-/* GUCODE32_SEL	6 32 bit Code Descriptor for user */
-{	.ssd_base = 0x0,
+[GUCODE32_SEL] = { /* 6 32 bit Code Descriptor for user */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMERA,
 	.ssd_dpl = SEL_UPL,
@@ -416,8 +416,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 1,
 	.ssd_gran = 1		},
-/* GUDATA_SEL	7 32/64 bit Data Descriptor for user */
-{	.ssd_base = 0x0,
+[GUDATA_SEL] = { /* 7 32/64 bit Data Descriptor for user */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMRWA,
 	.ssd_dpl = SEL_UPL,
@@ -425,8 +425,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 1,
 	.ssd_gran = 1		},
-/* GUCODE_SEL	8 64 bit Code Descriptor for user */
-{	.ssd_base = 0x0,
+[GUCODE_SEL] = { /* 8 64 bit Code Descriptor for user */
+	.ssd_base = 0x0,
 	.ssd_limit = 0xfffff,
 	.ssd_type = SDT_MEMERA,
 	.ssd_dpl = SEL_UPL,
@@ -434,8 +434,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 1,
 	.ssd_def32 = 0,
 	.ssd_gran = 1		},
-/* GPROC0_SEL	9 Proc 0 Tss Descriptor */
-{	.ssd_base = 0x0,
+[GPROC0_SEL] = { /* 9 Proc 0 TSS Descriptor */
+	.ssd_base = 0x0,
 	.ssd_limit = sizeof(struct amd64tss) + IOPERM_BITMAP_SIZE - 1,
 	.ssd_type = SDT_SYSTSS,
 	.ssd_dpl = SEL_KPL,
@@ -443,8 +443,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 0,
 	.ssd_gran = 0		},
-/* Actually, the TSS is a system descriptor which is double size */
-{	.ssd_base = 0x0,
+[GPROC0_SEL + 1] = { /* 10 Proc 0 TSS descriptor, double size */
+	.ssd_base = 0x0,
 	.ssd_limit = 0x0,
 	.ssd_type = 0,
 	.ssd_dpl = 0,
@@ -452,8 +452,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 0,
 	.ssd_gran = 0		},
-/* GUSERLDT_SEL	11 LDT Descriptor */
-{	.ssd_base = 0x0,
+[GUSERLDT_SEL] = { /* 11 LDT Descriptor */
+	.ssd_base = 0x0,
 	.ssd_limit = 0x0,
 	.ssd_type = 0,
 	.ssd_dpl = 0,
@@ -461,8 +461,8 @@ struct soft_segment_descriptor gdt_segs[] = {
 	.ssd_long = 0,
 	.ssd_def32 = 0,
 	.ssd_gran = 0		},
-/* GUSERLDT_SEL	12 LDT Descriptor, double size */
-{	.ssd_base = 0x0,
+[GUSERLDT_SEL + 1] = { /* 12 LDT Descriptor, double size */
+	.ssd_base = 0x0,
 	.ssd_limit = 0x0,
 	.ssd_type = 0,
 	.ssd_dpl = 0,
