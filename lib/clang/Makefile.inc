@@ -2,14 +2,6 @@
 .include <bsd.compiler.mk>
 
 PACKAGE=	clang
-<<<<<<< HEAD
-=======
-
-# Build only PIE static libraries; bsd.lib.mk does support this directly.
-MK_PIE:=	no
-CFLAGS+=	${PIEFLAG} ${SHARED_CFLAGS}
-CXXFLAGS+=	${PIEFLAG} ${SHARED_CXXFLAGS}
->>>>>>> internal/freebsd/current/main
 
 .if ${COMPILER_TYPE} == "clang"
 DEBUG_FILES_CFLAGS= -gline-tables-only
