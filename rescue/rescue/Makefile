@@ -23,13 +23,6 @@ LDFLAGS+=	-Wl,--allow-multiple-definition
 PROG=	rescue
 BINDIR?=/rescue
 
-# Shell scripts need #! line to be edited from /bin/sh to /rescue/sh
-SCRIPTS= nextboot_FIXED
-SCRIPTSNAME_nextboot_FIXED= nextboot
-nextboot_FIXED: ../../sbin/reboot/nextboot.sh
-	sed '1s/\/bin\//\/rescue\//' ${.ALLSRC} > ${.TARGET}
-CLEANFILES+= nextboot_FIXED
-
 SCRIPTS+= dhclient_FIXED
 SCRIPTSNAME_dhclient_FIXED= dhclient-script
 dhclient_FIXED: ../../sbin/dhclient/dhclient-script
@@ -135,6 +128,7 @@ CRUNCH_PROGS_sbin+= routed rtquery
 .if ${MK_ZFS} != "no"
 CRUNCH_PROGS_sbin+= bectl
 CRUNCH_PROGS_sbin+= zfs
+CRUNCH_PROGS_sbin+= zfsbootcfg
 CRUNCH_PROGS_sbin+= zpool
 CRUNCH_PROGS_usr.sbin+= zdb
 .endif
@@ -156,6 +150,13 @@ CRUNCH_LIBS_zfs+=	${LIBBE} \
 CRUNCH_LIBS_bectl+=	${CRUNCH_LIBS_zfs}
 CRUNCH_LIBS_zpool+=	${CRUNCH_LIBS_zfs}
 CRUNCH_LIBS_zdb+=	${CRUNCH_LIBS_zfs} ${LIBZDB}
+CRUNCH_LIBS_zfsbootcfg+=${LIBZFSBOOTENV} \
+			${LIBZPOOL} \
+			${LIBZFS} \
+			${LIBZUTIL} \
+			${LIBZFS_CORE} \
+			${LIBICP_RESCUE} \
+			${LIBNVPAIR}
 .else
 # liblzma needs pthread
 CRUNCH_LIBS+= -lpthread
@@ -185,7 +186,7 @@ CRUNCH_SRCDIR_zfs= ${SRCTOP}/cddl/sbin/zfs
 CRUNCH_SRCDIR_zpool= ${SRCTOP}/cddl/sbin/zpool
 CRUNCH_SRCDIR_zdb= ${SRCTOP}/cddl/usr.sbin/zdb
 .endif
-CRUNCH_ALIAS_reboot= fastboot halt fasthalt
+CRUNCH_ALIAS_reboot= fastboot halt fasthalt nextboot
 CRUNCH_ALIAS_restore= rrestore
 CRUNCH_ALIAS_dump= rdump
 CRUNCH_ALIAS_fsck_ffs= fsck_4.2bsd fsck_ufs
