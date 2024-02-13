@@ -2661,13 +2661,14 @@ load_filtee1(Obj_Entry *obj, Needed_Entry *needed, int flags,
 static void
 load_filtees(Obj_Entry *obj, int flags, RtldLockState *lockstate)
 {
-
-    if (!obj->filtees_loaded) {
+	if (obj->filtees_loaded || obj->filtees_loading)
+		return;
 	lock_restart_for_upgrade(lockstate);
+	obj->filtees_loading = true;
 	load_filtee1(obj, obj->needed_filtees, flags, lockstate);
 	load_filtee1(obj, obj->needed_aux_filtees, flags, lockstate);
 	obj->filtees_loaded = true;
-    }
+	obj->filtees_loading = false;
 }
 
 static int
@@ -4887,6 +4888,20 @@ symlook_needed(SymLook *req, const Needed_Entry *needed, DoneList *dlp)
     return (ESRCH);
 }
 
+static int
+symlook_obj_load_filtees(SymLook *req, SymLook *req1, const Obj_Entry *obj,
+    Needed_Entry *needed)
+{
+	DoneList donelist;
+	int flags;
+
+	flags = (req->flags & SYMLOOK_EARLY) != 0 ? RTLD_LO_EARLY : 0;
+	load_filtees(__DECONST(Obj_Entry *, obj), flags, req->lockstate);
+	donelist_init(&donelist);
+	symlook_init_from_req(req1, req);
+	return (symlook_needed(req1, needed, &donelist));
+}
+
 /*
  * Search the symbol table of a single shared object for a symbol of
  * the given name and version, if requested.  Returns a pointer to the
@@ -4899,9 +4914,8 @@ symlook_needed(SymLook *req, const Needed_Entry *needed, DoneList *dlp)
 int
 symlook_obj(SymLook *req, const Obj_Entry *obj)
 {
-    DoneList donelist;
     SymLook req1;
-    int flags, res, mres;
+    int res, mres;
 
     /*
      * If there is at least one valid hash at this point, we prefer to
@@ -4916,11 +4930,8 @@ symlook_obj(SymLook *req, const Obj_Entry *obj)
 
     if (mres == 0) {
 	if (obj->needed_filtees != NULL) {
-	    flags = (req->flags & SYMLOOK_EARLY) ? RTLD_LO_EARLY : 0;
-	    load_filtees(__DECONST(Obj_Entry *, obj), flags, req->lockstate);
-	    donelist_init(&donelist);
-	    symlook_init_from_req(&req1, req);
-	    res = symlook_needed(&req1, obj->needed_filtees, &donelist);
+	    res = symlook_obj_load_filtees(req, &req1, obj,
+		obj->needed_filtees);
 	    if (res == 0) {
 		req->sym_out = req1.sym_out;
 		req->defobj_out = req1.defobj_out;
@@ -4928,11 +4939,8 @@ symlook_obj(SymLook *req, const Obj_Entry *obj)
 	    return (res);
 	}
 	if (obj->needed_aux_filtees != NULL) {
-	    flags = (req->flags & SYMLOOK_EARLY) ? RTLD_LO_EARLY : 0;
-	    load_filtees(__DECONST(Obj_Entry *, obj), flags, req->lockstate);
-	    donelist_init(&donelist);
-	    symlook_init_from_req(&req1, req);
-	    res = symlook_needed(&req1, obj->needed_aux_filtees, &donelist);
+	    res = symlook_obj_load_filtees(req, &req1, obj,
+		obj->needed_aux_filtees);
 	    if (res == 0) {
 		req->sym_out = req1.sym_out;
 		req->defobj_out = req1.defobj_out;
