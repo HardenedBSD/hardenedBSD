@@ -134,6 +134,7 @@ struct lkpi_sta {
 
 	struct ieee80211_key_conf *kc;
 	enum ieee80211_sta_state state;
+	bool			txq_ready;			/* Can we run the taskq? */
 	bool			added_to_drv;			/* Driver knows; i.e. we called ...(). */
 	bool			in_mgd;				/* XXX-BZ should this be per-vif? */
 
@@ -156,6 +157,8 @@ struct lkpi_vif {
 	struct ieee80211_node *	(*iv_update_bss)(struct ieee80211vap *,
 				    struct ieee80211_node *);
 	TAILQ_HEAD(, lkpi_sta)	lsta_head;
+	struct lkpi_sta		*lvif_bss;
+	bool			lvif_bss_synched;
 	bool			added_to_drv;			/* Driver knows; i.e. we called add_interface(). */
 
 	bool			hw_queue_stopped[IEEE80211_NUM_ACS];
