@@ -574,7 +574,7 @@ main(int argc, char *argv[])
 	argv += optind;
 
 #ifdef HAVE_CAPSICUM
-	if (caph_limit_stdout() < 0 || caph_limit_stderr() < 0)
+	if (caph_limit_stdio() < 0)
 		err(1, "unable to limit rights for stdio");
 #endif
 
@@ -606,16 +606,21 @@ main(int argc, char *argv[])
 		err(1, "Unable to enter capability mode");
 #endif
 
-	if (*argv) {
+	if (*argv && !pflag && string == NULL) {
 		do {
 			const char *filename = *argv;
 			const char *filemode = "rb";
 
+			if (strcmp(filename, "-") == 0) {
+				f = stdin;
+			} else {
 #ifdef HAVE_CAPSICUM
-			if ((f = fileargs_fopen(fa, filename, filemode)) == NULL) {
+				f = fileargs_fopen(fa, filename, filemode);
 #else
-			if ((f = fopen(filename, filemode)) == NULL) {
+				f = fopen(filename, filemode);
 #endif
+			}
+			if (f == NULL) {
 				if (errno != ENOENT || !(cflag && ignoreMissing)) {
 					warn("%s", filename);
 					failed = true;
@@ -624,23 +629,16 @@ main(int argc, char *argv[])
 					rec = rec->next;
 				continue;
 			}
-#ifdef HAVE_CAPSICUM
-			if (caph_rights_limit(fileno(f), &rights) < 0)
-				err(1, "capsicum");
-#endif
 			if (cflag && mode != mode_bsd) {
 				checkAgainst = rec->chksum;
 				rec = rec->next;
 			}
 			p = MDInput(&Algorithm[digest], f, buf, false);
-			(void)fclose(f);
+			if (f != stdin)
+				(void)fclose(f);
 			MDOutput(&Algorithm[digest], p, filename);
 		} while (*++argv);
 	} else if (!cflag && string == NULL && !skip) {
-#ifdef HAVE_CAPSICUM
-		if (caph_limit_stdin() < 0)
-			err(1, "capsicum");
-#endif
 		if (mode == mode_bsd)
 			output_mode = output_bare;
 		p = MDInput(&Algorithm[digest], stdin, buf, pflag);
