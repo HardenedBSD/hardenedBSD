@@ -104,6 +104,7 @@ static device_method_t	simplebus_methods[] = {
 	DEVMETHOD(bus_unmap_resource,	simplebus_unmap_resource),
 	DEVMETHOD(bus_set_resource,	bus_generic_rl_set_resource),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
+	DEVMETHOD(bus_delete_resource,	bus_generic_rl_delete_resource),
 	DEVMETHOD(bus_child_pnpinfo,	ofw_bus_gen_child_pnpinfo),
 	DEVMETHOD(bus_get_resource_list, simplebus_get_resource_list),
 	DEVMETHOD(bus_get_property,	simplebus_get_property),
@@ -447,9 +448,6 @@ simplebus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 	sc = device_get_softc(bus);
 
-	if (type == SYS_RES_IOPORT)
-		type = SYS_RES_MEMORY;
-
 	/*
 	 * Request for the default allocation with a given rid: use resource
 	 * list stored in the local device info.
@@ -469,6 +467,9 @@ simplebus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 		end = rle->end;
 		count = rle->count;
         }
+
+	if (type == SYS_RES_IOPORT)
+		type = SYS_RES_MEMORY;
 
 	if (type == SYS_RES_MEMORY) {
 		/* Remap through ranges property */
