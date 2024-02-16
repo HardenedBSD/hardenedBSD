@@ -104,6 +104,7 @@ interp_init(void)
 	struct interp_lua_softc	*softc = &lua_softc;
 	const char *filename;
 	const luaL_Reg *lib;
+	lua_init_md_t **fnpp;
 
 	TSENTER();
 
@@ -122,6 +123,9 @@ interp_init(void)
 		luaL_requiref(luap, lib->name, lib->func, 1);
 		lua_pop(luap, 1);  /* remove lib */
 	}
+
+	LUA_FOREACH_SET(fnpp)
+	    (*fnpp)(luap);
 
 	filename = getenv("loader_lua");
 	if (filename == NULL)
