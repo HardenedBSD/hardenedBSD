@@ -35,7 +35,6 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 
 #include <err.h>
@@ -51,6 +50,8 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <utmpx.h>
+
+extern char **environ;
 
 #define PATH_NEXTBOOT "/boot/nextboot.conf"
 
@@ -85,7 +86,6 @@ zfsbootcfg(const char *pool, bool force)
 	};
 	int rv, status;
 	pid_t p;
-	extern char **environ;
 
 	rv = posix_spawnp(&p, av[0], NULL, NULL, __DECONST(char **, av),
 	    environ);
