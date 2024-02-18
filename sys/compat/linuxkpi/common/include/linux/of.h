@@ -1,8 +1,7 @@
 /*-
- * Copyright (c) 2020 The FreeBSD Foundation
+ * SPDX-License-Identifier: BSD-2-Clause
  *
- * This software was developed by Emmanuel Vadot under sponsorship
- * from the FreeBSD Foundation.
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,7 +15,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -26,31 +25,9 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_PAGEMAP_H_
-#define _LINUXKPI_LINUX_PAGEMAP_H_
+#ifndef _LINUXKPI_LINUX_OF_H
+#define	_LINUXKPI_LINUX_OF_H
 
-#include <linux/mm.h>
-#include <linux/highmem.h>
-#include <linux/vmalloc.h>
-
-#define	invalidate_mapping_pages(...) \
-  linux_invalidate_mapping_pages(__VA_ARGS__)
-
-unsigned long linux_invalidate_mapping_pages(vm_object_t obj, pgoff_t start,
-    pgoff_t end);
-
-static inline void
-release_pages(struct page **pages, int nr)
-{
-	int i;
-
-	for (i = 0; i < nr; i++)
-		put_page(pages[i]);
-}
-
-static inline void
-mapping_clear_unevictable(vm_object_t mapping)
-{
-}
+#include <linux/kobject.h>
 
 #endif

@@ -1,14 +1,16 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause
- *
- * Copyright (c) 2021 Vladimir Kondratyev <wulf@FreeBSD.org>
+ * Copyright (c) 2010 Isilon Systems, Inc.
+ * Copyright (c) 2010 iX Systems, Inc.
+ * Copyright (c) 2010 Panasas, Inc.
+ * Copyright (c) 2017 Matt Macy <mmacy@FreeBSD.org>
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ *    notice unmodified, this list of conditions, and the following
+ *    disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
@@ -25,39 +27,20 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_ASM_PROCESSOR_H_
-#define	_LINUXKPI_ASM_PROCESSOR_H_
+#ifndef _LINUXKPI_LINUX_CONTAINER_OF_H
+#define	_LINUXKPI_LINUX_CONTAINER_OF_H
 
-#include <sys/types.h>
-#include <machine/cpufunc.h>
-#include <machine/cpu.h>
+#include <sys/stdint.h>
 
-#if defined(__i386__) || defined(__amd64__)
-#define	X86_VENDOR_INTEL	0
-#define	X86_VENDOR_CYRIX	1
-#define	X86_VENDOR_AMD		2
-#define	X86_VENDOR_UMC		3
-#define	X86_VENDOR_CENTAUR	5
-#define	X86_VENDOR_TRANSMETA	7
-#define	X86_VENDOR_NSC		8
-#define	X86_VENDOR_HYGON	9
-#define	X86_VENDOR_NUM		12
+#include <linux/build_bug.h>
+#include <linux/stddef.h>
 
-#define	X86_VENDOR_UNKNOWN	0xff
+#define	container_of(ptr, type, member)				\
+({								\
+	const __typeof(((type *)0)->member) *__p = (ptr);	\
+	(type *)((uintptr_t)__p - offsetof(type, member));	\
+})
 
-struct cpuinfo_x86 {
-	uint8_t		x86;
-	uint8_t		x86_model;
-	uint16_t	x86_clflush_size;
-	uint16_t	x86_max_cores;
-	uint8_t		x86_vendor;
-};
+#define	typeof_member(type, member)	__typeof(((type *)0)->member)
 
-extern struct cpuinfo_x86	boot_cpu_data;
-extern struct cpuinfo_x86	__cpu_data[];
-#define	cpu_data(cpu)	__cpu_data[cpu]
 #endif
-
-#define	cpu_relax()	cpu_spinwait()
-
-#endif	/* _LINUXKPI_ASM_PROCESSOR_H_ */

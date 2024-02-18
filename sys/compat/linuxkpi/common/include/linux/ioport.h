@@ -1,8 +1,7 @@
 /*-
- * Copyright (c) 2020 The FreeBSD Foundation
+ * SPDX-License-Identifier: BSD-2-Clause
  *
- * This software was developed by Emmanuel Vadot under sponsorship
- * from the FreeBSD Foundation.
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,7 +15,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -26,31 +25,33 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_PAGEMAP_H_
-#define _LINUXKPI_LINUX_PAGEMAP_H_
+#ifndef _LINUXKPI_LINUX_IOPORT_H
+#define _LINUXKPI_LINUX_IOPORT_H
 
-#include <linux/mm.h>
-#include <linux/highmem.h>
-#include <linux/vmalloc.h>
+#include <linux/compiler.h>
+#include <linux/types.h>
 
-#define	invalidate_mapping_pages(...) \
-  linux_invalidate_mapping_pages(__VA_ARGS__)
+#define DEFINE_RES_MEM(_start, _size)		\
+	(struct resource) {			\
+		.start = (_start),		\
+		.end = (_start) + (_size) - 1,	\
+	}
 
-unsigned long linux_invalidate_mapping_pages(vm_object_t obj, pgoff_t start,
-    pgoff_t end);
+struct resource {
+	resource_size_t start;
+	resource_size_t end;
+};
 
-static inline void
-release_pages(struct page **pages, int nr)
+static inline resource_size_t
+resource_size(const struct resource *r)
 {
-	int i;
-
-	for (i = 0; i < nr; i++)
-		put_page(pages[i]);
+	return (r->end - r->start + 1);
 }
 
-static inline void
-mapping_clear_unevictable(vm_object_t mapping)
+static inline bool
+resource_contains(struct resource *a, struct resource *b)
 {
+	return (a->start <= b->start && a->end >= b->end);
 }
 
 #endif

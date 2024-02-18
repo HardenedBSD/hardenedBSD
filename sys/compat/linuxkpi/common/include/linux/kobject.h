@@ -35,6 +35,9 @@
 #include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
+#include <linux/wait.h>
+#include <linux/workqueue.h>
 
 struct kobject;
 struct sysctl_oid;
@@ -153,5 +156,7 @@ kobject_uevent_env(struct kobject *kobj, int action, char *envp[])
 	 * need a shortcut or simply ignore it (for now).
 	 */
 }
+
+void linux_kobject_kfree_name(struct kobject *kobj);
 
 #endif /* _LINUXKPI_LINUX_KOBJECT_H_ */
