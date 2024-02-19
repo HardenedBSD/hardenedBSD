@@ -62,6 +62,7 @@
 #include <net80211/ieee80211_proto.h>
 #include <net80211/ieee80211_ratectl.h>
 #include <net80211/ieee80211_radiotap.h>
+#include <net80211/ieee80211_vht.h>
 
 #define	LINUXKPI_NET80211
 #include <net/mac80211.h>
@@ -71,6 +72,11 @@
 
 #define	LKPI_80211_WME
 /* #define	LKPI_80211_HW_CRYPTO */
+/* #define	LKPI_80211_VHT */
+/* #define	LKPI_80211_HT */
+#if defined(LKPI_80211_VHT) && !defined(LKPI_80211_HT)
+#define	LKPI_80211_HT
+#endif
 
 static MALLOC_DEFINE(M_LKPI80211, "lkpi80211", "LinuxKPI 80211 compat");
 
@@ -144,6 +150,79 @@ static void lkpi_ieee80211_free_skb_mbuf(void *);
 static int lkpi_wme_update(struct lkpi_hw *, struct ieee80211vap *, bool);
 #endif
 
+#if defined(LKPI_80211_HT)
+static void
+lkpi_sta_sync_ht_from_ni(struct ieee80211_sta *sta, struct ieee80211_node *ni, int *ht_rx_nss)
+{
+	struct ieee80211vap *vap;
+	uint8_t *ie;
+	struct ieee80211_ht_cap *htcap;
+	int i, rx_nss;
+
+	if ((ni->ni_flags & IEEE80211_NODE_HT) == 0)
+		return;
+
+	if (IEEE80211_IS_CHAN_HT(ni->ni_chan) &&
+	    IEEE80211_IS_CHAN_HT40(ni->ni_chan))
+		sta->deflink.bandwidth = IEEE80211_STA_RX_BW_40;
+
+	sta->deflink.ht_cap.ht_supported = true;
+
+	/* htcap->ampdu_params_info */
+	vap = ni->ni_vap;
+	sta->deflink.ht_cap.ampdu_density = _IEEE80211_MASKSHIFT(ni->ni_htparam, IEEE80211_HTCAP_MPDUDENSITY);
+	if (sta->deflink.ht_cap.ampdu_density > vap->iv_ampdu_density)
+		sta->deflink.ht_cap.ampdu_density = vap->iv_ampdu_density;
+	sta->deflink.ht_cap.ampdu_factor = _IEEE80211_MASKSHIFT(ni->ni_htparam, IEEE80211_HTCAP_MAXRXAMPDU);
+	if (sta->deflink.ht_cap.ampdu_factor > vap->iv_ampdu_rxmax)
+		sta->deflink.ht_cap.ampdu_factor = vap->iv_ampdu_rxmax;
+
+	ie = ni->ni_ies.htcap_ie;
+	KASSERT(ie != NULL, ("%s: HT but no htcap_ie on ni %p\n", __func__, ni));
+	if (ie[0] == IEEE80211_ELEMID_VENDOR)
+		ie += 4;
+	ie += 2;
+	htcap = (struct ieee80211_ht_cap *)ie;
+	sta->deflink.ht_cap.cap = htcap->cap_info;
+	sta->deflink.ht_cap.mcs = htcap->mcs;
+
+	rx_nss = 0;
+	for (i = 0; i < nitems(htcap->mcs.rx_mask); i++) {
+		if (htcap->mcs.rx_mask[i])
+			rx_nss++;
+	}
+	if (ht_rx_nss != NULL)
+		*ht_rx_nss = rx_nss;
+
+	IMPROVE("sta->wme, sta->deflink.agg.max*");
+}
+#endif
+
+#if defined(LKPI_80211_VHT)
+static void
+lkpi_sta_sync_vht_from_ni(struct ieee80211_sta *sta, struct ieee80211_node *ni, int *vht_rx_nss)
+{
+
+	if ((ni->ni_flags & IEEE80211_NODE_VHT) == 0)
+		return;
+
+	if (IEEE80211_IS_CHAN_VHT(ni->ni_chan)) {
+#ifdef __notyet__
+		if (IEEE80211_IS_CHAN_VHT80P80(ni->ni_chan)) {
+			sta->deflink.bandwidth = IEEE80211_STA_RX_BW_160; /* XXX? */
+		} else
+#endif
+		if (IEEE80211_IS_CHAN_VHT160(ni->ni_chan))
+			sta->deflink.bandwidth = IEEE80211_STA_RX_BW_160;
+		else if (IEEE80211_IS_CHAN_VHT80(ni->ni_chan))
+			sta->deflink.bandwidth = IEEE80211_STA_RX_BW_80;
+	}
+
+	IMPROVE("VHT sync ni to sta");
+	return;
+}
+#endif
+
 static void
 lkpi_lsta_dump(struct lkpi_sta *lsta, struct ieee80211_node *ni,
     const char *_f, int _l)
@@ -168,25 +247,14 @@ lkpi_lsta_dump(struct lkpi_sta *lsta, struct ieee80211_node *ni,
 static void
 lkpi_lsta_remove(struct lkpi_sta *lsta, struct lkpi_vif *lvif)
 {
-	struct ieee80211_node *ni;
 
-	IMPROVE("XXX-BZ remove tqe_prev check once ni-sta-state-sync is fixed");
-
-	ni = lsta->ni;
 
 	LKPI_80211_LVIF_LOCK(lvif);
-	if (lsta->lsta_entry.tqe_prev != NULL)
-		TAILQ_REMOVE(&lvif->lsta_head, lsta, lsta_entry);
+	KASSERT(lsta->lsta_entry.tqe_prev != NULL,
+	    ("%s: lsta %p lsta_entry.tqe_prev %p ni %p\n", __func__,
+	    lsta, lsta->lsta_entry.tqe_prev, lsta->ni));
+	TAILQ_REMOVE(&lvif->lsta_head, lsta, lsta_entry);
 	LKPI_80211_LVIF_UNLOCK(lvif);
-
-	lsta->ni = NULL;
-	ni->ni_drv_data = NULL;
-	if (ni != NULL)
-		ieee80211_free_node(ni);
-
-	IMPROVE("more from lkpi_ic_node_free() should happen here.");
-
-	free(lsta, M_LKPI80211);
 }
 
 static struct lkpi_sta *
@@ -198,6 +266,8 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 	struct ieee80211_vif *vif;
 	struct ieee80211_sta *sta;
 	int band, i, tid;
+	int ht_rx_nss;
+	int vht_rx_nss;
 
 	lsta = malloc(sizeof(*lsta) + hw->sta_data_size, M_LKPI80211,
 	    M_NOWAIT | M_ZERO);
@@ -206,13 +276,16 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 
 	lsta->added_to_drv = false;
 	lsta->state = IEEE80211_STA_NOTEXIST;
-#if 0
 	/*
-	 * This needs to be done in node_init() as ieee80211_alloc_node()
-	 * will initialise the refcount after us.
+	 * Link the ni to the lsta here without taking a reference.
+	 * For one we would have to take the reference in node_init()
+	 * as ieee80211_alloc_node() will initialise the refcount after us.
+	 * For the other a ni and an lsta are 1:1 mapped and always together
+	 * from [ic_]node_alloc() to [ic_]node_free() so we are essentally
+	 * using the ni references for the lsta as well despite it being
+	 * two separate allocations.
 	 */
-	lsta->ni = ieee80211_ref_node(ni);
-#endif
+	lsta->ni = ni;
 	/* The back-pointer "drv_data" to net80211_node let's us get lsta. */
 	ni->ni_drv_data = lsta;
 
@@ -249,6 +322,7 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 		ltxq->txq.sta = sta;
 		TAILQ_ELEM_INIT(ltxq, txq_entry);
 		skb_queue_head_init(&ltxq->skbq);
+		LKPI_80211_LTXQ_LOCK_INIT(ltxq);
 		sta->txq[tid] = &ltxq->txq;
 	}
 
@@ -267,9 +341,23 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 			sta->deflink.supp_rates[band] |= BIT(i);
 		}
 	}
+
 	sta->deflink.smps_mode = IEEE80211_SMPS_OFF;
-	IMPROVE("ht, vht, he, ... bandwidth, smps_mode, ..");
-	/* bandwidth = IEEE80211_STA_RX_... */
+	sta->deflink.bandwidth = IEEE80211_STA_RX_BW_20;
+	sta->deflink.rx_nss = 0;
+
+	ht_rx_nss = 0;
+#if defined(LKPI_80211_HT)
+	lkpi_sta_sync_ht_from_ni(sta, ni, &ht_rx_nss);
+#endif
+	vht_rx_nss = 0;
+#if defined(LKPI_80211_VHT)
+	lkpi_sta_sync_vht_from_ni(sta, ni, &vht_rx_nss);
+#endif
+
+	sta->deflink.rx_nss = MAX(ht_rx_nss, sta->deflink.rx_nss);
+	sta->deflink.rx_nss = MAX(vht_rx_nss, sta->deflink.rx_nss);
+	IMPROVE("he, ... smps_mode, ..");
 
 	/* Link configuration. */
 	IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
@@ -279,18 +367,73 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 	}
 
 	/* Deferred TX path. */
-	mtx_init(&lsta->txq_mtx, "lsta_txq", NULL, MTX_DEF);
+	LKPI_80211_LSTA_TXQ_LOCK_INIT(lsta);
 	TASK_INIT(&lsta->txq_task, 0, lkpi_80211_txq_task, lsta);
 	mbufq_init(&lsta->txq, IFQ_MAXLEN);
+	lsta->txq_ready = true;
 
 	return (lsta);
 
 cleanup:
-	for (; tid >= 0; tid--)
+	for (; tid >= 0; tid--) {
+		struct lkpi_txq *ltxq;
+
+		ltxq = TXQ_TO_LTXQ(sta->txq[tid]);
+		LKPI_80211_LTXQ_LOCK_DESTROY(ltxq);
 		free(sta->txq[tid], M_LKPI80211);
+	}
 	free(lsta, M_LKPI80211);
 	return (NULL);
 }
+
+static void
+lkpi_lsta_free(struct lkpi_sta *lsta, struct ieee80211_node *ni)
+{
+	struct mbuf *m;
+
+	if (lsta->added_to_drv)
+		panic("%s: Trying to free an lsta still known to firmware: "
+		    "lsta %p ni %p added_to_drv %d\n",
+		    __func__, lsta, ni, lsta->added_to_drv);
+
+	/* XXX-BZ free resources, ... */
+	IMPROVE();
+
+	/* Drain sta->txq[] */
+
+	LKPI_80211_LSTA_TXQ_LOCK(lsta);
+	lsta->txq_ready = false;
+	LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
+
+	/* Drain taskq, won't be restarted until added_to_drv is set again. */
+	while (taskqueue_cancel(taskqueue_thread, &lsta->txq_task, NULL) != 0)
+		taskqueue_drain(taskqueue_thread, &lsta->txq_task);
+
+	/* Flush mbufq (make sure to release ni refs!). */
+	m = mbufq_dequeue(&lsta->txq);
+	while (m != NULL) {
+		struct ieee80211_node *nim;
+
+		nim = (struct ieee80211_node *)m->m_pkthdr.rcvif;
+		if (nim != NULL)
+			ieee80211_free_node(nim);
+		m_freem(m);
+		m = mbufq_dequeue(&lsta->txq);
+	}
+	KASSERT(mbufq_empty(&lsta->txq), ("%s: lsta %p has txq len %d != 0\n",
+	    __func__, lsta, mbufq_len(&lsta->txq)));
+	LKPI_80211_LSTA_TXQ_LOCK_DESTROY(lsta);
+
+	/* Remove lsta from vif; that is done by the state machine.  Should assert it? */
+
+	IMPROVE("Make sure everything is cleaned up.");
+
+	/* Free lsta. */
+	lsta->ni = NULL;
+	ni->ni_drv_data = NULL;
+	free(lsta, M_LKPI80211);
+}
+
 
 static enum nl80211_band
 lkpi_net80211_chan_to_nl80211_band(struct ieee80211_channel *c)
@@ -510,6 +653,7 @@ lkpi_find_lkpi80211_chan(struct lkpi_hw *lhw,
 	return (NULL);
 }
 
+#if 0
 static struct linuxkpi_ieee80211_channel *
 lkpi_get_lkpi80211_chan(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
@@ -534,6 +678,7 @@ lkpi_get_lkpi80211_chan(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 	return (chan);
 }
+#endif
 
 struct linuxkpi_ieee80211_channel *
 linuxkpi_ieee80211_get_channel(struct wiphy *wiphy, uint32_t freq)
@@ -881,6 +1026,7 @@ lkpi_wake_tx_queues(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
 {
 	struct lkpi_txq *ltxq;
 	int tid;
+	bool ltxq_empty;
 
 	/* Wake up all queues to know they are allocated in the driver. */
 	for (tid = 0; tid < nitems(sta->txq); tid++) {
@@ -899,7 +1045,10 @@ lkpi_wake_tx_queues(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
 		if (dequeue_seen && !ltxq->seen_dequeue)
 			continue;
 
-		if (no_emptyq && skb_queue_empty(&ltxq->skbq))
+		LKPI_80211_LTXQ_LOCK(ltxq);
+		ltxq_empty = skb_queue_empty(&ltxq->skbq);
+		LKPI_80211_LTXQ_UNLOCK(ltxq);
+		if (no_emptyq && ltxq_empty)
 			continue;
 
 		lkpi_80211_mo_wake_tx_queue(hw, sta->txq[tid]);
@@ -935,18 +1084,54 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	uint32_t changed;
 	int error;
 
-	chan = lkpi_get_lkpi80211_chan(vap->iv_ic, vap->iv_bss);
-	if (chan == NULL) {
-		ic_printf(vap->iv_ic, "%s: failed to get channel\n", __func__);
-		return (ESRCH);
+	/*
+	 * In here we use vap->iv_bss until lvif->lvif_bss is set.
+	 * For all later (STATE >= AUTH) functions we need to use the lvif
+	 * cache which will be tracked even through (*iv_update_bss)().
+	 */
+
+	if (vap->iv_bss == NULL) {
+		ic_printf(vap->iv_ic, "%s: no iv_bss for vap %p\n", __func__, vap);
+		return (EINVAL);
+	}
+	/*
+	 * Keep the ni alive locally.  In theory (and practice) iv_bss can change
+	 * once we unlock here.  This is due to net80211 allowing state changes
+	 * and new join1() despite having an active node as well as due to
+	 * the fact that the iv_bss can be swapped under the hood in (*iv_update_bss).
+	 */
+	ni = ieee80211_ref_node(vap->iv_bss);
+	if (ni->ni_chan == NULL || ni->ni_chan == IEEE80211_CHAN_ANYC) {
+		ic_printf(vap->iv_ic, "%s: no channel set for iv_bss ni %p "
+		    "on vap %p\n", __func__, ni, vap);
+		ieee80211_free_node(ni);	/* Error handling for the local ni. */
+		return (EINVAL);
 	}
 
 	lhw = vap->iv_ic->ic_softc;
+	chan = lkpi_find_lkpi80211_chan(lhw, ni->ni_chan);
+	if (chan == NULL) {
+		ic_printf(vap->iv_ic, "%s: failed to get LKPI channel from "
+		    "iv_bss ni %p on vap %p\n", __func__, ni, vap);
+		ieee80211_free_node(ni);	/* Error handling for the local ni. */
+		return (ESRCH);
+	}
+
 	hw = LHW_TO_HW(lhw);
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	ni = ieee80211_ref_node(vap->iv_bss);
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* XXX-BZ KASSERT later? */
+	if (lvif->lvif_bss_synched || lvif->lvif_bss != NULL) {
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+		return (EBUSY);
+	}
+	LKPI_80211_LVIF_UNLOCK(lvif);
 
 	IEEE80211_UNLOCK(vap->iv_ic);
 	LKPI_80211_LHW_LOCK(lhw);
@@ -971,12 +1156,37 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	conf->def.width = NL80211_CHAN_WIDTH_20_NOHT;
 	conf->def.center_freq1 = chan->center_freq;
 	conf->def.center_freq2 = 0;
+	IMPROVE("Check vht_cap from band not just chan?");
+	KASSERT(ni->ni_chan != NULL && ni->ni_chan != IEEE80211_CHAN_ANYC,
+	   ("%s:%d: ni %p ni_chan %p\n", __func__, __LINE__, ni, ni->ni_chan));
+#ifdef LKPI_80211_HT
+	if (IEEE80211_IS_CHAN_HT(ni->ni_chan)) {
+		if (IEEE80211_IS_CHAN_HT40(ni->ni_chan)) {
+			conf->def.width = NL80211_CHAN_WIDTH_40;
+		} else
+			conf->def.width = NL80211_CHAN_WIDTH_20;
+	}
+#endif
+#ifdef LKPI_80211_VHT
+	if (IEEE80211_IS_CHAN_VHT(ni->ni_chan)) {
+#ifdef __notyet__
+		if (IEEE80211_IS_CHAN_VHT80P80(ni->ni_chan)) {
+			conf->def.width = NL80211_CHAN_WIDTH_80P80;
+			conf->def.center_freq2 = 0;	/* XXX */
+		} else
+#endif
+		if (IEEE80211_IS_CHAN_VHT160(ni->ni_chan))
+			conf->def.width = NL80211_CHAN_WIDTH_160;
+		else if (IEEE80211_IS_CHAN_VHT80(ni->ni_chan))
+			conf->def.width = NL80211_CHAN_WIDTH_80;
+	}
+#endif
 	/* Responder ... */
 	conf->min_def.chan = chan;
 	conf->min_def.width = NL80211_CHAN_WIDTH_20_NOHT;
 	conf->min_def.center_freq1 = chan->center_freq;
 	conf->min_def.center_freq2 = 0;
-	IMPROVE("currently 20_NOHT only");
+	IMPROVE("currently 20_NOHT min_def only");
 
 	/* Set bss info (bss_info_changed). */
 	bss_changed = 0;
@@ -1009,6 +1219,15 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 			vif->bss_conf.chandef.width = conf->def.width;
 			vif->bss_conf.chandef.center_freq1 =
 			    conf->def.center_freq1;
+#ifdef LKPI_80211_HT
+			if (vif->bss_conf.chandef.width == NL80211_CHAN_WIDTH_40) {
+				/* Note: it is 10 not 20. */
+				if (IEEE80211_IS_CHAN_HT40U(ni->ni_chan))
+					vif->bss_conf.chandef.center_freq1 += 10;
+				else if (IEEE80211_IS_CHAN_HT40D(ni->ni_chan))
+					vif->bss_conf.chandef.center_freq1 -= 10;
+			}
+#endif
 			vif->bss_conf.chandef.center_freq2 =
 			    conf->def.center_freq2;
 		} else {
@@ -1041,29 +1260,35 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, bss_changed);
 
 	/*
-	 * This is a bandaid for now.  If we went through (*iv_update_bss)()
-	 * and then removed the lsta we end up here without a lsta and have
-	 * to manually allocate and link it in as lkpi_ic_node_alloc()/init()
-	 * would normally do.
-	 * XXX-BZ I do not like this but currently we have no good way of
-	 * intercepting the bss swap and state changes and packets going out
-	 * workflow so live with this.  It is a compat layer after all.
+	 * Given ni and lsta are 1:1 from alloc to free we can assert that
+	 * ni always has lsta data attach despite net80211 node swapping
+	 * under the hoods.
 	 */
-	if (ni->ni_drv_data == NULL) {
-		lsta = lkpi_lsta_alloc(vap, ni->ni_macaddr, hw, ni);
-		if (lsta == NULL) {
-			error = ENOMEM;
-			ic_printf(vap->iv_ic, "%s:%d: lkpi_lsta_alloc "
-			    "failed: %d\n", __func__, __LINE__, error);
-			goto out;
-		}
-		lsta->ni = ieee80211_ref_node(ni);
-	} else {
-		lsta = ni->ni_drv_data;
-	}
+	KASSERT(ni->ni_drv_data != NULL, ("%s: ni %p ni_drv_data %p\n",
+	    __func__, ni, ni->ni_drv_data));
+	lsta = ni->ni_drv_data;
+
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* Re-check given (*iv_update_bss) could have happened. */
+	/* XXX-BZ KASSERT later? or deal as error? */
+	if (lvif->lvif_bss_synched || lvif->lvif_bss != NULL)
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d, ni %p lsta %p\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched, ni, lsta);
+
+	/*
+	 * Reference the ni for this cache of lsta/ni on lvif->lvif_bss
+	 * essentially out lsta version of the iv_bss.
+	 * Do NOT use iv_bss here anymore as that may have diverged from our
+	 * function local ni already and would lead to inconsistencies.
+	 */
+	ieee80211_ref_node(ni);
+	lvif->lvif_bss = lsta;
+	lvif->lvif_bss_synched = true;
 
 	/* Insert the [l]sta into the list of known stations. */
-	LKPI_80211_LVIF_LOCK(lvif);
 	TAILQ_INSERT_TAIL(&lvif->lsta_head, lsta, lsta_entry);
 	LKPI_80211_LVIF_UNLOCK(lvif);
 
@@ -1112,6 +1337,10 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
+	/*
+	 * Release the reference that keop the ni stable locally
+	 * during the work of this function.
+	 */
 	if (ni != NULL)
 		ieee80211_free_node(ni);
 	return (error);
@@ -1135,9 +1364,23 @@ lkpi_sta_auth_to_scan(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	/* Keep ni around. */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
+	LKPI_80211_LVIF_LOCK(lvif);
+#ifdef LINUXKPI_DEBUG_80211
+	/* XXX-BZ KASSERT later; state going down so no action. */
+	if (lvif->lvif_bss == NULL)
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+	KASSERT(lsta != NULL && lsta->ni != NULL, ("%s: lsta %p ni %p "
+	    "lvif %p vap %p\n", __func__,
+	    lsta, (lsta != NULL) ? lsta->ni : NULL, lvif, vap));
+	ni = lsta->ni;			/* Reference held for lvif_bss. */
 	sta = LSTA_TO_STA(lsta);
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
@@ -1187,7 +1430,18 @@ lkpi_sta_auth_to_scan(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
 
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* Remove ni reference for this cache of lsta. */
+	lvif->lvif_bss = NULL;
+	lvif->lvif_bss_synched = false;
+	LKPI_80211_LVIF_UNLOCK(lvif);
 	lkpi_lsta_remove(lsta, lvif);
+	/*
+	 * The very last release the reference on the ni for the ni/lsta on
+	 * lvif->lvif_bss.  Upon return from this both ni and lsta are invalid
+	 * and potentially freed.
+	 */
+	ieee80211_free_node(ni);
 
 	/* conf_tx */
 
@@ -1210,8 +1464,6 @@ lkpi_sta_auth_to_scan(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -1233,7 +1485,6 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 	struct ieee80211_hw *hw;
 	struct lkpi_vif *lvif;
 	struct ieee80211_vif *vif;
-	struct ieee80211_node *ni;
 	struct lkpi_sta *lsta;
 	struct ieee80211_prep_tx_info prep_tx_info;
 	int error;
@@ -1245,15 +1496,30 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 
 	IEEE80211_UNLOCK(vap->iv_ic);
 	LKPI_80211_LHW_LOCK(lhw);
-	ni = NULL;
+
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* XXX-BZ KASSERT later? */
+	if (!lvif->lvif_bss_synched || lvif->lvif_bss == NULL) {
+#ifdef LINUXKPI_DEBUG_80211
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+		error = ENOTRECOVERABLE;
+		LKPI_80211_LVIF_UNLOCK(lvif);
+		goto out;
+	}
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+
+	KASSERT(lsta != NULL, ("%s: lsta %p\n", __func__, lsta));
 
 	/* Finish auth. */
 	IMPROVE("event callback");
 
 	/* Update sta_state (NONE to AUTH). */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
-	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_NONE, ("%s: lsta %p state not "
 	    "NONE: %#x\n", __func__, lsta, lsta->state));
 	error = lkpi_80211_mo_sta_state(hw, vif, lsta, IEEE80211_STA_AUTH);
@@ -1297,8 +1563,6 @@ lkpi_sta_auth_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, in
 out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -1310,20 +1574,37 @@ lkpi_sta_a_to_a(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	struct ieee80211_hw *hw;
 	struct lkpi_vif *lvif;
 	struct ieee80211_vif *vif;
-	struct ieee80211_node *ni;
 	struct lkpi_sta *lsta;
 	struct ieee80211_prep_tx_info prep_tx_info;
+	int error;
 
 	lhw = vap->iv_ic->ic_softc;
 	hw = LHW_TO_HW(lhw);
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	ni = ieee80211_ref_node(vap->iv_bss);
-
 	IEEE80211_UNLOCK(vap->iv_ic);
 	LKPI_80211_LHW_LOCK(lhw);
-	lsta = ni->ni_drv_data;
+
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* XXX-BZ KASSERT later? */
+	if (!lvif->lvif_bss_synched || lvif->lvif_bss == NULL) {
+#ifdef LINUXKPI_DEBUG_80211
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+		LKPI_80211_LVIF_UNLOCK(lvif);
+		error = ENOTRECOVERABLE;
+		goto out;
+	}
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+
+	KASSERT(lsta != NULL, ("%s: lsta %p! lvif %p vap %p\n", __func__,
+	    lsta, lvif, vap));
 
 	IMPROVE("event callback?");
 
@@ -1345,12 +1626,12 @@ lkpi_sta_a_to_a(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		lsta->in_mgd = true;
 	}
 
+	error = 0;
+out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 
-	return (0);
+	return (error);
 }
 
 static int
@@ -1372,15 +1653,29 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	/* Keep ni around. */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
+	IEEE80211_UNLOCK(vap->iv_ic);
+	LKPI_80211_LHW_LOCK(lhw);
+
+	LKPI_80211_LVIF_LOCK(lvif);
+#ifdef LINUXKPI_DEBUG_80211
+	/* XXX-BZ KASSERT later; state going down so no action. */
+	if (lvif->lvif_bss == NULL)
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+	KASSERT(lsta != NULL && lsta->ni != NULL, ("%s: lsta %p ni %p "
+	    "lvif %p vap %p\n", __func__,
+	    lsta, (lsta != NULL) ? lsta->ni : NULL, lvif, vap));
+
+	ni = lsta->ni;		/* Reference held for lvif_bss. */
 	sta = LSTA_TO_STA(lsta);
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
-
-	IEEE80211_UNLOCK(vap->iv_ic);
-	LKPI_80211_LHW_LOCK(lhw);
 
 	/* flush, drop. */
 	lkpi_80211_mo_flush(hw, vif,  nitems(sta->txq), true);
@@ -1477,7 +1772,18 @@ _lkpi_sta_assoc_to_down(struct ieee80211vap *vap, enum ieee80211_state nstate, i
 	bss_changed |= BSS_CHANGED_BSSID;
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, bss_changed);
 
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* Remove ni reference for this cache of lsta. */
+	lvif->lvif_bss = NULL;
+	lvif->lvif_bss_synched = false;
+	LKPI_80211_LVIF_UNLOCK(lvif);
 	lkpi_lsta_remove(lsta, lvif);
+	/*
+	 * The very last release the reference on the ni for the ni/lsta on
+	 * lvif->lvif_bss.  Upon return from this both ni and lsta are invalid
+	 * and potentially freed.
+	 */
+	ieee80211_free_node(ni);
 
 	/* conf_tx */
 
@@ -1502,8 +1808,6 @@ out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
 outni:
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -1561,16 +1865,34 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 
 	IEEE80211_UNLOCK(vap->iv_ic);
 	LKPI_80211_LHW_LOCK(lhw);
-	ni = NULL;
+
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* XXX-BZ KASSERT later? */
+	if (!lvif->lvif_bss_synched || lvif->lvif_bss == NULL) {
+#ifdef LINUXKPI_DEBUG_80211
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+		LKPI_80211_LVIF_UNLOCK(lvif);
+		error = ENOTRECOVERABLE;
+		goto out;
+	}
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+	KASSERT(lsta != NULL && lsta->ni != NULL, ("%s: lsta %p ni %p "
+	    "lvif %p vap %p\n", __func__,
+	    lsta, (lsta != NULL) ? lsta->ni : NULL, lvif, vap));
+
+	ni = lsta->ni;		/* Reference held for lvif_bss. */
 
 	IMPROVE("ponder some of this moved to ic_newassoc, scan_assoc_success, "
 	    "and to lesser extend ieee80211_notify_node_join");
 
 	/* Finish assoc. */
 	/* Update sta_state (AUTH to ASSOC) and set aid. */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
-	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_AUTH, ("%s: lsta %p state not "
 	    "AUTH: %#x\n", __func__, lsta, lsta->state));
 	sta = LSTA_TO_STA(lsta);
@@ -1651,6 +1973,11 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 		IMPROVE("net80211 does not consider node authorized");
 	}
 
+#if defined(LKPI_80211_HT)
+	IMPROVE("Is this the right spot, has net80211 done all updates already?");
+	lkpi_sta_sync_ht_from_ni(sta, ni, NULL);
+#endif
+
 	/* Update sta_state (ASSOC to AUTHORIZED). */
 	KASSERT(lsta != NULL, ("%s: ni %p lsta is NULL\n", __func__, ni));
 	KASSERT(lsta->state == IEEE80211_STA_ASSOC, ("%s: lsta %p state not "
@@ -1678,8 +2005,6 @@ lkpi_sta_assoc_to_run(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -1715,9 +2040,23 @@ lkpi_sta_run_to_assoc(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	/* Keep ni around. */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
+	LKPI_80211_LVIF_LOCK(lvif);
+#ifdef LINUXKPI_DEBUG_80211
+	/* XXX-BZ KASSERT later; state going down so no action. */
+	if (lvif->lvif_bss == NULL)
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+	KASSERT(lsta != NULL && lsta->ni != NULL, ("%s: lsta %p ni %p "
+	    "lvif %p vap %p\n", __func__,
+	    lsta, (lsta != NULL) ? lsta->ni : NULL, lvif, vap));
+
+	ni = lsta->ni;		/* Reference held for lvif_bss. */
 	sta = LSTA_TO_STA(lsta);
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
@@ -1813,8 +2152,6 @@ out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
 outni:
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -1837,15 +2174,29 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	lvif = VAP_TO_LVIF(vap);
 	vif = LVIF_TO_VIF(lvif);
 
-	/* Keep ni around. */
-	ni = ieee80211_ref_node(vap->iv_bss);
-	lsta = ni->ni_drv_data;
+	IEEE80211_UNLOCK(vap->iv_ic);
+	LKPI_80211_LHW_LOCK(lhw);
+
+	LKPI_80211_LVIF_LOCK(lvif);
+#ifdef LINUXKPI_DEBUG_80211
+	/* XXX-BZ KASSERT later; state going down so no action. */
+	if (lvif->lvif_bss == NULL)
+		ic_printf(vap->iv_ic, "%s:%d: lvif %p vap %p iv_bss %p lvif_bss %p "
+		    "lvif_bss->ni %p synched %d\n", __func__, __LINE__,
+		    lvif, vap, vap->iv_bss, lvif->lvif_bss,
+		    (lvif->lvif_bss != NULL) ? lvif->lvif_bss->ni : NULL,
+		    lvif->lvif_bss_synched);
+#endif
+	lsta = lvif->lvif_bss;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+	KASSERT(lsta != NULL && lsta->ni != NULL, ("%s: lsta %p ni %p "
+	    "lvif %p vap %p\n", __func__,
+	    lsta, (lsta != NULL) ? lsta->ni : NULL, lvif, vap));
+
+	ni = lsta->ni;		/* Reference held for lvif_bss. */
 	sta = LSTA_TO_STA(lsta);
 
 	lkpi_lsta_dump(lsta, ni, __func__, __LINE__);
-
-	IEEE80211_UNLOCK(vap->iv_ic);
-	LKPI_80211_LHW_LOCK(lhw);
 
 	/* flush, drop. */
 	lkpi_80211_mo_flush(hw, vif,  nitems(sta->txq), true);
@@ -1966,7 +2317,18 @@ lkpi_sta_run_to_init(struct ieee80211vap *vap, enum ieee80211_state nstate, int 
 	bss_changed |= BSS_CHANGED_BSSID;
 	lkpi_80211_mo_bss_info_changed(hw, vif, &vif->bss_conf, bss_changed);
 
+	LKPI_80211_LVIF_LOCK(lvif);
+	/* Remove ni reference for this cache of lsta. */
+	lvif->lvif_bss = NULL;
+	lvif->lvif_bss_synched = false;
+	LKPI_80211_LVIF_UNLOCK(lvif);
 	lkpi_lsta_remove(lsta, lvif);
+	/*
+	 * The very last release the reference on the ni for the ni/lsta on
+	 * lvif->lvif_bss.  Upon return from this both ni and lsta are invalid
+	 * and potentially freed.
+	 */
+	ieee80211_free_node(ni);
 
 	/* conf_tx */
 
@@ -1991,8 +2353,6 @@ out:
 	LKPI_80211_LHW_UNLOCK(lhw);
 	IEEE80211_LOCK(vap->iv_ic);
 outni:
-	if (ni != NULL)
-		ieee80211_free_node(ni);
 	return (error);
 }
 
@@ -2165,53 +2525,18 @@ static struct ieee80211_node *
 lkpi_iv_update_bss(struct ieee80211vap *vap, struct ieee80211_node *ni)
 {
 	struct lkpi_vif *lvif;
-	struct ieee80211_node *obss;
-	struct lkpi_sta *lsta;
-	struct ieee80211_sta *sta;
+	struct ieee80211_node *rni;
 
-	obss = vap->iv_bss;
+	IEEE80211_LOCK_ASSERT(vap->iv_ic);
 
-#ifdef LINUXKPI_DEBUG_80211
-	if (linuxkpi_debug_80211 & D80211_TRACE)
-		ic_printf(vap->iv_ic, "%s: obss %p ni_drv_data %p "
-		    "ni %p ni_drv_data %p\n", __func__,
-		    obss, (obss != NULL) ? obss->ni_drv_data : NULL,
-		    ni, (ni != NULL) ? ni->ni_drv_data : NULL);
-#endif
-
-	/* Nothing to copy from.  Just return. */
-	if (obss == NULL || obss->ni_drv_data == NULL)
-		goto out;
-
-	/* Nothing to copy to.  Just return. */
-	IMPROVE("clearing the obss might still be needed?");
-	if (ni == NULL)
-		goto out;
-
-	/* Nothing changed? panic? */
-	if (obss == ni)
-		goto out;
-
-	lsta = obss->ni_drv_data;
-	obss->ni_drv_data = ni->ni_drv_data;
-	ni->ni_drv_data = lsta;
-	if (lsta != NULL) {
-		lsta->ni = ni;
-		sta = LSTA_TO_STA(lsta);
-		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
-		IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
-	}
-	lsta = obss->ni_drv_data;
-	if (lsta != NULL) {
-		lsta->ni = obss;
-		sta = LSTA_TO_STA(lsta);
-		IEEE80211_ADDR_COPY(sta->addr, lsta->ni->ni_macaddr);
-		IEEE80211_ADDR_COPY(sta->deflink.addr, sta->addr);
-	}
-
-out:
 	lvif = VAP_TO_LVIF(vap);
-	return (lvif->iv_update_bss(vap, ni));
+
+	LKPI_80211_LVIF_LOCK(lvif);
+	lvif->lvif_bss_synched = false;
+	LKPI_80211_LVIF_UNLOCK(lvif);
+
+	rni = lvif->iv_update_bss(vap, ni);
+	return (rni);
 }
 
 #ifdef LKPI_80211_WME
@@ -2332,6 +2657,8 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	lvif = malloc(len, M_80211_VAP, M_WAITOK | M_ZERO);
 	mtx_init(&lvif->mtx, "lvif", NULL, MTX_DEF);
 	TAILQ_INIT(&lvif->lsta_head);
+	lvif->lvif_bss = NULL;
+	lvif->lvif_bss_synched = false;
 	vap = LVIF_TO_VAP(lvif);
 
 	vif = LVIF_TO_VIF(lvif);
@@ -2463,6 +2790,10 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 		vap->iv_key_delete = lkpi_iv_key_delete;
 #endif
 	}
+
+#ifdef LKPI_80211_HT
+	/* Stay with the iv_ampdu_rxmax,limit / iv_ampdu_density defaults until later. */
+#endif
 
 	ieee80211_ratectl_init(vap);
 
@@ -3075,6 +3406,9 @@ lkpi_ic_set_channel(struct ieee80211com *ic)
 
 	hw = LHW_TO_HW(lhw);
 	cfg80211_chandef_create(&hw->conf.chandef, chan,
+#ifdef LKPI_80211_HT
+	    (ic->ic_htcaps & IEEE80211_HTC_HT) ? 0 :
+#endif
 	    NL80211_CHAN_NO_HT);
 
 	error = lkpi_80211_mo_config(hw, IEEE80211_CONF_CHANGE_CHANNEL);
@@ -3141,7 +3475,6 @@ lkpi_ic_node_init(struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic;
 	struct lkpi_hw *lhw;
-	struct lkpi_sta *lsta;
 	int error;
 
 	ic = ni->ni_ic;
@@ -3152,11 +3485,6 @@ lkpi_ic_node_init(struct ieee80211_node *ni)
 		if (error != 0)
 			return (error);
 	}
-
-	lsta = ni->ni_drv_data;
-
-	/* Now take the reference before linking it to the table. */
-	lsta->ni = ieee80211_ref_node(ni);
 
 	/* XXX-BZ Sync other state over. */
 	IMPROVE();
@@ -3190,30 +3518,15 @@ lkpi_ic_node_free(struct ieee80211_node *ni)
 	ic = ni->ni_ic;
 	lhw = ic->ic_softc;
 	lsta = ni->ni_drv_data;
-	if (lsta == NULL)
-		goto out;
 
-	/* XXX-BZ free resources, ... */
-	IMPROVE();
+	/* KASSERT lsta is not NULL here. Print ni/ni__refcnt. */
 
-	/* Flush mbufq (make sure to release ni refs!). */
-#ifdef __notyet__
-	KASSERT(mbufq_empty(&lsta->txq), ("%s: lsta %p has txq len %d != 0\n",
-	    __func__, lsta, mbufq_len(&lsta->txq)));
-#endif
-	/* Drain taskq. */
+	/*
+	 * Pass in the original ni just in case of error we could check that
+	 * it is the same as lsta->ni.
+	 */
+	lkpi_lsta_free(lsta, ni);
 
-	/* Drain sta->txq[] */
-	mtx_destroy(&lsta->txq_mtx);
-
-	/* Remove lsta if added_to_drv. */
-
-	/* Remove lsta from vif */
-	/* Remove ref from lsta node... */
-	/* Free lsta. */
-	lkpi_lsta_remove(lsta, VAP_TO_LVIF(ni->ni_vap));
-
-out:
 	if (lhw->ic_node_free != NULL)
 		lhw->ic_node_free(ni);
 }
@@ -3225,11 +3538,21 @@ lkpi_ic_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 	struct lkpi_sta *lsta;
 
 	lsta = ni->ni_drv_data;
+	LKPI_80211_LSTA_TXQ_LOCK(lsta);
+	if (!lsta->txq_ready) {
+		LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
+		/*
+		 * Free the mbuf (do NOT release ni ref for the m_pkthdr.rcvif!
+		 * ieee80211_raw_output() does that in case of error).
+		 */
+		m_free(m);
+		return (ENETDOWN);
+	}
 
 	/* Queue the packet and enqueue the task to handle it. */
-	LKPI_80211_LSTA_LOCK(lsta);
 	mbufq_enqueue(&lsta->txq, m);
-	LKPI_80211_LSTA_UNLOCK(lsta);
+	taskqueue_enqueue(taskqueue_thread, &lsta->txq_task);
+	LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
 
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_TX)
@@ -3238,7 +3561,6 @@ lkpi_ic_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 		    mbufq_len(&lsta->txq));
 #endif
 
-	taskqueue_enqueue(taskqueue_thread, &lsta->txq_task);
 	return (0);
 }
 
@@ -3363,6 +3685,13 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 		info->control.flags |= IEEE80211_TX_CTRL_PORT_CTRL_PROTO;
 	info->control.vif = vif;
 	/* XXX-BZ info->control.rates */
+#ifdef __notyet__
+#ifdef LKPI_80211_HT
+	info->control.rts_cts_rate_idx=
+	info->control.use_rts= /* RTS */
+	info->control.use_cts_prot= /* RTS/CTS*/
+#endif
+#endif
 
 	lsta = lkpi_find_lsta_by_ni(lvif, ni);
 	if (lsta != NULL) {
@@ -3395,6 +3724,7 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 		KASSERT(ltxq != NULL, ("%s: lsta %p sta %p m %p skb %p "
 		    "ltxq %p != NULL\n", __func__, lsta, sta, m, skb, ltxq));
 
+		LKPI_80211_LTXQ_LOCK(ltxq);
 		skb_queue_tail(&ltxq->skbq, skb);
 #ifdef LINUXKPI_DEBUG_80211
 		if (linuxkpi_debug_80211 & D80211_TRACE_TX)
@@ -3407,6 +3737,7 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 			    skb_queue_len(&ltxq->skbq), ltxq->txq.ac,
 			    ltxq->txq.tid, ac, skb->priority, skb->qmap);
 #endif
+		LKPI_80211_LTXQ_UNLOCK(ltxq);
 		lkpi_80211_mo_wake_tx_queue(hw, &ltxq->txq);
 		return;
 	}
@@ -3444,9 +3775,13 @@ lkpi_80211_txq_task(void *ctx, int pending)
 
 	mbufq_init(&mq, IFQ_MAXLEN);
 
-	LKPI_80211_LSTA_LOCK(lsta);
+	LKPI_80211_LSTA_TXQ_LOCK(lsta);
+	/*
+	 * Do not re-check lsta->txq_ready here; we may have a pending
+	 * disassoc frame still.
+	 */
 	mbufq_concat(&mq, &lsta->txq);
-	LKPI_80211_LSTA_UNLOCK(lsta);
+	LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
 
 	m = mbufq_dequeue(&mq);
 	while (m != NULL) {
@@ -3467,6 +3802,291 @@ lkpi_ic_transmit(struct ieee80211com *ic, struct mbuf *m)
 
 	ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
 	return (lkpi_ic_raw_xmit(ni, m, NULL));
+}
+
+#ifdef LKPI_80211_HT
+static int
+lkpi_ic_recv_action(struct ieee80211_node *ni, const struct ieee80211_frame *wh,
+    const uint8_t *frm, const uint8_t *efrm)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	return (lhw->ic_recv_action(ni, wh, frm, efrm));
+}
+
+static int
+lkpi_ic_send_action(struct ieee80211_node *ni, int category, int action, void *sa)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	return (lhw->ic_send_action(ni, category, action, sa));
+}
+
+
+static int
+lkpi_ic_ampdu_enable(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	return (lhw->ic_ampdu_enable(ni, tap));
+}
+
+static int
+lkpi_ic_addba_request(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap,
+    int dialogtoken, int baparamset, int batimeout)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	return (lhw->ic_addba_request(ni, tap, dialogtoken, baparamset, batimeout));
+}
+
+static int
+lkpi_ic_addba_response(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap,
+    int status, int baparamset, int batimeout)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	return (lhw->ic_addba_response(ni, tap, status, baparamset, batimeout));
+}
+
+static void
+lkpi_ic_addba_stop(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	lhw->ic_addba_stop(ni, tap);
+}
+
+static void
+lkpi_ic_addba_response_timeout(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	lhw->ic_addba_response_timeout(ni, tap);
+}
+
+static void
+lkpi_ic_bar_response(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap,
+    int status)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	IMPROVE_HT();
+
+	lhw->ic_bar_response(ni, tap, status);
+}
+
+static int
+lkpi_ic_ampdu_rx_start(struct ieee80211_node *ni, struct ieee80211_rx_ampdu *rap,
+    int baparamset, int batimeout, int baseqctl)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+	struct ieee80211_hw *hw;
+	struct ieee80211vap *vap;
+	struct lkpi_vif *lvif;
+	struct ieee80211_vif *vif;
+	struct lkpi_sta *lsta;
+        struct ieee80211_sta *sta;
+	struct ieee80211_ampdu_params params;
+	int error;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+	hw = LHW_TO_HW(lhw);
+	vap = ni->ni_vap;
+	lvif = VAP_TO_LVIF(vap);
+	vif = LVIF_TO_VIF(lvif);
+	lsta = ni->ni_drv_data;
+	sta = LSTA_TO_STA(lsta);
+
+	params.sta = sta;
+	params.action = IEEE80211_AMPDU_RX_START;
+	params.buf_size = _IEEE80211_MASKSHIFT(le16toh(baparamset), IEEE80211_BAPS_BUFSIZ);
+	if (params.buf_size == 0)
+		params.buf_size = IEEE80211_MAX_AMPDU_BUF_HT;
+	else
+		params.buf_size = min(params.buf_size, IEEE80211_MAX_AMPDU_BUF_HT);
+	if (params.buf_size > hw->max_rx_aggregation_subframes)
+		params.buf_size = hw->max_rx_aggregation_subframes;
+	params.timeout = le16toh(batimeout);
+	params.ssn = _IEEE80211_MASKSHIFT(le16toh(baseqctl), IEEE80211_BASEQ_START);
+	params.tid = _IEEE80211_MASKSHIFT(le16toh(baparamset), IEEE80211_BAPS_TID);
+	params.amsdu = false;
+
+	IMPROVE_HT("Do we need to distinguish based on SUPPORTS_REORDERING_BUFFER?");
+
+	/* This may call kalloc.  Make sure we can sleep. */
+	error = lkpi_80211_mo_ampdu_action(hw, vif, &params);
+	if (error != 0) {
+		ic_printf(ic, "%s: mo_ampdu_action returned %d. ni %p rap %p\n",
+		    __func__, error, ni, rap);
+		return (error);
+	}
+	IMPROVE_HT("net80211 is missing the error check on return and assumes success");
+
+	error = lhw->ic_ampdu_rx_start(ni, rap, baparamset, batimeout, baseqctl);
+	return (error);
+}
+
+static void
+lkpi_ic_ampdu_rx_stop(struct ieee80211_node *ni, struct ieee80211_rx_ampdu *rap)
+{
+	struct ieee80211com *ic;
+	struct lkpi_hw *lhw;
+	struct ieee80211_hw *hw;
+	struct ieee80211vap *vap;
+	struct lkpi_vif *lvif;
+	struct ieee80211_vif *vif;
+	struct lkpi_sta *lsta;
+        struct ieee80211_sta *sta;
+	struct ieee80211_ampdu_params params;
+	int error;
+	uint8_t tid;
+
+	ic = ni->ni_ic;
+	lhw = ic->ic_softc;
+
+	/*
+	 * We should not (cannot) call into mac80211 ops with AMPDU_RX_STOP if
+	 * we did not START.  Some drivers pass it down to firmware which will
+	 * simply barf and net80211 calls ieee80211_ht_node_cleanup() from
+	 * ieee80211_ht_node_init() amongst others which will iterate over all
+	 * tid and call ic_ampdu_rx_stop() unconditionally.
+	 * XXX net80211 should probably be more "gentle" in these cases and
+	 * track some state itself.
+	 */
+	if ((rap->rxa_flags & IEEE80211_AGGR_RUNNING) == 0)
+		goto net80211_only;
+
+	hw = LHW_TO_HW(lhw);
+	vap = ni->ni_vap;
+	lvif = VAP_TO_LVIF(vap);
+	vif = LVIF_TO_VIF(lvif);
+	lsta = ni->ni_drv_data;
+	sta = LSTA_TO_STA(lsta);
+
+	IMPROVE_HT("This really should be passed from ht_recv_action_ba_delba.");
+	for (tid = 0; tid < WME_NUM_TID; tid++) {
+		if (&ni->ni_rx_ampdu[tid] == rap)
+			break;
+	}
+
+	params.sta = sta;
+	params.action = IEEE80211_AMPDU_RX_STOP;
+	params.buf_size = 0;
+	params.timeout = 0;
+	params.ssn = 0;
+	params.tid = tid;
+	params.amsdu = false;
+
+	error = lkpi_80211_mo_ampdu_action(hw, vif, &params);
+	if (error != 0)
+		ic_printf(ic, "%s: mo_ampdu_action returned %d. ni %p rap %p\n",
+		    __func__, error, ni, rap);
+
+net80211_only:
+	lhw->ic_ampdu_rx_stop(ni, rap);
+}
+#endif
+
+static void
+lkpi_ic_getradiocaps_ht(struct ieee80211com *ic, struct ieee80211_hw *hw,
+    uint8_t *bands, int *chan_flags, enum nl80211_band band)
+{
+#ifdef LKPI_80211_HT
+	struct ieee80211_sta_ht_cap *ht_cap;
+
+	ht_cap = &hw->wiphy->bands[band]->ht_cap;
+	if (!ht_cap->ht_supported)
+		return;
+
+	switch (band) {
+	case NL80211_BAND_2GHZ:
+		setbit(bands, IEEE80211_MODE_11NG);
+		break;
+	case NL80211_BAND_5GHZ:
+		setbit(bands, IEEE80211_MODE_11NA);
+		break;
+	default:
+		IMPROVE("Unsupported band %d", band);
+		return;
+	}
+
+	ic->ic_htcaps = IEEE80211_HTC_HT;	/* HT operation */
+
+	/*
+	 * Rather than manually checking each flag and
+	 * translating IEEE80211_HT_CAP_ to IEEE80211_HTCAP_,
+	 * simply copy the 16bits.
+	 */
+	ic->ic_htcaps |= ht_cap->cap;
+
+	/* Then deal with the other flags. */
+	if (ieee80211_hw_check(hw, AMPDU_AGGREGATION))
+		ic->ic_htcaps |= IEEE80211_HTC_AMPDU;
+#ifdef __notyet__
+	if (ieee80211_hw_check(hw, TX_AMSDU))
+		ic->ic_htcaps |= IEEE80211_HTC_AMSDU;
+	if (ieee80211_hw_check(hw, SUPPORTS_AMSDU_IN_AMPDU))
+		ic->ic_htcaps |= (IEEE80211_HTC_RX_AMSDU_AMPDU |
+		    IEEE80211_HTC_TX_AMSDU_AMPDU);
+#endif
+
+	IMPROVE("PS, ampdu_*, ht_cap.mcs.tx_params, ...");
+	ic->ic_htcaps |= IEEE80211_HTCAP_SMPS_OFF;
+
+	/* Only add HT40 channels if supported. */
+	if ((ic->ic_htcaps & IEEE80211_HTCAP_CHWIDTH40) != 0 &&
+	    chan_flags != NULL)
+		*chan_flags |= NET80211_CBW_FLAG_HT40;
+#endif
 }
 
 static void
@@ -3492,13 +4112,12 @@ lkpi_ic_getradiocaps(struct ieee80211com *ic, int maxchan,
 		chan_flags = 0;
 		setbit(bands, IEEE80211_MODE_11B);
 		/* XXX-BZ unclear how to check for 11g. */
+
+		IMPROVE("the bitrates may have flags?");
 		setbit(bands, IEEE80211_MODE_11G);
-#ifdef __notyet__
-		if (hw->wiphy->bands[NL80211_BAND_2GHZ]->ht_cap.ht_supported) {
-			setbit(bands, IEEE80211_MODE_11NG);
-			chan_flags |= NET80211_CBW_FLAG_HT40;
-		}
-#endif
+
+		lkpi_ic_getradiocaps_ht(ic, hw, bands, &chan_flags,
+		    NL80211_BAND_2GHZ);
 
 		channels = hw->wiphy->bands[NL80211_BAND_2GHZ]->channels;
 		for (i = 0; i < nchans && *n < maxchan; i++) {
@@ -3548,11 +4167,11 @@ lkpi_ic_getradiocaps(struct ieee80211com *ic, int maxchan,
 		memset(bands, 0, sizeof(bands));
 		chan_flags = 0;
 		setbit(bands, IEEE80211_MODE_11A);
-#ifdef __not_yet__
-		if (hw->wiphy->bands[NL80211_BAND_5GHZ]->ht_cap.ht_supported) {
-			setbit(bands, IEEE80211_MODE_11NA);
-			chan_flags |= NET80211_CBW_FLAG_HT40;
-		}
+
+		lkpi_ic_getradiocaps_ht(ic, hw, bands, &chan_flags,
+		    NL80211_BAND_5GHZ);
+
+#ifdef LKPI_80211_VHT
 		if (hw->wiphy->bands[NL80211_BAND_5GHZ]->vht_cap.vht_supported){
 
 			ic->ic_flags_ext |= IEEE80211_FEXT_VHT;
@@ -3645,6 +4264,7 @@ linuxkpi_ieee80211_alloc_hw(size_t priv_len, const struct ieee80211_ops *ops)
 
 	LKPI_80211_LHW_LOCK_INIT(lhw);
 	LKPI_80211_LHW_SCAN_LOCK_INIT(lhw);
+	LKPI_80211_LHW_TXQ_LOCK_INIT(lhw);
 	sx_init_flags(&lhw->lvif_sx, "lhw-lvif", SX_RECURSE | SX_DUPOK);
 	TAILQ_INIT(&lhw->lvif_head);
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
@@ -3683,9 +4303,10 @@ linuxkpi_ieee80211_iffree(struct ieee80211_hw *hw)
 	lhw->ic = NULL;
 
 	/* Cleanup more of lhw here or in wiphy_free()? */
-	sx_destroy(&lhw->lvif_sx);
-	LKPI_80211_LHW_LOCK_DESTROY(lhw);
+	LKPI_80211_LHW_TXQ_LOCK_DESTROY(lhw);
 	LKPI_80211_LHW_SCAN_LOCK_DESTROY(lhw);
+	LKPI_80211_LHW_LOCK_DESTROY(lhw);
+	sx_destroy(&lhw->lvif_sx);
 	IMPROVE();
 }
 
@@ -3793,18 +4414,6 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 		lhw->scan_flags |= LKPI_LHW_SCAN_HW;
 	}
 
-#ifdef __notyet__
-	ic->ic_htcaps = IEEE80211_HTC_HT        /* HT operation */
-		    | IEEE80211_HTC_AMPDU       /* A-MPDU tx/rx */
-		    | IEEE80211_HTC_AMSDU       /* A-MSDU tx/rx */
-		    | IEEE80211_HTCAP_MAXAMSDU_3839
-						/* max A-MSDU length */
-		    | IEEE80211_HTCAP_SMPS_OFF; /* SM power save off */
-	ic->ic_htcaps |= IEEE80211_HTCAP_SHORTGI20;
-	ic->ic_htcaps |= IEEE80211_HTCAP_CHWIDTH40 | IEEE80211_HTCAP_SHORTGI40;
-	ic->ic_htcaps |= IEEE80211_HTCAP_TXSTBC;
-#endif
-
 	/*
 	 * The wiphy variables report bitmasks of avail antennas.
 	 * (*get_antenna) get the current bitmask sets which can be
@@ -3863,6 +4472,33 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 	lhw->ic_node_free = ic->ic_node_free;
 	ic->ic_node_free = lkpi_ic_node_free;
 
+#ifdef LKPI_80211_HT
+	lhw->ic_recv_action = ic->ic_recv_action;
+	ic->ic_recv_action = lkpi_ic_recv_action;
+	lhw->ic_send_action = ic->ic_send_action;
+	ic->ic_send_action = lkpi_ic_send_action;
+
+	lhw->ic_ampdu_enable = ic->ic_ampdu_enable;
+	ic->ic_ampdu_enable = lkpi_ic_ampdu_enable;
+
+	lhw->ic_addba_request = ic->ic_addba_request;
+	ic->ic_addba_request = lkpi_ic_addba_request;
+	lhw->ic_addba_response = ic->ic_addba_response;
+	ic->ic_addba_response = lkpi_ic_addba_response;
+	lhw->ic_addba_stop = ic->ic_addba_stop;
+	ic->ic_addba_stop = lkpi_ic_addba_stop;
+	lhw->ic_addba_response_timeout = ic->ic_addba_response_timeout;
+	ic->ic_addba_response_timeout = lkpi_ic_addba_response_timeout;
+
+	lhw->ic_bar_response = ic->ic_bar_response;
+	ic->ic_bar_response = lkpi_ic_bar_response;
+
+	lhw->ic_ampdu_rx_start = ic->ic_ampdu_rx_start;
+	ic->ic_ampdu_rx_start = lkpi_ic_ampdu_rx_start;
+	lhw->ic_ampdu_rx_stop = ic->ic_ampdu_rx_stop;
+	ic->ic_ampdu_rx_stop = lkpi_ic_ampdu_rx_stop;
+#endif
+
 	lkpi_radiotap_attach(lhw);
 
 	/*
@@ -3894,6 +4530,9 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 				continue;
 
 			cfg80211_chandef_create(&hw->conf.chandef, &channels[i],
+#ifdef LKPI_80211_HT
+			    (ic->ic_htcaps & IEEE80211_HTC_HT) ? 0 :
+#endif
 			    NL80211_CHAN_NO_HT);
 			break;
 		}
@@ -3911,7 +4550,6 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 	/*
 	 * The maximum supported bitrates on any band + size for
 	 * DSSS Parameter Set give our per-band IE size.
-	 * XXX-BZ FIXME add HT VHT ... later
 	 * SSID is the responsibility of the driver and goes on the side.
 	 * The user specified bits coming from the vap go into the
 	 * "common ies" fields.
@@ -3928,6 +4566,15 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 		 */
 		lhw->scan_ie_len += 2 + 1;
 	}
+
+#if defined(LKPI_80211_HT)
+	if ((ic->ic_htcaps & IEEE80211_HTC_HT) != 0)
+		lhw->scan_ie_len += sizeof(struct ieee80211_ie_htcap);
+#endif
+#if defined(LKPI_80211_VHT)
+	if ((ic->ic_flags_ext & IEEE80211_FEXT_VHT) != 0)
+		lhw->scan_ie_len += 2 + sizeof(struct ieee80211_vht_cap);
+#endif
 
 	/* Reduce the max_scan_ie_len "left" by the amount we consume already. */
 	if (hw->wiphy->max_scan_ie_len > 0) {
@@ -4328,8 +4975,9 @@ no_trace_beacons:
 		 * net80211 should take care of the other information (sync_tsf,
 		 * sync_dtim_count) as otherwise we need to parse the beacon.
 		 */
-	}
 skip_device_ts:
+		;
+	}
 
 	if (vap != NULL && vap->iv_state > IEEE80211_S_INIT &&
 	    ieee80211_radiotap_active_vap(vap)) {
@@ -4564,7 +5212,11 @@ linuxkpi_ieee80211_tx_dequeue(struct ieee80211_hw *hw,
 		goto stopped;
 	}
 
+	IMPROVE("hw(TX_FRAG_LIST)");
+
+	LKPI_80211_LTXQ_LOCK(ltxq);
 	skb = skb_dequeue(&ltxq->skbq);
+	LKPI_80211_LTXQ_UNLOCK(ltxq);
 
 stopped:
 	return (skb);
@@ -4581,10 +5233,12 @@ linuxkpi_ieee80211_txq_get_depth(struct ieee80211_txq *txq,
 	ltxq = TXQ_TO_LTXQ(txq);
 
 	fc = bc = 0;
+	LKPI_80211_LTXQ_LOCK(ltxq);
 	skb_queue_walk(&ltxq->skbq, skb) {
 		fc++;
 		bc += skb->len;
 	}
+	LKPI_80211_LTXQ_UNLOCK(ltxq);
 	if (frame_cnt)
 		*frame_cnt = fc;
 	if (byte_cnt)
@@ -5137,13 +5791,17 @@ void linuxkpi_ieee80211_schedule_txq(struct ieee80211_hw *hw,
 {
 	struct lkpi_hw *lhw;
 	struct lkpi_txq *ltxq;
+	bool ltxq_empty;
 
 	ltxq = TXQ_TO_LTXQ(txq);
 
 	IMPROVE_TXQ("LOCKING");
 
 	/* Only schedule if work to do or asked to anyway. */
-	if (!withoutpkts && skb_queue_empty(&ltxq->skbq))
+	LKPI_80211_LTXQ_LOCK(ltxq);
+	ltxq_empty = skb_queue_empty(&ltxq->skbq);
+	LKPI_80211_LTXQ_UNLOCK(ltxq);
+	if (!withoutpkts && ltxq_empty)
 		goto out;
 
 	/* Make sure we do not double-schedule. */
@@ -5154,6 +5812,39 @@ void linuxkpi_ieee80211_schedule_txq(struct ieee80211_hw *hw,
 	TAILQ_INSERT_TAIL(&lhw->scheduled_txqs[txq->ac], ltxq, txq_entry);
 out:
 	return;
+}
+
+void
+linuxkpi_ieee80211_handle_wake_tx_queue(struct ieee80211_hw *hw,
+    struct ieee80211_txq *txq)
+{
+	struct lkpi_hw *lhw;
+	struct ieee80211_txq *ntxq;
+	struct ieee80211_tx_control control;
+        struct sk_buff *skb;
+
+	lhw = HW_TO_LHW(hw);
+
+	LKPI_80211_LHW_TXQ_LOCK(lhw);
+	ieee80211_txq_schedule_start(hw, txq->ac);
+	do {
+		ntxq = ieee80211_next_txq(hw, txq->ac);
+		if (ntxq == NULL)
+			break;
+
+		memset(&control, 0, sizeof(control));
+		control.sta = ntxq->sta;
+		do {
+			skb = linuxkpi_ieee80211_tx_dequeue(hw, ntxq);
+			if (skb == NULL)
+				break;
+			lkpi_80211_mo_tx(hw, &control, skb);
+		} while(1);
+
+		ieee80211_return_txq(hw, ntxq, false);
+	} while (1);
+	ieee80211_txq_schedule_end(hw, txq->ac);
+	LKPI_80211_LHW_TXQ_UNLOCK(lhw);
 }
 
 /* -------------------------------------------------------------------------- */
