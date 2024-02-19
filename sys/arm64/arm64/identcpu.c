@@ -1617,6 +1617,7 @@ static const struct mrs_field_value mvfr0_fpdp[] = {
 static const struct mrs_field_hwcap mvfr0_fpdp_caps[] = {
 	MRS_HWCAP(&elf32_hwcap, HWCAP32_VFP, MVFR0_FPDP_VFP_v2),
 	MRS_HWCAP(&elf32_hwcap, HWCAP32_VFPv3, MVFR0_FPDP_VFP_v3_v4),
+	MRS_HWCAP_END
 };
 
 static const struct mrs_field_value mvfr0_fpsp[] = {
@@ -2041,6 +2042,8 @@ identify_cpu_sysinit(void *dummy __unused)
 
 	/* Find the values to export to userspace as AT_HWCAP and AT_HWCAP2 */
 	parse_cpu_features();
+	/* We export the CPUID registers */
+	elf_hwcap |= HWCAP_CPUID;
 
 #ifdef COMPAT_FREEBSD32
 	/* Set the default caps and any that need to check multiple fields */
@@ -2089,6 +2092,31 @@ cpu_features_sysinit(void *dummy __unused)
 }
 /* Log features before APs are released and start printing to the dmesg. */
 SYSINIT(cpu_features, SI_SUB_SMP - 1, SI_ORDER_ANY, cpu_features_sysinit, NULL);
+
+static void
+tcr_set_e0pd1(void *arg __unused)
+{
+	uint64_t tcr;
+
+	tcr = READ_SPECIALREG(tcr_el1);
+	tcr |= TCR_E0PD1;
+	WRITE_SPECIALREG(tcr_el1, tcr);
+	isb();
+}
+
+/* Enable support for more recent architecture features */
+static void
+cpu_feat_support(void *arg __unused)
+{
+	/*
+	 * If FEAT_E0PD is supported use it to cause faults without a page
+	 * table walk if userspace tries to access kernel memory.
+	 */
+	if (ID_AA64MMFR2_E0PD_VAL(kern_cpu_desc.id_aa64mmfr2) !=
+	    ID_AA64MMFR2_E0PD_NONE)
+		smp_rendezvous(NULL, tcr_set_e0pd1, NULL, NULL);
+}
+SYSINIT(cpu_feat_support, SI_SUB_SMP, SI_ORDER_ANY, cpu_feat_support, NULL);
 
 #ifdef COMPAT_FREEBSD32
 static u_long
