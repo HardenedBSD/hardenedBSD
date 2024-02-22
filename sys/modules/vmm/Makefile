@@ -68,18 +68,9 @@ DPSRCS+=	vmx_genassym.c svm_genassym.c offset.inc
 CFLAGS+= -I${SRCTOP}/sys/amd64/vmm/intel
 CFLAGS+= -I${SRCTOP}/sys/amd64/vmm/amd
 
-<<<<<<< HEAD
 TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE=	yes
 
-# generic vmm support
-.PATH: ${SRCTOP}/sys/amd64/vmm
-SRCS+=	vmm.c		\
-	vmm_dev.c	\
-	vmm_host.c	\
-	vmm_instruction_emul.c	\
-=======
 SRCS+=	vmm_host.c	\
->>>>>>> internal/freebsd/current/main
 	vmm_ioport.c	\
 	vmm_lapic.c	\
 	vmm_mem.c	\
