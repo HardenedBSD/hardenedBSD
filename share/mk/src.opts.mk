@@ -316,6 +316,7 @@ __DEFAULT_NO_OPTIONS+=LLDB
 .if ${__T:Mpowerpc*} || ${__T} == "i386"
 BROKEN_OPTIONS+=EFI
 .endif
+<<<<<<< HEAD
 
 .if ${__T} == "amd64" || ${__T} == "i386" || ${__T} == "aarch64"
 __DEFAULT_YES_OPTIONS+=PIE
@@ -351,6 +352,12 @@ __DEFAULT_NO_OPTIONS+=CFI
 __DEFAULT_NO_OPTIONS+=CLANG_EXTRAS
 .endif
 
+=======
+# Bad coupling for libsecure stuff with bearssl and efi, so broken on EFI
+.if ${__T:Mpowerpc*}
+BROKEN_OPTIONS+=BEARSSL		# bearssl brings in secure efi stuff xxx
+.endif
+>>>>>>> internal/freebsd/current/main
 # OFW is only for powerpc, exclude others
 .if ${__T:Mpowerpc*} == ""
 BROKEN_OPTIONS+=LOADER_OFW
