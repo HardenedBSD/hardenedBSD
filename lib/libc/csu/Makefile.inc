@@ -10,4 +10,3 @@ CFLAGS+= -I${LIBC_SRCTOP}/csu/${LIBC_ARCH}
 SYM_MAPS+=${LIBC_SRCTOP}/csu/Symbol.map
 
 NOPIE=	1
-MK_LTOLIB=	no
