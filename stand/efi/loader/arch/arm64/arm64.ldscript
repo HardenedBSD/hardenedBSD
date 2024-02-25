@@ -1,5 +1,7 @@
-OUTPUT_FORMAT("elf64-littleriscv", "elf64-littleriscv", "elf64-littleriscv")
-OUTPUT_ARCH(riscv64)
+/*
+OUTPUT_FORMAT("elf64-aarch64-freebsd", "elf64-aarch64-freebsd", "elf64-aarch64-freebsd")
+*/
+OUTPUT_ARCH(aarch64)
 ENTRY(_start)
 SECTIONS
 {
@@ -12,8 +14,10 @@ SECTIONS
     /* .gnu.warning sections are handled specially by elf32.em. */
     *(.gnu.warning)
     *(.plt)
-  } =0x9090
-  . = ALIGN(16);
+  } =0xD4200000
+  . = ALIGN(4096);
+  _etext = .;
+  __data_start = .;
   .data		: {
     *(.rodata .rodata.* .gnu.linkonce.r.*)
     *(.rodata1)
@@ -35,23 +39,8 @@ SECTIONS
     __bss_end = .;
   }
   . = ALIGN(16);
-  set_Xcommand_set	: {
-    __start_set_Xcommand_set = .;
-    *(set_Xcommand_set)
-    __stop_set_Xcommand_set = .;
-  }
-  set_Xficl_compile_set	: {
-    __start_set_Xficl_compile_set = .;
-    *(set_Xficl_compile_set)
-    __stop_set_Xficl_compile_set = .;
-  }
-  . = ALIGN(16);
+  __gp = .;
   .sdata	: {
-    /*
-     * u-boot expects the gp register to be untouched by the EFI payload, so we
-     * can't enable this yet.
-     */
-    /* __global_pointer$ = . + 0x800; */
     *(.got.plt .got)
     *(.sdata .sdata.* .gnu.linkonce.s.*)
     *(dynsbss)
@@ -79,6 +68,7 @@ SECTIONS
   . = ALIGN(16);
   .dynsym	: { *(.dynsym) }
   _edata = .;
+  __data_size = . - __data_start;
 
   /* Unused sections */
   .interp	: { *(.interp) }

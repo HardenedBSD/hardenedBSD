@@ -1,10 +1,10 @@
-OUTPUT_FORMAT("elf64-x86-64", "elf64-x86-64", "elf64-x86-64")
+OUTPUT_FORMAT("elf64-x86-64-freebsd", "elf64-x86-64-freebsd", "elf64-x86-64-freebsd")
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 SECTIONS
 {
   /* Read-only sections, merged into text segment: */
-  . = 0x401000;
+  . = 0;
   ImageBase = .;
   .hash : { *(.hash) }  /* this MUST come first! */
   . = ALIGN(4096);
@@ -32,17 +32,6 @@ SECTIONS
     *(.dynbss)
     *(.bss .bss.* .gnu.linkonce.b.*)
     *(COMMON)
-  }
-  . = ALIGN(4096);
-  set_Xcommand_set	: {
-    __start_set_Xcommand_set = .;
-    *(set_Xcommand_set)
-    __stop_set_Xcommand_set = .;
-  }
-  set_Xficl_compile_set	: {
-    __start_set_Xficl_compile_set = .;
-    *(set_Xficl_compile_set)
-    __stop_set_Xficl_compile_set = .;
   }
   . = ALIGN(4096);
   __gp = .;
