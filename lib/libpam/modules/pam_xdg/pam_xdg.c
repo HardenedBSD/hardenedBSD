@@ -131,6 +131,11 @@ _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
 
 	/* Setup the environment variable */
 	asprintf(&runtime_dir, "XDG_RUNTIME_DIR=%s/%s", RUNTIME_DIR_PREFIX, user);
+	if (runtime_dir == NULL) {
+		PAM_VERBOSE_ERROR("Unable to allocate runtime_dir");
+		rv = PAM_SESSION_ERR;
+		goto out;
+	}
 	rv = pam_putenv(pamh, runtime_dir);
 	if (rv != PAM_SUCCESS) {
 		PAM_VERBOSE_ERROR("pam_putenv: failed (%d)", rv);
@@ -141,7 +146,11 @@ _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
 	/* Setup the session count file */
 	for (i = 0; i < XDG_MAX_SESSION; i++) {
 		asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
-		printf("Trying to open %s\n", xdg_session_file);
+		if (xdg_session_file == NULL) {
+			PAM_VERBOSE_ERROR("Unable to allocate xdg_session_file");
+			rv = PAM_SESSION_ERROR;
+			goto out;
+		}
 		session_file = openat(rt_dir_prefix, xdg_session_file, O_CREAT | O_EXCL, RUNTIME_DIR_MODE);
 		free(xdg_session_file);
 		if (session_file >= 0)
