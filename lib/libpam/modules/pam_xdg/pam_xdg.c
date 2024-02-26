@@ -148,7 +148,7 @@ _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
 		asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
 		if (xdg_session_file == NULL) {
 			PAM_VERBOSE_ERROR("Unable to allocate xdg_session_file");
-			rv = PAM_SESSION_ERROR;
+			rv = PAM_SESSION_ERR;
 			goto out;
 		}
 		session_file = openat(rt_dir_prefix, xdg_session_file, O_CREAT | O_EXCL, RUNTIME_DIR_MODE);
