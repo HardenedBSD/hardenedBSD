@@ -134,9 +134,15 @@ _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
 	}
 
 	/* Setup the environment variable */
+<<<<<<< HEAD
 	asprintf(&runtime_dir, "XDG_RUNTIME_DIR=%s/%s", RUNTIME_DIR_PREFIX, user);
 	if (runtime_dir == NULL) {
 		PAM_VERBOSE_ERROR("Unable to allocate runtime_dir");
+=======
+	rv = asprintf(&runtime_dir, "XDG_RUNTIME_DIR=%s/%s", RUNTIME_DIR_PREFIX, user);
+	if (rv < 0) {
+		PAM_VERBOSE_ERROR("asprintf failed %d\n", rv);
+>>>>>>> internal/freebsd/current/main
 		rv = PAM_SESSION_ERR;
 		goto out;
 	}
@@ -149,12 +155,22 @@ _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
 
 	/* Setup the session count file */
 	for (i = 0; i < XDG_MAX_SESSION; i++) {
+<<<<<<< HEAD
 		asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
 		if (xdg_session_file == NULL) {
 			PAM_VERBOSE_ERROR("Unable to allocate xdg_session_file");
 			rv = PAM_SESSION_ERR;
 			goto out;
 		}
+=======
+		rv = asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
+		if (rv < 0) {
+			PAM_VERBOSE_ERROR("asprintf failed %d\n", rv);
+			rv = PAM_SESSION_ERR;
+			goto out;
+		}
+		rv = 0;
+>>>>>>> internal/freebsd/current/main
 		session_file = openat(rt_dir_prefix, xdg_session_file, O_CREAT | O_EXCL, RUNTIME_DIR_MODE);
 		free(xdg_session_file);
 		if (session_file >= 0)
@@ -274,7 +290,13 @@ _pam_xdg_close(pam_handle_t *pamh __unused, int flags __unused,
 
 	/* Get the last session file created */
 	for (i = XDG_MAX_SESSION; i >= 0; i--) {
-		asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
+		rv = asprintf(&xdg_session_file, "%s/xdg_session.%d", user, i);
+		if (rv < 0) {
+			PAM_VERBOSE_ERROR("asprintf failed %d\n", rv);
+			rv = PAM_SESSION_ERR;
+			goto out;
+		}
+		rv = 0;
 		session_file = openat(rt_dir_prefix, xdg_session_file, 0);
 		if (session_file >= 0) {
 			unlinkat(rt_dir_prefix, xdg_session_file, 0);
