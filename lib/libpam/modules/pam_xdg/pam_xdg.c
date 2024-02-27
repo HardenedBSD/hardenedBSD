@@ -49,6 +49,10 @@
 
 #define	XDG_MAX_SESSION		100 /* Arbitrary limit because we need one */
 
+#ifndef REMOVEDIR_MAX_RECUR
+#define REMOVEDIR_MAX_RECUR 1000
+#endif
+
 static int
 _pam_xdg_open(pam_handle_t *pamh, int flags __unused,
     int argc __unused, const char *argv[] __unused)
@@ -174,10 +178,14 @@ out:
 }
 
 static int
-remove_dir(int fd)
+remove_dir(int fd, size_t max_recursions)
 {
 	DIR *dirp;
 	struct dirent *dp;
+
+	if (!max_recursions) {
+		return (-1);
+	}
 
 	dirp = fdopendir(fd);
 	if (dirp == NULL)
@@ -191,7 +199,7 @@ remove_dir(int fd)
 			    strcmp(dp->d_name, "..") == 0)
 				continue;
 			dirfd = openat(fd, dp->d_name, 0);
-			remove_dir(dirfd);
+			remove_dir(dirfd, max_recursions-1);
 			close(dirfd);
 			unlinkat(fd, dp->d_name, AT_REMOVEDIR);
 			continue;
@@ -284,7 +292,7 @@ _pam_xdg_close(pam_handle_t *pamh __unused, int flags __unused,
 
 	/* Final cleanup if last user session */
 	if (i == 0) {
-		remove_dir(rt_dir);
+		remove_dir(rt_dir, REMOVEDIR_MAX_RECUR);
 		if (unlinkat(rt_dir_prefix, user, AT_REMOVEDIR) != 0) {
 			PAM_VERBOSE_ERROR("Can't cleanup %s/%s\n", runtime_dir_prefix, user);
 			rv = PAM_SESSION_ERR;
