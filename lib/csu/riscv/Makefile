@@ -1,8 +1,10 @@
 
 .PATH: ${.CURDIR:H}/common
 
-CFLAGS+=	-DCRT_IRELOC_SUPPRESS
-
 CRT1OBJS+=	crt1_s.o
+
+MK_LTOLIB=	no
+MK_RELRO=	no
+MK_BIND_NOW=	no
 
 .include <bsd.lib.mk>
