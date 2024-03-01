@@ -209,6 +209,7 @@ remove_dir(int fd, size_t max_recursions)
 		}
 		unlinkat(fd, dp->d_name, 0);
 	}
+	closedir(dirp);
 
 	return (0);
 }
