@@ -21,10 +21,14 @@ LIBC_ARCH=${MACHINE_CPUARCH}
 LIB=sys
 SHLIB_MAJOR= 7
 WARNS?=	2
+MK_SSP=		no
 
 CFLAGS+=-I${LIBSYS_SRCTOP}/include -I${LIBC_SRCTOP}/include
 CFLAGS+=-I${LIBSYS_SRCTOP}/${LIBC_ARCH}
 CFLAGS+=-I${LIBC_SRCTOP}/${LIBC_ARCH}
+
+.PATH: ${LIBC_SRCTOP}/string
+SRCS+=	memcpy.c memset.c strlcpy.c
 
 CLEANFILES+=tags
 INSTALL_PIC_ARCHIVE=
@@ -39,6 +43,7 @@ CFLAGS+= -ftls-model=initial-exec
 # Link with static libcompiler_rt.a.
 #
 LDFLAGS+= -nodefaultlibs
+LDFLAGS+= -Wl,-Bsymbolic
 LIBADD+=	compiler_rt
 
 .if ${MK_SSP} != "no" && \
@@ -46,16 +51,14 @@ LIBADD+=	compiler_rt
 LIBADD+=        ssp_nonshared
 .endif
 
-#.if ${MK_SSP} != "no" && \
-#    (${LIBC_ARCH} == "i386" || ${LIBC_ARCH:Mpowerpc*} != "")
-#LIBADD+=	ssp_nonshared
-#.endif
-
 # Define (empty) variables so that make doesn't give substitution
 # errors if the included makefiles don't change these:
 MDASM=
 MIASM=
 NOASM=
+
+SYM_MAPS+=	${LIBSYS_SRCTOP}/Symbol.map
+SRCS+=	auxv.c
 
 .include "${LIBSYS_SRCTOP}/Makefile.sys"
 

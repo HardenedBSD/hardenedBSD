@@ -73,21 +73,8 @@ __elf_phdr_match_addr(struct dl_phdr_info *phdr_info, void *addr)
 void
 __libc_map_stacks_exec(void)
 {
-	int mib[2];
-	struct rlimit rlim;
-	u_long usrstack;
-	size_t len;
-	
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_USRSTACK;
-	len = sizeof(usrstack);
-	if (sysctl(mib, nitems(mib), &usrstack, &len, NULL, 0)
-	    == -1)
-		return;
-	if (getrlimit(RLIMIT_STACK, &rlim) == -1)
-		return;
-	mprotect((void *)(uintptr_t)(usrstack - rlim.rlim_cur),
-	    rlim.rlim_cur, _rtld_get_stack_prot());
+	/* HBSD: No-op since we do not support executable stacks */
+	return;
 }
 
 #pragma weak __pthread_map_stacks_exec

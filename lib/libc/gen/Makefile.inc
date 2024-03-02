@@ -9,6 +9,7 @@ CONFSPACKAGE=   runtime
 SRCS+= \
 	__pthread_mutex_init_calloc_cb_stub.c \
 	__xuname.c \
+	_once_stub.c \
 	_pthread_stubs.c \
 	_rand48.c \
 	_spinlock_stub.c \
@@ -46,7 +47,6 @@ SRCS+= \
 	erand48.c \
 	err.c \
 	errlst.c \
-	errno.c \
 	eventfd.c \
 	exec.c \
 	exect.c \
@@ -137,6 +137,7 @@ SRCS+= \
 	siglist.c \
 	signal.c \
 	sigsetops.c \
+	sleep.c \
 	srand48.c \
 	statvfs.c \
 	stringlist.c \
@@ -160,6 +161,7 @@ SRCS+= \
 	ulimit.c \
 	uname.c \
 	unvis-compat.c \
+	usleep.c \
 	utime.c \
 	utxdb.c \
 	valloc.c \

@@ -21,7 +21,6 @@ INSTALLFLAGS=	-b
 SRCS=	\
 		bootinfo.c \
 		conf.c \
-		gfx_fb_stub.c \
 		hostcons.c \
 		hostdisk.c \
 		hostfs.c \
@@ -32,7 +31,6 @@ SRCS=	\
 		util.c \
 		vers.c
 
-CFLAGS.gfx_fb_stub.c += -I${SRCTOP}/contrib/pnglite -I${SRCTOP}/sys/teken
 .if ${MK_LOADER_ZFS} != "no"
 CFLAGS+=	-I${ZFSSRC}
 CFLAGS+=        -I${SYSDIR}/contrib/openzfs/include
@@ -53,6 +51,9 @@ HELP_FILENAME=	loader.help.kboot
 .PATH:	${.CURDIR}/arch/${MACHINE_ARCH}
 .include "${.CURDIR}/arch/${MACHINE_ARCH}/Makefile.inc"
 
+# Bring in our ldscript
+LDFLAGS=	-nostdlib -static -T ${.CURDIR}/arch/${MACHINE_ARCH}/${MACHINE_ARCH}.ldscript
+
 # Always add MI sources
 .include	"${BOOTSRC}/loader.mk"
 CFLAGS+=	-I${.CURDIR} -I${.CURDIR}/arch/${MACHINE_ARCH}
@@ -61,5 +62,12 @@ CFLAGS+=	-Wall
 
 DPADD=		${LDR_INTERP} ${LIBOFW} ${LIBSAFDT} ${LIBSA} ${LIBKBOOT}
 LDADD=		${LDR_INTERP} ${LIBOFW} ${LIBSAFDT} ${LIBSA} ${LIBKBOOT}
+
+# Add our own lua bindings until they are universal
+.if ${LOADER_INTERP} == "lua"
+SRCS+=		\
+		lua_bindings.c
+CFLAGS.lua_bindings.c+=  -I${FLUALIB}/libhash
+.endif
 
 .include <bsd.prog.mk>

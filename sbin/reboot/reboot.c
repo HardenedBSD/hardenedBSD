@@ -29,19 +29,20 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
 #include <sys/boottrace.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,8 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <utmpx.h>
+
+extern char **environ;
 
 #define PATH_NEXTBOOT "/boot/nextboot.conf"
 
@@ -69,23 +72,42 @@ static bool donextboot;
 static void
 zfsbootcfg(const char *pool, bool force)
 {
-	char *k;
-	int rv;
+	const char * const av[] = {
+		"zfsbootcfg",
+		"-z",
+		pool,
+		"-n",
+		"freebsd:nvstore",
+		"-k",
+		"nextboot_enable",
+		"-v",
+		"YES",
+		NULL
+	};
+	int rv, status;
+	pid_t p;
 
-	asprintf(&k,
-	    "zfsbootcfg -z %s -n freebsd:nvstore -k nextboot_enable -v YES",
-	    pool);
-	if (k == NULL)
-		E("No memory for zfsbootcfg");
-
-	rv = system(k);
-	if (rv == 0)
-		return;
+	rv = posix_spawnp(&p, av[0], NULL, NULL, __DECONST(char **, av),
+	    environ);
 	if (rv == -1)
 		E("system zfsbootcfg");
-	if (rv == 127)
-		E("zfsbootcfg not found in path");
-	E("zfsbootcfg returned %d", rv);
+	if (waitpid(p, &status, WEXITED) < 0) {
+		if (errno == EINTR)
+			return;
+		E("waitpid zfsbootcfg");
+	}
+	if (WIFEXITED(status)) {
+		int e = WEXITSTATUS(status);
+
+		if (e == 0)
+			return;
+		if (e == 127)
+			E("zfsbootcfg not found in path");
+		E("zfsbootcfg returned %d", e);
+	}
+	if (WIFSIGNALED(status))
+		E("zfsbootcfg died with signal %d", WTERMSIG(status));
+	E("zfsbootcfg unexpected status %d", status);
 }
 
 static void
@@ -108,6 +130,11 @@ write_nextboot(const char *fn, const char *env, bool force)
 	}
 
 	if (zfs) {
+		char *slash;
+
+		if ((slash = strchr(sfs.f_mntfromname, '/')) == NULL)
+			E("Can't find ZFS pool name in %s", sfs.f_mntfromname);
+		*slash = '\0';
 		zfsbootcfg(sfs.f_mntfromname, force);
 	}
 
@@ -175,7 +202,7 @@ main(int argc, char *argv[])
 {
 	struct utmpx utx;
 	const struct passwd *pw;
-	int ch, howto, i, sverrno;
+	int ch, howto = 0, i, sverrno;
 	bool Dflag, fflag, lflag, Nflag, nflag, qflag;
 	uint64_t pageins;
 	const char *user, *kernel = NULL, *getopts = GETOPT_REBOOT;
@@ -188,6 +215,7 @@ main(int argc, char *argv[])
 		donextboot = true;
 		getopts = GETOPT_NEXTBOOT; /* Note: reboot's extra opts return '?' */
 	} else {
+		/* reboot */
 		howto = 0;
 	}
 	Dflag = fflag = lflag = Nflag = nflag = qflag = false;
@@ -260,8 +288,8 @@ main(int argc, char *argv[])
 		errx(1, "-r and -k cannot be used together, there is no next kernel");
 
 	if (Dflag) {
-		if (unlink(PATH_NEXTBOOT) != 0)
-			err(1, "unlink %s", PATH_NEXTBOOT);
+		if (unlink(PATH_NEXTBOOT) != 0 && errno != ENOENT)
+			warn("unlink " PATH_NEXTBOOT);
 		exit(0);
 	}
 

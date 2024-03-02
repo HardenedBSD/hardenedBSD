@@ -40,16 +40,15 @@ HELP_FILENAME=	loader.help.uboot
 # Always add MI sources
 .include	"${BOOTSRC}/loader.mk"
 
-LDSCRIPT=	${.CURDIR}/arch/${MACHINE_CPUARCH}/ldscript.${MACHINE_CPUARCH}
+LDSCRIPT=	${.CURDIR}/arch/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}.ldscript
 LDFLAGS=	-nostdlib -static -T ${LDSCRIPT}
 LDFLAGS+=	-Wl,-znotext
 
 SRCS+=		main.c vers.c
 SRCS+=		copy.c devicename.c elf_freebsd.c glue.c
-SRCS+=		net.c reboot.c time.c gfx_fb_stub.c
+SRCS+=		net.c reboot.c time.c
 SRCS+=		uboot_console.c uboot_disk.c uboot_fdt.c uboot_module.c
 
-CFLAGS.gfx_fb_stub.c += -I${SRCTOP}/contrib/pnglite -I${SRCTOP}/sys/teken
 CFLAGS.glue.c+=	-DHAVE_MEMCPY -I${SRCTOP}/sys/contrib/zlib
 
 CFLAGS+=	-I${BOOTSRC}/common

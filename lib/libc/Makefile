@@ -62,6 +62,12 @@ CFLAGS+= -ftls-model=initial-exec
 #
 LDFLAGS+= -nodefaultlibs
 LIBADD+=	compiler_rt
+LIBADD+=	sys
+.if defined(COMPAT_libcompat)
+# XXX: work around gcc -m32 + bfd ld path issue for DT_NEEDED symbols.
+# https://sourceware.org/bugzilla/show_bug.cgi?id=31395
+LDFLAGS+=	-Wl,--rpath=/usr/lib${COMPAT_libcompat}
+.endif
 
 LDFLAGS+=-Wl,--auxiliary,libsys.so.7
 
@@ -90,6 +96,7 @@ MIASM=
 NOASM=
 
 .include "${LIBC_SRCTOP}/${LIBC_ARCH}/Makefile.inc"
+.include "${LIBC_SRCTOP}/csu/Makefile.inc"
 .include "${LIBC_SRCTOP}/db/Makefile.inc"
 .include "${LIBC_SRCTOP}/compat-43/Makefile.inc"
 .include "${LIBC_SRCTOP}/gdtoa/Makefile.inc"

@@ -49,8 +49,6 @@
 #include "un-namespace.h"
 #include "libc_private.h"
 
-extern char **environ;
-
 struct pid {
 	SLIST_ENTRY(pid) next;
 	FILE *fp;

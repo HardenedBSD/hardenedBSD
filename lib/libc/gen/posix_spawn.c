@@ -42,8 +42,6 @@
 #include "un-namespace.h"
 #include "libc_private.h"
 
-extern char **environ;
-
 struct __posix_spawnattr {
 	short			sa_flags;
 	pid_t			sa_pgroup;

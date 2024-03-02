@@ -211,8 +211,8 @@ ENTRY(mpentry)
 	adrp	x24, pagetable_l0_ttbr1
 	add	x24, x24, :lo12:pagetable_l0_ttbr1
 	/* Load the identity page table */
-	adrp	x27, pagetable_l0_ttbr0_boostrap
-	add	x27, x27, :lo12:pagetable_l0_ttbr0_boostrap
+	adrp	x27, pagetable_l0_ttbr0_bootstrap
+	add	x27, x27, :lo12:pagetable_l0_ttbr0_bootstrap
 
 	/* Enable the mmu */
 	bl	start_mmu
@@ -267,8 +267,8 @@ END(mpentry)
  */
 LENTRY(drop_to_el1)
 	mrs	x23, CurrentEL
-	lsr	x23, x23, #2
-	cmp	x23, #0x2
+	and	x23, x23, #(CURRENTEL_EL_MASK)
+	cmp	x23, #(CURRENTEL_EL_EL2)
 	b.eq	1f
 	ret
 1:
@@ -916,7 +916,7 @@ pagetable_l2_ttbr0_bootstrap:
 	.space	PAGE_SIZE
 pagetable_l1_ttbr0_bootstrap:
 	.space	PAGE_SIZE
-pagetable_l0_ttbr0_boostrap:
+pagetable_l0_ttbr0_bootstrap:
 	.space	PAGE_SIZE
 pagetable_l0_ttbr0:
 	.space	PAGE_SIZE

@@ -35,7 +35,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "un-namespace.h"
-
+#include "libc_private.h"
 
 static const char CorruptEnvFindMsg[] = "environment corrupt; unable to find ";
 static const char CorruptEnvValueMsg[] =
@@ -52,7 +52,6 @@ static const char CorruptEnvValueMsg[] =
  *	intEnviron:	Internally-built environ.  Exposed via environ during
  *			(re)builds of the environment.
  */
-extern char **environ;
 static char **origEnviron;
 static char **intEnviron = NULL;
 static int environSize = 0;

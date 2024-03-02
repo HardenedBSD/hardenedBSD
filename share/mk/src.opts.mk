@@ -206,8 +206,10 @@ __DEFAULT_NO_OPTIONS = \
     FREEBSD_UPDATE \
     HESIOD \
     LIB32 \
+    LOADER_BIOS_TEXTONLY \
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
+    LLVM_FULL_DEBUGINFO \
     MALLOC_PRODUCTION \
     NETLINK \
     NETLINK_SUPPORT \
@@ -351,6 +353,10 @@ __DEFAULT_NO_OPTIONS+=CFI
 __DEFAULT_NO_OPTIONS+=CLANG_EXTRAS
 .endif
 
+# Bad coupling for libsecure stuff with bearssl and efi, so broken on EFI
+.if ${__T:Mpowerpc*}
+BROKEN_OPTIONS+=BEARSSL		# bearssl brings in secure efi stuff xxx
+.endif
 # OFW is only for powerpc, exclude others
 .if ${__T:Mpowerpc*} == ""
 BROKEN_OPTIONS+=LOADER_OFW

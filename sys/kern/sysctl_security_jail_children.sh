@@ -36,6 +36,9 @@ max_cur_head()
 }
 max_cur_body()
 {
+	if ! which -s jail; then
+		atf_skip "This test requires jail"
+	fi
 	origin_max=$(sysctl -n security.jail.children.max)
 	origin_cur=$(sysctl -n security.jail.children.cur)
 

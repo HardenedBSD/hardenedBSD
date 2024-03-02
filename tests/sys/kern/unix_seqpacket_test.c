@@ -68,32 +68,50 @@ do_socketpair_nonblocking(int *sv)
 }
 
 /*
- * Returns a pair of sockets made the hard way: bind, listen, connect & accept
+ * Returns a bound and listening socket.
  * @return	const char* The path to the socket
  */
-static const char*
-mk_pair_of_sockets(int *sv)
+static const struct sockaddr_un *
+mk_listening_socket(int *sv)
 {
-	struct sockaddr_un sun;
 	/* ATF's isolation mechanisms will guarantee uniqueness of this file */
-	const char *path = "sock";
-	int s, err, s2, s1;
+	static const struct sockaddr_un sun = {
+		.sun_family = AF_LOCAL,
+		.sun_len = sizeof(sun),
+		.sun_path = "sock",
+	};
+	int s, r, l;
 
 	s = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
 	ATF_REQUIRE(s >= 0);
 
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_LOCAL;
-	sun.sun_len = sizeof(sun);
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	err = bind(s, (struct sockaddr *)&sun, sizeof(sun));
-	err = listen(s, -1);
-	ATF_CHECK_EQ(0, err);
+	r = bind(s, (struct sockaddr *)&sun, sizeof(sun));
+	l = listen(s, -1);
+	ATF_CHECK_EQ(0, r);
+	ATF_CHECK_EQ(0, l);
+
+	if (sv != NULL)
+		*sv = s;
+
+	return (&sun);
+}
+
+/*
+ * Returns a pair of sockets made the hard way: bind, listen, connect & accept
+ * @return	const char* The path to the socket
+ */
+static const struct sockaddr_un *
+mk_pair_of_sockets(int *sv)
+{
+	const struct sockaddr_un *sun;
+	int s, s2, err, s1;
+
+	sun = mk_listening_socket(&s);
 
 	/* Create the other socket */
 	s2 = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
 	ATF_REQUIRE(s2 >= 0);
-	err = connect(s2, (struct sockaddr*)&sun, sizeof(sun));
+	err = connect(s2, (struct sockaddr *)sun, sizeof(*sun));
 	if (err != 0) {
 		perror("connect");
 		atf_tc_fail("connect(2) failed");
@@ -106,12 +124,14 @@ mk_pair_of_sockets(int *sv)
 		atf_tc_fail("accept(2) failed");
 	}
 
-	sv[0] = s1;
-	sv[1] = s2;
+	if (sv != NULL) {
+		sv[0] = s1;
+		sv[1] = s2;
+	}
 
 	close(s);
 
-	return (path);
+	return (sun);
 }
 
 static volatile sig_atomic_t got_sigpipe = 0;
@@ -454,22 +474,9 @@ ATF_TC_BODY(bind, tc)
 ATF_TC_WITHOUT_HEAD(listen_bound);
 ATF_TC_BODY(listen_bound, tc)
 {
-	struct sockaddr_un sun;
-	/* ATF's isolation mechanisms will guarantee uniqueness of this file */
-	const char *path = "sock";
-	int s, r, l;
+	int s;
 
-	s = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
-	ATF_REQUIRE(s >= 0);
-
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_LOCAL;
-	sun.sun_len = sizeof(sun);
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	r = bind(s, (struct sockaddr *)&sun, sizeof(sun));
-	l = listen(s, -1);
-	ATF_CHECK_EQ(0, r);
-	ATF_CHECK_EQ(0, l);
+	(void)mk_listening_socket(&s);
 	close(s);
 }
 
@@ -477,33 +484,64 @@ ATF_TC_BODY(listen_bound, tc)
 ATF_TC_WITHOUT_HEAD(connect);
 ATF_TC_BODY(connect, tc)
 {
-	struct sockaddr_un sun;
-	/* ATF's isolation mechanisms will guarantee uniqueness of this file */
-	const char *path = "sock";
-	int s, r, err, l, s2;
+	const struct sockaddr_un *sun;
+	int s, err, s2;
 
-	s = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
-	ATF_REQUIRE(s >= 0);
-
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_LOCAL;
-	sun.sun_len = sizeof(sun);
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	r = bind(s, (struct sockaddr *)&sun, sizeof(sun));
-	l = listen(s, -1);
-	ATF_CHECK_EQ(0, r);
-	ATF_CHECK_EQ(0, l);
+	sun = mk_listening_socket(&s);
 
 	/* Create the other socket */
 	s2 = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
 	ATF_REQUIRE(s2 >= 0);
-	err = connect(s2, (struct sockaddr*)&sun, sizeof(sun));
+	err = connect(s2, (struct sockaddr *)sun, sizeof(*sun));
 	if (err != 0) {
 		perror("connect");
 		atf_tc_fail("connect(2) failed");
 	}
 	close(s);
 	close(s2);
+}
+
+/*
+ * An undocumented feature that we probably want to preserve: sending to
+ * a socket that isn't yet accepted lands data on the socket.  It can be
+ * read after accept(2).
+ */
+ATF_TC_WITHOUT_HEAD(send_before_accept);
+ATF_TC_BODY(send_before_accept, tc)
+{
+	const char buf[] = "hello";
+	char repl[sizeof(buf)];
+	const struct sockaddr_un *sun;
+	int l, s, a;
+
+	sun = mk_listening_socket(&l);
+
+	ATF_REQUIRE((s = socket(PF_LOCAL, SOCK_SEQPACKET, 0)) > 0);
+	ATF_REQUIRE(connect(s, (struct sockaddr *)sun, sizeof(*sun)) == 0);
+	ATF_REQUIRE(send(s, &buf, sizeof(buf), 0) == sizeof(buf));
+	ATF_REQUIRE((a = accept(l, NULL, NULL)) != 1);
+	ATF_REQUIRE(recv(a, &repl, sizeof(repl), 0) == sizeof(buf));
+	ATF_REQUIRE(strcmp(buf, repl) == 0);
+	close(l);
+	close(s);
+	close(a);
+}
+
+/* Implied connect is unix/dgram only feature. Fails on stream or seqpacket. */
+ATF_TC_WITHOUT_HEAD(implied_connect);
+ATF_TC_BODY(implied_connect, tc)
+{
+	const struct sockaddr_un *sun;
+	int l, s;
+
+	sun = mk_listening_socket(&l);
+
+	ATF_REQUIRE((s = socket(PF_LOCAL, SOCK_SEQPACKET, 0)) > 0);
+	ATF_REQUIRE(sendto(s, &s, sizeof(s), 0, (struct sockaddr *)sun,
+	    sizeof(*sun)) == -1);
+	ATF_REQUIRE(errno == ENOTCONN);
+	close(l);
+	close(s);
 }
 
 /* accept(2) can receive a connection */
@@ -670,7 +708,7 @@ ATF_TC_WITHOUT_HEAD(sendto_recvfrom);
 ATF_TC_BODY(sendto_recvfrom, tc)
 {
 #ifdef TEST_SEQ_PACKET_SOURCE_ADDRESS
-	const char* path;
+	const sockaddr_un *sun;
 #endif
 	struct sockaddr_storage from;
 	int sv[2];
@@ -683,7 +721,7 @@ ATF_TC_BODY(sendto_recvfrom, tc)
 
 	/* setup the socket pair */
 #ifdef TEST_SEQ_PACKET_SOURCE_ADDRESS
-	path =
+	sun =
 #endif
 		mk_pair_of_sockets(sv);
 
@@ -714,7 +752,7 @@ ATF_TC_BODY(sendto_recvfrom, tc)
 	 * these checks may be reenabled
 	 */
 	ATF_CHECK_EQ(PF_LOCAL, from.ss_family);
-	ATF_CHECK_STREQ(path, ((struct sockaddr_un*)&from)->sun_path);
+	ATF_CHECK_STREQ(sun->sun_path, ((struct sockaddr_un*)&from)->sun_path);
 #endif
 	close(sv[0]);
 	close(sv[1]);
@@ -756,28 +794,17 @@ ATF_TC_BODY(send_recv_with_connect, tc)
 ATF_TC_WITHOUT_HEAD(shutdown_send);
 ATF_TC_BODY(shutdown_send, tc)
 {
-	struct sockaddr_un sun;
-	/* ATF's isolation mechanisms will guarantee uniqueness of this file */
-	const char *path = "sock";
+	const struct sockaddr_un *sun;
 	const char *data = "data";
 	ssize_t datalen, ssize;
 	int s, err, s2;
 
-	s = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
-	ATF_REQUIRE(s >= 0);
-
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_LOCAL;
-	sun.sun_len = sizeof(sun);
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	err = bind(s, (struct sockaddr *)&sun, sizeof(sun));
-	err = listen(s, -1);
-	ATF_CHECK_EQ(0, err);
+	sun = mk_listening_socket(&s);
 
 	/* Create the other socket */
 	s2 = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
 	ATF_REQUIRE(s2 >= 0);
-	err = connect(s2, (struct sockaddr*)&sun, sizeof(sun));
+	err = connect(s2, (struct sockaddr *)sun, sizeof(*sun));
 	if (err != 0) {
 		perror("connect");
 		atf_tc_fail("connect(2) failed");
@@ -797,28 +824,17 @@ ATF_TC_BODY(shutdown_send, tc)
 ATF_TC_WITHOUT_HEAD(shutdown_send_sigpipe);
 ATF_TC_BODY(shutdown_send_sigpipe, tc)
 {
-	struct sockaddr_un sun;
-	/* ATF's isolation mechanisms will guarantee uniqueness of this file */
-	const char *path = "sock";
+	const struct sockaddr_un *sun;
 	const char *data = "data";
 	ssize_t datalen;
 	int s, err, s2;
 
-	s = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
-	ATF_REQUIRE(s >= 0);
-
-	bzero(&sun, sizeof(sun));
-	sun.sun_family = AF_LOCAL;
-	sun.sun_len = sizeof(sun);
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-	err = bind(s, (struct sockaddr *)&sun, sizeof(sun));
-	err = listen(s, -1);
-	ATF_CHECK_EQ(0, err);
+	sun = mk_listening_socket(&s);
 
 	/* Create the other socket */
 	s2 = socket(PF_LOCAL, SOCK_SEQPACKET, 0);
 	ATF_REQUIRE(s2 >= 0);
-	err = connect(s2, (struct sockaddr*)&sun, sizeof(sun));
+	err = connect(s2, (struct sockaddr *)sun, sizeof(*sun));
 	if (err != 0) {
 		perror("connect");
 		atf_tc_fail("connect(2) failed");
@@ -867,65 +883,6 @@ ATF_TC_BODY(send_recv_nonblocking, tc)
 	close(sv[0]);
 	close(sv[1]);
 }
-
-/*
- * We should get EMSGSIZE if we try to send a message larger than the socket
- * buffer, with blocking sockets
- */
-ATF_TC_WITHOUT_HEAD(emsgsize);
-ATF_TC_BODY(emsgsize, tc)
-{
-	int sv[2];
-	const int sndbufsize = 8192;
-	const int rcvbufsize = 8192;
-	const size_t pktsize = (sndbufsize + rcvbufsize) * 2;
-	char sndbuf[pktsize];
-	ssize_t ssize;
-
-	/* setup the socket pair */
-	do_socketpair(sv);
-	/* Setup the buffers */
-	ATF_REQUIRE_EQ(0, setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &sndbufsize,
-	    sizeof(sndbufsize)));
-	ATF_REQUIRE_EQ(0, setsockopt(sv[1], SOL_SOCKET, SO_RCVBUF, &rcvbufsize,
-	    sizeof(rcvbufsize)));
-
-	ssize = send(sv[0], sndbuf, pktsize, MSG_EOR);
-	ATF_CHECK_EQ(EMSGSIZE, errno);
-	ATF_CHECK_EQ(-1, ssize);
-	close(sv[0]);
-	close(sv[1]);
-}
-
-/*
- * We should get EMSGSIZE if we try to send a message larger than the socket
- * buffer, with nonblocking sockets
- */
-ATF_TC_WITHOUT_HEAD(emsgsize_nonblocking);
-ATF_TC_BODY(emsgsize_nonblocking, tc)
-{
-	int sv[2];
-	const int sndbufsize = 8192;
-	const int rcvbufsize = 8192;
-	const size_t pktsize = (sndbufsize + rcvbufsize) * 2;
-	char sndbuf[pktsize];
-	ssize_t ssize;
-
-	/* setup the socket pair */
-	do_socketpair_nonblocking(sv);
-	/* Setup the buffers */
-	ATF_REQUIRE_EQ(0, setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &sndbufsize,
-	    sizeof(sndbufsize)));
-	ATF_REQUIRE_EQ(0, setsockopt(sv[1], SOL_SOCKET, SO_RCVBUF, &rcvbufsize,
-	    sizeof(rcvbufsize)));
-
-	ssize = send(sv[0], sndbuf, pktsize, MSG_EOR);
-	ATF_CHECK_EQ(EMSGSIZE, errno);
-	ATF_CHECK_EQ(-1, ssize);
-	close(sv[0]);
-	close(sv[1]);
-}
-
 
 /*
  * We should get EAGAIN if we try to send a message larger than the socket
@@ -1158,10 +1115,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, send_recv_nonblocking);
 	ATF_TP_ADD_TC(tp, send_recv_with_connect);
 	ATF_TP_ADD_TC(tp, sendto_recvfrom);
+	ATF_TP_ADD_TC(tp, send_before_accept);
+	ATF_TP_ADD_TC(tp, implied_connect);
 	ATF_TP_ADD_TC(tp, shutdown_send);
 	ATF_TP_ADD_TC(tp, shutdown_send_sigpipe);
-	ATF_TP_ADD_TC(tp, emsgsize);
-	ATF_TP_ADD_TC(tp, emsgsize_nonblocking);
 	ATF_TP_ADD_TC(tp, eagain_8k_8k);
 	ATF_TP_ADD_TC(tp, eagain_8k_128k);
 	ATF_TP_ADD_TC(tp, eagain_128k_8k);

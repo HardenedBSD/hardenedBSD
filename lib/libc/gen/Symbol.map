@@ -99,7 +99,6 @@ FBSD_1.0 {
 	vwarnx;
 	sys_errlist;
 	sys_nerr;
-	errno;
 	exect;
 	execl;
 	execle;
@@ -359,6 +358,7 @@ FBSD_1.2 {
 };
 
 FBSD_1.3 {
+	cap_sandboxed;
 	clock_getcpuclockid;
 	dirfd;
 	dup3;

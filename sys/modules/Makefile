@@ -833,7 +833,9 @@ _qlnx=		qlnx
 _sfxge=		sfxge
 _smartpqi=	smartpqi
 _p2sb=		p2sb
+.endif
 
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64"
 .if ${MK_BHYVE} != "no" || defined(ALL_MODULES)
 .if ${KERN_OPTS:MSMP}
 _vmm=		vmm

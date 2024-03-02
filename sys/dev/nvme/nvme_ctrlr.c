@@ -650,7 +650,8 @@ nvme_ctrlr_log_critical_warnings(struct nvme_controller *ctrlr,
 
 	if (state & NVME_CRIT_WARN_ST_RESERVED_MASK)
 		nvme_ctrlr_devctl_log(ctrlr, "critical",
-		    "unknown critical warning(s): state = 0x%02x", state);
+		    "unknown critical warning(s): state = 0x%02x",
+		    state & NVME_CRIT_WARN_ST_RESERVED_MASK);
 }
 
 static void
@@ -681,10 +682,6 @@ nvme_ctrlr_async_event_log_page_cb(void *arg, const struct nvme_completion *cpl)
 		case NVME_LOG_HEALTH_INFORMATION:
 			nvme_health_information_page_swapbytes(
 			    (struct nvme_health_information_page *)aer->log_page_buffer);
-			break;
-		case NVME_LOG_FIRMWARE_SLOT:
-			nvme_firmware_page_swapbytes(
-			    (struct nvme_firmware_page *)aer->log_page_buffer);
 			break;
 		case NVME_LOG_CHANGED_NAMESPACE:
 			nvme_ns_list_swapbytes(
