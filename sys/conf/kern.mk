@@ -242,18 +242,17 @@ CFLAGS+=	-mretpoline
 CFLAGS+=	-ftrivial-auto-var-init=uninitialized
 .endif
 
-<<<<<<< HEAD
 .if defined(KCFI_SAFE)
 CFLAGS+=	-fsanitize=kcfi
 LDFLAGS+=	-fsanitize=kcfi
-=======
+.endif
+
 #
 # Some newer toolchains default to DWARF 5, which isn't supported by some build
 # tools yet.
 #
 .if (${CFLAGS:M-g} != "" || ${CFLAGS:M-g[0-3]} != "") && ${CFLAGS:M-gdwarf*} == ""
 CFLAGS+=	-gdwarf-4
->>>>>>> internal/hardened/current/master
 .endif
 
 CFLAGS+= ${CWARNFLAGS:M*} ${CWARNFLAGS.${.IMPSRC:T}}
