@@ -105,5 +105,9 @@ CFLAGS+= -DHAVE_ISSETUGID
 CFLAGS+= -include ${SRCTOP}/sys/modules/zfs/zfs_config.h
 CFLAGS+= -DSYSCONFDIR=\"/etc\"
 CFLAGS+= -DPKGDATADIR=\"/usr/share/zfs\"
+<<<<<<< HEAD
+=======
+CFLAGS+= -DZFSEXECDIR=\"${LIBEXECDIR}/zfs\"
+>>>>>>> internal/freebsd/13-stable/main
 
 .include <bsd.lib.mk>
