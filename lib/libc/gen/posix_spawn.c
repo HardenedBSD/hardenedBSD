@@ -325,11 +325,16 @@ do_posix_spawn(pid_t *pid, const char *path,
 	 * ideal vfork(2) if we get an EINVAL from rfork -- this should only
 	 * happen with newer libc on older kernel that doesn't accept
 	 * RFSPAWN.
+	 *
+	 * Combination of vfork() (or its equivalent rfork() form) and
+	 * a special property of the libthr rtld locks ensure that
+	 * rtld is operational in the child.  In particular, libthr
+	 * rtld locks do not store owner' tid into the lock word.
 	 */
 #ifdef _RFORK_THREAD_STACK_SIZE
 	/*
 	 * x86 stores the return address on the stack, so rfork(2) cannot work
-	 * as-is because the child would clobber the return address om the
+	 * as-is because the child would clobber the return address of the
 	 * parent.  Because of this, we must use rfork_thread instead while
 	 * almost every other arch stores the return address in a register.
 	 */
