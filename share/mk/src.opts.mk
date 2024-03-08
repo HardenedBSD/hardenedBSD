@@ -214,7 +214,11 @@ __DEFAULT_NO_OPTIONS = \
     LOADER_FIREWIRE \
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
+<<<<<<< HEAD
     OFED \
+=======
+    LLVM_FULL_DEBUGINFO \
+>>>>>>> internal/freebsd/13-stable/main
     OFED_EXTRA \
     OPENLDAP \
     PORTSNAP \
