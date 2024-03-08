@@ -209,12 +209,7 @@ __DEFAULT_NO_OPTIONS = \
     LIB32 \
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
-<<<<<<< HEAD
-=======
-    LLVM_ASSERTIONS \
-    LLVM_BINUTILS \
     LLVM_FULL_DEBUGINFO \
->>>>>>> origin/freebsd/14-stable/main
     MALLOC_PRODUCTION \
     NETLINK \
     NETLINK_SUPPORT \
