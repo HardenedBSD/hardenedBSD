@@ -1187,32 +1187,29 @@ freebsd32_copyinuio(struct iovec32 *iovp, u_int iovcnt, struct uio **uiop)
 	struct iovec32 iov32;
 	struct iovec *iov;
 	struct uio *uio;
-	u_int iovlen;
 	int error, i;
 
 	*uiop = NULL;
 	if (iovcnt > UIO_MAXIOV)
 		return (EINVAL);
-	iovlen = iovcnt * sizeof(struct iovec);
-	uio = malloc(iovlen + sizeof *uio, M_IOV, M_WAITOK);
-	iov = (struct iovec *)(uio + 1);
+	uio = allocuio(iovcnt);
+	iov = uio->uio_iov;
 	for (i = 0; i < iovcnt; i++) {
 		error = copyin(&iovp[i], &iov32, sizeof(struct iovec32));
 		if (error) {
-			free(uio, M_IOV);
+			freeuio(uio);
 			return (error);
 		}
 		iov[i].iov_base = PTRIN(iov32.iov_base);
 		iov[i].iov_len = iov32.iov_len;
 	}
-	uio->uio_iov = iov;
 	uio->uio_iovcnt = iovcnt;
 	uio->uio_segflg = UIO_USERSPACE;
 	uio->uio_offset = -1;
 	uio->uio_resid = 0;
 	for (i = 0; i < iovcnt; i++) {
 		if (iov->iov_len > INT_MAX - uio->uio_resid) {
-			free(uio, M_IOV);
+			freeuio(uio);
 			return (EINVAL);
 		}
 		uio->uio_resid += iov->iov_len;
@@ -1232,7 +1229,7 @@ freebsd32_readv(struct thread *td, struct freebsd32_readv_args *uap)
 	if (error)
 		return (error);
 	error = kern_readv(td, uap->fd, auio);
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -1246,7 +1243,7 @@ freebsd32_writev(struct thread *td, struct freebsd32_writev_args *uap)
 	if (error)
 		return (error);
 	error = kern_writev(td, uap->fd, auio);
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -1260,7 +1257,7 @@ freebsd32_preadv(struct thread *td, struct freebsd32_preadv_args *uap)
 	if (error)
 		return (error);
 	error = kern_preadv(td, uap->fd, auio, PAIR32TO64(off_t,uap->offset));
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -1274,7 +1271,7 @@ freebsd32_pwritev(struct thread *td, struct freebsd32_pwritev_args *uap)
 	if (error)
 		return (error);
 	error = kern_pwritev(td, uap->fd, auio, PAIR32TO64(off_t,uap->offset));
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -2190,9 +2187,9 @@ freebsd32_do_sendfile(struct thread *td,
 
 out:
 	if (hdr_uio)
-		free(hdr_uio, M_IOV);
+		freeuio(hdr_uio);
 	if (trl_uio)
-		free(trl_uio, M_IOV);
+		freeuio(trl_uio);
 	return (error);
 }
 
@@ -2771,7 +2768,7 @@ freebsd32_jail_set(struct thread *td, struct freebsd32_jail_set_args *uap)
 	if (error)
 		return (error);
 	error = kern_jail_set(td, auio, uap->flags);
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -2798,7 +2795,7 @@ freebsd32_jail_get(struct thread *td, struct freebsd32_jail_get_args *uap)
 			if (error != 0)
 				break;
 		}
-	free(auio, M_IOV);
+	freeuio(auio);
 	return (error);
 }
 
@@ -3531,7 +3528,7 @@ freebsd32_nmount(struct thread *td,
 		return (error);
 	error = vfs_donmount(td, flags, auio);
 
-	free(auio, M_IOV);
+	freeuio(auio);
 	return error;
 }
 
