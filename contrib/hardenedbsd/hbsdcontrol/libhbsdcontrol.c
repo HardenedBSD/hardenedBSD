@@ -149,15 +149,13 @@ hbsdcontrol_extattr_set_attr(const char *file, const char *attr, const int val)
 	    sbuf_data(attrval), sbuf_len(attrval));
 	if (len >= 0 && hbsdcontrol_debug_flag)
 		warnx("%s: %s@%s = %s", file, "system", attr, sbuf_data(attrval));
+	if (len == -1) {
+		perror("hbsdcontrol_extattr_set_attr: extattr_set_file");
+	}
 
 	sbuf_delete(attrval);
 
-	if (len == -1) {
-		perror(__func__);
-		errx(-1, "abort");
-	}
-
-	return (0);
+	return ((len == -1) ? -1 : 0);
 }
 
 int
@@ -178,7 +176,7 @@ hbsdcontrol_extattr_get_attr(const char *file, const char *attr, int *val)
 	len = extattr_get_file(file, attrnamespace, attr, NULL, 0);
 	if (len < 0) {
 		perror(__func__);
-		errx(-1, "abort");
+		return (-1);
 	}
 
 #if 0
@@ -189,13 +187,14 @@ hbsdcontrol_extattr_get_attr(const char *file, const char *attr, int *val)
 	attrval = calloc(sizeof(char), len);
 	if (attrval == NULL) {
 		perror(__func__);
-		errx(-1, "abort");
+		return (-1);
 	}
 
 	len = extattr_get_file(file, attrnamespace, attr, attrval, len);
 	if (len == -1) {
 		perror(__func__);
-		errx(-1, "abort");
+		free(attrval);
+		return (-1);
 	}
 
 	// XXXOP: strtol?
@@ -214,8 +213,10 @@ hbsdcontrol_extattr_rm_attr(const char *file, const char *attr)
 	int attrnamespace;
 
 	error = extattr_string_to_namespace("system", &attrnamespace);
-	if (error)
-		err(-1, "%s", "system");
+	if (error) {
+		perror("extattr_string_to_namespace");
+		return (error);
+	}
 
 	if (hbsdcontrol_debug_flag)
 		printf("reset attr: %s on file: %s\n", attr, file);
@@ -242,12 +243,14 @@ hbsdcontrol_extattr_list_attrs(const char *file, char ***attrs)
 	pos = 0;
 	fpos = 0;
 
-	if (attrs == NULL)
-		err(-1, "%s", "attrs");
+	if (attrs == NULL) {
+		return (-1);
+	}
 
 	error = extattr_string_to_namespace("system", &attrnamespace);
-	if (error)
-		err(-1, "%s", "system");
+	if (error) {
+		return (-1);
+	}
 
 	if (hbsdcontrol_debug_flag)
 		printf("list attrs on file: %s\n", file);
@@ -405,8 +408,9 @@ hbsdcontrol_get_all_feature_state(const char *file, struct pax_feature_state **f
 	assert(*feature_states != NULL);
 
 	error = hbsdcontrol_extattr_list_attrs(file, &attrs);
-	if (attrs == NULL)
-		err(-1, "attrs == NULL");
+	if (attrs == NULL) {
+		return (-1);
+	}
 
 	for (int feature = 0; pax_features[feature].feature != NULL; feature++) {
 		for (int attr = 0; attrs[attr] != NULL; attr++) {
@@ -520,7 +524,7 @@ hbsdcontrol_validate_state(struct pax_feature_state *feature_state)
 	else if (negated_feature == enable && feature == enable)
 		state = conflict;
 	else
-		assert(false);
+		return (-1);
 
 	return (state);
 }
