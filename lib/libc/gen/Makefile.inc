@@ -307,9 +307,7 @@ MAN+=	alarm.3 \
 	times.3 \
 	timespec_get.3 \
 	timespec_getres.3 \
-	timezone.3 \
 	ttyname.3 \
-	tzset.3 \
 	ualarm.3 \
 	ucontext.3 \
 	ulimit.3 \
