@@ -124,7 +124,7 @@ hostfs_seek(struct open_file *f, off_t offset, int whence)
 {
 	hostfs_file *hf = f->f_fsdata;
 	uint32_t offl, offh;
-	int err;
+	long err;
 	uint64_t res;
 
 	/*
@@ -133,11 +133,19 @@ hostfs_seek(struct open_file *f, off_t offset, int whence)
 	 * from V7 later ISO-C). Also assumes we have to support powerpc still,
 	 * it's interface is weird for legacy reasons....
 	 */
-	offl = offset & 0xffffffff;
-	offh = (offset >> 32) & 0xffffffff;
+	res = (uint64_t)offset;
+	offl = res & 0xfffffffful;
+	offh = (res >> 32) & 0xfffffffful;
 	err = host_llseek(hf->hf_fd, offh, offl, &res, whence);
-	if (err < 0)
-		return (err);
+	/*
+	 * Since we're interfacing to the raw linux system call, we have to
+	 * carefully check. We have to translate the errno value from the host
+	 * to libsa's conventions.
+	 */
+	if (is_linux_error(err)) {
+		errno = host_to_stand_errno(err);
+		return (-1);
+	}
 	return (res);
 }
 
