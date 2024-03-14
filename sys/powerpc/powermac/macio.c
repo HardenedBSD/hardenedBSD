@@ -84,18 +84,15 @@ static struct rman *macio_get_rman(device_t, int, u_int);
 static struct   resource *macio_alloc_resource(device_t, device_t, int, int *,
 					       rman_res_t, rman_res_t, rman_res_t,
 					       u_int);
-static int  macio_adjust_resource(device_t, device_t, int, struct resource *,
+static int  macio_adjust_resource(device_t, device_t, struct resource *,
 				  rman_res_t, rman_res_t);
-static int  macio_activate_resource(device_t, device_t, int, int,
-				    struct resource *);
-static int  macio_deactivate_resource(device_t, device_t, int, int,
-				      struct resource *);
-static int  macio_release_resource(device_t, device_t, int, int,
-				   struct resource *);
-static int  macio_map_resource(device_t, device_t, int, struct resource *,
+static int  macio_activate_resource(device_t, device_t, struct resource *);
+static int  macio_deactivate_resource(device_t, device_t, struct resource *);
+static int  macio_release_resource(device_t, device_t, struct resource *);
+static int  macio_map_resource(device_t, device_t, struct resource *,
 			       struct resource_map_request *,
 			       struct resource_map *);
-static int  macio_unmap_resource(device_t, device_t, int, struct resource *,
+static int  macio_unmap_resource(device_t, device_t, struct resource *,
 				 struct resource_map *);
 static struct resource_list *macio_get_resource_list (device_t, device_t);
 static ofw_bus_get_devinfo_t macio_get_devinfo;
@@ -596,77 +593,66 @@ macio_alloc_resource(device_t bus, device_t child, int type, int *rid,
 }
 
 static int
-macio_adjust_resource(device_t bus, device_t child, int type,
-    struct resource *r, rman_res_t start, rman_res_t end)
+macio_adjust_resource(device_t bus, device_t child, struct resource *r,
+    rman_res_t start, rman_res_t end)
 {
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_adjust_resource(bus, child, type, r,
-		    start, end));
-	case SYS_RES_IRQ:
-		return (bus_generic_adjust_resource(bus, child, type, r, start,
+		return (bus_generic_rman_adjust_resource(bus, child, r, start,
 		    end));
+	case SYS_RES_IRQ:
+		return (bus_generic_adjust_resource(bus, child, r, start, end));
 	default:
 		return (EINVAL);
 	}
 }
 
 static int
-macio_release_resource(device_t bus, device_t child, int type, int rid,
-		       struct resource *res)
+macio_release_resource(device_t bus, device_t child, struct resource *res)
 {
-	switch (type) {
+	switch (rman_get_type(res)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_release_resource(bus, child, type, rid,
-		    res));
+		return (bus_generic_rman_release_resource(bus, child, res));
 	case SYS_RES_IRQ:
-		return (bus_generic_rl_release_resource(bus, child, type, rid,
-		    res));
+		return (bus_generic_rl_release_resource(bus, child, res));
 	default:
 		return (EINVAL);
 	}
 }
 
 static int
-macio_activate_resource(device_t bus, device_t child, int type, int rid,
-			   struct resource *res)
+macio_activate_resource(device_t bus, device_t child, struct resource *res)
 {
-	switch (type) {
+	switch (rman_get_type(res)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_activate_resource(bus, child, type,
-		    rid, res));
+		return (bus_generic_rman_activate_resource(bus, child, res));
 	case SYS_RES_IRQ:
-		return (bus_generic_activate_resource(bus, child, type, rid,
-		    res));
+		return (bus_generic_activate_resource(bus, child, res));
 	default:
 		return (EINVAL);
 	}
 }
 
 static int
-macio_deactivate_resource(device_t bus, device_t child, int type, int rid,
-			  struct resource *res)
+macio_deactivate_resource(device_t bus, device_t child, struct resource *res)
 {
-	switch (type) {
+	switch (rman_get_type(res)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_deactivate_resource(bus, child, type,
-		    rid, res));
+		return (bus_generic_rman_deactivate_resource(bus, child, res));
 	case SYS_RES_IRQ:
-		return (bus_generic_deactivate_resource(bus, child, type, rid,
-		    res));
+		return (bus_generic_deactivate_resource(bus, child, res));
 	default:
 		return (EINVAL);
 	}
 }
 
 static int
-macio_map_resource(device_t bus, device_t child, int type,
-    struct resource *r, struct resource_map_request *argsp,
-    struct resource_map *map)
+macio_map_resource(device_t bus, device_t child, struct resource *r,
+    struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct resource_map_request args;
 	struct macio_softc *sc;
@@ -678,7 +664,7 @@ macio_map_resource(device_t bus, device_t child, int type,
 		return (ENXIO);
 
 	/* Mappings are only supported on I/O and memory resources. */
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
 		break;
@@ -706,13 +692,13 @@ macio_map_resource(device_t bus, device_t child, int type,
 }
 
 static int
-macio_unmap_resource(device_t bus, device_t child, int type,
-    struct resource *r, struct resource_map *map)
+macio_unmap_resource(device_t bus, device_t child, struct resource *r,
+    struct resource_map *map)
 {
 	/*
 	 * If this is a memory resource, unmap it.
 	 */
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
 		pmap_unmapdev(map->r_vaddr, map->r_size);

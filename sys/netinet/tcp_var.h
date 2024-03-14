@@ -812,10 +812,12 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
 #define	ENTER_RECOVERY(t_flags) t_flags |= (TF_CONGRECOVERY | TF_FASTRECOVERY)
 #define	EXIT_RECOVERY(t_flags) t_flags &= ~(TF_CONGRECOVERY | TF_FASTRECOVERY)
 
-#if defined(_KERNEL) && !defined(TCP_RFC7413)
+#if defined(_KERNEL)
+#if !defined(TCP_RFC7413)
 #define	IS_FASTOPEN(t_flags)		(false)
 #else
 #define	IS_FASTOPEN(t_flags)		(t_flags & TF_FASTOPEN)
+#endif
 #endif
 
 #define	BYTES_THIS_ACK(tp, th)	(th->th_ack - tp->snd_una)
@@ -893,17 +895,6 @@ struct hc_metrics_lite {	/* must stay in sync with hc_metrics */
 	uint32_t	rmx_cwnd;	/* congestion window */
 	uint32_t	rmx_sendpipe;   /* outbound delay-bandwidth product */
 	uint32_t	rmx_recvpipe;   /* inbound delay-bandwidth product */
-};
-
-/*
- * Used by tcp_maxmtu() to communicate interface specific features
- * and limits at the time of connection setup.
- */
-struct tcp_ifcap {
-	int	ifcap;
-	u_int	tsomax;
-	u_int	tsomaxsegcount;
-	u_int	tsomaxsegsize;
 };
 
 #ifndef _NETINET_IN_PCB_H_
@@ -1438,8 +1429,19 @@ extern int32_t tcp_attack_on_turns_on_logging;
 extern uint32_t tcp_ack_war_time_window;
 extern uint32_t tcp_ack_war_cnt;
 
+/*
+ * Used by tcp_maxmtu() to communicate interface specific features
+ * and limits at the time of connection setup.
+ */
+struct tcp_ifcap {
+	int	ifcap;
+	u_int	tsomax;
+	u_int	tsomaxsegcount;
+	u_int	tsomaxsegsize;
+};
 uint32_t tcp_maxmtu(struct in_conninfo *, struct tcp_ifcap *);
 uint32_t tcp_maxmtu6(struct in_conninfo *, struct tcp_ifcap *);
+
 void	 tcp6_use_min_mtu(struct tcpcb *);
 u_int	 tcp_maxseg(const struct tcpcb *);
 u_int	 tcp_fixed_maxseg(const struct tcpcb *);

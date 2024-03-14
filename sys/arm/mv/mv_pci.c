@@ -345,17 +345,14 @@ static int mv_pcib_attach(device_t);
 static struct rman *mv_pcib_get_rman(device_t, int, u_int);
 static struct resource *mv_pcib_alloc_resource(device_t, device_t, int, int *,
     rman_res_t, rman_res_t, rman_res_t, u_int);
-static int mv_pcib_adjust_resource(device_t, device_t, int, struct resource *,
+static int mv_pcib_adjust_resource(device_t, device_t, struct resource *,
     rman_res_t, rman_res_t);
-static int mv_pcib_release_resource(device_t, device_t, int, int,
-    struct resource *);
-static int mv_pcib_activate_resource(device_t, device_t, int, int,
-    struct resource *r);
-static int mv_pcib_deactivate_resource(device_t, device_t, int, int,
-    struct resource *r);
-static int mv_pcib_map_resource(device_t, device_t, int, struct resource *,
+static int mv_pcib_release_resource(device_t, device_t, struct resource *);
+static int mv_pcib_activate_resource(device_t, device_t, struct resource *);
+static int mv_pcib_deactivate_resource(device_t, device_t, struct resource *);
+static int mv_pcib_map_resource(device_t, device_t, struct resource *,
     struct resource_map_request *, struct resource_map *);
-static int mv_pcib_unmap_resource(device_t, device_t, int, struct resource *,
+static int mv_pcib_unmap_resource(device_t, device_t, struct resource *,
     struct resource_map *);
 static int mv_pcib_read_ivar(device_t, device_t, int, uintptr_t *);
 static int mv_pcib_write_ivar(device_t, device_t, int, uintptr_t);
@@ -941,101 +938,90 @@ mv_pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-mv_pcib_adjust_resource(device_t dev, device_t child, int type,
+mv_pcib_adjust_resource(device_t dev, device_t child,
     struct resource *r, rman_res_t start, rman_res_t end)
 {
 #ifdef PCI_RES_BUS
 	struct mv_pcib_softc *sc = device_get_softc(dev);
 #endif
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_adjust_resource(dev, child, type, r,
-		    start, end));
+		return (bus_generic_rman_adjust_resource(dev, child, r, start,
+		    end));
 #ifdef PCI_RES_BUS
 	case PCI_RES_BUS:
 		return (pci_domain_adjust_bus(sc->ap_segment, child, r, start,
 		    end));
 #endif
 	default:
-		return (bus_generic_adjust_resource(dev, child, type, r,
-		    start, end));
+		return (bus_generic_adjust_resource(dev, child, r, start, end));
 	}
 }
 
 static int
-mv_pcib_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *res)
+mv_pcib_release_resource(device_t dev, device_t child, struct resource *res)
 {
 #ifdef PCI_RES_BUS
 	struct mv_pcib_softc *sc = device_get_softc(dev);
 #endif
 
-	switch (type) {
+	switch (rman_get_type(res)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_release_resource(dev, child, type,
-		    rid, res));
+		return (bus_generic_rman_release_resource(dev, child, res));
 #ifdef PCI_RES_BUS
 	case PCI_RES_BUS:
-		return (pci_domain_release_bus(sc->ap_segment, child, rid, res));
+		return (pci_domain_release_bus(sc->ap_segment, child, res));
 #endif
 	default:
-		return (BUS_RELEASE_RESOURCE(device_get_parent(dev), child,
-		    type, rid, res));
+		return (bus_generic_release_resource(dev, child, res));
 	}
 }
 
 static int
-mv_pcib_activate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+mv_pcib_activate_resource(device_t dev, device_t child, struct resource *r)
 {
 #ifdef PCI_RES_BUS
 	struct mv_pcib_softc *sc = device_get_softc(dev);
 #endif
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_activate_resource(dev, child, type,
-		    rid, r));
+		return (bus_generic_rman_activate_resource(dev, child, r));
 #ifdef PCI_RES_BUS
 	case PCI_RES_BUS:
-		return (pci_domain_activate_bus(sc->ap_segment, child, rid, r));
+		return (pci_domain_activate_bus(sc->ap_segment, child, r));
 #endif
 	default:
-		return (bus_generic_activate_resource(dev, child, type, rid,
-		    r));
+		return (bus_generic_activate_resource(dev, child, r));
 	}
 }
 
 static int
-mv_pcib_deactivate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+mv_pcib_deactivate_resource(device_t dev, device_t child, struct resource *r)
 {
 #ifdef PCI_RES_BUS
 	struct mv_pcib_softc *sc = device_get_softc(dev);
 #endif
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
-		return (bus_generic_rman_deactivate_resource(dev, child, type,
-		    rid, r));
+		return (bus_generic_rman_deactivate_resource(dev, child, r));
 #ifdef PCI_RES_BUS
 	case PCI_RES_BUS:
-		return (pci_domain_deactivate_bus(sc->ap_segment, child, rid,
-		    r));
+		return (pci_domain_deactivate_bus(sc->ap_segment, child, r));
 #endif
 	default:
-		return (bus_generic_deactivate_resource(dev, child, type, rid,
-		    r));
+		return (bus_generic_deactivate_resource(dev, child, r));
 	}
 }
 
 static int
-mv_pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
+mv_pcib_map_resource(device_t dev, device_t child, struct resource *r,
     struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct resource_map_request args;
@@ -1047,7 +1033,7 @@ mv_pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
 		return (ENXIO);
 
 	/* Mappings are only supported on I/O and memory resources. */
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
 		break;
@@ -1067,10 +1053,10 @@ mv_pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
 }
 
 static int
-mv_pcib_unmap_resource(device_t dev, device_t child, int type,
-    struct resource *r, struct resource_map *map)
+mv_pcib_unmap_resource(device_t dev, device_t child, struct resource *r,
+    struct resource_map *map)
 {
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 	case SYS_RES_MEMORY:
 		return (0);

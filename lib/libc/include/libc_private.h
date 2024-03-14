@@ -201,7 +201,6 @@ typedef int (*interpos_func_t)(void);
 interpos_func_t *__libc_interposing_slot(int interposno);
 extern interpos_func_t __libc_interposing[] __hidden;
 interpos_func_t *__libsys_interposing_slot(int interposno);
-extern interpos_func_t __libsys_interposing[] __hidden;
 
 enum {
 	INTERPOS_accept,
@@ -414,8 +413,7 @@ int		__libc_sigaction(int, const struct sigaction *,
 int		__libc_sigprocmask(int, const __sigset_t *, __sigset_t *)
 		    __hidden;
 int		__libc_sigsuspend(const __sigset_t *) __hidden;
-int		__libc_sigwait(const __sigset_t * __restrict,
-		    int * restrict sig);
+int		__libsys_sigwait(const __sigset_t *, int *) __hidden;
 int		__libc_system(const char *);
 int		__libc_tcdrain(int);
 

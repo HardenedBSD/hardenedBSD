@@ -469,50 +469,42 @@ vmd_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-vmd_adjust_resource(device_t dev, device_t child, int type,
+vmd_adjust_resource(device_t dev, device_t child,
     struct resource *r, rman_res_t start, rman_res_t end)
 {
 
-	if (type == SYS_RES_IRQ) {
-		return (bus_generic_adjust_resource(dev, child, type, r,
-		    start, end));
+	if (rman_get_type(r) == SYS_RES_IRQ) {
+		return (bus_generic_adjust_resource(dev, child, r, start, end));
 	}
-	return (bus_generic_rman_adjust_resource(dev, child, type, r, start,
-	    end));
+	return (bus_generic_rman_adjust_resource(dev, child, r, start, end));
 }
 
 static int
-vmd_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmd_release_resource(device_t dev, device_t child, struct resource *r)
 {
 
-	if (type == SYS_RES_IRQ) {
-		return (bus_generic_release_resource(dev, child, type, rid,
-		    r));
+	if (rman_get_type(r) == SYS_RES_IRQ) {
+		return (bus_generic_release_resource(dev, child, r));
 	}
-	return (bus_generic_rman_release_resource(dev, child, type, rid, r));
+	return (bus_generic_rman_release_resource(dev, child, r));
 }
 
 static int
-vmd_activate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmd_activate_resource(device_t dev, device_t child, struct resource *r)
 {
-	if (type == SYS_RES_IRQ) {
-		return (bus_generic_activate_resource(dev, child, type, rid,
-		    r));
+	if (rman_get_type(r) == SYS_RES_IRQ) {
+		return (bus_generic_activate_resource(dev, child, r));
 	}
-	return (bus_generic_rman_activate_resource(dev, child, type, rid, r));
+	return (bus_generic_rman_activate_resource(dev, child, r));
 }
 
 static int
-vmd_deactivate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmd_deactivate_resource(device_t dev, device_t child, struct resource *r)
 {
-	if (type == SYS_RES_IRQ) {
-		return (bus_generic_deactivate_resource(dev, child, type, rid,
-		    r));
+	if (rman_get_type(r) == SYS_RES_IRQ) {
+		return (bus_generic_deactivate_resource(dev, child, r));
 	}
-	return (bus_generic_rman_deactivate_resource(dev, child, type, rid, r));
+	return (bus_generic_rman_deactivate_resource(dev, child, r));
 }
 
 static struct resource *
@@ -527,7 +519,7 @@ vmd_find_parent_resource(struct vmd_softc *sc, struct resource *r)
 }
 
 static int
-vmd_map_resource(device_t dev, device_t child, int type, struct resource *r,
+vmd_map_resource(device_t dev, device_t child, struct resource *r,
     struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct vmd_softc *sc = device_get_softc(dev);
@@ -551,11 +543,11 @@ vmd_map_resource(device_t dev, device_t child, int type, struct resource *r,
 
 	args.offset = start - rman_get_start(pres);
 	args.length = length;
-	return (bus_generic_map_resource(dev, child, type, pres, &args, map));
+	return (bus_generic_map_resource(dev, child, pres, &args, map));
 }
 
 static int
-vmd_unmap_resource(device_t dev, device_t child, int type, struct resource *r,
+vmd_unmap_resource(device_t dev, device_t child, struct resource *r,
     struct resource_map *map)
 {
 	struct vmd_softc *sc = device_get_softc(dev);
@@ -563,7 +555,7 @@ vmd_unmap_resource(device_t dev, device_t child, int type, struct resource *r,
 	r = vmd_find_parent_resource(sc, r);
 	if (r == NULL)
 		return (ENOENT);
-	return (bus_generic_unmap_resource(dev, child, type, r, map));
+	return (bus_generic_unmap_resource(dev, child, r, map));
 }
 
 static int

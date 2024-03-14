@@ -260,26 +260,26 @@ restart:
 }
 
 int
-pcib_host_res_adjust(struct pcib_host_resources *hr, device_t dev, int type,
+pcib_host_res_adjust(struct pcib_host_resources *hr, device_t dev,
     struct resource *r, rman_res_t start, rman_res_t end)
 {
 	struct resource_list_entry *rle;
 
-	rle = resource_list_find(&hr->hr_rl, type, 0);
+	rle = resource_list_find(&hr->hr_rl, rman_get_type(r), 0);
 	if (rle == NULL) {
 		/*
 		 * No decoding ranges for this resource type, just pass
 		 * the request up to the parent.
 		 */
-		return (bus_generic_adjust_resource(hr->hr_pcib, dev, type, r,
-		    start, end));
+		return (bus_generic_adjust_resource(hr->hr_pcib, dev, r, start,
+		    end));
 	}
 
 	/* Only allow adjustments that stay within a decoded range. */
 	for (; rle != NULL; rle = STAILQ_NEXT(rle, link)) {
 		if (rle->start <= start && rle->end >= end)
 			return (bus_generic_adjust_resource(hr->hr_pcib, dev,
-			    type, r, start, end));
+			    r, start, end));
 	}
 	return (ERANGE);
 }
@@ -344,6 +344,7 @@ pci_domain_alloc_bus(int domain, device_t dev, int *rid, rman_res_t start,
 		return (NULL);
 
 	rman_set_rid(res, *rid);
+	rman_set_type(res, PCI_RES_BUS);
 	return (res);
 }
 
@@ -365,7 +366,7 @@ pci_domain_adjust_bus(int domain, device_t dev, struct resource *r,
 }
 
 int
-pci_domain_release_bus(int domain, device_t dev, int rid, struct resource *r)
+pci_domain_release_bus(int domain, device_t dev, struct resource *r)
 {
 #ifdef INVARIANTS
 	struct pci_domain *d;
@@ -381,7 +382,7 @@ pci_domain_release_bus(int domain, device_t dev, int rid, struct resource *r)
 }
 
 int
-pci_domain_activate_bus(int domain, device_t dev, int rid, struct resource *r)
+pci_domain_activate_bus(int domain, device_t dev, struct resource *r)
 {
 #ifdef INVARIANTS
 	struct pci_domain *d;
@@ -397,7 +398,7 @@ pci_domain_activate_bus(int domain, device_t dev, int rid, struct resource *r)
 }
 
 int
-pci_domain_deactivate_bus(int domain, device_t dev, int rid, struct resource *r)
+pci_domain_deactivate_bus(int domain, device_t dev, struct resource *r)
 {
 #ifdef INVARIANTS
 	struct pci_domain *d;

@@ -305,16 +305,14 @@ nexus_bind_intr(device_t dev, device_t child, struct resource *irq, int cpu)
 #endif
 
 static int
-nexus_activate_resource(device_t bus, device_t child, int type, int rid,
-    struct resource *r)
+nexus_activate_resource(device_t bus, device_t child, struct resource *r)
 {
 	int err;
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
-		return (bus_generic_rman_activate_resource(bus, child, type,
-		    rid, r));
+		return (bus_generic_rman_activate_resource(bus, child, r));
 	case SYS_RES_IRQ:
 		err = rman_activate_resource(r);
 		if (err != 0)
@@ -331,7 +329,7 @@ nexus_activate_resource(device_t bus, device_t child, int type, int rid,
 }
 
 static int
-nexus_map_resource(device_t bus, device_t child, int type, struct resource *r,
+nexus_map_resource(device_t bus, device_t child, struct resource *r,
     struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct resource_map_request args;
@@ -342,7 +340,7 @@ nexus_map_resource(device_t bus, device_t child, int type, struct resource *r,
 	if (!(rman_get_flags(r) & RF_ACTIVE))
 		return (ENXIO);
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
 		break;
@@ -374,11 +372,11 @@ nexus_map_resource(device_t bus, device_t child, int type, struct resource *r,
 }
 
 static int
-nexus_unmap_resource(device_t bus, device_t child, int type, struct resource *r,
+nexus_unmap_resource(device_t bus, device_t child, struct resource *r,
     struct resource_map *map)
 {
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
 #ifdef FDT
@@ -393,16 +391,14 @@ nexus_unmap_resource(device_t bus, device_t child, int type, struct resource *r,
 }
 
 static int
-nexus_deactivate_resource(device_t bus, device_t child, int type, int rid,
-    struct resource *r)
+nexus_deactivate_resource(device_t bus, device_t child, struct resource *r)
 {
 	int error;
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
-		return (bus_generic_rman_deactivate_resource(bus, child, type,
-		    rid, r));
+		return (bus_generic_rman_deactivate_resource(bus, child, r));
 	case SYS_RES_IRQ:
 		error = rman_deactivate_resource(r);
 		if (error)
