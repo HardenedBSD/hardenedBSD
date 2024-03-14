@@ -231,7 +231,8 @@ CFLAGS+=	-fwrapv
 # GCC SSP support
 #
 .if ${MK_SSP} != "no"
-CFLAGS+=	-fstack-protector-strong
+KERN_SSP_CFLAG?=	-fstack-protector-strong
+CFLAGS+=		${KERN_SSP_CFLAG}
 .endif
 
 .if defined(MK_RETPOLINE) && ${MK_RETPOLINE} != "no"
