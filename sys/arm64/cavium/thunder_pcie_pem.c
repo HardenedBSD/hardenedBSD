@@ -120,9 +120,8 @@
 
 #define	RID_PEM_SPACE		1
 
-static int thunder_pem_activate_resource(device_t, device_t, int, int,
-    struct resource *);
-static int thunder_pem_adjust_resource(device_t, device_t, int,
+static int thunder_pem_activate_resource(device_t, device_t, struct resource *);
+static int thunder_pem_adjust_resource(device_t, device_t,
     struct resource *, rman_res_t, rman_res_t);
 static struct resource * thunder_pem_alloc_resource(device_t, device_t, int,
     int *, rman_res_t, rman_res_t, rman_res_t, u_int);
@@ -134,12 +133,12 @@ static int thunder_pem_map_msi(device_t, device_t, int, uint64_t *, uint32_t *);
 static int thunder_pem_get_id(device_t, device_t, enum pci_id_type,
     uintptr_t *);
 static int thunder_pem_attach(device_t);
-static int thunder_pem_deactivate_resource(device_t, device_t, int, int,
+static int thunder_pem_deactivate_resource(device_t, device_t,
     struct resource *);
-static int thunder_pem_map_resource(device_t, device_t, int, struct resource *,
+static int thunder_pem_map_resource(device_t, device_t, struct resource *,
     struct resource_map_request *, struct resource_map *);
-static int thunder_pem_unmap_resource(device_t, device_t, int,
-    struct resource *, struct resource_map *);
+static int thunder_pem_unmap_resource(device_t, device_t, struct resource *,
+    struct resource_map *);
 static bus_dma_tag_t thunder_pem_get_dma_tag(device_t, device_t);
 static int thunder_pem_detach(device_t);
 static uint64_t thunder_pem_config_reg_read(struct thunder_pem_softc *, int);
@@ -150,8 +149,7 @@ static uint32_t thunder_pem_read_config(device_t, u_int, u_int, u_int, u_int,
     int);
 static int thunder_pem_read_ivar(device_t, device_t, int, uintptr_t *);
 static void thunder_pem_release_all(device_t);
-static int thunder_pem_release_resource(device_t, device_t, int, int,
-    struct resource *);
+static int thunder_pem_release_resource(device_t, device_t, struct resource *);
 static struct rman * thunder_pem_get_rman(device_t, int, u_int);
 static void thunder_pem_slix_s2m_regx_acc_modify(struct thunder_pem_softc *,
     int, int);
@@ -254,7 +252,28 @@ thunder_pem_write_ivar(device_t dev, device_t child, int index,
 }
 
 static int
-thunder_pem_activate_resource(device_t dev, device_t child, int type, int rid,
+thunder_pem_activate_resource(device_t dev, device_t child, struct resource *r)
+{
+#if defined(NEW_PCIB) && defined(PCI_RES_BUS)
+	struct thunder_pem_softc *sc;
+
+	sc = device_get_softc(dev);
+#endif
+	switch (rman_get_type(r)) {
+#if defined(NEW_PCIB) && defined(PCI_RES_BUS)
+	case PCI_RES_BUS:
+		return (pci_domain_activate_bus(sc->id, child, r));
+#endif
+	case SYS_RES_MEMORY:
+	case SYS_RES_IOPORT:
+		return (bus_generic_rman_activate_resource(dev, child, r));
+	default:
+		return (bus_generic_activate_resource(dev, child, r));
+	}
+}
+
+static int
+thunder_pem_deactivate_resource(device_t dev, device_t child,
     struct resource *r)
 {
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
@@ -262,49 +281,22 @@ thunder_pem_activate_resource(device_t dev, device_t child, int type, int rid,
 
 	sc = device_get_softc(dev);
 #endif
-	switch (type) {
+	switch (rman_get_type(r)) {
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	case PCI_RES_BUS:
-		return (pci_domain_activate_bus(sc->id, child, rid, r));
+		return (pci_domain_deactivate_bus(sc->id, child, r));
 #endif
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
-		return (bus_generic_rman_activate_resource(dev, child, type,
-		    rid, r));
+		return (bus_generic_rman_deactivate_resource(dev, child, r));
 	default:
-		return (bus_generic_activate_resource(dev, child, type, rid,
-		    r));
+		return (bus_generic_deactivate_resource(dev, child, r));
 	}
 }
 
 static int
-thunder_pem_deactivate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
-{
-#if defined(NEW_PCIB) && defined(PCI_RES_BUS)
-	struct thunder_pem_softc *sc;
-
-	sc = device_get_softc(dev);
-#endif
-	switch (type) {
-#if defined(NEW_PCIB) && defined(PCI_RES_BUS)
-	case PCI_RES_BUS:
-		return (pci_domain_deactivate_bus(sc->id, child, rid, r));
-#endif
-	case SYS_RES_MEMORY:
-	case SYS_RES_IOPORT:
-		return (bus_generic_rman_deactivate_resource(dev, child, type,
-		    rid, r));
-	default:
-		return (bus_generic_deactivate_resource(dev, child, type, rid,
-		    r));
-	}
-}
-
-static int
-thunder_pem_map_resource(device_t dev, device_t child, int type,
-    struct resource *r, struct resource_map_request *argsp,
-    struct resource_map *map)
+thunder_pem_map_resource(device_t dev, device_t child, struct resource *r,
+    struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct resource_map_request args;
 	struct thunder_pem_softc *sc;
@@ -315,7 +307,7 @@ thunder_pem_map_resource(device_t dev, device_t child, int type,
 	if (!(rman_get_flags(r) & RF_ACTIVE))
 		return (ENXIO);
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
 		break;
@@ -340,11 +332,11 @@ thunder_pem_map_resource(device_t dev, device_t child, int type,
 }
 
 static int
-thunder_pem_unmap_resource(device_t dev, device_t child, int type,
-    struct resource *r, struct resource_map *map)
+thunder_pem_unmap_resource(device_t dev, device_t child, struct resource *r,
+    struct resource_map *map)
 {
 
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
 		bus_space_unmap(map->r_bustag, map->r_bushandle, map->r_size);
@@ -355,26 +347,26 @@ thunder_pem_unmap_resource(device_t dev, device_t child, int type,
 }
 
 static int
-thunder_pem_adjust_resource(device_t dev, device_t child, int type,
-    struct resource *res, rman_res_t start, rman_res_t end)
+thunder_pem_adjust_resource(device_t dev, device_t child, struct resource *res,
+    rman_res_t start, rman_res_t end)
 {
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	struct thunder_pem_softc *sc;
 
 	sc = device_get_softc(dev);
 #endif
-	switch (type) {
+	switch (rman_get_type(res)) {
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	case PCI_RES_BUS:
 		return (pci_domain_adjust_bus(sc->id, child, res, start, end));
 #endif
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
-		return (bus_generic_rman_adjust_resource(dev, child, type, res,
-		    start, end));
+		return (bus_generic_rman_adjust_resource(dev, child, res, start,
+		    end));
 	default:
-		return (bus_generic_adjust_resource(dev, child, type, res,
-		    start, end));
+		return (bus_generic_adjust_resource(dev, child, res, start,
+		    end));
 	}
 }
 
@@ -723,28 +715,25 @@ thunder_pem_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-thunder_pem_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *res)
+thunder_pem_release_resource(device_t dev, device_t child, struct resource *res)
 {
 	device_t parent_dev;
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	struct thunder_pem_softc *sc = device_get_softc(dev);
 #endif
 
-	switch (type) {
+	switch (rman_get_type(res)) {
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	case PCI_RES_BUS:
-		return (pci_domain_release_bus(sc->id, child, rid, res));
+		return (pci_domain_release_bus(sc->id, child, res));
 #endif
 	case SYS_RES_MEMORY:
 	case SYS_RES_IOPORT:
-		return (bus_generic_rman_release_resource(dev, child, type,
-		    rid, res));
+		return (bus_generic_rman_release_resource(dev, child, res));
 	default:
 		/* Find parent device. On ThunderX we know an exact path. */
 		parent_dev = device_get_parent(device_get_parent(dev));
-		return (BUS_RELEASE_RESOURCE(parent_dev, child,
-		    type, rid, res));
+		return (BUS_RELEASE_RESOURCE(parent_dev, child, res));
 	}
 }
 

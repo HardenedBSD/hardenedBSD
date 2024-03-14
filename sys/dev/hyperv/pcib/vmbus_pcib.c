@@ -1713,55 +1713,52 @@ vmbus_pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-vmbus_pcib_adjust_resource(device_t dev, device_t child, int type,
+vmbus_pcib_adjust_resource(device_t dev, device_t child,
     struct resource *r, rman_res_t start, rman_res_t end)
 {
 	struct vmbus_pcib_softc *sc = device_get_softc(dev);
 
-	if (type == PCI_RES_BUS)
+	if (rman_get_type(r) == PCI_RES_BUS)
 		return (pci_domain_adjust_bus(sc->hbus->pci_domain, child, r,
 		    start, end));
-	return (bus_generic_adjust_resource(dev, child, type, r, start, end));
+	return (bus_generic_adjust_resource(dev, child, r, start, end));
 }
 
 static int
-vmbus_pcib_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmbus_pcib_release_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct vmbus_pcib_softc *sc = device_get_softc(dev);
 
-	if (type == PCI_RES_BUS)
-		return (pci_domain_release_bus(sc->hbus->pci_domain, child,
-		    rid, r));
-
-	if (type == SYS_RES_IOPORT)
+	switch (rman_get_type(r)) {
+	case PCI_RES_BUS:
+		return (pci_domain_release_bus(sc->hbus->pci_domain, child, r));
+	case SYS_RES_IOPORT:
 		return (EINVAL);
-
-	return (bus_generic_release_resource(dev, child, type, rid, r));
+	default:
+		return (bus_generic_release_resource(dev, child, r));
+	}
 }
 
 static int
-vmbus_pcib_activate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmbus_pcib_activate_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct vmbus_pcib_softc *sc = device_get_softc(dev);
 
-	if (type == PCI_RES_BUS)
+	if (rman_get_type(r) == PCI_RES_BUS)
 		return (pci_domain_activate_bus(sc->hbus->pci_domain, child,
-		    rid, r));
-	return (bus_generic_activate_resource(dev, child, type, rid, r));
+		    r));
+	return (bus_generic_activate_resource(dev, child, r));
 }
 
 static int
-vmbus_pcib_deactivate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+vmbus_pcib_deactivate_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct vmbus_pcib_softc *sc = device_get_softc(dev);
 
-	if (type == PCI_RES_BUS)
+	if (rman_get_type(r) == PCI_RES_BUS)
 		return (pci_domain_deactivate_bus(sc->hbus->pci_domain, child,
-		    rid, r));
-	return (bus_generic_deactivate_resource(dev, child, type, rid, r));
+		    r));
+	return (bus_generic_deactivate_resource(dev, child, r));
 }
 
 static int

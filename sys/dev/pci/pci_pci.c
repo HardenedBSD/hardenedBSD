@@ -164,9 +164,9 @@ SYSCTL_INT(_hw_pci, OID_AUTO, clear_pcib, CTLFLAG_RDTUN, &pci_clear_pcib, 0,
  * sub-allocated from one of our window resource managers.
  */
 static struct pcib_window *
-pcib_get_resource_window(struct pcib_softc *sc, int type, struct resource *r)
+pcib_get_resource_window(struct pcib_softc *sc, struct resource *r)
 {
-	switch (type) {
+	switch (rman_get_type(r)) {
 	case SYS_RES_IOPORT:
 		if (rman_is_region_manager(r, &sc->io.rman))
 			return (&sc->io);
@@ -188,14 +188,14 @@ pcib_get_resource_window(struct pcib_softc *sc, int type, struct resource *r)
  * resource managers?
  */
 static int
-pcib_is_resource_managed(struct pcib_softc *sc, int type, struct resource *r)
+pcib_is_resource_managed(struct pcib_softc *sc, struct resource *r)
 {
 
 #ifdef PCI_RES_BUS
-	if (type == PCI_RES_BUS)
+	if (rman_get_type(r) == PCI_RES_BUS)
 		return (rman_is_region_manager(r, &sc->bus.rman));
 #endif
-	return (pcib_get_resource_window(sc, type, r) != NULL);
+	return (pcib_get_resource_window(sc, r) != NULL);
 }
 
 static int
@@ -727,6 +727,7 @@ pcib_suballoc_bus(struct pcib_secbus *bus, device_t child, int *rid,
 		    rman_get_start(res), rman_get_end(res), *rid,
 		    pcib_child_name(child));
 	rman_set_rid(res, *rid);
+	rman_set_type(res, PCI_RES_BUS);
 	return (res);
 }
 
@@ -1930,6 +1931,7 @@ pcib_suballoc_resource(struct pcib_softc *sc, struct pcib_window *w,
 		    w->name, rman_get_start(res), rman_get_end(res), *rid,
 		    pcib_child_name(child));
 	rman_set_rid(res, *rid);
+	rman_set_type(res, type);
 
 	if (flags & RF_ACTIVE) {
 		if (bus_activate_resource(child, type, *rid, res) != 0) {
@@ -2370,23 +2372,23 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 }
 
 static int
-pcib_adjust_resource(device_t bus, device_t child, int type, struct resource *r,
+pcib_adjust_resource(device_t bus, device_t child, struct resource *r,
     rman_res_t start, rman_res_t end)
 {
 	struct pcib_softc *sc;
 	struct pcib_window *w;
 	rman_res_t wmask;
-	int error;
+	int error, type;
 
 	sc = device_get_softc(bus);
+	type = rman_get_type(r);
 
 	/*
 	 * If the resource wasn't sub-allocated from one of our region
 	 * managers then just pass the request up.
 	 */
-	if (!pcib_is_resource_managed(sc, type, r))
-		return (bus_generic_adjust_resource(bus, child, type, r,
-		    start, end));
+	if (!pcib_is_resource_managed(sc, r))
+		return (bus_generic_adjust_resource(bus, child, r, start, end));
 
 #ifdef PCI_RES_BUS
 	if (type == PCI_RES_BUS) {
@@ -2409,7 +2411,7 @@ pcib_adjust_resource(device_t bus, device_t child, int type, struct resource *r,
 		 * Resource is managed and not a secondary bus number, must
 		 * be from one of our windows.
 		 */
-		w = pcib_get_resource_window(sc, type, r);
+		w = pcib_get_resource_window(sc, r);
 		KASSERT(w != NULL,
 		    ("%s: no window for resource (%#jx-%#jx) type %d",
 		    __func__, rman_get_start(r), rman_get_end(r), type));
@@ -2438,43 +2440,41 @@ pcib_adjust_resource(device_t bus, device_t child, int type, struct resource *r,
 }
 
 static int
-pcib_release_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+pcib_release_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct pcib_softc *sc;
 	int error;
 
 	sc = device_get_softc(dev);
-	if (pcib_is_resource_managed(sc, type, r)) {
+	if (pcib_is_resource_managed(sc, r)) {
 		if (rman_get_flags(r) & RF_ACTIVE) {
-			error = bus_deactivate_resource(child, type, rid, r);
+			error = bus_deactivate_resource(child, r);
 			if (error)
 				return (error);
 		}
 		return (rman_release_resource(r));
 	}
-	return (bus_generic_release_resource(dev, child, type, rid, r));
+	return (bus_generic_release_resource(dev, child, r));
 }
 
 static int
-pcib_activate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+pcib_activate_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct pcib_softc *sc = device_get_softc(dev);
 	struct resource_map map;
-	int error;
+	int error, type;
 
-	if (!pcib_is_resource_managed(sc, type, r))
-		return (bus_generic_activate_resource(dev, child, type, rid,
-		    r));
+	if (!pcib_is_resource_managed(sc, r))
+		return (bus_generic_activate_resource(dev, child, r));
 
 	error = rman_activate_resource(r);
 	if (error != 0)
 		return (error);
 
+	type = rman_get_type(r);
 	if ((rman_get_flags(r) & RF_UNMAPPED) == 0 &&
 	    (type == SYS_RES_MEMORY || type == SYS_RES_IOPORT)) {
-		error = BUS_MAP_RESOURCE(dev, child, type, r, NULL, &map);
+		error = BUS_MAP_RESOURCE(dev, child, r, NULL, &map);
 		if (error != 0) {
 			rman_deactivate_resource(r);
 			return (error);
@@ -2486,25 +2486,24 @@ pcib_activate_resource(device_t dev, device_t child, int type, int rid,
 }
 
 static int
-pcib_deactivate_resource(device_t dev, device_t child, int type, int rid,
-    struct resource *r)
+pcib_deactivate_resource(device_t dev, device_t child, struct resource *r)
 {
 	struct pcib_softc *sc = device_get_softc(dev);
 	struct resource_map map;
-	int error;
+	int error, type;
 
-	if (!pcib_is_resource_managed(sc, type, r))
-		return (bus_generic_deactivate_resource(dev, child, type, rid,
-		    r));
+	if (!pcib_is_resource_managed(sc, r))
+		return (bus_generic_deactivate_resource(dev, child, r));
 
 	error = rman_deactivate_resource(r);
 	if (error != 0)
 		return (error);
 
+	type = rman_get_type(r);
 	if ((rman_get_flags(r) & RF_UNMAPPED) == 0 &&
 	    (type == SYS_RES_MEMORY || type == SYS_RES_IOPORT)) {
 		rman_get_mapping(r, &map);
-		BUS_UNMAP_RESOURCE(dev, child, type, r, &map);
+		BUS_UNMAP_RESOURCE(dev, child, r, &map);
 	}
 	return (0);
 }
@@ -2521,7 +2520,7 @@ pcib_find_parent_resource(struct pcib_window *w, struct resource *r)
 }
 
 static int
-pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
+pcib_map_resource(device_t dev, device_t child, struct resource *r,
     struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct pcib_softc *sc = device_get_softc(dev);
@@ -2531,10 +2530,9 @@ pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
 	rman_res_t length, start;
 	int error;
 
-	w = pcib_get_resource_window(sc, type, r);
+	w = pcib_get_resource_window(sc, r);
 	if (w == NULL)
-		return (bus_generic_map_resource(dev, child, type, r, argsp,
-		    map));
+		return (bus_generic_map_resource(dev, child, r, argsp, map));
 
 	/* Resources must be active to be mapped. */
 	if (!(rman_get_flags(r) & RF_ACTIVE))
@@ -2551,23 +2549,23 @@ pcib_map_resource(device_t dev, device_t child, int type, struct resource *r,
 
 	args.offset = start - rman_get_start(pres);
 	args.length = length;
-	return (bus_generic_map_resource(dev, child, type, pres, &args, map));
+	return (bus_generic_map_resource(dev, child, pres, &args, map));
 }
 
 static int
-pcib_unmap_resource(device_t dev, device_t child, int type, struct resource *r,
+pcib_unmap_resource(device_t dev, device_t child, struct resource *r,
     struct resource_map *map)
 {
 	struct pcib_softc *sc = device_get_softc(dev);
 	struct pcib_window *w;
 
-	w = pcib_get_resource_window(sc, type, r);
+	w = pcib_get_resource_window(sc, r);
 	if (w != NULL) {
 		r = pcib_find_parent_resource(w, r);
 		if (r == NULL)
 			return (ENOENT);
 	}
-	return (bus_generic_unmap_resource(dev, child, type, r, map));
+	return (bus_generic_unmap_resource(dev, child, r, map));
 }
 #else
 /*

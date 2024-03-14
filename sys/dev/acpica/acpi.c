@@ -1540,27 +1540,27 @@ acpi_alloc_resource(device_t bus, device_t child, int type, int *rid,
 }
 
 static bool
-acpi_is_resource_managed(device_t bus, int type, struct resource *r)
+acpi_is_resource_managed(device_t bus, struct resource *r)
 {
 	struct rman *rm;
 
-	rm = acpi_get_rman(bus, type, 0);
+	rm = acpi_get_rman(bus, rman_get_type(r), rman_get_flags(r));
 	if (rm == NULL)
 		return (false);
 	return (rman_is_region_manager(r, rm));
 }
 
 static struct resource *
-acpi_managed_resource(device_t bus, int type, struct resource *r)
+acpi_managed_resource(device_t bus, struct resource *r)
 {
 	struct acpi_softc *sc = device_get_softc(bus);
 	struct resource_list_entry *rle;
 
-	KASSERT(acpi_is_resource_managed(bus, type, r),
+	KASSERT(acpi_is_resource_managed(bus, r),
 	    ("resource %p is not suballocated", r));
 
 	STAILQ_FOREACH(rle, &sc->sysres_rl, link) {
-		if (rle->type != type || rle->res == NULL)
+		if (rle->type != rman_get_type(r) || rle->res == NULL)
 			continue;
 		if (rman_get_start(r) >= rman_get_start(rle->res) &&
 		    rman_get_end(r) <= rman_get_end(rle->res))
@@ -1570,27 +1570,26 @@ acpi_managed_resource(device_t bus, int type, struct resource *r)
 }
 
 static int
-acpi_adjust_resource(device_t bus, device_t child, int type, struct resource *r,
+acpi_adjust_resource(device_t bus, device_t child, struct resource *r,
     rman_res_t start, rman_res_t end)
 {
 
-    if (acpi_is_resource_managed(bus, type, r))
+    if (acpi_is_resource_managed(bus, r))
 	return (rman_adjust_resource(r, start, end));
-    return (bus_generic_adjust_resource(bus, child, type, r, start, end));
+    return (bus_generic_adjust_resource(bus, child, r, start, end));
 }
 
 static int
-acpi_release_resource(device_t bus, device_t child, int type, int rid,
-    struct resource *r)
+acpi_release_resource(device_t bus, device_t child, struct resource *r)
 {
     /*
      * If this resource belongs to one of our internal managers,
      * deactivate it and release it to the local pool.
      */
-    if (acpi_is_resource_managed(bus, type, r))
-	return (bus_generic_rman_release_resource(bus, child, type, rid, r));
+    if (acpi_is_resource_managed(bus, r))
+	return (bus_generic_rman_release_resource(bus, child, r));
 
-    return (bus_generic_rl_release_resource(bus, child, type, rid, r));
+    return (bus_generic_rl_release_resource(bus, child, r));
 }
 
 static void
@@ -1610,27 +1609,23 @@ acpi_delete_resource(device_t bus, device_t child, int type, int rid)
 }
 
 static int
-acpi_activate_resource(device_t bus, device_t child, int type, int rid,
-    struct resource *r)
+acpi_activate_resource(device_t bus, device_t child, struct resource *r)
 {
-	if (acpi_is_resource_managed(bus, type, r))
-		return (bus_generic_rman_activate_resource(bus, child, type,
-		    rid, r));
-	return (bus_generic_activate_resource(bus, child, type, rid, r));
+	if (acpi_is_resource_managed(bus, r))
+		return (bus_generic_rman_activate_resource(bus, child, r));
+	return (bus_generic_activate_resource(bus, child, r));
 }
 
 static int
-acpi_deactivate_resource(device_t bus, device_t child, int type, int rid,
-    struct resource *r)
+acpi_deactivate_resource(device_t bus, device_t child, struct resource *r)
 {
-	if (acpi_is_resource_managed(bus, type, r))
-		return (bus_generic_rman_deactivate_resource(bus, child, type,
-		    rid, r));
-	return (bus_generic_deactivate_resource(bus, child, type, rid, r));
+	if (acpi_is_resource_managed(bus, r))
+		return (bus_generic_rman_deactivate_resource(bus, child, r));
+	return (bus_generic_deactivate_resource(bus, child, r));
 }
 
 static int
-acpi_map_resource(device_t bus, device_t child, int type, struct resource *r,
+acpi_map_resource(device_t bus, device_t child, struct resource *r,
     struct resource_map_request *argsp, struct resource_map *map)
 {
 	struct resource_map_request args;
@@ -1638,9 +1633,8 @@ acpi_map_resource(device_t bus, device_t child, int type, struct resource *r,
 	rman_res_t length, start;
 	int error;
 
-	if (!acpi_is_resource_managed(bus, type, r))
-		return (bus_generic_map_resource(bus, child, type, r, argsp,
-		    map));
+	if (!acpi_is_resource_managed(bus, r))
+		return (bus_generic_map_resource(bus, child, r, argsp, map));
 
 	/* Resources must be active to be mapped. */
 	if (!(rman_get_flags(r) & RF_ACTIVE))
@@ -1651,25 +1645,25 @@ acpi_map_resource(device_t bus, device_t child, int type, struct resource *r,
 	if (error)
 		return (error);
 
-	sysres = acpi_managed_resource(bus, type, r);
+	sysres = acpi_managed_resource(bus, r);
 	if (sysres == NULL)
 		return (ENOENT);
 
 	args.offset = start - rman_get_start(sysres);
 	args.length = length;
-	return (bus_generic_map_resource(bus, child, type, sysres, &args, map));
+	return (bus_generic_map_resource(bus, child, sysres, &args, map));
 }
 
 static int
-acpi_unmap_resource(device_t bus, device_t child, int type, struct resource *r,
+acpi_unmap_resource(device_t bus, device_t child, struct resource *r,
     struct resource_map *map)
 {
-	if (acpi_is_resource_managed(bus, type, r)) {
-		r = acpi_managed_resource(bus, type, r);
+	if (acpi_is_resource_managed(bus, r)) {
+		r = acpi_managed_resource(bus, r);
 		if (r == NULL)
 			return (ENOENT);
 	}
-	return (bus_generic_unmap_resource(bus, child, type, r, map));
+	return (bus_generic_unmap_resource(bus, child, r, map));
 }
 
 /* Allocate an IO port or memory resource, given its GAS. */
