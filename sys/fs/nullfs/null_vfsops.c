@@ -50,6 +50,7 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#include <sys/sysctl.h>
 #include <sys/vnode.h>
 #include <sys/jail.h>
 
@@ -66,6 +67,13 @@ static vfs_statfs_t	nullfs_statfs;
 static vfs_unmount_t	nullfs_unmount;
 static vfs_vget_t	nullfs_vget;
 static vfs_extattrctl_t	nullfs_extattrctl;
+
+SYSCTL_NODE(_vfs, OID_AUTO, nullfs, CTLFLAG_RW, 0, "nullfs");
+
+static bool null_cache_vnodes = true;
+SYSCTL_BOOL(_vfs_nullfs, OID_AUTO, cache_vnodes, CTLFLAG_RWTUN,
+    &null_cache_vnodes, 0,
+    "cache free nullfs vnodes");
 
 /*
  * Mount null layer
@@ -166,8 +174,8 @@ nullfs_mount(struct mount *mp)
 		return (EINVAL);
 	}
 
-	xmp = (struct null_mount *) malloc(sizeof(struct null_mount),
-	    M_NULLFSMNT, M_WAITOK | M_ZERO);
+	xmp = malloc(sizeof(struct null_mount), M_NULLFSMNT,
+	    M_WAITOK | M_ZERO);
 
 	/*
 	 * Save pointer to underlying FS and the reference to the
@@ -201,10 +209,14 @@ nullfs_mount(struct mount *mp)
 		MNT_IUNLOCK(mp);
 	}
 
-	xmp->nullm_flags |= NULLM_CACHE;
-	if (vfs_getopt(mp->mnt_optnew, "nocache", NULL, NULL) == 0 ||
-	    (xmp->nullm_vfs->mnt_kern_flag & MNTK_NULL_NOCACHE) != 0)
-		xmp->nullm_flags &= ~NULLM_CACHE;
+	if (vfs_getopt(mp->mnt_optnew, "cache", NULL, NULL) == 0) {
+		xmp->nullm_flags |= NULLM_CACHE;
+	} else if (vfs_getopt(mp->mnt_optnew, "nocache", NULL, NULL) == 0) {
+		;
+	} else if (null_cache_vnodes &&
+	    (xmp->nullm_vfs->mnt_kern_flag & MNTK_NULL_NOCACHE) == 0) {
+		xmp->nullm_flags |= NULLM_CACHE;
+	}
 
 	if ((xmp->nullm_flags & NULLM_CACHE) != 0) {
 		vfs_register_for_notification(xmp->nullm_vfs, mp,
