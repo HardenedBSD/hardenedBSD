@@ -18,6 +18,7 @@ SRCS+=	vmm.c		\
 	vmm_stat.c
 
 .if ${MACHINE_CPUARCH} == "aarch64"
+KERN_SSP_CFLAG=	-fstack-protector
 DPSRCS+=	assym.inc
 
 # TODO: Add the new EL2 code
