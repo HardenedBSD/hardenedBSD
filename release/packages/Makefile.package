@@ -77,13 +77,8 @@ geom_COMMENT=		GEOM Utilitites
 geom_DESC=		GEOM Utilitites
 ggate_COMMENT=		GEOM Gate Utilities
 ggate_DESC=		GEOM Gate Utilities
-<<<<<<< HEAD
-groff_COMMENT= 		Groff Utilities
-groff_DESC= 		Groff Utilities
 hardenedbsd_COMMENT=	HardenedBSD Utilities
 hardenedbsd_DESC=	HardenedBSD Utilities
-=======
->>>>>>> internal/freebsd/current/main
 hast_COMMENT= 		Highly Available Storage daemon
 hast_DESC= 		Highly Available Storage daemon
 hostapd_COMMENT=	802.11 Access Point Daemon an Utilities
