@@ -34,20 +34,31 @@
 
 #include <sys/queue.h>
 
-#define LIBHBSDCONTROL_VERSION	20240316001UL
+#define LIBHBSDCONTROL_VERSION			20240316001UL
+#define LIBHBSDCONTROL_DEFAULT_NAMESPACE	"system"
 
 typedef uint64_t hbsdctrl_flag_t;
 
 struct _hbsdctrl_ctx;
 struct _hbsdctrl_feature;
+struct _hbsdctrl_feature_state;
 
 typedef struct _hbsdctrl_ctx hbsdctrl_ctx_t;
 typedef struct _hbsdctrl_feature hbsdctrl_feature_t;
+typedef struct _hbsdctrl_feature_state hbsdctrl_feature_state_t;
 
 typedef enum _hbsdctrl_feature_cb_res {
 	RES_SUCCESS	= 0,
 	RES_FAIL	= 1,
 } hbsdctrl_feature_cb_res_t;
+
+typedef enum _hbsdctrl_feature_state_value {
+	HBSDCTRL_STATE_UNKNOWN	= 0,
+	HBSDCTRL_STATE_ENABLED	= 1,
+	HBSDCTRL_STATE_DISABLED	= 2,
+	HBSDCTRL_STATE_SYSDEF	= 3,
+	HBSDCTRL_STATE_INVALID	= 4,
+} hbsdctrl_feature_state_value_t;
 
 /*
  * Each feature implements callbacks for various operations. Arguments:
@@ -65,6 +76,7 @@ typedef hbsdctrl_feature_cb_res_t (*hbsdctrl_feature_cb_t)(hbsdctrl_ctx_t *,
 struct _hbsdctrl_ctx {
 	uint64_t			 hc_version;
 	hbsdctrl_flag_t			 hc_flags;
+	int				 hc_namespace;
 	LIST_HEAD(,_hbsdctrl_feature)	 hc_features;
 	uint64_t			 hc_spare[32];
 };
@@ -78,21 +90,32 @@ struct _hbsdctrl_feature {
 	hbsdctrl_feature_cb_t		 hf_validate;
 	hbsdctrl_feature_cb_t		 hf_apply;
 	hbsdctrl_feature_cb_t		 hf_unapply;
+	hbsdctrl_feature_cb_t		 hf_get;
 	hbsdctrl_ctx_t			*hf_ctx;
 	void				*hf_data;
 	LIST_ENTRY(_hbsdctrl_feature)	 hf_entry;
 	uint64_t			 hf_spare[32];
 };
 
+struct _hbsdctrl_feature_state {
+	hbsdctrl_feature_state_value_t	 hfs_value;
+	hbsdctrl_flag_t			 hfs_flags;
+	int				 hfs_fd;
+	uint64_t			 hfs_spare[16];
+};
+
 uint64_t libhbsdctrl_get_version(void);
 
-hbsdctrl_ctx_t *hbsdctrl_ctx_new(hbsdctrl_flag_t);
+hbsdctrl_ctx_t *hbsdctrl_ctx_new(hbsdctrl_flag_t, const char *);
 void hbsdctrl_ctx_free(hbsdctrl_ctx_t **);
 bool hbsdctrl_ctx_check_flag_sanity(hbsdctrl_flag_t);
 hbsdctrl_flag_t hbsdctrl_ctx_get_flags(const hbsdctrl_ctx_t *);
 hbsdctrl_flag_t hbsdctrl_ctx_set_flag(hbsdctrl_ctx_t *, hbsdctrl_flag_t);
 hbsdctrl_flag_t hbsdctrl_ctx_set_flags(hbsdctrl_ctx_t *, hbsdctrl_flag_t);
 bool hbsdctrl_ctx_is_flag_set(const hbsdctrl_ctx_t *, hbsdctrl_flag_t);
+bool hbsdctrl_ctx_add_feature(hbsdctrl_ctx_t *, hbsdctrl_feature_t *);
+hbsdctrl_feature_t *hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *,
+    const char *);
 
 hbsdctrl_feature_t *hbsdctrl_feature_new(hbsdctrl_ctx_t *, const char *, hbsdctrl_flag_t);
 void hbsdctrl_feature_free(hbsdctrl_feature_t **);
@@ -112,7 +135,20 @@ void hbsdctrl_feature_set_pre_validate(hbsdctrl_feature_t *, hbsdctrl_feature_cb
 void hbsdctrl_feature_set_validate(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 void hbsdctrl_feature_set_apply(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 void hbsdctrl_feature_set_unapply(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
+void hbsdctrl_feature_set_get(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 hbsdctrl_feature_cb_res_t hbsdctrl_feature_call_cb(hbsdctrl_feature_t *,
     const char *, const void *, void *);
+
+hbsdctrl_feature_state_t *hbsdctrl_feature_state_new(int, hbsdctrl_flag_t);
+void hbsdctrl_feature_state_free(hbsdctrl_feature_state_t **);
+bool hbsdctrl_feature_state_value_valid(hbsdctrl_feature_state_value_t);
+bool hbsdctrl_feature_state_set_value(hbsdctrl_feature_state_t *,
+    hbsdctrl_feature_state_value_t);
+hbsdctrl_feature_state_value_t hbsdctrl_feature_state_get_value(
+    hbsdctrl_feature_state_t *);
+
+/* aslr.c */
+hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
 
 #endif /* !_LIBHBSDCONTROL_H */
