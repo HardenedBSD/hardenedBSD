@@ -543,6 +543,27 @@ hbsdctrl_feature_state_get_value(hbsdctrl_feature_state_t *state)
 	return (state->hfs_value);
 }
 
+const char *
+hbsdctrl_feature_state_to_string(hbsdctrl_feature_state_t *state)
+{
+	if (state == NULL) {
+		return (NULL);
+	}
+
+	switch (state->hfs_value) {
+	case HBSDCTRL_STATE_ENABLED:
+		return ("enabled");
+	case HBSDCTRL_STATE_DISABLED:
+		return ("disabled");
+	case HBSDCTRL_STATE_SYSDEF:
+		return ("sysdef");
+	case HBSDCTRL_STATE_INVALID:
+		return ("invalid");
+	default:
+		return ("unknown");
+	}
+}
+
 bool
 hbsdctrl_feature_state_flag_sanity(hbsdctrl_flag_t flag)
 {
