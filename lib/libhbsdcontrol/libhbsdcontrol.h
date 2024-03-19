@@ -29,6 +29,7 @@
 #ifndef _LIBHBSDCONTROL_H
 #define _LIBHBSDCONTROL_H
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -83,6 +84,7 @@ struct _hbsdctrl_ctx {
 	uint64_t			 hc_version;
 	hbsdctrl_flag_t			 hc_flags;
 	int				 hc_namespace;
+	pthread_mutex_t			 hc_mtx;
 	LIST_HEAD(,_hbsdctrl_feature)	 hc_features;
 	uint64_t			 hc_spare[32];
 };
@@ -160,6 +162,9 @@ hbsdctrl_flag_t hbsdctrl_feature_state_set_flags(hbsdctrl_feature_state_t *,
     hbsdctrl_flag_t);
 bool hbsdctrl_feature_state_is_flag_set(hbsdctrl_feature_state_t *,
     hbsdctrl_flag_t);
+
+hbsdctrl_feature_cb_res_t hbsdctrl_exec_all_features(hbsdctrl_ctx_t *,
+    const char *, bool, const void *, void *);
 
 /* aslr.c */
 hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,

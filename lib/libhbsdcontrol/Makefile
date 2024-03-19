@@ -13,6 +13,7 @@ SRCS+=		libhbsdcontrol.c
 INCS=		libhbsdcontrol.h
 MAN=
 
-LIBADD=		util
+LIBADD+=	pthread
+LIBADD+=	util
 
 .include <bsd.lib.mk>
