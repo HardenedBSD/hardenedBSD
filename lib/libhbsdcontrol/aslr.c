@@ -34,6 +34,9 @@
 
 #include "libhbsdcontrol.h"
 
+#define ATTRNAME_ENABLED	"hbsd.pax.aslr"
+#define ATTRNAME_DISABLED	"hbsd.pax.noaslr"
+
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_init(hbsdctrl_ctx_t *,
     hbsdctrl_feature_t *, const void *, void *);
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_cleanup(
@@ -100,8 +103,43 @@ hbsdctrl_feature_aslr_validate(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t 
 
 static hbsdctrl_feature_cb_res_t
 hbsdctrl_feature_aslr_apply(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
-    const void *arg1 __unused, void *arg2 __unused)
+    const void *arg1, void *arg2)
 {
+	hbsdctrl_feature_state_value_t value;
+	hbsdctrl_feature_state_t *state;
+	unsigned char buf[2];
+	int fd;
+
+	if (arg1 == NULL || arg2 == NULL) {
+		return (RES_FAIL);
+	}
+
+	state = (hbsdctrl_feature_state_t *)arg2;
+	fd = *(__DECONST(int *, arg1));
+
+	if (fd < 0) {
+		return (RES_FAIL);
+	}
+
+	value = hbsdctrl_feature_state_get_value(state);
+	if (!hbsdctrl_feature_state_value_valid(value)) {
+		return (RES_FAIL);
+	}
+
+	buf[0] = (value == HBSDCTRL_STATE_ENABLED) ? '1' : '0';
+	if (extattr_set_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED, buf,
+	    sizeof(buf)) != sizeof(buf)) {
+		return (RES_FAIL);
+	}
+
+	buf[0] = (value == HBSDCTRL_STATE_DISABLED) ? '1' : '0';
+	if (extattr_set_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED, buf,
+	    sizeof(buf)) != sizeof(buf)) {
+		return (RES_FAIL);
+	}
+
+	hbsdctrl_feature_state_set_flag(state, HBSDCTRL_FEATURE_STATE_FLAG_PERSISTED);
+
 	return (RES_SUCCESS);
 }
 
@@ -130,7 +168,7 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 	res = (hbsdctrl_feature_state_t *)arg2;
 
 	hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_SYSDEF);
-	sz = extattr_get_fd(fd, ctx->hc_namespace, "hbsd.pax.aslr", NULL, 0);
+	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED, NULL, 0);
 	if (sz <= 0) {
 		goto end;
 	}
@@ -147,7 +185,7 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 		return (RES_FAIL);
 	}
 
-	sz = extattr_get_fd(fd, ctx->hc_namespace, "hbsd.pax.aslr", buf, sz);
+	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED, buf, sz);
 	if (sz < 0) {
 		free(buf);
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
@@ -157,7 +195,7 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 	enabled = buf[0] == '1';
 	free(buf);
 
-	sz = extattr_get_fd(fd, ctx->hc_namespace, "hbsd.pax.noaslr", NULL, 0);
+	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED, NULL, 0);
 	if (sz <= 0) {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
 		goto end;
@@ -173,7 +211,7 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 		return (RES_FAIL);
 	}
 
-	sz = extattr_get_fd(fd, ctx->hc_namespace, "hbsd.pax.noaslr", buf, sz);
+	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED, buf, sz);
 	if (sz < 0) {
 		free(buf);
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
