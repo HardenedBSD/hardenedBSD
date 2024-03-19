@@ -514,3 +514,68 @@ hbsdctrl_feature_state_get_value(hbsdctrl_feature_state_t *state)
 
 	return (state->hfs_value);
 }
+
+bool
+hbsdctrl_feature_state_flag_sanity(hbsdctrl_flag_t flag)
+{
+	return ((flag & ~(HBSDCTRL_FEATURE_STATE_FLAG_ALL)) == 0);
+}
+
+hbsdctrl_flag_t
+hbsdctrl_feature_state_get_flags(hbsdctrl_feature_state_t *state)
+{
+	if (state == NULL) {
+		return (0);
+	}
+
+	return (state->hfs_flags);
+}
+
+hbsdctrl_flag_t
+hbsdctrl_feature_state_set_flag(hbsdctrl_feature_state_t *state,
+    hbsdctrl_flag_t flag)
+{
+	hbsdctrl_flag_t oldflags;
+
+	if (state == NULL) {
+		return (0);
+	}
+
+	if (!hbsdctrl_feature_state_flag_sanity(state->hfs_flags | flag)) {
+		return (state->hfs_flags);
+	}
+
+	oldflags = state->hfs_flags;
+	state->hfs_flags |= flag;
+	return (oldflags);
+}
+
+hbsdctrl_flag_t
+hbsdctrl_feature_state_set_flags(hbsdctrl_feature_state_t *state,
+    hbsdctrl_flag_t flags)
+{
+	hbsdctrl_flag_t oldflags;
+
+	if (state == NULL) {
+		return (0);
+	}
+
+	if (!hbsdctrl_feature_state_flag_sanity(flags)) {
+		return (state->hfs_flags);
+	}
+
+	oldflags = state->hfs_flags;
+	state->hfs_flags = flags;
+	return (oldflags);
+}
+
+bool
+hbsdctrl_feature_state_is_flag_set(hbsdctrl_feature_state_t *state,
+    hbsdctrl_flag_t flag)
+{
+	if (state == NULL) {
+		return (false);
+	}
+
+	return ((state->hfs_flags & flag) == flag);
+}

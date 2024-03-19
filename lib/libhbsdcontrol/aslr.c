@@ -135,6 +135,8 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 		goto end;
 	}
 
+	hbsdctrl_feature_state_set_flag(res, HBSDCTRL_FEATURE_STATE_FLAG_PERSISTED);
+
 	if (sz > 2) {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
 		return (RES_FAIL);

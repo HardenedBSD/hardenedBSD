@@ -37,6 +37,12 @@
 #define LIBHBSDCONTROL_VERSION			20240316001UL
 #define LIBHBSDCONTROL_DEFAULT_NAMESPACE	"system"
 
+#define HBSDCTRL_FEATURE_STATE_FLAG_NONE	0x0UL
+#define HBSDCTRL_FEATURE_STATE_FLAG_PERSISTED	0x1UL
+#define HBSDCTRL_FEATURE_STATE_FLAG_ALL	(	\
+    HBSDCTRL_FEATURE_STATE_FLAG_PERSISTED	\
+)
+
 typedef uint64_t hbsdctrl_flag_t;
 
 struct _hbsdctrl_ctx;
@@ -146,6 +152,14 @@ bool hbsdctrl_feature_state_set_value(hbsdctrl_feature_state_t *,
     hbsdctrl_feature_state_value_t);
 hbsdctrl_feature_state_value_t hbsdctrl_feature_state_get_value(
     hbsdctrl_feature_state_t *);
+bool hbsdctrl_feature_state_flag_sanity(hbsdctrl_flag_t);
+hbsdctrl_flag_t hbsdctrl_feature_state_get_flags(hbsdctrl_feature_state_t *);
+hbsdctrl_flag_t hbsdctrl_feature_state_set_flag(hbsdctrl_feature_state_t *,
+    hbsdctrl_flag_t);
+hbsdctrl_flag_t hbsdctrl_feature_state_set_flags(hbsdctrl_feature_state_t *,
+    hbsdctrl_flag_t);
+bool hbsdctrl_feature_state_is_flag_set(hbsdctrl_feature_state_t *,
+    hbsdctrl_flag_t);
 
 /* aslr.c */
 hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
