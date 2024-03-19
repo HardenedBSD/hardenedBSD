@@ -61,6 +61,12 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 		return (NULL);
 	}
 
+	memset(&(ctx->hc_mtx), 0, sizeof(ctx->hc_mtx));
+	if (pthread_mutex_init(&(ctx->hc_mtx), NULL)) {
+		free(ctx);
+		return (NULL);
+	}
+
 	ctx->hc_version = LIBHBSDCONTROL_VERSION;
 	ctx->hc_flags = flags;
 
@@ -82,10 +88,13 @@ hbsdctrl_ctx_free(hbsdctrl_ctx_t **ctxp)
 	ctx = *ctxp;
 	*ctxp = NULL;
 
+	pthread_mutex_lock(&(ctx->hc_mtx));
 	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
 		LIST_REMOVE(feature, hf_entry);
 		hbsdctrl_feature_free(&feature);
 	}
+	pthread_mutex_unlock(&(ctx->hc_mtx));
+	pthread_mutex_destroy(&(ctx->hc_mtx));
 
 	free(ctx);
 }
@@ -169,7 +178,9 @@ hbsdctrl_ctx_add_feature(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature)
 		return (false);
 	}
 
+	pthread_mutex_lock(&(ctx->hc_mtx));
 	LIST_INSERT_HEAD(&(ctx->hc_features), feature, hf_entry);
+	pthread_mutex_unlock(&(ctx->hc_mtx));
 	return (true);
 }
 
@@ -182,17 +193,19 @@ hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *ctx, const char *name)
 		return (NULL);
 	}
 
+	pthread_mutex_lock(&(ctx->hc_mtx));
 	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
 		if (feature->hf_name == NULL) {
 			continue;
 		}
 
 		if (!strcmp(feature->hf_name, name)) {
-			return (feature);
+			break;
 		}
 	}
+	pthread_mutex_unlock(&(ctx->hc_mtx));
 
-	return (NULL);
+	return (feature);
 }
 
 hbsdctrl_feature_t *
@@ -444,6 +457,10 @@ hbsdctrl_feature_call_cb(hbsdctrl_feature_t *feature, const char *name,
 		return (feature->hf_unapply(feature->hf_ctx, feature, arg1,
 		    arg2));
 	}
+	if (!strcasecmp(name, "get") && feature->hf_get != NULL) {
+		return (feature->hf_get(feature->hf_ctx, feature, arg1,
+		    arg2));
+	}
 
 	return (RES_FAIL);
 }
@@ -578,4 +595,31 @@ hbsdctrl_feature_state_is_flag_set(hbsdctrl_feature_state_t *state,
 	}
 
 	return ((state->hfs_flags & flag) == flag);
+}
+
+hbsdctrl_feature_cb_res_t
+hbsdctrl_exec_all_features(hbsdctrl_ctx_t *ctx, const char *cbname,
+    bool bail_on_error, const void *arg1, void *arg2)
+{
+	hbsdctrl_feature_t *feature, *tfeature;
+	hbsdctrl_feature_cb_res_t res, ret;
+
+	res = RES_SUCCESS;
+	ret = RES_SUCCESS;
+	pthread_mutex_lock(&(ctx->hc_mtx));
+	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
+		res = hbsdctrl_feature_call_cb(feature, cbname, arg1, arg2);
+		if (res != RES_SUCCESS) {
+			if (bail_on_error) {
+				ret = res;
+				goto end;
+			}
+
+			ret = res;
+		}
+	}
+
+end:
+	pthread_mutex_unlock(&(ctx->hc_mtx));
+	return (ret);
 }

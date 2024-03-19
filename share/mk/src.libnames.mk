@@ -239,7 +239,8 @@ _LIBRARIES+= \
 
 .if ${MK_HBSDCONTROL} != "no"
 _LIBRARIES+= 		hbsdcontrol
-_DP_hbsdcontrol=	util
+_DP_hbsdcontrol+=	pthread
+_DP_hbsdcontrol+=	util
 .endif
 
 .if ${MK_OFED} != "no"
