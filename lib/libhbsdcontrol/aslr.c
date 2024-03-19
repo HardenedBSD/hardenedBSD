@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <errno.h>
+
 #include <sys/types.h>
 #include <sys/extattr.h>
 
@@ -155,11 +157,13 @@ hbsdctrl_feature_aslr_unapply(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature _
 
 	fd = *(__DECONST(int *, arg1));
 
-	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED)) {
+	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED)
+	    && errno != ENOATTR) {
 		return (RES_FAIL);
 	}
 
-	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED)) {
+	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED)
+	    && errno != ENOATTR) {
 		return (RES_FAIL);
 	}
 
