@@ -154,6 +154,7 @@ bool hbsdctrl_feature_state_set_value(hbsdctrl_feature_state_t *,
     hbsdctrl_feature_state_value_t);
 hbsdctrl_feature_state_value_t hbsdctrl_feature_state_get_value(
     hbsdctrl_feature_state_t *);
+const char *hbsdctrl_feature_state_to_string(hbsdctrl_feature_state_t *);
 bool hbsdctrl_feature_state_flag_sanity(hbsdctrl_flag_t);
 hbsdctrl_flag_t hbsdctrl_feature_state_get_flags(hbsdctrl_feature_state_t *);
 hbsdctrl_flag_t hbsdctrl_feature_state_set_flag(hbsdctrl_feature_state_t *,
