@@ -210,7 +210,7 @@ hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *ctx, const char *name)
 			continue;
 		}
 
-		if (!strcmp(feature->hf_name, name)) {
+		if (!strcasecmp(feature->hf_name, name)) {
 			break;
 		}
 	}
