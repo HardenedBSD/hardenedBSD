@@ -612,14 +612,13 @@ hbsdctrl_exec_all_features(hbsdctrl_ctx_t *ctx, const char *cbname,
 		if (res != RES_SUCCESS) {
 			if (bail_on_error) {
 				ret = res;
-				goto end;
+				break;
 			}
 
 			ret = res;
 		}
 	}
 
-end:
 	pthread_mutex_unlock(&(ctx->hc_mtx));
 	return (ret);
 }
