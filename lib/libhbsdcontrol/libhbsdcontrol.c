@@ -29,6 +29,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/types.h>
+#include <sys/extattr.h>
+#include <libutil.h>
+
 #include "libhbsdcontrol.h"
 
 uint64_t
@@ -38,7 +42,7 @@ libhbsdctrl_get_version(void)
 }
 
 hbsdctrl_ctx_t *
-hbsdctrl_ctx_new(hbsdctrl_flag_t flags)
+hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 {
 	hbsdctrl_ctx_t *ctx;
 
@@ -48,6 +52,12 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags)
 
 	ctx = calloc(1, sizeof(*ctx));
 	if (ctx == NULL) {
+		return (NULL);
+	}
+
+	ctx->hc_namespace = -1;
+	if (extattr_string_to_namespace(ns, &(ctx->hc_namespace))) {
+		free(ctx);
 		return (NULL);
 	}
 
@@ -141,6 +151,48 @@ hbsdctrl_ctx_is_flag_set(const hbsdctrl_ctx_t *ctx, hbsdctrl_flag_t flag)
 	}
 
 	return ((ctx->hc_flags & flag) == flag);
+}
+
+bool
+hbsdctrl_ctx_add_feature(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature)
+{
+	if (ctx == NULL || feature == NULL) {
+		return (false);
+	}
+
+	/* feature->hf_ctx gets set when creating a new feature object */
+	if (feature->hf_ctx != ctx) {
+		return (false);
+	}
+
+	if (hbsdctrl_ctx_find_feature_by_name(ctx, feature->hf_name) != NULL) {
+		return (false);
+	}
+
+	LIST_INSERT_HEAD(&(ctx->hc_features), feature, hf_entry);
+	return (true);
+}
+
+hbsdctrl_feature_t *
+hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *ctx, const char *name)
+{
+	hbsdctrl_feature_t *feature, *tfeature;
+
+	if (ctx == NULL || name == NULL) {
+		return (NULL);
+	}
+
+	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
+		if (feature->hf_name == NULL) {
+			continue;
+		}
+
+		if (!strcmp(feature->hf_name, name)) {
+			return (feature);
+		}
+	}
+
+	return (NULL);
 }
 
 hbsdctrl_feature_t *
@@ -341,6 +393,16 @@ hbsdctrl_feature_set_unapply(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t 
 	feature->hf_unapply = cb;
 }
 
+void
+hbsdctrl_feature_set_get(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t cb)
+{
+	if (feature == NULL) {
+		return;
+	}
+
+	feature->hf_get = cb;
+}
+
 hbsdctrl_feature_cb_res_t
 hbsdctrl_feature_call_cb(hbsdctrl_feature_t *feature, const char *name,
     const void *arg1, void *arg2)
@@ -384,4 +446,71 @@ hbsdctrl_feature_call_cb(hbsdctrl_feature_t *feature, const char *name,
 	}
 
 	return (RES_FAIL);
+}
+
+hbsdctrl_feature_state_t *
+hbsdctrl_feature_state_new(int fd, hbsdctrl_flag_t flags)
+{
+	hbsdctrl_feature_state_t *state;
+
+	state = calloc(1, sizeof(*state));
+	if (state == NULL) {
+		return (NULL);
+	}
+
+	state->hfs_fd = fd;
+	state->hfs_flags = flags;
+
+	return (state);
+}
+
+void
+hbsdctrl_feature_state_free(hbsdctrl_feature_state_t **statep)
+{
+	hbsdctrl_feature_state_t *state;
+
+	if (statep == NULL || *statep == NULL) {
+		return;
+	}
+
+	state = *statep;
+	*statep = NULL;
+	free(state);
+}
+
+bool
+hbsdctrl_feature_state_value_valid(hbsdctrl_feature_state_value_t value)
+{
+	switch (value) {
+	case HBSDCTRL_STATE_UNKNOWN:
+	case HBSDCTRL_STATE_ENABLED:
+	case HBSDCTRL_STATE_DISABLED:
+	case HBSDCTRL_STATE_SYSDEF:
+	case HBSDCTRL_STATE_INVALID:
+		return (true);
+	default:
+		return (false);
+	}
+}
+
+bool
+hbsdctrl_feature_state_set_value(hbsdctrl_feature_state_t *state,
+    hbsdctrl_feature_state_value_t value)
+{
+	if (state == NULL) {
+		return (false);
+	}
+
+	state->hfs_value = value;
+	return (true);
+}
+
+hbsdctrl_feature_state_value_t
+hbsdctrl_feature_state_get_value(hbsdctrl_feature_state_t *state)
+{
+	if (state == NULL) {
+		return (HBSDCTRL_STATE_UNKNOWN);
+	}
+
+	return (state->hfs_value);
 }

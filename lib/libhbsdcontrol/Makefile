@@ -8,8 +8,11 @@ SHLIB_MAJOR=	0
 
 CFLAGS+=	-I${.CURDIR}
 
-SRCS=		libhbsdcontrol.c
+SRCS=		aslr.c
+SRCS+=		libhbsdcontrol.c
 INCS=		libhbsdcontrol.h
 MAN=
+
+LIBADD=		util
 
 .include <bsd.lib.mk>

@@ -238,9 +238,8 @@ _LIBRARIES+= \
 .endif
 
 .if ${MK_HBSDCONTROL} != "no"
-_LIBRARIES+= \
-		hbsdcontrol \
-
+_LIBRARIES+= 		hbsdcontrol
+_DP_hbsdcontrol=	util
 .endif
 
 .if ${MK_OFED} != "no"
@@ -324,9 +323,6 @@ _DP_cap_grp=	nv
 _DP_cap_pwd=	nv
 _DP_cap_sysctl=	nv
 _DP_cap_syslog=	nv
-.if ${MK_HBSDCONTROL} != "no"
-_DP_hbsdcontrol=	sbuf
-.endif
 .if ${MK_OFED} != "no"
 _DP_pcap=	ibverbs mlx5
 .endif
