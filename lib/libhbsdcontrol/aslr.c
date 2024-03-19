@@ -102,7 +102,7 @@ hbsdctrl_feature_aslr_validate(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t 
 }
 
 static hbsdctrl_feature_cb_res_t
-hbsdctrl_feature_aslr_apply(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
+hbsdctrl_feature_aslr_apply(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature __unused,
     const void *arg1, void *arg2)
 {
 	hbsdctrl_feature_state_value_t value;
@@ -144,14 +144,30 @@ hbsdctrl_feature_aslr_apply(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *fe
 }
 
 static hbsdctrl_feature_cb_res_t
-hbsdctrl_feature_aslr_unapply(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
-    const void *arg1 __unused, void *arg2 __unused)
+hbsdctrl_feature_aslr_unapply(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature __unused,
+    const void *arg1, void *arg2 __unused)
 {
+	int fd;
+
+	if (arg1 == NULL) {
+		return (RES_FAIL);
+	}
+
+	fd = *(__DECONST(int *, arg1));
+
+	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED)) {
+		return (RES_FAIL);
+	}
+
+	if (extattr_delete_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED)) {
+		return (RES_FAIL);
+	}
+
 	return (RES_SUCCESS);
 }
 
 static hbsdctrl_feature_cb_res_t
-hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
+hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature __unused,
     const void *arg1, void *arg2)
 {
 	hbsdctrl_feature_state_t *res;
