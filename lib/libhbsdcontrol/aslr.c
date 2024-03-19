@@ -34,12 +34,6 @@
 
 #include "libhbsdcontrol.h"
 
-typedef struct _aslr_state {
-	bool	 as_enabled;
-	bool	 as_disabled;
-	bool	 as_set;
-} aslr_state_t;
-
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_init(hbsdctrl_ctx_t *,
     hbsdctrl_feature_t *, const void *, void *);
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_cleanup(
@@ -54,9 +48,6 @@ static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_unapply(
     hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_get(
     hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
-
-static aslr_state_t *aslr_state_new(void);
-static void aslr_state_free(aslr_state_t **);
 
 hbsdctrl_feature_t *
 hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *ctx, hbsdctrl_flag_t flags)
@@ -83,7 +74,6 @@ static hbsdctrl_feature_cb_res_t
 hbsdctrl_feature_aslr_init(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
     const void *arg1 __unused, void *arg2 __unused)
 {
-	feature->hf_data = aslr_state_new();
 	return (RES_SUCCESS);
 }
 
@@ -91,12 +81,6 @@ static hbsdctrl_feature_cb_res_t
 hbsdctrl_feature_aslr_cleanup(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
     const void *arg1 __unused, void *arg2 __unused)
 {
-	aslr_state_t *state;
-
-	state = (aslr_state_t *)(feature->hf_data);
-	aslr_state_free(&state);
-	feature->hf_data = NULL;
-
 	return (RES_SUCCESS);
 }
 
@@ -133,22 +117,13 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
     const void *arg1, void *arg2)
 {
 	hbsdctrl_feature_state_t *res;
-	aslr_state_t *state;
+	bool enabled, disabled;
 	unsigned char *buf;
 	ssize_t sz;
 	int fd;
 
 	if (arg1 == NULL || arg2 == NULL) {
 		return (RES_FAIL);
-	}
-
-	state = (aslr_state_t *)(feature->hf_data);
-	if (state == NULL) {
-		state = aslr_state_new();
-		if (state == NULL) {
-			return (RES_FAIL);
-		}
-		feature->hf_data = state;
 	}
 
 	fd = *(int *)__DECONST(int *, arg1);
@@ -177,7 +152,7 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 		return (RES_FAIL);
 	}
 
-	state->as_enabled = buf[0] == '1';
+	enabled = buf[0] == '1';
 	free(buf);
 
 	sz = extattr_get_fd(fd, ctx->hc_namespace, "hbsd.pax.noaslr", NULL, 0);
@@ -203,15 +178,15 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 		return (RES_FAIL);
 	}
 
-	state->as_disabled = buf[0] == '1';
+	disabled = buf[0] == '1';
 	free(buf);
 
-	if (state->as_enabled && state->as_disabled) {
+	if (enabled && disabled) {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
 		return (RES_FAIL);
 	}
 
-	if (state->as_enabled) {
+	if (enabled) {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_ENABLED);
 	} else {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_DISABLED);
@@ -219,27 +194,4 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feat
 
 end:
 	return (RES_SUCCESS);
-}
-
-static aslr_state_t *
-aslr_state_new(void)
-{
-	aslr_state_t *state;
-
-	state = calloc(1, sizeof(*state));
-	return (state);
-}
-
-static void
-aslr_state_free(aslr_state_t **statep)
-{
-	aslr_state_t *state;
-
-	if (statep == NULL || *statep == NULL) {
-		return;
-	}
-
-	state = *statep;
-	*statep = NULL;
-	free(state);
 }
