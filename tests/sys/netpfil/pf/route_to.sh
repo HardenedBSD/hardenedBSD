@@ -345,7 +345,7 @@ dummynet_body()
 
 	# The ping request will pass, but take 1.2 seconds
 	# So this works:
-	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.1
+	atf_check -s exit:0 -o ignore ping -c 1 -t 2 192.0.2.1
 	# But this times out:
 	atf_check -s exit:2 -o ignore ping -c 1 -t 1 192.0.2.1
 
@@ -355,12 +355,72 @@ dummynet_body()
 
 	# The ping request will pass, but take 1.2 seconds
 	# So this works:
-	atf_check -s exit:0 -o ignore ping -c 1 192.0.2.1
+	atf_check -s exit:0 -o ignore ping -c 1 -t 2 192.0.2.1
 	# But this times out:
 	atf_check -s exit:2 -o ignore ping -c 1 -t 1 192.0.2.1
 }
 
 dummynet_cleanup()
+{
+	pft_cleanup
+}
+
+atf_test_case "dummynet_in" "cleanup"
+dummynet_in_head()
+{
+	atf_set descr 'Thest that dummynet works as expected on pass in route-to packets'
+	atf_set require.user root
+}
+
+dummynet_in_body()
+{
+	dummynet_init
+
+	epair_srv=$(vnet_mkepair)
+	epair_gw=$(vnet_mkepair)
+
+	vnet_mkjail srv ${epair_srv}a
+	jexec srv ifconfig ${epair_srv}a 192.0.2.1/24 up
+	jexec srv route add default 192.0.2.2
+
+	vnet_mkjail gw ${epair_srv}b ${epair_gw}a
+	jexec gw ifconfig ${epair_srv}b 192.0.2.2/24 up
+	jexec gw ifconfig ${epair_gw}a 198.51.100.1/24 up
+	jexec gw sysctl net.inet.ip.forwarding=1
+
+	ifconfig ${epair_gw}b 198.51.100.2/24 up
+	route add -net 192.0.2.0/24 198.51.100.1
+
+	# Sanity check
+	atf_check -s exit:0 -o ignore ping -c 1 -t 1 192.0.2.1
+
+	jexec gw dnctl pipe 1 config delay 1200
+	pft_set_rules gw \
+		"pass in route-to (${epair_srv}b 192.0.2.1) to 192.0.2.1 dnpipe 1"
+	jexec gw pfctl -e
+
+	# The ping request will pass, but take 1.2 seconds
+	# So this works:
+	echo "Expect 1.2 s"
+	ping -c 1 192.0.2.1
+	atf_check -s exit:0 -o ignore ping -c 1 -t 2 192.0.2.1
+	# But this times out:
+	atf_check -s exit:2 -o ignore ping -c 1 -t 1 192.0.2.1
+
+	# return path dummynet
+	pft_set_rules gw \
+		"pass in route-to (${epair_srv}b 192.0.2.1) to 192.0.2.1 dnpipe (0, 1)"
+
+	# The ping request will pass, but take 1.2 seconds
+	# So this works:
+	echo "Expect 1.2 s"
+	ping -c 1 192.0.2.1
+	atf_check -s exit:0 -o ignore ping -c 1 -t 2 192.0.2.1
+	# But this times out:
+	atf_check -s exit:2 -o ignore ping -c 1 -t 1 192.0.2.1
+}
+
+dummynet_in_cleanup()
 {
 	pft_cleanup
 }
@@ -615,6 +675,58 @@ dummynet_frag_cleanup()
 	pft_cleanup
 }
 
+atf_test_case "dummynet_double" "cleanup"
+dummynet_double_head()
+{
+	atf_set descr 'Ensure dummynet is not applied multiple times'
+	atf_set require.user root
+}
+
+dummynet_double_body()
+{
+	pft_init
+	dummynet_init
+
+	epair_one=$(vnet_mkepair)
+	epair_two=$(vnet_mkepair)
+
+	ifconfig ${epair_one}a 192.0.2.1/24 up
+
+	vnet_mkjail alcatraz ${epair_one}b ${epair_two}a
+	jexec alcatraz ifconfig ${epair_one}b 192.0.2.2/24 up
+	jexec alcatraz ifconfig ${epair_two}a 198.51.100.1/24 up
+	jexec alcatraz sysctl net.inet.ip.forwarding=1
+
+	vnet_mkjail singsing ${epair_two}b
+	jexec singsing ifconfig ${epair_two}b 198.51.100.2/24 up
+	jexec singsing route add default 198.51.100.1
+
+	route add 198.51.100.0/24 192.0.2.2
+
+	jexec alcatraz dnctl pipe 1 config delay 800
+
+	jexec alcatraz pfctl -e
+	pft_set_rules alcatraz \
+		"set reassemble yes" \
+		"nat on ${epair_two}a from 192.0.2.0/24 -> (${epair_two}a)" \
+		"pass in route-to (${epair_two}a 198.51.100.2) inet proto icmp all icmp-type echoreq dnpipe (1, 1)" \
+		"pass out route-to (${epair_two}a 198.51.100.2) inet proto icmp all icmp-type echoreq"
+
+	ping -c 1 198.51.100.2
+	jexec alcatraz pfctl -sr -vv
+	jexec alcatraz pfctl -ss -vv
+
+	# We expect to be delayed 1.6 seconds, so timeout of two seconds passes, but
+	# timeout of 1 does not.
+	atf_check -s exit:0 -o ignore ping -t 2 -c 1 198.51.100.2
+	atf_check -s exit:2 -o ignore ping -t 1 -c 1 198.51.100.2
+}
+
+dummynet_double_cleanup()
+{
+	pft_cleanup
+}
+
 atf_init_test_cases()
 {
 	atf_add_test_case "v4"
@@ -623,9 +735,11 @@ atf_init_test_cases()
 	atf_add_test_case "multiwanlocal"
 	atf_add_test_case "icmp_nat"
 	atf_add_test_case "dummynet"
+	atf_add_test_case "dummynet_in"
 	atf_add_test_case "ifbound"
 	atf_add_test_case "ifbound_v6"
 	atf_add_test_case "ifbound_reply_to"
 	atf_add_test_case "ifbound_reply_to_v6"
 	atf_add_test_case "dummynet_frag"
+	atf_add_test_case "dummynet_double"
 }
