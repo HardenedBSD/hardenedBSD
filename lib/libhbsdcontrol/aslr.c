@@ -97,9 +97,38 @@ hbsdctrl_feature_aslr_pre_validate(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_featur
 }
 
 static hbsdctrl_feature_cb_res_t
-hbsdctrl_feature_aslr_validate(hbsdctrl_ctx_t *ctx __unused, hbsdctrl_feature_t *feature __unused,
-    const void *arg1 __unused, void *arg2 __unused)
+hbsdctrl_feature_aslr_validate(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature,
+    const void *arg1, void *arg2)
 {
+	hbsdctrl_feature_state_t state;
+	hbsdctrl_feature_cb_res_t res;
+
+	/*
+	 * If arg2 is non-NULL, we are checking against an existing feature
+	 * state object. Otherwise, we expect arg1 to be a pointer to a valid
+	 * file descriptor and we fetch the current state from the underlying
+	 * storage.
+	 */
+
+	if (arg1 == NULL && arg2 == NULL) {
+		return (RES_FAIL);
+	}
+
+	if (arg2 == NULL) {
+		memset(&state, 0, sizeof(state));
+		res = feature->hf_get(ctx, feature, arg1, &state);
+		if (res != RES_SUCCESS) {
+			return (res);
+		}
+
+		arg2 = &state;
+	}
+
+	if (hbsdctrl_feature_state_value_valid(
+	    hbsdctrl_feature_state_get_value(arg2)) == false) {
+		return (RES_FAIL);
+	}
+
 	return (RES_SUCCESS);
 }
 
