@@ -35,6 +35,9 @@
 
 #include "libhbsdcontrol.h"
 
+static hbsdctrl_feature_cb_res_t _hbsdctrl_default_feature_success_cb(
+    hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
+
 uint64_t
 libhbsdctrl_get_version(void)
 {
@@ -289,6 +292,16 @@ hbsdctrl_feature_new(hbsdctrl_ctx_t *ctx, const char *name, hbsdctrl_flag_t flag
 
 	feature->hf_ctx = ctx;
 	feature->hf_flags = flags;
+
+	hbsdctrl_feature_set_init(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_cleanup(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_cleanup(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_pre_validate(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_validate(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_apply(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_unapply(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_get(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_help(feature, _hbsdctrl_default_feature_success_cb);
 
 	return (feature);
 }
@@ -718,4 +731,12 @@ hbsdctrl_exec_all_features(hbsdctrl_ctx_t *ctx, const char *cbname,
 
 	pthread_mutex_unlock(&(ctx->hc_mtx));
 	return (ret);
+}
+
+static hbsdctrl_feature_cb_res_t
+_hbsdctrl_default_feature_success_cb(hbsdctrl_ctx_t *ctx __unused,
+    hbsdctrl_feature_t *feature __unused, const void *arg1 __unused,
+    void *arg2 __unused)
+{
+	return (RES_SUCCESS);
 }
