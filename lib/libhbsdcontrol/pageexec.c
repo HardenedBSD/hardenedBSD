@@ -223,7 +223,14 @@ hbsdctrl_feature_pageexec_get(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature _
 	hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_SYSDEF);
 	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_ENABLED, NULL, 0);
 	if (sz <= 0) {
-		goto end;
+		if (errno == ENOATTR) {
+			/*
+			* This is okay, it just means that nothing has been set.
+			* No error condition here.
+			*/
+			return (RES_SUCCESS);
+		}
+		return (RES_FAIL);
 	}
 
 	hbsdctrl_feature_state_set_flag(res, HBSDCTRL_FEATURE_STATE_FLAG_PERSISTED);
