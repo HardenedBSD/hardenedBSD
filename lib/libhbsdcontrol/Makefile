@@ -10,6 +10,7 @@ CFLAGS+=	-I${.CURDIR}
 
 SRCS=		aslr.c
 SRCS+=		libhbsdcontrol.c
+SRCS+=		pageexec.c
 INCS=		libhbsdcontrol.h
 MAN=
 
