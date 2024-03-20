@@ -99,6 +99,7 @@ struct _hbsdctrl_feature {
 	hbsdctrl_feature_cb_t		 hf_apply;
 	hbsdctrl_feature_cb_t		 hf_unapply;
 	hbsdctrl_feature_cb_t		 hf_get;
+	hbsdctrl_feature_cb_t		 hf_help;
 	hbsdctrl_ctx_t			*hf_ctx;
 	void				*hf_data;
 	LIST_ENTRY(_hbsdctrl_feature)	 hf_entry;
