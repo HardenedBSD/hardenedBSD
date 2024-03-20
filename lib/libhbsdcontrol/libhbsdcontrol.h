@@ -147,6 +147,7 @@ void hbsdctrl_feature_set_validate(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 void hbsdctrl_feature_set_apply(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 void hbsdctrl_feature_set_unapply(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 void hbsdctrl_feature_set_get(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
+void hbsdctrl_feature_set_help(hbsdctrl_feature_t *, hbsdctrl_feature_cb_t);
 hbsdctrl_feature_cb_res_t hbsdctrl_feature_call_cb(hbsdctrl_feature_t *,
     const char *, const void *, void *);
 

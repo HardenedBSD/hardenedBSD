@@ -475,6 +475,16 @@ hbsdctrl_feature_set_get(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t cb)
 	feature->hf_get = cb;
 }
 
+void
+hbsdctrl_feature_set_help(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t cb)
+{
+	if (feature == NULL) {
+		return;
+	}
+
+	feature->hf_help = cb;
+}
+
 hbsdctrl_feature_cb_res_t
 hbsdctrl_feature_call_cb(hbsdctrl_feature_t *feature, const char *name,
     const void *arg1, void *arg2)
@@ -518,6 +528,13 @@ hbsdctrl_feature_call_cb(hbsdctrl_feature_t *feature, const char *name,
 	}
 	if (!strcasecmp(name, "get") && feature->hf_get != NULL) {
 		return (feature->hf_get(feature->hf_ctx, feature, arg1,
+		    arg2));
+	}
+	if (!strcasecmp(name, "help")) {
+		if (feature->hf_help == NULL) {
+			return (RES_SUCCESS);
+		}
+		return (feature->hf_help(feature->hf_ctx, feature, arg1,
 		    arg2));
 	}
 

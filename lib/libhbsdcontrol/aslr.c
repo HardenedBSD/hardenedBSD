@@ -26,6 +26,7 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,6 +54,8 @@ static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_unapply(
     hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_get(
     hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
+static hbsdctrl_feature_cb_res_t hbsdctrl_feature_aslr_help(
+    hbsdctrl_ctx_t *, hbsdctrl_feature_t *, const void *, void *);
 
 hbsdctrl_feature_t *
 hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *ctx, hbsdctrl_flag_t flags)
@@ -71,6 +74,7 @@ hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *ctx, hbsdctrl_flag_t flags)
 	hbsdctrl_feature_set_apply(feature, hbsdctrl_feature_aslr_apply);
 	hbsdctrl_feature_set_unapply(feature, hbsdctrl_feature_aslr_unapply);
 	hbsdctrl_feature_set_get(feature, hbsdctrl_feature_aslr_get);
+	hbsdctrl_feature_set_help(feature, hbsdctrl_feature_aslr_help);
 
 	return (feature);
 }
@@ -282,5 +286,22 @@ hbsdctrl_feature_aslr_get(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature __unu
 	}
 
 end:
+	return (RES_SUCCESS);
+}
+
+static hbsdctrl_feature_cb_res_t
+hbsdctrl_feature_aslr_help(hbsdctrl_ctx_t *ctx __unused,
+    hbsdctrl_feature_t *feature __unused, const void *arg1 __unused,
+    void *arg2)
+{
+	FILE *fp;
+
+	fp = (arg2 == NULL) ? stderr : arg2;
+
+	fprintf(fp, "PaX ASLR possible states:\n");
+	fprintf(fp, "    1. enabled: force PaX ASLR to be enabled\n");
+	fprintf(fp, "    2. disabled: force PaX ASLR to be disabled\n");
+	fprintf(fp, "    3. sysdef: system default\n");
+
 	return (RES_SUCCESS);
 }
