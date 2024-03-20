@@ -124,6 +124,8 @@ bool hbsdctrl_ctx_is_flag_set(const hbsdctrl_ctx_t *, hbsdctrl_flag_t);
 bool hbsdctrl_ctx_add_feature(hbsdctrl_ctx_t *, hbsdctrl_feature_t *);
 hbsdctrl_feature_t *hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *,
     const char *);
+char **hbsdctrl_ctx_all_feature_names(hbsdctrl_ctx_t *);
+void hbsdctrl_ctx_free_feature_names(char **);
 
 hbsdctrl_feature_t *hbsdctrl_feature_new(hbsdctrl_ctx_t *, const char *, hbsdctrl_flag_t);
 void hbsdctrl_feature_free(hbsdctrl_feature_t **);
@@ -169,6 +171,10 @@ hbsdctrl_feature_cb_res_t hbsdctrl_exec_all_features(hbsdctrl_ctx_t *,
 
 /* aslr.c */
 hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
+/* pageexec.c */
+hbsdctrl_feature_t *hbsdctrl_feature_pageexec_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
 #endif /* !_LIBHBSDCONTROL_H */
