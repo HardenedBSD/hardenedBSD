@@ -83,6 +83,16 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 		return (NULL);
 	}
 
+	feature = hbsdctrl_feature_pageexec_new(ctx, 0);
+	if (feature == NULL) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+
 	return (ctx);
 }
 
@@ -217,6 +227,44 @@ hbsdctrl_ctx_find_feature_by_name(hbsdctrl_ctx_t *ctx, const char *name)
 	pthread_mutex_unlock(&(ctx->hc_mtx));
 
 	return (feature);
+}
+
+char **
+hbsdctrl_ctx_all_feature_names(hbsdctrl_ctx_t *ctx)
+{
+	hbsdctrl_feature_t *feature, *tfeature;
+	size_t i, nres;
+	char **res;
+
+	if (ctx == NULL) {
+		return (NULL);
+	}
+
+	nres = 1; /* 1 for the terminating NULL entry */
+	pthread_mutex_lock(&(ctx->hc_mtx));
+	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
+		nres++;
+	}
+
+	res = calloc(nres, sizeof(char **));
+	if (res == NULL) {
+		goto end;
+	}
+
+	i = 0;
+	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
+		res[i++] = feature->hf_name;
+	}
+
+end:
+	pthread_mutex_unlock(&(ctx->hc_mtx));
+	return (res);
+}
+
+void
+hbsdctrl_ctx_free_feature_names(char **names)
+{
+	free(names);
 }
 
 hbsdctrl_feature_t *
