@@ -202,4 +202,8 @@ hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
 hbsdctrl_feature_t *hbsdctrl_feature_pageexec_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
+/* mprotect.c */
+hbsdctrl_feature_t *hbsdctrl_feature_mprotect_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
 #endif /* !_LIBHBSDCONTROL_H */
