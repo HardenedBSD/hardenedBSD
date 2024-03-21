@@ -8,10 +8,14 @@ SHLIB_MAJOR=	0
 
 CFLAGS+=	-I${.CURDIR}
 
-SRCS=		aslr.c
-SRCS+=		libhbsdcontrol.c
-SRCS+=		pageexec.c
+SRCS=		libhbsdcontrol.c
 INCS=		libhbsdcontrol.h
+
+# Features
+SRCS+=		aslr.c
+SRCS+=		mprotect.c
+SRCS+=		pageexec.c
+
 MAN=
 
 LIBADD+=	pthread

@@ -26,6 +26,7 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -77,6 +78,16 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 	LIST_INIT(&(ctx->hc_features));
 
 	feature = hbsdctrl_feature_aslr_new(ctx, 0);
+	if (feature == NULL) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+
+	feature = hbsdctrl_feature_mprotect_new(ctx, 0);
 	if (feature == NULL) {
 		hbsdctrl_ctx_free(&ctx);
 		return (NULL);
@@ -741,6 +752,7 @@ hbsdctrl_get_file_states(hbsdctrl_ctx_t *ctx, int fd)
 	hbsdctrl_file_states_t *fstate;
 
 	if (ctx == NULL || fd < 0) {
+		fprintf(stderr, "ctx: %p, fd: %d\n", ctx, fd);
 		return (NULL);
 	}
 
