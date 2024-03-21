@@ -733,6 +733,99 @@ hbsdctrl_exec_all_features(hbsdctrl_ctx_t *ctx, const char *cbname,
 	return (ret);
 }
 
+hbsdctrl_file_states_head_t *
+hbsdctrl_get_file_states(hbsdctrl_ctx_t *ctx, int fd)
+{
+	hbsdctrl_feature_t *feature, *tfeature;
+	hbsdctrl_file_states_head_t *states;
+	hbsdctrl_file_states_t *fstate;
+
+	if (ctx == NULL || fd < 0) {
+		return (NULL);
+	}
+
+	states = calloc(1, sizeof(*states));
+	if (states == NULL) {
+		return (NULL);
+	}
+
+	LIST_INIT(&(states->hfsh_states));
+
+	pthread_mutex_lock(&(ctx->hc_mtx));
+	LIST_FOREACH_SAFE(feature, &(ctx->hc_features), hf_entry, tfeature) {
+		fstate = calloc(1, sizeof(*fstate));
+		if (fstate == NULL) {
+			break;
+		}
+
+		fstate->hfs_feature = feature;
+		fstate->hfs_state = hbsdctrl_feature_state_new(fd,
+		    HBSDCTRL_FEATURE_STATE_FLAG_NONE);
+		if (fstate->hfs_state == NULL) {
+			free(fstate);
+			break;
+		}
+		fstate->hfs_state_get_res = hbsdctrl_feature_call_cb(feature,
+		    "get", &fd, fstate->hfs_state);
+		LIST_INSERT_HEAD(&(states->hfsh_states), fstate, hfs_entry);
+	}
+
+	pthread_mutex_unlock(&(ctx->hc_mtx));
+	return (states);
+}
+
+void
+hbsdctrl_free_file_states(hbsdctrl_file_states_head_t **statesp)
+{
+	hbsdctrl_file_states_t *fstate, *tfstate;
+	hbsdctrl_file_states_head_t *states;
+
+	if (statesp == NULL || *statesp == NULL) {
+		return;
+	}
+
+	states = *statesp;
+	*statesp = NULL;
+
+	LIST_FOREACH_SAFE(fstate, &(states->hfsh_states), hfs_entry, tfstate) {
+		LIST_REMOVE(fstate, hfs_entry);
+		hbsdctrl_feature_state_free(&(fstate->hfs_state));
+		free(fstate);
+	}
+
+	free(states);
+}
+
+hbsdctrl_feature_t *
+hbsdctrl_file_states_get_feature(hbsdctrl_file_states_t *fstate)
+{
+	if (fstate == NULL) {
+		return (NULL);
+	}
+
+	return (fstate->hfs_feature);
+}
+
+hbsdctrl_feature_state_t *
+hbsdctrl_file_states_get_feature_state(hbsdctrl_file_states_t *fstate)
+{
+	if (fstate == NULL) {
+		return (NULL);
+	}
+
+	return (fstate->hfs_state);
+}
+
+hbsdctrl_feature_cb_res_t
+hbsdctrl_file_states_get_feature_state_res(hbsdctrl_file_states_t *fstate)
+{
+	if (fstate == NULL) {
+		return (0);
+	}
+
+	return (fstate->hfs_state_get_res);
+}
+
 static hbsdctrl_feature_cb_res_t
 _hbsdctrl_default_feature_success_cb(hbsdctrl_ctx_t *ctx __unused,
     hbsdctrl_feature_t *feature __unused, const void *arg1 __unused,

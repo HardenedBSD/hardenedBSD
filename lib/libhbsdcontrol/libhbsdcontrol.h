@@ -49,10 +49,14 @@ typedef uint64_t hbsdctrl_flag_t;
 struct _hbsdctrl_ctx;
 struct _hbsdctrl_feature;
 struct _hbsdctrl_feature_state;
+struct _hbsdctrl_file_states_head;
+struct _hbsdctrl_file_states;
 
 typedef struct _hbsdctrl_ctx hbsdctrl_ctx_t;
 typedef struct _hbsdctrl_feature hbsdctrl_feature_t;
 typedef struct _hbsdctrl_feature_state hbsdctrl_feature_state_t;
+typedef struct _hbsdctrl_file_states hbsdctrl_file_states_t;
+typedef struct _hbsdctrl_file_states_head hbsdctrl_file_states_head_t;
 
 typedef enum _hbsdctrl_feature_cb_res {
 	RES_SUCCESS	= 0,
@@ -113,6 +117,17 @@ struct _hbsdctrl_feature_state {
 	uint64_t			 hfs_spare[16];
 };
 
+struct _hbsdctrl_file_states_head {
+	LIST_HEAD(,_hbsdctrl_file_states)	 hfsh_states;
+};
+
+struct _hbsdctrl_file_states {
+	hbsdctrl_feature_t			*hfs_feature;
+	hbsdctrl_feature_state_t		*hfs_state;
+	hbsdctrl_feature_cb_res_t		 hfs_state_get_res;
+	LIST_ENTRY(_hbsdctrl_file_states)	 hfs_entry;
+};
+
 uint64_t libhbsdctrl_get_version(void);
 
 hbsdctrl_ctx_t *hbsdctrl_ctx_new(hbsdctrl_flag_t, const char *);
@@ -170,6 +185,14 @@ bool hbsdctrl_feature_state_is_flag_set(hbsdctrl_feature_state_t *,
 
 hbsdctrl_feature_cb_res_t hbsdctrl_exec_all_features(hbsdctrl_ctx_t *,
     const char *, bool, const void *, void *);
+
+hbsdctrl_file_states_head_t *hbsdctrl_get_file_states(hbsdctrl_ctx_t *, int);
+void hbsdctrl_free_file_states(hbsdctrl_file_states_head_t **);
+hbsdctrl_feature_t *hbsdctrl_file_states_get_feature(hbsdctrl_file_states_t *);
+hbsdctrl_feature_state_t *hbsdctrl_file_states_get_feature_state(
+    hbsdctrl_file_states_t *);
+hbsdctrl_feature_cb_res_t hbsdctrl_file_states_get_feature_state_res(
+    hbsdctrl_file_states_t *);
 
 /* aslr.c */
 hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
