@@ -112,56 +112,6 @@ static int udom_open(const char *path, int flags);
 #define SUPPORTED_FLAGS "belnstuv"
 #endif
 
-<<<<<<< HEAD
-=======
-#ifndef NO_UDOM_SUPPORT
-static void
-init_casper_net(cap_channel_t *casper)
-{
-	cap_net_limit_t *limit;
-	int familylimit;
-
-	capnet = cap_service_open(casper, "system.net");
-	if (capnet == NULL)
-		err(EXIT_FAILURE, "unable to create network service");
-
-	limit = cap_net_limit_init(capnet, CAPNET_NAME2ADDR |
-	    CAPNET_CONNECTDNS);
-	if (limit == NULL)
-		err(EXIT_FAILURE, "unable to create limits");
-
-	familylimit = AF_LOCAL;
-	cap_net_limit_name2addr_family(limit, &familylimit, 1);
-
-	if (cap_net_limit(limit) < 0)
-		err(EXIT_FAILURE, "unable to apply limits");
-}
-#endif
-
-static void
-init_casper(int argc, char *argv[])
-{
-	cap_channel_t *casper;
-	cap_rights_t rights;
-
-	casper = cap_init();
-	if (casper == NULL)
-		err(EXIT_FAILURE, "unable to create Casper");
-
-	fa = fileargs_cinit(casper, argc, argv, O_RDONLY, 0,
-	    cap_rights_init(&rights, CAP_READ, CAP_FSTAT, CAP_FCNTL, CAP_SEEK),
-	    FA_OPEN | FA_REALPATH);
-	if (fa == NULL)
-		err(EXIT_FAILURE, "unable to create fileargs");
-
-#ifndef NO_UDOM_SUPPORT
-	init_casper_net(casper);
-#endif
-
-	cap_close(casper);
-}
-
->>>>>>> origin/freebsd/14-stable/main
 int
 main(int argc, char *argv[])
 {
