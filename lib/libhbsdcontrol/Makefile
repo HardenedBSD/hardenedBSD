@@ -18,6 +18,7 @@ SRCS+=		harden_shm.c
 SRCS+=		insecure_kmod.c
 SRCS+=		mprotect.c
 SRCS+=		pageexec.c
+SRCS+=		prohibit_ptrace_capsicum.c
 SRCS+=		segvguard.c
 SRCS+=		shlibrandom.c
 
