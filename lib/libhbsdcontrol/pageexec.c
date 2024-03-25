@@ -258,7 +258,7 @@ hbsdctrl_feature_pageexec_get(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature _
 	sz = extattr_get_fd(fd, ctx->hc_namespace, ATTRNAME_DISABLED, NULL, 0);
 	if (sz <= 0) {
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_INVALID);
-		goto end;
+		return (RES_FAIL);
 	}
 
 	if (sz > 2) {
@@ -292,7 +292,6 @@ hbsdctrl_feature_pageexec_get(hbsdctrl_ctx_t *ctx, hbsdctrl_feature_t *feature _
 		hbsdctrl_feature_state_set_value(res, HBSDCTRL_STATE_DISABLED);
 	}
 
-end:
 	return (RES_SUCCESS);
 }
 
