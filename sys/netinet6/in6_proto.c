@@ -191,21 +191,6 @@ VNET_DEFINE(bool, ip6_log_cannot_forward) = 1;
 VNET_DEFINE(int, pmtu_expire) = 60*10;
 VNET_DEFINE(int, pmtu_probe) = 60*2;
 
-<<<<<<< HEAD
-/* ICMPV6 parameters */
-#ifdef PAX_HARDENING
-VNET_DEFINE(int, icmp6_rediraccept) = 0;/* accept and process redirects */
-#else
-VNET_DEFINE(int, icmp6_rediraccept) = 1;/* accept and process redirects */
-#endif
-VNET_DEFINE(int, icmp6_redirtimeout) = 10 * 60;	/* 10 minutes */
-VNET_DEFINE(int, icmp6errppslim) = 100;		/* 100pps */
-/* control how to respond to NI queries */
-VNET_DEFINE(int, icmp6_nodeinfo) = 0;
-VNET_DEFINE(int, icmp6_nodeinfo_oldmcprefix) = 1;
-
-=======
->>>>>>> internal/freebsd/current/main
 VNET_DEFINE_STATIC(int, ip6_log_interval) = 5;
 VNET_DEFINE_STATIC(int, ip6_log_count) = 0;
 VNET_DEFINE_STATIC(struct timeval, ip6_log_last) = { 0 };

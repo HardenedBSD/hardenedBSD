@@ -65,6 +65,7 @@
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -122,7 +123,11 @@ SYSCTL_VNET_PCPUSTAT(_net_inet6_icmp6, ICMPV6CTL_STATS, stats,
 VNET_PCPUSTAT_SYSUNINIT(icmp6stat);
 #endif /* VIMAGE */
 
+#ifdef PAX_HARDENING
+VNET_DEFINE_STATIC(int, icmp6_rediraccept) = 0;
+#else
 VNET_DEFINE_STATIC(int, icmp6_rediraccept) = 1;
+#endif
 #define	V_icmp6_rediraccept	VNET(icmp6_rediraccept)
 SYSCTL_INT(_net_inet6_icmp6, ICMPV6CTL_REDIRACCEPT, rediraccept,
     CTLFLAG_VNET | CTLFLAG_RW, &VNET_NAME(icmp6_rediraccept), 0,
