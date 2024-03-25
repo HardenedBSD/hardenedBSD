@@ -15,6 +15,7 @@ INCS=		libhbsdcontrol.h
 SRCS+=		aslr.c
 SRCS+=		mprotect.c
 SRCS+=		pageexec.c
+SRCS+=		segvguard.c
 
 MAN=
 
