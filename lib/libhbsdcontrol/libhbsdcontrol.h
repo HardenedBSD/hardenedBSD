@@ -210,4 +210,8 @@ hbsdctrl_feature_t *hbsdctrl_feature_mprotect_new(hbsdctrl_ctx_t *,
 hbsdctrl_feature_t *hbsdctrl_feature_segvguard_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
+/* shlibrandom.c */
+hbsdctrl_feature_t *hbsdctrl_feature_shlibrandom_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
 #endif /* !_LIBHBSDCONTROL_H */
