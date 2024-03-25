@@ -16,6 +16,7 @@ SRCS+=		aslr.c
 SRCS+=		mprotect.c
 SRCS+=		pageexec.c
 SRCS+=		segvguard.c
+SRCS+=		shlibrandom.c
 
 MAN=
 
