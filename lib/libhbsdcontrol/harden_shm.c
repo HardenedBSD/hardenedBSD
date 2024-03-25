@@ -37,8 +37,8 @@
 
 #include "libhbsdcontrol.h"
 
-#define ATTRNAME_ENABLED	"hbsd.pax.harden_shm"
-#define ATTRNAME_DISABLED	"hbsd.pax.noharden_shm"
+#define ATTRNAME_ENABLED	"hbsd.hardening.harden_shm"
+#define ATTRNAME_DISABLED	"hbsd.hardening.noharden_shm"
 
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_harden_shm_init(hbsdctrl_ctx_t *,
     hbsdctrl_feature_t *, const void *, void *);
