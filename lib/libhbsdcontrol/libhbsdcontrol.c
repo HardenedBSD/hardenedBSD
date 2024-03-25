@@ -373,6 +373,7 @@ hbsdctrl_feature_new(hbsdctrl_ctx_t *ctx, const char *name, hbsdctrl_flag_t flag
 	hbsdctrl_feature_set_unapply(feature, _hbsdctrl_default_feature_success_cb);
 	hbsdctrl_feature_set_get(feature, _hbsdctrl_default_feature_success_cb);
 	hbsdctrl_feature_set_help(feature, _hbsdctrl_default_feature_success_cb);
+	hbsdctrl_feature_set_to_ucl(feature, _hbsdctrl_default_feature_success_cb);
 
 	return (feature);
 }
@@ -567,6 +568,16 @@ hbsdctrl_feature_set_help(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t cb)
 	}
 
 	feature->hf_help = cb;
+}
+
+void
+hbsdctrl_feature_set_to_ucl(hbsdctrl_feature_t *feature, hbsdctrl_feature_cb_t cb)
+{
+	if (feature == NULL) {
+		return;
+	}
+
+	feature->hf_to_ucl = cb;
 }
 
 hbsdctrl_feature_cb_res_t
