@@ -14,6 +14,7 @@ INCS=		libhbsdcontrol.h
 # Features
 SRCS+=		aslr.c
 SRCS+=		disallow_map32bit.c
+SRCS+=		harden_shm.c
 SRCS+=		insecure_kmod.c
 SRCS+=		mprotect.c
 SRCS+=		pageexec.c
