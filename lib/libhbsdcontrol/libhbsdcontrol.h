@@ -210,13 +210,17 @@ hbsdctrl_feature_t *hbsdctrl_feature_harden_shm_new(hbsdctrl_ctx_t *,
 hbsdctrl_feature_t *hbsdctrl_feature_insecure_kmod_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
+/* mprotect.c */
+hbsdctrl_feature_t *hbsdctrl_feature_mprotect_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
 /* pageexec.c */
 hbsdctrl_feature_t *hbsdctrl_feature_pageexec_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
-/* mprotect.c */
-hbsdctrl_feature_t *hbsdctrl_feature_mprotect_new(hbsdctrl_ctx_t *,
-    hbsdctrl_flag_t);
+/* prohibit_ptrace_capsicum.c */
+hbsdctrl_feature_t *hbsdctrl_feature_prohibit_ptrace_capsicum_new(
+    hbsdctrl_ctx_t *, hbsdctrl_flag_t);
 
 /* segvguard.c */
 hbsdctrl_feature_t *hbsdctrl_feature_segvguard_new(hbsdctrl_ctx_t *,

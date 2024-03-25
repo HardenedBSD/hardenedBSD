@@ -87,6 +87,16 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 		return (NULL);
 	}
 
+	feature = hbsdctrl_feature_disallow_map32bit_new(ctx, 0);
+	if (feature == NULL) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+
 	feature = hbsdctrl_feature_harden_shm_new(ctx, 0);
 	if (feature == NULL) {
 		hbsdctrl_ctx_free(&ctx);
@@ -107,16 +117,6 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 		return (NULL);
 	}
 
-	feature = hbsdctrl_feature_disallow_map32bit_new(ctx, 0);
-	if (feature == NULL) {
-		hbsdctrl_ctx_free(&ctx);
-		return (NULL);
-	}
-	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
-		hbsdctrl_ctx_free(&ctx);
-		return (NULL);
-	}
-
 	feature = hbsdctrl_feature_mprotect_new(ctx, 0);
 	if (feature == NULL) {
 		hbsdctrl_ctx_free(&ctx);
@@ -128,6 +128,16 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 	}
 
 	feature = hbsdctrl_feature_pageexec_new(ctx, 0);
+	if (feature == NULL) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+
+	feature = hbsdctrl_feature_prohibit_ptrace_capsicum_new(ctx, 0);
 	if (feature == NULL) {
 		hbsdctrl_ctx_free(&ctx);
 		return (NULL);
