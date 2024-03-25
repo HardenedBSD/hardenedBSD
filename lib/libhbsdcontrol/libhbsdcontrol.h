@@ -202,6 +202,10 @@ hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
 hbsdctrl_feature_t *hbsdctrl_feature_disallow_map32bit_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
+/* insecure_kmod.c */
+hbsdctrl_feature_t *hbsdctrl_feature_insecure_kmod_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
 /* pageexec.c */
 hbsdctrl_feature_t *hbsdctrl_feature_pageexec_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
