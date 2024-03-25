@@ -198,6 +198,10 @@ hbsdctrl_feature_cb_res_t hbsdctrl_file_states_get_feature_state_res(
 hbsdctrl_feature_t *hbsdctrl_feature_aslr_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
 
+/* disallow_map32bit.c */
+hbsdctrl_feature_t *hbsdctrl_feature_disallow_map32bit_new(hbsdctrl_ctx_t *,
+    hbsdctrl_flag_t);
+
 /* pageexec.c */
 hbsdctrl_feature_t *hbsdctrl_feature_pageexec_new(hbsdctrl_ctx_t *,
     hbsdctrl_flag_t);
