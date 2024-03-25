@@ -87,6 +87,16 @@ hbsdctrl_ctx_new(hbsdctrl_flag_t flags, const char *ns)
 		return (NULL);
 	}
 
+	feature = hbsdctrl_feature_insecure_kmod_new(ctx, 0);
+	if (feature == NULL) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+	if (!hbsdctrl_ctx_add_feature(ctx, feature)) {
+		hbsdctrl_ctx_free(&ctx);
+		return (NULL);
+	}
+
 	feature = hbsdctrl_feature_disallow_map32bit_new(ctx, 0);
 	if (feature == NULL) {
 		hbsdctrl_ctx_free(&ctx);
