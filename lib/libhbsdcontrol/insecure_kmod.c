@@ -300,14 +300,16 @@ hbsdctrl_feature_insecure_kmod_help(hbsdctrl_ctx_t *ctx __unused,
     hbsdctrl_feature_t *feature __unused, const void *arg1 __unused,
     void *arg2)
 {
+	const char *prefix;
 	FILE *fp;
 
+	prefix = (arg1 == NULL) ? "" : arg1;
 	fp = (arg2 == NULL) ? stderr : arg2;
 
-	fprintf(fp, "PaX insecure_kmod possible states:\n");
-	fprintf(fp, "    1. enabled: permit loading of insecure kmod\n");
-	fprintf(fp, "    2. disabled: prohibit loading of insecure kmod\n");
-	fprintf(fp, "    3. sysdef: system default\n");
+	fprintf(fp, "%sPaX insecure_kmod possible states:\n", prefix);
+	fprintf(fp, "%s    1. enabled: permit loading of insecure kmod\n", prefix);
+	fprintf(fp, "%s    2. disabled: prohibit loading of insecure kmod\n", prefix);
+	fprintf(fp, "%s    3. sysdef: system default\n", prefix);
 
 	return (RES_SUCCESS);
 }
