@@ -300,14 +300,16 @@ hbsdctrl_feature_disallow_map32bit_help(hbsdctrl_ctx_t *ctx __unused,
     hbsdctrl_feature_t *feature __unused, const void *arg1 __unused,
     void *arg2)
 {
+	const char *prefix;
 	FILE *fp;
 
+	prefix = (arg1 == NULL) ? "" : arg1;
 	fp = (arg2 == NULL) ? stderr : arg2;
 
-	fprintf(fp, "PaX disallow_map32bit possible states:\n");
-	fprintf(fp, "    1. enabled: force PaX disallow_map32bit to be enabled\n");
-	fprintf(fp, "    2. disabled: force PaX disallow_map32bit to be disabled\n");
-	fprintf(fp, "    3. sysdef: system default\n");
+	fprintf(fp, "%sPaX disallow_map32bit possible states:\n", prefix);
+	fprintf(fp, "%s    1. enabled: force PaX disallow_map32bit to be enabled\n", prefix);
+	fprintf(fp, "%s    2. disabled: force PaX disallow_map32bit to be disabled\n", prefix);
+	fprintf(fp, "%s    3. sysdef: system default\n", prefix);
 
 	return (RES_SUCCESS);
 }
