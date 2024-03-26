@@ -26,7 +26,6 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -823,7 +822,6 @@ hbsdctrl_get_file_states(hbsdctrl_ctx_t *ctx, int fd)
 	hbsdctrl_file_states_t *fstate;
 
 	if (ctx == NULL || fd < 0) {
-		fprintf(stderr, "ctx: %p, fd: %d\n", ctx, fd);
 		return (NULL);
 	}
 
