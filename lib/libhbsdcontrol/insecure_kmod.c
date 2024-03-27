@@ -37,8 +37,8 @@
 
 #include "libhbsdcontrol.h"
 
-#define ATTRNAME_ENABLED	"hbsd.hardening.permit_kmod"
-#define ATTRNAME_DISABLED	"hbsd.hardening.forbit_kmod"
+#define ATTRNAME_ENABLED	"hbsd.hardening.forbit_kmod"
+#define ATTRNAME_DISABLED	"hbsd.hardening.permit_kmod"
 
 static hbsdctrl_feature_cb_res_t hbsdctrl_feature_insecure_kmod_init(hbsdctrl_ctx_t *,
     hbsdctrl_feature_t *, const void *, void *);
