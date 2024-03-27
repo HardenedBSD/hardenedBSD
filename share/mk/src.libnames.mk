@@ -43,7 +43,9 @@ _INTERNALLIBS=	\
 		bsnmptools \
 		c_nossp_pic \
 		cron \
+		diff \
 		elftc \
+		fdt \
 		fifolog \
 		ifconfig \
 		ipf \
@@ -547,8 +549,14 @@ LDADD+=		${LDADD_${_l}}
 
 _LIB_OBJTOP?=	${OBJTOP}
 # INTERNALLIB definitions.
+LIBDIFFDIR=	${_LIB_OBJTOP}/lib/libdiff
+LIBDIFF?=	${LIBDIFFDIR}/libdiff${PIE_SUFFIX}.a
+
 LIBELFTCDIR=	${_LIB_OBJTOP}/lib/libelftc
 LIBELFTC?=	${LIBELFTCDIR}/libelftc.a
+
+LIBFDTDIR=	${_LIB_OBJTOP}/lib/libfdt
+LIBFDT?=	${LIBFDTDIR}/libfdt${PIE_SUFFIX}.a
 
 LIBLUADIR=	${_LIB_OBJTOP}/lib/liblua
 LIBLUA?=	${LIBLUADIR}/liblua.a

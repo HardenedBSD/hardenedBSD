@@ -2149,7 +2149,7 @@ gethints(bool nostdlib)
 	uint32_t strtab;	/* Offset of string table in file */
 	uint32_t dirlist;	/* Offset of directory list in string table */
 	uint32_t dirlistlen;	/* strlen(dirlist) */
-	bool is_le;
+	bool is_le;		/* Does the hints file use little endian */
 	bool skip;
 
 	/* First call, read the hints file */
@@ -2176,7 +2176,10 @@ cleanup1:
 			hdr.dirlistlen = 0;
 			return (NULL);
 		}
-		is_le = /*le32toh(1) == 1 || */ hdr.magic == ELFHINTS_MAGIC;
+		dbg("host byte-order: %s-endian", le32toh(1) == 1 ? "little" : "big");
+		dbg("hints file byte-order: %s-endian",
+		    hdr.magic == htole32(ELFHINTS_MAGIC) ? "little" : "big");
+		is_le = /*htole32(1) == 1 || */ hdr.magic == htole32(ELFHINTS_MAGIC);
 		magic = COND_SWAP(hdr.magic);
 		version = COND_SWAP(hdr.version);
 		strtab = COND_SWAP(hdr.strtab);

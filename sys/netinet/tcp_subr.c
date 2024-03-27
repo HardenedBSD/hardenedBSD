@@ -2395,9 +2395,8 @@ tcp_discardcb(struct tcpcb *tp)
 #endif
 
 	INP_WLOCK_ASSERT(inp);
+	MPASS(!callout_active(&tp->t_callout));
 	MPASS(TAILQ_EMPTY(&tp->snd_holes));
-
-	tcp_timer_stop(tp);
 
 	/* free the reassembly queue, if any */
 	tcp_reass_flush(tp);
@@ -3282,7 +3281,7 @@ tcp_drop_syn_sent(struct inpcb *inp, int errno)
 	if (tp->t_state != TCPS_SYN_SENT)
 		return (inp);
 
-	if (IS_FASTOPEN(tp->t_flags))
+	if (tp->t_flags & TF_FASTOPEN)
 		tcp_fastopen_disable_path(tp);
 
 	tp = tcp_drop(tp, errno);
