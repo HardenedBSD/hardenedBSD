@@ -59,7 +59,8 @@ usage(bool list_features)
 		    tfeature) {
 			printf("==> Feature: %s\n",
 			    hbsdctrl_feature_get_name(feature));
-			feature->hf_help(ctx, feature, "    ", stdout);
+			hbsdctrl_feature_call_cb(feature, "help", "    ",
+			    stderr);
 		}
 	}
 end:
