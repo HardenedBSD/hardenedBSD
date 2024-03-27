@@ -1,15 +1,11 @@
 PACKAGE=hardenedbsd
 
-PROG=hbsdcontrol
+PROG=	hbsdcontrol
 
-.PATH: ${SRCTOP}/contrib/hardenedbsd/hbsdcontrol
-CFLAGS+= -I${HBSDCONTROL_DIR}
+LIBADD=	hbsdcontrol
 
-LIBADD= sbuf hbsdcontrol
+SRCS=	hbsdcontrol.c
 
-SRCS= main.c
-SRCS+= cmd_pax.c
-
-MAN= hbsdcontrol.8
+MAN=	hbsdcontrol.8
 
 .include <bsd.prog.mk>
