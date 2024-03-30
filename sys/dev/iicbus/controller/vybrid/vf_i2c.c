@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2014 Ruslan Bukin <br@bsdpad.com>
- * All rights reserved.
+ * Copyright (c) 2024 Pierre-Luc Drouin <pldrouin@pldrouin.net>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,13 +28,16 @@
 
 /*
  * Vybrid Family Inter-Integrated Circuit (I2C)
- * Chapter 48, Vybrid Reference Manual, Rev. 5, 07/2013
+ * Originally based on Chapter 48, Vybrid Reference Manual, Rev. 5, 07/2013
+ * Currently based on Chapter 21, LX2160A Reference Manual, Rev. 1, 10/2021
+ *
+ * The current implementation is based on the original driver by Ruslan Bukin,
+ * later modified by Dawid Górecki, and split into FDT and ACPI drivers by Val
+ * Packett.
  */
 
-/*
- * This driver is based on the I2C driver for i.MX
- */
-
+#include <sys/types.h>
+#include <sys/mutex.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
@@ -50,17 +53,11 @@
 
 #include "iicbus_if.h"
 
-#include <dev/ofw/openfirm.h>
-#include <dev/ofw/ofw_bus.h>
-#include <dev/ofw/ofw_bus_subr.h>
-
-#include <dev/clk/clk.h>
-
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
-#include <arm/freescale/vybrid/vf_common.h>
+#include <dev/iicbus/controller/vybrid/vf_i2c.h>
 
 #define	I2C_IBAD	0x0	/* I2C Bus Address Register */
 #define	I2C_IBFD	0x1	/* I2C Bus Frequency Divider Register */
@@ -85,16 +82,31 @@
 #define	 IBIC_BIIE		(1 << 7) /* Bus Idle Interrupt Enable bit. */
 #define	I2C_IBDBG	0x6	/* I2C Bus Debug Register */
 
+#define DIV_REG_UNSET	0xFF
+
+#define	READ1(_sc, _reg) bus_space_read_1(_sc->bst, _sc->bsh, _reg)
+#define	WRITE1(_sc, _reg, _val)	bus_space_write_1(_sc->bst,\
+		_sc->bsh, _reg, _val)
+
 #ifdef DEBUG
 #define vf_i2c_dbg(_sc, fmt, args...) \
 	device_printf((_sc)->dev, fmt, ##args)
+#ifdef DEBUG2
+#undef WRITE1
+#define WRITE1(_sc, _reg, _val) ({\
+		vf_i2c_dbg(_sc, "WRITE1 REG 0x%02X VAL 0x%02X\n",_reg,_val);\
+		bus_space_write_1(_sc->bst, _sc->bsh, _reg, _val);\
+		})
+#undef READ1
+#define READ1(_sc, _reg) ({\
+		uint32_t ret=bus_space_read_1(_sc->bst, _sc->bsh, _reg);\
+		vf_i2c_dbg(_sc, "READ1 REG 0x%02X RETURNS 0x%02X\n",_reg,ret);\
+		ret;\
+		})
+#endif
 #else
 #define vf_i2c_dbg(_sc, fmt, args...)
 #endif
-
-#define	HW_UNKNOWN	0x00
-#define	HW_MVF600	0x01
-#define	HW_VF610	0x02
 
 static int i2c_repeated_start(device_t, u_char, int);
 static int i2c_start(device_t, u_char, int);
@@ -102,23 +114,10 @@ static int i2c_stop(device_t);
 static int i2c_reset(device_t, u_char, u_char, u_char *);
 static int i2c_read(device_t, char *, int, int *, int, int);
 static int i2c_write(device_t, const char *, int, int *, int);
-static phandle_t i2c_get_node(device_t, device_t);
 
 struct i2c_div_type {
 	uint32_t reg_val;
 	uint32_t div;
-};
-
-struct i2c_softc {
-	struct resource		*res[2];
-	bus_space_tag_t		bst;
-	bus_space_handle_t	bsh;
-	clk_t			clock;
-	uint32_t		freq;
-	device_t		dev;
-	device_t		iicbus;
-	struct mtx		mutex;
-	uintptr_t		hwtype;
 };
 
 static struct resource_spec i2c_spec[] = {
@@ -143,49 +142,15 @@ static struct i2c_div_type vf610_div_table[] = {
 	{ 0x3F, 3840 }, { 0x7B, 4096 }, { 0x7D, 5120 }, { 0x7E, 6144 },
 };
 
-static const struct ofw_compat_data i2c_compat_data[] = {
-	{"fsl,mvf600-i2c",	HW_MVF600},
-	{"fsl,vf610-i2c",	HW_VF610},
-	{NULL,			HW_UNKNOWN}
-};
-
-static int
-i2c_probe(device_t dev)
+int
+vf_i2c_attach_common(device_t dev)
 {
-
-	if (!ofw_bus_status_okay(dev))
-		return (ENXIO);
-
-	if (!ofw_bus_search_compatible(dev, i2c_compat_data)->ocd_data)
-		return (ENXIO);
-
-	device_set_desc(dev, "Vybrid Family Inter-Integrated Circuit (I2C)");
-	return (BUS_PROBE_DEFAULT);
-}
-
-static int
-i2c_attach(device_t dev)
-{
-	struct i2c_softc *sc;
-	phandle_t node;
+	struct vf_i2c_softc *sc;
 	int error;
 
 	sc = device_get_softc(dev);
-	sc->dev = dev;
-	sc->hwtype = ofw_bus_search_compatible(dev, i2c_compat_data)->ocd_data;
-	node = ofw_bus_get_node(dev);
 
-	error = clk_get_by_ofw_index(dev, node, 0, &sc->clock);
-	if (error != 0) {
-		sc->freq = 0;
-		device_printf(dev, "Parent clock not found.\n");
-	} else {
-		if (OF_hasprop(node, "clock-frequency"))
-			OF_getencprop(node, "clock-frequency", &sc->freq,
-			    sizeof(sc->freq));
-		else
-			sc->freq = 100000;
-	}
+	vf_i2c_dbg(sc, "i2c attach common\n");
 
 	mtx_init(&sc->mutex, device_get_nameunit(dev), "I2C", MTX_DEF);
 
@@ -200,9 +165,27 @@ i2c_attach(device_t dev)
 	sc->bst = rman_get_bustag(sc->res[0]);
 	sc->bsh = rman_get_bushandle(sc->res[0]);
 
+	mtx_lock(&sc->mutex);
+
 	WRITE1(sc, I2C_IBIC, IBIC_BIIE);
 
+	if (sc->freq == 0) {
+		uint8_t div_reg;
+
+		div_reg = READ1(sc, I2C_IBFD);
+
+		if (div_reg != 0x00) {
+			sc->freq = UINT32_MAX;
+			device_printf(dev, "Using existing bus frequency divider register value (0x%02X).\n", div_reg);
+		} else {
+			device_printf(dev, "Bus frequency divider value appears unset, defaulting to low I2C bus speed.\n");
+		}
+	}
+
+	mtx_unlock(&sc->mutex);
+
 	sc->iicbus = device_add_child(dev, "iicbus", -1);
+
 	if (sc->iicbus == NULL) {
 		device_printf(dev, "could not add iicbus child");
 		mtx_destroy(&sc->mutex);
@@ -218,10 +201,18 @@ i2c_attach(device_t dev)
 static int
 i2c_detach(device_t dev)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 	int error = 0;
 
 	sc = device_get_softc(dev);
+	vf_i2c_dbg(sc, "i2c detach\n");
+
+	mtx_lock(&sc->mutex);
+
+	if (sc->freq == 0) {
+		vf_i2c_dbg(sc, "Writing 0x00 to clock divider register\n");
+		WRITE1(sc, I2C_IBFD, 0x00);
+	}
 
 	error = bus_generic_detach(dev);
 	if (error != 0) {
@@ -237,32 +228,16 @@ i2c_detach(device_t dev)
 
 	bus_release_resources(dev, i2c_spec, sc->res);
 
+	mtx_unlock(&sc->mutex);
+
 	mtx_destroy(&sc->mutex);
 
 	return (0);
 }
 
-/* Wait for transfer interrupt flag */
-static int
-wait_for_iif(struct i2c_softc *sc)
-{
-	int retry;
-
-	retry = 1000;
-	while (retry --) {
-		if (READ1(sc, I2C_IBSR) & IBSR_IBIF) {
-			WRITE1(sc, I2C_IBSR, IBSR_IBIF);
-			return (IIC_NOERR);
-		}
-		DELAY(10);
-	}
-
-	return (IIC_ETIMEOUT);
-}
-
 /* Wait for free bus */
 static int
-wait_for_nibb(struct i2c_softc *sc)
+wait_for_nibb(struct vf_i2c_softc *sc)
 {
 	int retry;
 
@@ -278,17 +253,27 @@ wait_for_nibb(struct i2c_softc *sc)
 
 /* Wait for transfer complete+interrupt flag */
 static int
-wait_for_icf(struct i2c_softc *sc)
+wait_for_icf(struct vf_i2c_softc *sc)
 {
 	int retry;
+	uint8_t ibsr;
+
+	vf_i2c_dbg(sc, "i2c wait for transfer complete + interrupt flag\n");
 
 	retry = 1000;
 	while (retry --) {
-		if (READ1(sc, I2C_IBSR) & IBSR_TCF) {
-			if (READ1(sc, I2C_IBSR) & IBSR_IBIF) {
-				WRITE1(sc, I2C_IBSR, IBSR_IBIF);
-				return (IIC_NOERR);
+		ibsr = READ1(sc, I2C_IBSR);
+
+		if (ibsr & IBSR_IBIF) {
+			WRITE1(sc, I2C_IBSR, IBSR_IBIF);
+
+			if (ibsr & IBSR_IBAL) {
+				WRITE1(sc, I2C_IBSR, IBSR_IBAL);
+				return (IIC_EBUSBSY);
 			}
+
+			if (ibsr & IBSR_TCF)
+				return (IIC_NOERR);
 		}
 		DELAY(10);
 	}
@@ -297,8 +282,9 @@ wait_for_icf(struct i2c_softc *sc)
 }
 /* Get ACK bit from last write */
 static bool
-tx_acked(struct i2c_softc *sc)
+tx_acked(struct vf_i2c_softc *sc)
 {
+	vf_i2c_dbg(sc, "i2c get ACK bit from last write\n");
 
 	return (READ1(sc, I2C_IBSR) & IBSR_RXAK) ? false : true;
 
@@ -307,7 +293,7 @@ tx_acked(struct i2c_softc *sc)
 static int
 i2c_repeated_start(device_t dev, u_char slave, int timeout)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 	int error;
 	int reg;
 
@@ -317,30 +303,24 @@ i2c_repeated_start(device_t dev, u_char slave, int timeout)
 
 	mtx_lock(&sc->mutex);
 
-	WRITE1(sc, I2C_IBAD, slave);
-
 	if ((READ1(sc, I2C_IBSR) & IBSR_IBB) == 0) {
+		vf_i2c_dbg(sc, "cant i2c repeat start: bus is no longer busy\n");
 		mtx_unlock(&sc->mutex);
 		return (IIC_EBUSERR);
 	}
-
-	/* Set repeated start condition */
-	DELAY(10);
 
 	reg = READ1(sc, I2C_IBCR);
 	reg |= (IBCR_RSTA | IBCR_IBIE);
 	WRITE1(sc, I2C_IBCR, reg);
 
-	DELAY(10);
-
 	/* Write target address - LSB is R/W bit */
 	WRITE1(sc, I2C_IBDR, slave);
 
-	error = wait_for_iif(sc);
+	error = wait_for_icf(sc);
 
 	if (!tx_acked(sc)) {
-		vf_i2c_dbg(sc,
-		    "cant i2c start: missing ACK after slave addres\n");
+		mtx_unlock(&sc->mutex);
+		vf_i2c_dbg(sc, "cant i2c repeat start: missing ACK after slave address\n");
 		return (IIC_ENOACK);
 	}
 
@@ -355,7 +335,7 @@ i2c_repeated_start(device_t dev, u_char slave, int timeout)
 static int
 i2c_start(device_t dev, u_char slave, int timeout)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 	int error;
 	int reg;
 
@@ -365,27 +345,32 @@ i2c_start(device_t dev, u_char slave, int timeout)
 
 	mtx_lock(&sc->mutex);
 
-	WRITE1(sc, I2C_IBAD, slave);
+	error = wait_for_nibb(sc);
 
-	if (READ1(sc, I2C_IBSR) & IBSR_IBB) {
+	/* Reset controller if bus is still busy. */
+	if (error == IIC_ETIMEOUT) {
+		WRITE1(sc, I2C_IBCR, IBCR_MDIS);
+		DELAY(1000);
+		WRITE1(sc, I2C_IBCR, IBCR_NOACK);
+		error = wait_for_nibb(sc);
+	}
+
+	if (error != 0) {
 		mtx_unlock(&sc->mutex);
-		vf_i2c_dbg(sc, "cant i2c start: IIC_EBUSBSY\n");
-		return (IIC_EBUSERR);
+		vf_i2c_dbg(sc, "cant i2c start: %i\n", error);
+		return (error);
 	}
 
 	/* Set start condition */
-	reg = (IBCR_MSSL | IBCR_NOACK | IBCR_IBIE);
+	reg = (IBCR_MSSL | IBCR_NOACK | IBCR_IBIE | IBCR_TXRX);
 	WRITE1(sc, I2C_IBCR, reg);
 
-	DELAY(100);
-
-	reg |= (IBCR_TXRX);
-	WRITE1(sc, I2C_IBCR, reg);
+	WRITE1(sc, I2C_IBSR, IBSR_IBIF);
 
 	/* Write target address - LSB is R/W bit */
 	WRITE1(sc, I2C_IBDR, slave);
 
-	error = wait_for_iif(sc);
+	error = wait_for_icf(sc);
 	if (error != 0) {
 		mtx_unlock(&sc->mutex);
 		vf_i2c_dbg(sc, "cant i2c start: iif error\n");
@@ -394,8 +379,7 @@ i2c_start(device_t dev, u_char slave, int timeout)
 	mtx_unlock(&sc->mutex);
 
 	if (!tx_acked(sc)) {
-		vf_i2c_dbg(sc,
-		    "cant i2c start: missing QACK after slave addres\n");
+		vf_i2c_dbg(sc, "cant i2c start: missing ACK after slave address\n");
 		return (IIC_ENOACK);
 	}
 
@@ -405,7 +389,7 @@ i2c_start(device_t dev, u_char slave, int timeout)
 static int
 i2c_stop(device_t dev)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 
 	sc = device_get_softc(dev);
 
@@ -413,80 +397,70 @@ i2c_stop(device_t dev)
 
 	mtx_lock(&sc->mutex);
 
-	WRITE1(sc, I2C_IBCR, IBCR_NOACK | IBCR_IBIE);
+	if ((READ1(sc, I2C_IBCR) & IBCR_MSSL) != 0)
+		WRITE1(sc, I2C_IBCR, IBCR_NOACK | IBCR_IBIE);
 
-	DELAY(100);
-
-	/* Reset controller if bus still busy after STOP */
-	if (wait_for_nibb(sc) == IIC_ETIMEOUT) {
-		WRITE1(sc, I2C_IBCR, IBCR_MDIS);
-		DELAY(1000);
-		WRITE1(sc, I2C_IBCR, IBCR_NOACK);
-	}
 	mtx_unlock(&sc->mutex);
 
 	return (IIC_NOERR);
 }
 
-static uint32_t
+static uint8_t
 i2c_get_div_val(device_t dev)
 {
-	struct i2c_softc *sc;
-	uint64_t clk_freq;
-	int error, i;
+	struct vf_i2c_softc *sc;
+	uint8_t div_reg = DIV_REG_UNSET;
 
 	sc = device_get_softc(dev);
 
+	if (sc->freq == UINT32_MAX)
+		return div_reg;
+#ifndef FDT
+	div_reg = vf610_div_table[nitems(vf610_div_table) - 1].reg_val;
+#else
 	if (sc->hwtype == HW_MVF600)
-		return 20;
+		div_reg = MVF600_DIV_REG;
+	else if (sc->freq == 0)
+		div_reg = vf610_div_table[nitems(vf610_div_table) - 1].reg_val;
+	else {
+		uint64_t clk_freq;
+		int error, i;
 
-	if (sc->freq == 0)
-		return vf610_div_table[nitems(vf610_div_table) - 1].reg_val;
+		error = clk_get_freq(sc->clock, &clk_freq);
+		if (error != 0) {
+			device_printf(dev, "Could not get parent clock frequency. "
+					"Using default divider.\n");
+			div_reg = vf610_div_table[nitems(vf610_div_table) - 1].reg_val;
+		} else {
 
-	error = clk_get_freq(sc->clock, &clk_freq);
-	if (error != 0) {
-		device_printf(dev, "Could not get parent clock frequency. "
-		    "Using default divider.\n");
-		return vf610_div_table[nitems(vf610_div_table) - 1].reg_val;
+			for (i = 0; i < nitems(vf610_div_table) - 1; i++)
+				if ((clk_freq / vf610_div_table[i].div) <= sc->freq)
+					break;
+			div_reg = vf610_div_table[i].reg_val;
+		}
 	}
-
-	for (i = 0; i < nitems(vf610_div_table) - 1; i++)
-		if ((clk_freq / vf610_div_table[i].div) <= sc->freq)
-			break;
-
-	return vf610_div_table[i].reg_val;
+#endif
+	vf_i2c_dbg(sc, "Writing 0x%02X to clock divider register\n", div_reg);
+	return div_reg;
 }
 
 static int
 i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 {
-	struct i2c_softc *sc;
-	uint32_t div;
+	struct vf_i2c_softc *sc;
+	uint8_t div_reg;
 
 	sc = device_get_softc(dev);
-	div = i2c_get_div_val(dev);
-	vf_i2c_dbg(sc, "Div val: %02x\n", div);
-
+	div_reg = i2c_get_div_val(dev);
 	vf_i2c_dbg(sc, "i2c reset\n");
-
-	switch (speed) {
-	case IIC_FAST:
-	case IIC_SLOW:
-	case IIC_UNKNOWN:
-	case IIC_FASTEST:
-	default:
-		break;
-	}
 
 	mtx_lock(&sc->mutex);
 	WRITE1(sc, I2C_IBCR, IBCR_MDIS);
 
-	DELAY(1000);
+	if(div_reg != DIV_REG_UNSET)
+		WRITE1(sc, I2C_IBFD, div_reg);
 
-	WRITE1(sc, I2C_IBFD, div);
 	WRITE1(sc, I2C_IBCR, 0x0); /* Enable i2c */
-
-	DELAY(1000);
 
 	mtx_unlock(&sc->mutex);
 
@@ -496,7 +470,7 @@ i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 static int
 i2c_read(device_t dev, char *buf, int len, int *read, int last, int delay)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 	int error;
 
 	sc = device_get_softc(dev);
@@ -509,36 +483,34 @@ i2c_read(device_t dev, char *buf, int len, int *read, int last, int delay)
 
 	if (len) {
 		if (len == 1)
-			WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_MSSL |	\
-			    IBCR_NOACK);
+			WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_MSSL | IBCR_NOACK);
 		else
 			WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_MSSL);
 
 		/* dummy read */
 		READ1(sc, I2C_IBDR);
-		DELAY(1000);
-	}
 
-	while (*read < len) {
-		error = wait_for_icf(sc);
-		if (error != 0) {
-			mtx_unlock(&sc->mutex);
-			return (error);
+		while (*read < len) {
+			error = wait_for_icf(sc);
+			if (error != 0) {
+				mtx_unlock(&sc->mutex);
+				return (error);
+			}
+
+			if (last) {
+				if (*read == len - 2) {
+					/* NO ACK on last byte */
+					WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_MSSL | IBCR_NOACK);
+
+				} else if (*read == len - 1) {
+					/* Transfer done, remove master bit */
+					WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_NOACK);
+				}
+			}
+
+			*buf++ = READ1(sc, I2C_IBDR);
+			(*read)++;
 		}
-
-		if ((*read == len - 2) && last) {
-			/* NO ACK on last byte */
-			WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_MSSL |	\
-			    IBCR_NOACK);
-		}
-
-		if ((*read == len - 1) && last) {
-			/* Transfer done, remove master bit */
-			WRITE1(sc, I2C_IBCR, IBCR_IBIE | IBCR_NOACK);
-		}
-
-		*buf++ = READ1(sc, I2C_IBDR);
-		(*read)++;
 	}
 	mtx_unlock(&sc->mutex);
 
@@ -548,7 +520,7 @@ i2c_read(device_t dev, char *buf, int len, int *read, int last, int delay)
 static int
 i2c_write(device_t dev, const char *buf, int len, int *sent, int timeout)
 {
-	struct i2c_softc *sc;
+	struct vf_i2c_softc *sc;
 	int error;
 
 	sc = device_get_softc(dev);
@@ -561,7 +533,7 @@ i2c_write(device_t dev, const char *buf, int len, int *sent, int timeout)
 	while (*sent < len) {
 		WRITE1(sc, I2C_IBDR, *buf++);
 
-		error = wait_for_iif(sc);
+		error = wait_for_icf(sc);
 		if (error != 0) {
 			mtx_unlock(&sc->mutex);
 			return (error);
@@ -579,20 +551,20 @@ i2c_write(device_t dev, const char *buf, int len, int *sent, int timeout)
 	return (IIC_NOERR);
 }
 
-static phandle_t
-i2c_get_node(device_t bus, device_t dev)
-{
-
-	return ofw_bus_get_node(bus);
-}
-
 static device_method_t i2c_methods[] = {
-	DEVMETHOD(device_probe,			i2c_probe),
-	DEVMETHOD(device_attach,		i2c_attach),
+	/* Device interface */
 	DEVMETHOD(device_detach,		i2c_detach),
 
-	DEVMETHOD(ofw_bus_get_node,		i2c_get_node),
+	/* Device interface */
+	DEVMETHOD(bus_setup_intr,		bus_generic_setup_intr),
+	DEVMETHOD(bus_teardown_intr,		bus_generic_teardown_intr),
+	DEVMETHOD(bus_alloc_resource,		bus_generic_alloc_resource),
+	DEVMETHOD(bus_release_resource,		bus_generic_release_resource),
+	DEVMETHOD(bus_activate_resource,	bus_generic_activate_resource),
+	DEVMETHOD(bus_deactivate_resource,	bus_generic_deactivate_resource),
+	DEVMETHOD(bus_adjust_resource,		bus_generic_adjust_resource),
 
+	/* iicbus interface */
 	DEVMETHOD(iicbus_callback,		iicbus_null_callback),
 	DEVMETHOD(iicbus_repeated_start,	i2c_repeated_start),
 	DEVMETHOD(iicbus_start,			i2c_start),
@@ -601,10 +573,11 @@ static device_method_t i2c_methods[] = {
 	DEVMETHOD(iicbus_read,			i2c_read),
 	DEVMETHOD(iicbus_write,			i2c_write),
 	DEVMETHOD(iicbus_transfer,		iicbus_transfer_gen),
-	{ 0, 0 }
+	DEVMETHOD_END
 };
 
-static DEFINE_CLASS_0(i2c, i2c_driver, i2c_methods, sizeof(struct i2c_softc));
-DRIVER_MODULE(vybrid_i2c, simplebus, i2c_driver, 0, 0);
-DRIVER_MODULE(iicbus, i2c, iicbus_driver, 0, 0);
-DRIVER_MODULE(ofw_iicbus, i2c, ofw_iicbus_driver, 0, 0);
+driver_t vf_i2c_driver = {
+	"i2c",
+	i2c_methods,
+	sizeof(struct vf_i2c_softc),
+};

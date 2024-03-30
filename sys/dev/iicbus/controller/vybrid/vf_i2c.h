@@ -1,7 +1,8 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2019 Dmitry Chagin <dchagin@FreeBSD.org>
+ * Copyright (c) 2014 Ruslan Bukin <br@bsdpad.com>
+ * Copyright (c) 2024 Pierre-Luc Drouin <pldrouin@pldrouin.net>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,28 +26,51 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUX_COMMON_H_
-#define _LINUX_COMMON_H_
+/*
+ * Vybrid Family Inter-Integrated Circuit (I2C)
+ * Originally based on Chapter 48, Vybrid Reference Manual, Rev. 5, 07/2013
+ * Currently based on Chapter 21, LX2160A Reference Manual, Rev. 1, 10/2021
+ *
+ * The current implementation is based on the original driver by Ruslan Bukin,
+ * later modified by Dawid Górecki, and split into FDT and ACPI drivers by Val
+ * Packett.
+ */
 
-int	ifname_bsd_to_linux_ifp(struct ifnet *, char *, size_t);
-int	ifname_bsd_to_linux_idx(u_int, char *, size_t);
-int	ifname_bsd_to_linux_name(const char *, char *, size_t);
-struct ifnet *ifname_linux_to_ifp(struct thread *, const char *);
-int	ifname_linux_to_bsd(struct thread *, const char *, char *);
+#ifndef __VF_I2C_H__
+#define __VF_I2C_H__
 
-unsigned short	linux_ifflags(struct ifnet *);
-int		linux_ifhwaddr(struct ifnet *ifp, struct l_sockaddr *lsa);
+#include "opt_acpi.h"
+#include "opt_platform.h"
 
-unsigned short	bsd_to_linux_ifflags(int);
-sa_family_t	linux_to_bsd_domain(sa_family_t domain);
-sa_family_t	bsd_to_linux_domain(sa_family_t domain);
-#define	AF_UNKNOWN	UINT8_MAX
-int		bsd_to_linux_sockaddr(const struct sockaddr *sa,
-		    struct l_sockaddr **lsa, socklen_t len);
-int		linux_to_bsd_sockaddr(const struct l_sockaddr *lsa,
-		    struct sockaddr **sap, socklen_t *len);
-void		linux_to_bsd_poll_events(struct thread *td, int fd,
-		    short lev, short *bev);
-void		bsd_to_linux_poll_events(short bev, short *lev);
+#ifdef FDT
+#include <dev/clk/clk.h>
+#endif
 
-#endif /* _LINUX_COMMON_H_ */
+#define VF_I2C_DEVSTR "Vybrid Family Inter-Integrated Circuit (I2C)"
+
+#define HW_MVF600       0x01
+#define HW_VF610        0x02
+
+#define MVF600_DIV_REG	0x14
+
+#define VF_I2C_DEFAULT_BUS_SPEED	100000
+
+struct vf_i2c_softc {
+	struct resource         *res[2];
+	bus_space_tag_t         bst;
+	bus_space_handle_t      bsh;
+	uint32_t                freq;
+	device_t                dev;
+	device_t                iicbus;
+	struct mtx              mutex;
+	uintptr_t               hwtype;
+#ifdef FDT
+	clk_t                   clock;
+#endif
+};
+
+extern driver_t vf_i2c_driver;
+
+device_attach_t vf_i2c_attach_common;
+
+#endif /* !__VF_I2C_H__ */
