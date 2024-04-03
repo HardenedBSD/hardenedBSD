@@ -225,13 +225,14 @@ db_pprint_enum(db_addr_t addr, struct ctf_type_v3 *type, u_int depth)
 	for (; ep < endp; ep++) {
 		if (val == ep->cte_value) {
 			valname = db_ctf_stroff_to_str(&sym_data, ep->cte_name);
-			if (valname != NULL)
-				db_printf("%s (0x%lx)", valname, (long)val);
-			else
-				db_printf("(0x%lx)", (long)val);
-			break;
+			if (valname != NULL) {
+				db_printf("%s (0x%lx)", valname, val);
+				break;
+			}
 		}
 	}
+	if (ep == endp)
+		db_printf("0x%lx", val);
 }
 
 /*
@@ -275,7 +276,7 @@ db_pprint_ptr(db_addr_t addr, struct ctf_type_v3 *type, u_int depth)
 		if (name != NULL)
 			db_printf("(%s%s *) 0x%lx", qual, name, (long)val);
 		else
-			db_printf("0x%lx", (long)val);
+			db_printf("(%s *) 0x%lx", qual, (long)val);
 	}
 }
 
