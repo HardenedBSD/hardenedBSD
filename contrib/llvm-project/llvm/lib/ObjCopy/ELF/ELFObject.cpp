@@ -1991,8 +1991,9 @@ template <class ELFT> void ELFWriter<ELFT>::writeEhdr() {
   Ehdr.e_ident[EI_MAG2] = 'L';
   Ehdr.e_ident[EI_MAG3] = 'F';
   Ehdr.e_ident[EI_CLASS] = ELFT::Is64Bits ? ELFCLASS64 : ELFCLASS32;
-  Ehdr.e_ident[EI_DATA] =
-      ELFT::TargetEndianness == support::big ? ELFDATA2MSB : ELFDATA2LSB;
+  Ehdr.e_ident[EI_DATA] = ELFT::TargetEndianness == llvm::endianness::big
+                              ? ELFDATA2MSB
+                              : ELFDATA2LSB;
   Ehdr.e_ident[EI_VERSION] = EV_CURRENT;
   Ehdr.e_ident[EI_OSABI] = Obj.OSABI;
   Ehdr.e_ident[EI_ABIVERSION] = Obj.ABIVersion;
@@ -2093,7 +2094,7 @@ template <class ELFT> void ELFWriter<ELFT>::writeSegmentData() {
                 Size);
   }
 
-  for (auto it : Obj.getUpdatedSections()) {
+  for (const auto &it : Obj.getUpdatedSections()) {
     SectionBase *Sec = it.first;
     ArrayRef<uint8_t> Data = it.second;
 
@@ -2639,9 +2640,36 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
 }
 
 Error BinaryWriter::write() {
-  for (const SectionBase &Sec : Obj.allocSections())
+  SmallVector<const SectionBase *, 30> SectionsToWrite;
+  for (const SectionBase &Sec : Obj.allocSections()) {
+    if (Sec.Type != SHT_NOBITS && Sec.Size > 0)
+      SectionsToWrite.push_back(&Sec);
+  }
+
+  if (SectionsToWrite.empty())
+    return Error::success();
+
+  llvm::stable_sort(SectionsToWrite,
+                    [](const SectionBase *LHS, const SectionBase *RHS) {
+                      return LHS->Offset < RHS->Offset;
+                    });
+
+  assert(SectionsToWrite.front()->Offset == 0);
+
+  for (size_t i = 0; i != SectionsToWrite.size(); ++i) {
+    const SectionBase &Sec = *SectionsToWrite[i];
     if (Error Err = Sec.accept(*SecWriter))
       return Err;
+    if (GapFill == 0)
+      continue;
+    uint64_t PadOffset = (i < SectionsToWrite.size() - 1)
+                             ? SectionsToWrite[i + 1]->Offset
+                             : Buf->getBufferSize();
+    assert(PadOffset <= Buf->getBufferSize());
+    assert(Sec.Offset + Sec.Size <= PadOffset);
+    std::fill(Buf->getBufferStart() + Sec.Offset + Sec.Size,
+              Buf->getBufferStart() + PadOffset, GapFill);
+  }
 
   // TODO: Implement direct writing to the output stream (without intermediate
   // memory buffer Buf).
@@ -2667,7 +2695,7 @@ Error BinaryWriter::finalize() {
   // file size. This might not be the same as the offset returned by
   // layoutSections, because we want to truncate the last segment to the end of
   // its last non-empty section, to match GNU objcopy's behaviour.
-  TotalSize = 0;
+  TotalSize = PadTo > MinAddr ? PadTo - MinAddr : 0;
   for (SectionBase &Sec : Obj.allocSections())
     if (Sec.Type != SHT_NOBITS && Sec.Size > 0) {
       Sec.Offset = Sec.Addr - MinAddr;
@@ -2699,11 +2727,11 @@ uint64_t IHexWriter::writeEntryPointRecord(uint8_t *Buf) {
   if (Obj.Entry <= 0xFFFFFU) {
     Data[0] = ((Obj.Entry & 0xF0000U) >> 12) & 0xFF;
     support::endian::write(&Data[2], static_cast<uint16_t>(Obj.Entry),
-                           support::big);
+                           llvm::endianness::big);
     HexData = IHexRecord::getLine(IHexRecord::StartAddr80x86, 0, Data);
   } else {
     support::endian::write(Data, static_cast<uint32_t>(Obj.Entry),
-                           support::big);
+                           llvm::endianness::big);
     HexData = IHexRecord::getLine(IHexRecord::StartAddr, 0, Data);
   }
   memcpy(Buf, HexData.data(), HexData.size());
