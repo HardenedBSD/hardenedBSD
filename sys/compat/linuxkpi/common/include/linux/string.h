@@ -37,6 +37,7 @@
 #include <linux/uaccess.h>
 #include <linux/err.h>
 #include <linux/bitops.h> /* for BITS_PER_LONG */
+#include <linux/overflow.h>
 #include <linux/stdarg.h>
 
 #include <sys/libkern.h>
@@ -212,6 +213,21 @@ strscpy_pad(char* dst, const char* src, size_t len)
 	bzero(dst, len);
 
 	return (strscpy(dst, src, len));
+}
+
+static inline char *
+strnchr(const char *cp, size_t n, int ch)
+{
+	char *p;
+
+	for (p = __DECONST(char *, cp); n--; ++p) {
+		if (*p == ch)
+			return (p);
+		if (*p == '\0')
+			break;
+	}
+
+	return (NULL);
 }
 
 static inline void *
