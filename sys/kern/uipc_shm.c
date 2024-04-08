@@ -1179,7 +1179,6 @@ kern_shm_open2(struct thread *td, const char *userpath, int flags, mode_t mode,
 	 * shm_open(2) is only allowed for anonymous objects when SHM hardening
 	 * (a HardenedBSD-specific feature) is disabled for the process.
 	 */
-<<<<<<< HEAD
 	if (IN_CAPABILITY_MODE(td)) {
 #ifdef PAX_HARDENING
 		if (pax_harden_shm(td)) {
@@ -1189,13 +1188,13 @@ kern_shm_open2(struct thread *td, const char *userpath, int flags, mode_t mode,
 		if (userpath != SHM_ANON) {
 			return (ECAPMODE);
 		}
-=======
+	}
+
 	if (userpath != SHM_ANON) {
 		if (CAP_TRACING(td))
 			ktrcapfail(CAPFAIL_NAMEI, userpath);
 		if (IN_CAPABILITY_MODE(td))
 			return (ECAPMODE);
->>>>>>> internal/freebsd/current/main
 	}
 #endif
 

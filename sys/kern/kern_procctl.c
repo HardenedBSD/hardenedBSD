@@ -27,11 +27,8 @@
  * SUCH DAMAGE.
  */
 
-<<<<<<< HEAD
-#include "opt_pax.h"
-=======
 #include "opt_ktrace.h"
->>>>>>> internal/freebsd/current/main
+#include "opt_pax.h"
 
 #include <sys/param.h>
 #include <sys/_unrhdr.h>
