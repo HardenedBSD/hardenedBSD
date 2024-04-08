@@ -1,11 +1,12 @@
-// SPDX-License-Identifier: 0BSD
-
 ///////////////////////////////////////////////////////////////////////////////
 //
 /// \file       filter_decoder.c
 /// \brief      Filter ID mapping to filter-specific functions
 //
 //  Author:     Lasse Collin
+//
+//  This file has been put into the public domain.
+//  You can do whatever you want with this file.
 //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -158,16 +159,6 @@ static const lzma_filter_encoder encoders[] = {
 		.props_encode = &lzma_simple_props_encode,
 	},
 #endif
-#ifdef HAVE_ENCODER_RISCV
-	{
-		.id = LZMA_FILTER_RISCV,
-		.init = &lzma_simple_riscv_encoder_init,
-		.memusage = NULL,
-		.block_size = NULL,
-		.props_size_get = &lzma_simple_props_size,
-		.props_encode = &lzma_simple_props_encode,
-	},
-#endif
 #ifdef HAVE_ENCODER_DELTA
 	{
 		.id = LZMA_FILTER_DELTA,
@@ -229,17 +220,17 @@ lzma_filters_update(lzma_stream *strm, const lzma_filter *filters)
 
 extern lzma_ret
 lzma_raw_encoder_init(lzma_next_coder *next, const lzma_allocator *allocator,
-		const lzma_filter *filters)
+		const lzma_filter *options)
 {
 	return lzma_raw_coder_init(next, allocator,
-			filters, (lzma_filter_find)(&encoder_find), true);
+			options, (lzma_filter_find)(&encoder_find), true);
 }
 
 
 extern LZMA_API(lzma_ret)
-lzma_raw_encoder(lzma_stream *strm, const lzma_filter *filters)
+lzma_raw_encoder(lzma_stream *strm, const lzma_filter *options)
 {
-	lzma_next_strm_init(lzma_raw_coder_init, strm, filters,
+	lzma_next_strm_init(lzma_raw_coder_init, strm, options,
 			(lzma_filter_find)(&encoder_find), true);
 
 	strm->internal->supported_actions[LZMA_RUN] = true;
