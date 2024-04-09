@@ -186,10 +186,17 @@ free_ddp_buffer(struct tom_data *td, struct ddp_buffer *db)
 		 */
 		if (!aio_clear_cancel_function(db->job))
 			ddp_complete_one(db->job, 0);
+#ifdef INVARIANTS
+		db->job = NULL;
+#endif
 	}
 
-	if (db->ps)
+	if (db->ps) {
 		free_pageset(td, db->ps);
+#ifdef INVARIANTS
+		db->ps = NULL;
+#endif
+	}
 }
 
 void
@@ -319,8 +326,11 @@ insert_ddp_data(struct toepcb *toep, uint32_t n)
 		placed = n;
 		if (placed > job->uaiocb.aio_nbytes - copied)
 			placed = job->uaiocb.aio_nbytes - copied;
-		if (placed > 0)
+		if (placed > 0) {
 			job->msgrcv = 1;
+			toep->ofld_rxq->rx_aio_ddp_jobs++;
+		}
+		toep->ofld_rxq->rx_aio_ddp_octets += placed;
 		if (!aio_clear_cancel_function(job)) {
 			/*
 			 * Update the copied length for when
@@ -560,6 +570,8 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	CURVNET_RESTORE();
 
 	job->msgrcv = 1;
+	toep->ofld_rxq->rx_aio_ddp_jobs++;
+	toep->ofld_rxq->rx_aio_ddp_octets += len;
 	if (db->cancel_pending) {
 		/*
 		 * Update the job's length but defer completion to the
@@ -724,8 +736,11 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, __be32 rcv_nxt)
 		placed = len;
 		if (placed > job->uaiocb.aio_nbytes - copied)
 			placed = job->uaiocb.aio_nbytes - copied;
-		if (placed > 0)
+		if (placed > 0) {
 			job->msgrcv = 1;
+			toep->ofld_rxq->rx_aio_ddp_jobs++;
+		}
+		toep->ofld_rxq->rx_aio_ddp_octets += placed;
 		if (!aio_clear_cancel_function(job)) {
 			/*
 			 * Update the copied length for when
