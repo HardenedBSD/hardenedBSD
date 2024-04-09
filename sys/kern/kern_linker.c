@@ -1216,6 +1216,8 @@ kern_kldunload(struct thread *td, int fileid, int flags)
 			printf("kldunload: attempt to unload file that was"
 			    " loaded by the kernel\n");
 			error = EBUSY;
+		} else if (lf->refs > 1) {
+			error = EBUSY;
 		} else {
 			lf->userrefs--;
 			error = linker_file_unload(lf, flags);
@@ -1812,6 +1814,9 @@ linker_preload_finish(void *arg)
 
 	sx_xlock(&kld_sx);
 	TAILQ_FOREACH_SAFE(lf, &linker_files, link, nlf) {
+		if (lf == linker_kernel_file)
+			continue;
+
 		/*
 		 * If all of the modules in this file failed to load, unload
 		 * the file and return an error of ENOEXEC.  (Parity with
