@@ -1001,10 +1001,8 @@ uipc_sosend_stream_or_seqpacket(struct socket *so, struct sockaddr *addr,
 	MPASS((uio != NULL && m == NULL) || (m != NULL && uio == NULL));
 	MPASS(m == NULL || c == NULL);
 
-	if (__predict_false(flags & MSG_OOB)) {
-		error = EOPNOTSUPP;
-		goto out;
-	}
+	if (__predict_false(flags & MSG_OOB))
+		return (EOPNOTSUPP);
 
 	nonblock = (so->so_state & SS_NBIO) ||
 	    (flags & (MSG_DONTWAIT | MSG_NBIO));
@@ -1368,7 +1366,8 @@ restart:
 				UIPC_STREAM_SBCHECK(sb);
 				MPASS(!(sb->sb_state & SBS_CANTRCVMORE));
 				/* XXXGL: STAILQ_PREPEND */
-				if (STAILQ_EMPTY(&sb->sb_mbq))
+				if (STAILQ_EMPTY(&sb->sb_mbq) &&
+				    control != NULL)
 					STAILQ_INSERT_HEAD(&sb->sb_mbq,
 					    control, m_stailq);
 				else
