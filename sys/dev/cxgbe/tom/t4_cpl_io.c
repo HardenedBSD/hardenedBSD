@@ -1753,17 +1753,18 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 		if (changed) {
 			if (toep->ddp.flags & DDP_SC_REQ)
 				toep->ddp.flags ^= DDP_ON | DDP_SC_REQ;
-			else {
-				KASSERT(cpl->ddp_off == 1,
-				    ("%s: DDP switched on by itself.",
-				    __func__));
-
+			else if (cpl->ddp_off == 1) {
 				/* Fell out of DDP mode */
 				toep->ddp.flags &= ~DDP_ON;
 				CTR1(KTR_CXGBE, "%s: fell out of DDP mode",
 				    __func__);
 
 				insert_ddp_data(toep, ddp_placed);
+			} else {
+				/*
+				 * Data was received while still
+				 * ULP_MODE_NONE, just fall through.
+				 */
 			}
 		}
 
@@ -2173,6 +2174,7 @@ t4_aiotx_process_job(struct toepcb *toep, struct socket *so, struct kaiocb *job)
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	struct mbuf *m;
+	u_int sent;
 	int error, len;
 	bool moretocome, sendmore;
 
@@ -2275,7 +2277,9 @@ sendanother:
 		goto out;
 	}
 
-	job->aio_sent += m_length(m, NULL);
+	sent = m_length(m, NULL);
+	job->aio_sent += sent;
+	counter_u64_add(toep->ofld_txq->tx_aio_octets, sent);
 
 	sbappendstream(sb, m, 0);
 	m = NULL;
@@ -2328,6 +2332,7 @@ sendanother:
 	 * socket.
 	 */
 	aiotx_free_job(job);
+	counter_u64_add(toep->ofld_txq->tx_aio_jobs, 1);
 
 out:
 	if (error) {

@@ -73,8 +73,9 @@ enum {
 	TPF_KTLS           = (1 << 11), /* send TLS records from KTLS */
 	TPF_INITIALIZED    = (1 << 12), /* init_toepcb has been called */
 	TPF_TLS_RECEIVE	   = (1 << 13), /* should receive TLS records */
-	TPF_TLS_RX_QUIESCED = (1 << 14), /* RX quiesced for TLS RX startup */
-	TPF_WAITING_FOR_FINAL = (1<< 15), /* waiting for wakeup on final CPL */
+	TPF_TLS_RX_QUIESCING = (1 << 14), /* RX quiesced for TLS RX startup */
+	TPF_TLS_RX_QUIESCED = (1 << 15), /* RX quiesced for TLS RX startup */
+	TPF_WAITING_FOR_FINAL = (1<< 16), /* waiting for wakeup on final CPL */
 };
 
 enum {
@@ -505,7 +506,6 @@ int t4_aio_queue_ddp(struct socket *, struct kaiocb *);
 void t4_ddp_mod_load(void);
 void t4_ddp_mod_unload(void);
 void ddp_assert_empty(struct toepcb *);
-void ddp_init_toep(struct toepcb *);
 void ddp_uninit_toep(struct toepcb *);
 void ddp_queue_toep(struct toepcb *);
 void release_ddp_resources(struct toepcb *toep);
