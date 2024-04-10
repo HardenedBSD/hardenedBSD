@@ -238,19 +238,6 @@ options 	DEVICE_POLLING
 
 options 	BPF_JITTER
 
-# OpenFabrics Enterprise Distribution (Infiniband).
-options 	OFED
-options 	OFED_DEBUG_INIT
-
-# Sockets Direct Protocol
-options 	SDP
-options 	SDP_DEBUG
-
-# IP over Infiniband
-options 	IPOIB
-options 	IPOIB_DEBUG
-options 	IPOIB_CM
-
 
 #####################################################################
 # CLOCK OPTIONS
@@ -646,11 +633,6 @@ device		ips
 # Intel C600 (Patsburg) integrated SAS controller
 device		isci
 options 	ISCI_LOGGING	# enable debugging in isci HAL
-
-#
-# NVM Express (NVMe) support
-device         nvme    # base NVMe driver
-device         nvd     # expose NVMe namespaces as disks, depends on nvme
 
 #
 # Intel Volume Management Device (VMD) support

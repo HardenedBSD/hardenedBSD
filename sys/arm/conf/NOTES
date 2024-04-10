@@ -74,6 +74,12 @@ nooptions	COMPAT_FREEBSD9
 nooptions	PPC_PROBE_CHIPSET
 nooptions	MAXCPU		# value is set in machine/param.h
 
+nooptions 	OFED
+nooptions 	SDP
+nooptions 	IPOIB
+nooptions 	IPOIB_CM
+
+nodevice	iser
 nodevice	sym
 
 nodevice	ccr

@@ -771,6 +771,19 @@ options 	SCTP_PACKET_LOGGING
 options 	SCTP_LTRACE_CHUNKS
 options 	SCTP_LTRACE_ERRORS
 
+# OpenFabrics Enterprise Distribution (Infiniband).
+options 	OFED
+options 	OFED_DEBUG_INIT
+
+# Sockets Direct Protocol
+options 	SDP
+options 	SDP_DEBUG
+
+# IP over Infiniband
+options 	IPOIB
+options 	IPOIB_DEBUG
+options 	IPOIB_CM
+
 # altq(9). Enable the base part of the hooks with the ALTQ option.
 # Individual disciplines must be built into the base system and can not be
 # loaded as modules at this point. ALTQ requires a stable TSC so if yours is
@@ -1448,6 +1461,19 @@ options 	SCSI_PT_DEFAULT_TIMEOUT=60
 # a topology with the SES device that's on the box these drives are in....
 options 	SES_ENABLE_PASSTHROUGH
 
+# iSCSI
+#
+# iSCSI permits access to SCSI peripherals over a network connection
+# (e.g. via a TCP/IP socket)
+
+device		cfiscsi		# CAM Target Layer iSCSI target frontend
+device		iscsi		# iSCSI initiator
+device		iser		# iSCSI Extensions for RDMA (iSER) initiator
+
+# Options used in dev/iscsi (Software iSCSI stack)
+#
+options 	ISCSI_INITIATOR_DEBUG=9
+
 
 #####################################################################
 # MISCELLANEOUS DEVICES AND OPTIONS
@@ -1607,10 +1633,6 @@ options 	AHD_REG_PRETTY_PRINT
 # Bitmap of units to enable targetmode operations.
 options 	AHD_TMODE_ENABLE
 
-# Options used in dev/iscsi (Software iSCSI stack)
-#
-options 	ISCSI_INITIATOR_DEBUG=9
-
 # Options used in dev/isp/ (Qlogic SCSI/FC driver).
 #
 #	ISP_TARGET_MODE		-	enable target mode operation
@@ -1653,6 +1675,17 @@ device		mfip		# LSI MegaRAID SAS passthrough, requires CAM
 options 	MFI_DEBUG
 device		mrsas		# LSI/Avago MegaRAID SAS/SATA, 6Gb/s and 12Gb/s
 
+# NVM Express
+#
+# nvme:	PCI-express NVM Express host controllers
+# nda:	CAM NVMe disk driver
+# nvd:	non-CAM NVMe disk driver
+
+device		nvme		# base NVMe driver
+options 	NVME_USE_NVD=1	# Use nvd(4) instead of the CAM nda(4) driver
+device		nda		# NVMe direct access devices (aka disks)
+device		nvd		# expose NVMe namespaces as disks, depends on nvme
+
 #
 # Serial ATA host controllers:
 #
@@ -1663,9 +1696,10 @@ device		mrsas		# LSI/Avago MegaRAID SAS/SATA, 6Gb/s and 12Gb/s
 # These drivers are part of cam(4) subsystem. They supersede less featured
 # ata(4) subsystem drivers, supporting same hardware.
 
-device		ahci
-device		mvs
-device		siis
+device		ahci		# AHCI-compatible SATA controllers
+device		mvs		# Marvell 88SX50XX/88SX60XX/88SX70XX/SoC SATA
+device		siis		# SiliconImage SiI3124/SiI3132/SiI3531 SATA
+device		ada		# ATA/SATA direct access devices (aka disks)
 
 #
 # The 'ATA' driver supports all legacy ATA/ATAPI controllers, including
@@ -1675,7 +1709,7 @@ device		siis
 # the 'atacore' driver then selecting the drivers on a per vendor basis.
 # For example to build a system which only supports a VIA chipset,
 # omit 'ata' and include the 'atacore', 'atapci' and 'atavia' drivers.
-device		ata
+device		ata		# Legacy ATA/SATA controllers
 
 # Modular ATA
 #device		atacore		# Core ATA functionality
