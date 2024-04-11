@@ -29,56 +29,44 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_ARM64_SCMI_SCMI_H_
-#define	_ARM64_SCMI_SCMI_H_
+#ifndef	_ARM64_SCMI_SCMI_SHMEM_H_
+#define	_ARM64_SCMI_SCMI_SHMEM_H_
 
-#include "scmi_if.h"
-
-#define SCMI_MAX_MSG		32
-#define SCMI_MAX_MSG_PAYLD_SIZE	128
-#define SCMI_MAX_MSG_REPLY_SIZE	(SCMI_MAX_MSG_PAYLD_SIZE - sizeof(uint32_t))
-#define SCMI_MAX_MSG_SIZE	(SCMI_MAX_MSG_PAYLD_SIZE + sizeof(uint32_t))
-
-enum scmi_chan {
-	SCMI_CHAN_A2P,
-	SCMI_CHAN_P2A,
-	SCMI_CHAN_MAX
+/* Shared Memory Transfer. */
+struct scmi_smt_header {
+	uint32_t reserved;
+	uint32_t channel_status;
+#define	SCMI_SHMEM_CHAN_STAT_CHANNEL_ERROR	(1 << 1)
+#define	SCMI_SHMEM_CHAN_STAT_CHANNEL_FREE	(1 << 0)
+	uint32_t reserved1[2];
+	uint32_t flags;
+#define	SCMI_SHMEM_FLAG_INTR_ENABLED		(1 << 0)
+	uint32_t length;
+	uint32_t msg_header;
+	uint8_t msg_payload[0];
 };
 
-struct scmi_transport_desc {
-	bool no_completion_irq;
-	unsigned int reply_timo_ms;
-};
+#define	SMT_SIZE_HEADER			sizeof(struct scmi_smt_header)
 
-struct scmi_transport;
+#define	SMT_OFFSET_CHAN_STATUS		\
+	__offsetof(struct scmi_smt_header, channel_status)
+#define	SMT_SIZE_CHAN_STATUS		sizeof(uint32_t)
 
-struct scmi_softc {
-	struct simplebus_softc		simplebus_sc;
-	device_t			dev;
-	struct mtx			mtx;
-	struct scmi_transport_desc	trs_desc;
-	struct scmi_transport		*trs;
-};
+#define	SMT_OFFSET_LENGTH		\
+	__offsetof(struct scmi_smt_header, length)
+#define	SMT_SIZE_LENGTH			sizeof(uint32_t)
 
-struct scmi_msg {
-	bool		polling;
-	int		poll_done;
-	uint32_t	tx_len;
-	uint32_t	rx_len;
-#define SCMI_MSG_HDR_SIZE	(sizeof(uint32_t))
-	uint32_t	hdr;
-	uint8_t		payld[];
-};
-#define hdr_to_msg(h)	__containerof((h), struct scmi_msg, hdr)
+#define	SMT_OFFSET_MSG_HEADER		\
+    __offsetof(struct scmi_smt_header, msg_header)
+#define	SMT_SIZE_MSG_HEADER		sizeof(uint32_t)
 
-void *scmi_buf_get(device_t dev, uint8_t protocol_id, uint8_t message_id,
-		   int tx_payd_sz, int rx_payld_sz);
-void scmi_buf_put(device_t dev, void *buf);
-int scmi_request(device_t dev, void *in, void **);
-void scmi_rx_irq_callback(device_t dev, void *chan, uint32_t hdr);
+device_t scmi_shmem_get(device_t sdev, phandle_t node, int index);
+int scmi_shmem_prepare_msg(device_t dev, uint8_t *msg, uint32_t tx_len,
+    bool polling);
+bool scmi_shmem_poll_msg(device_t dev, uint32_t *msg_header);
+int scmi_shmem_read_msg_header(device_t dev, uint32_t *msg_header);
+int scmi_shmem_read_msg_payload(device_t dev, uint8_t *buf, uint32_t buf_len);
+void scmi_shmem_tx_complete(device_t);
+void scmi_shmem_clear_channel(device_t);
 
-DECLARE_CLASS(scmi_driver);
-
-int scmi_attach(device_t dev);
-
-#endif /* !_ARM64_SCMI_SCMI_H_ */
+#endif /* !_ARM64_SCMI_SCMI_SHMEM_H_ */
