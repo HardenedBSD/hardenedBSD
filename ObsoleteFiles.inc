@@ -51,7 +51,10 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
-# 2024mmdd: new clang import which bumps version from 17 to 18
+# 20240414: unix_socketpair_test renamed
+OLD_FILES+=usr/tests/sys/kern/unix_socketpair_test
+
+# 20240406: new clang import which bumps version from 17 to 18
 OLD_FILES+=usr/lib/clang/17/include/__clang_cuda_builtin_vars.h
 OLD_FILES+=usr/lib/clang/17/include/__clang_cuda_cmath.h
 OLD_FILES+=usr/lib/clang/17/include/__clang_cuda_complex_builtins.h
@@ -442,7 +445,7 @@ OLD_FILES+=usr/lib/clang/17/share/msan_ignorelist.txt
 OLD_DIRS+=usr/lib/clang/17/share
 OLD_DIRS+=usr/lib/clang/17
 
-# 2024mmdd: new libc++ import which bumps version from 17 to 18
+# 20240406: new libc++ import which bumps version from 17 to 18
 OLD_FILES+=usr/include/c++/v1/__pstl/internal/algorithm_fwd.h
 OLD_FILES+=usr/include/c++/v1/__pstl/internal/algorithm_impl.h
 OLD_FILES+=usr/include/c++/v1/__pstl/internal/execution_defs.h
