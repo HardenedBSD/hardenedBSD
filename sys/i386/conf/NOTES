@@ -333,19 +333,6 @@ options 	PMAP_SHPGPERPROC=201
 #
 options 	NKPT=31
 
-<<<<<<< HEAD
-#
-# HID-over-I2C support
-#
-device		iichid		# HID-over-I2C support
-options 	IICHID_DEBUG	# Enable HID-over-I2C debug messages
-options 	IICHID_SAMPLING	# Workaround missing GPIO INTR support
-
-#####################################################################
-# VM OPTIONS
-
-=======
->>>>>>> internal/freebsd/current/main
 # KSTACK_PAGES is the number of memory pages to assign to the kernel
 # stack of each thread.
 
