@@ -824,122 +824,9 @@ static int num_pct_s(char *lessopen)
  * See if we should open a "replacement file" 
  * instead of the file we're about to open.
  */
-public char * open_altfile(char *filename, int *pf, void **pfd)
+public char * open_altfile(char *filename __unused, int *pf __unused, void **pfd __unused)
 {
-#if !HAVE_POPEN
 	return (NULL);
-#else
-	char *lessopen;
-	char *qfilename;
-	char *cmd;
-	int len;
-	FILE *fd;
-#if HAVE_FILENO
-	int returnfd = 0;
-#endif
-	
-	if (!use_lessopen || secure)
-		return (NULL);
-	ch_ungetchar(-1);
-	if ((lessopen = lgetenv("LESSOPEN")) == NULL)
-		return (NULL);
-	while (*lessopen == '|')
-	{
-		/*
-		 * If LESSOPEN starts with a |, it indicates 
-		 * a "pipe preprocessor".
-		 */
-#if !HAVE_FILENO
-		error("LESSOPEN pipe is not supported", NULL_PARG);
-		return (NULL);
-#else
-		lessopen++;
-		returnfd++;
-#endif
-	}
-	if (*lessopen == '-')
-	{
-		/*
-		 * Lessopen preprocessor will accept "-" as a filename.
-		 */
-		lessopen++;
-	} else
-	{
-		if (strcmp(filename, "-") == 0)
-			return (NULL);
-	}
-	if (num_pct_s(lessopen) != 1)
-	{
-		error("LESSOPEN ignored: must contain exactly one %%s", NULL_PARG);
-		return (NULL);
-	}
-
-	qfilename = shell_quote(filename);
-	len = (int) (strlen(lessopen) + strlen(qfilename) + 2);
-	cmd = (char *) ecalloc(len, sizeof(char));
-	SNPRINTF1(cmd, len, lessopen, qfilename);
-	free(qfilename);
-	fd = shellcmd(cmd);
-	free(cmd);
-	if (fd == NULL)
-	{
-		/*
-		 * Cannot create the pipe.
-		 */
-		return (NULL);
-	}
-#if HAVE_FILENO
-	if (returnfd)
-	{
-		char c;
-		int f;
-
-		/*
-		 * The alt file is a pipe. Read one char 
-		 * to see if the pipe will produce any data.
-		 * If it does, push the char back on the pipe.
-		 */
-		f = fileno(fd);
-		SET_BINARY(f);
-		if (read(f, &c, 1) != 1)
-		{
-			/*
-			 * Pipe is empty.
-			 * If more than 1 pipe char was specified,
-			 * the exit status tells whether the file itself 
-			 * is empty, or if there is no alt file.
-			 * If only one pipe char, just assume no alt file.
-			 */
-			int status = pclose(fd);
-			if (returnfd > 1 && status == 0) {
-				/* File is empty. */
-				*pfd = NULL;
-				*pf = -1;
-				return (save(FAKE_EMPTYFILE));
-			}
-			/* No alt file. */
-			return (NULL);
-		}
-		/* Alt pipe contains data, so use it. */
-		ch_ungetchar(c);
-		*pfd = (void *) fd;
-		*pf = f;
-		return (save("-"));
-	}
-#endif
-	/* The alt file is a regular file. Read its name from LESSOPEN. */
-	cmd = readfd(fd);
-	pclose(fd);
-	if (*cmd == '\0')
-	{
-		/*
-		 * Pipe is empty.  This means there is no alt file.
-		 */
-		free(cmd);
-		return (NULL);
-	}
-	return (cmd);
-#endif /* HAVE_POPEN */
 }
 
 /*
@@ -947,36 +834,6 @@ public char * open_altfile(char *filename, int *pf, void **pfd)
  */
 public void close_altfile(char *altfilename, char *filename)
 {
-#if HAVE_POPEN
-	char *lessclose;
-	char *qfilename;
-	char *qaltfilename;
-	FILE *fd;
-	char *cmd;
-	int len;
-	
-	if (secure)
-		return;
-	ch_ungetchar(-1);
-	if ((lessclose = lgetenv("LESSCLOSE")) == NULL)
-		return;
-	if (num_pct_s(lessclose) > 2) 
-	{
-		error("LESSCLOSE ignored; must contain no more than 2 %%s", NULL_PARG);
-		return;
-	}
-	qfilename = shell_quote(filename);
-	qaltfilename = shell_quote(altfilename);
-	len = (int) (strlen(lessclose) + strlen(qfilename) + strlen(qaltfilename) + 2);
-	cmd = (char *) ecalloc(len, sizeof(char));
-	SNPRINTF2(cmd, len, lessclose, qfilename, qaltfilename);
-	free(qaltfilename);
-	free(qfilename);
-	fd = shellcmd(cmd);
-	free(cmd);
-	if (fd != NULL)
-		pclose(fd);
-#endif
 }
 		
 /*
