@@ -74,6 +74,8 @@
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 
+#include <vm/uma.h>
+
 #ifdef REGRESSION
 FEATURE(regression,
     "Kernel support for interfaces necessary for regression testing (SECURITY RISK!)");

@@ -621,8 +621,13 @@ LIBOPTS?=	${LIBOPTSDIR}/libopts.a
 LIBPARSEDIR=	${_LIB_OBJTOP}/usr.sbin/ntp/libparse
 LIBPARSE?=	${LIBPARSEDIR}/libparse.a
 
+<<<<<<< HEAD
 LIBPFCTL=	${_LIB_OBJTOP}/lib/libpfctl
 LIBPFCTL?=	${LIBPFCTLDIR}/libpfctl.a
+=======
+LIBPFCTLDIR=	${_LIB_OBJTOP}/lib/libpfctl
+LIBPFCTL?=	${LIBPFCTLDIR}/libpfctl${PIE_SUFFIX}.a
+>>>>>>> internal/freebsd/current/main
 
 LIBLPRDIR=	${_LIB_OBJTOP}/usr.sbin/lpr/common_source
 LIBLPR?=	${LIBLPRDIR}/liblpr.a

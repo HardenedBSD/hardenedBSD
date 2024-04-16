@@ -35,6 +35,7 @@
 #include <sys/systm.h>
 #include <sys/capsicum.h>
 #include <sys/lock.h>
+#include <sys/malloc.h>
 #include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/priv.h>
