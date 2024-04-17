@@ -30,9 +30,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/mman.h>
-#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -159,7 +156,6 @@ static void	metadata_log(const char *, const char *, struct timespec *,
 		    const char *, const char *, off_t);
 static int	parseid(const char *, id_t *);
 static int	strip(const char *, int, const char *, char **);
-static int	trymmap(size_t);
 static void	usage(void);
 
 int
@@ -375,8 +371,8 @@ main(int argc, char *argv[])
 				err(EX_OSERR, "%s vanished", to_name);
 			if (S_ISLNK(to_sb.st_mode)) {
 				if (argc != 2) {
-					errno = ENOTDIR;
-					err(EX_USAGE, "%s", to_name);
+					errc(EX_CANTCREAT, ENOTDIR, "%s",
+					    to_name);
 				}
 				install(*argv, to_name, fset, iflags);
 				exit(EX_OK);
@@ -402,14 +398,13 @@ main(int argc, char *argv[])
 	if (!no_target && !dolink) {
 		if (stat(*argv, &from_sb))
 			err(EX_OSERR, "%s", *argv);
-		if (!S_ISREG(to_sb.st_mode)) {
-			errno = EFTYPE;
-			err(EX_OSERR, "%s", to_name);
-		}
+		if (!S_ISREG(to_sb.st_mode))
+			errc(EX_CANTCREAT, EFTYPE, "%s", to_name);
 		if (to_sb.st_dev == from_sb.st_dev &&
-		    to_sb.st_ino == from_sb.st_ino)
-			errx(EX_USAGE, 
-			    "%s and %s are the same file", *argv, to_name);
+		    to_sb.st_ino == from_sb.st_ino) {
+			errx(EX_USAGE, "%s and %s are the same file",
+			    *argv, to_name);
+		}
 	}
 	install(*argv, to_name, fset, iflags);
 	exit(EX_OK);
@@ -753,10 +748,10 @@ makelink(const char *from_name, const char *to_name,
 			if (realpath(dir, dst) == NULL)
 				err(EX_OSERR, "%s: realpath", dir);
 			if (strcmp(dst, "/") != 0 &&
-			    strlcat(dst, "/", sizeof(dst)) > sizeof(dst))
+			    strlcat(dst, "/", sizeof(dst)) >= sizeof(dst))
 				errx(1, "resolved pathname too long");
 		}
-		if (strlcat(dst, base, sizeof(dst)) > sizeof(dst))
+		if (strlcat(dst, base, sizeof(dst)) >= sizeof(dst))
 			errx(1, "resolved pathname too long");
 		free(to_name_copy);
 
@@ -823,10 +818,8 @@ install(const char *from_name, const char *to_name, u_long fset, u_int flags)
 		if (!dolink) {
 			if (stat(from_name, &from_sb))
 				err(EX_OSERR, "%s", from_name);
-			if (!S_ISREG(from_sb.st_mode)) {
-				errno = EFTYPE;
-				err(EX_OSERR, "%s", from_name);
-			}
+			if (!S_ISREG(from_sb.st_mode))
+				errc(EX_OSERR, EFTYPE, "%s", from_name);
 		}
 		/* Build the target path. */
 		if (flags & DIRECTORY) {
@@ -850,11 +843,8 @@ install(const char *from_name, const char *to_name, u_long fset, u_int flags)
 		return;
 	}
 
-	if (target && !S_ISREG(to_sb.st_mode) && !S_ISLNK(to_sb.st_mode)) {
-		errno = EFTYPE;
-		warn("%s", to_name);
-		return;
-	}
+	if (target && !S_ISREG(to_sb.st_mode) && !S_ISLNK(to_sb.st_mode))
+		errc(EX_CANTCREAT, EFTYPE, "%s", to_name);
 
 	if (!devnull && (from_fd = open(from_name, O_RDONLY, 0)) < 0)
 		err(EX_OSERR, "%s", from_name);
@@ -1093,86 +1083,62 @@ compare(int from_fd, const char *from_name __unused, size_t from_len,
 	int to_fd, const char *to_name __unused, size_t to_len,
 	char **dresp)
 {
-	char *p, *q;
 	int rv;
-	int do_digest, done_compare;
+	int do_digest;
 	DIGEST_CTX ctx;
 
-	rv = 0;
 	if (from_len != to_len)
 		return 1;
 
 	do_digest = (digesttype != DIGEST_NONE && dresp != NULL &&
 	    *dresp == NULL);
 	if (from_len <= MAX_CMP_SIZE) {
+		static char *buf, *buf1, *buf2;
+		static size_t bufsize;
+		int n1, n2;
+
 		if (do_digest)
 			digest_init(&ctx);
-		done_compare = 0;
-		if (trymmap(from_len) && trymmap(to_len)) {
-			p = mmap(NULL, from_len, PROT_READ, MAP_SHARED,
-			    from_fd, (off_t)0);
-			if (p == MAP_FAILED)
-				goto out;
-			q = mmap(NULL, from_len, PROT_READ, MAP_SHARED,
-			    to_fd, (off_t)0);
-			if (q == MAP_FAILED) {
-				munmap(p, from_len);
-				goto out;
-			}
 
-			rv = memcmp(p, q, from_len);
-			if (do_digest)
-				digest_update(&ctx, p, from_len);
-			munmap(p, from_len);
-			munmap(q, from_len);
-			done_compare = 1;
+		if (buf == NULL) {
+			/*
+			 * Note that buf and bufsize are static. If
+			 * malloc() fails, it will fail at the start
+			 * and not copy only some files.
+			 */
+			if (sysconf(_SC_PHYS_PAGES) > PHYSPAGES_THRESHOLD)
+				bufsize = MIN(BUFSIZE_MAX, MAXPHYS * 8);
+			else
+				bufsize = BUFSIZE_SMALL;
+			buf = malloc(bufsize * 2);
+			if (buf == NULL)
+				err(1, "Not enough memory");
+			buf1 = buf;
+			buf2 = buf + bufsize;
 		}
-	out:
-		if (!done_compare) {
-			static char *buf, *buf1, *buf2;
-			static size_t bufsize;
-			int n1, n2;
-
-			if (buf == NULL) {
-				/*
-				 * Note that buf and bufsize are static. If
-				 * malloc() fails, it will fail at the start
-				 * and not copy only some files.
-				 */
-				if (sysconf(_SC_PHYS_PAGES) >
-				    PHYSPAGES_THRESHOLD)
-					bufsize = MIN(BUFSIZE_MAX, MAXPHYS * 8);
+		rv = 0;
+		lseek(from_fd, 0, SEEK_SET);
+		lseek(to_fd, 0, SEEK_SET);
+		while (rv == 0) {
+			n1 = read(from_fd, buf1, bufsize);
+			if (n1 == 0)
+				break;		/* EOF */
+			else if (n1 > 0) {
+				n2 = read(to_fd, buf2, n1);
+				if (n2 == n1)
+					rv = memcmp(buf1, buf2, n1);
 				else
-					bufsize = BUFSIZE_SMALL;
-				buf = malloc(bufsize * 2);
-				if (buf == NULL)
-					err(1, "Not enough memory");
-				buf1 = buf;
-				buf2 = buf + bufsize;
-			}
-			rv = 0;
-			lseek(from_fd, 0, SEEK_SET);
-			lseek(to_fd, 0, SEEK_SET);
-			while (rv == 0) {
-				n1 = read(from_fd, buf1, bufsize);
-				if (n1 == 0)
-					break;		/* EOF */
-				else if (n1 > 0) {
-					n2 = read(to_fd, buf2, n1);
-					if (n2 == n1)
-						rv = memcmp(buf1, buf2, n1);
-					else
-						rv = 1;	/* out of sync */
-				} else
-					rv = 1;		/* read failure */
-				if (do_digest)
-					digest_update(&ctx, buf1, n1);
-			}
-			lseek(from_fd, 0, SEEK_SET);
-			lseek(to_fd, 0, SEEK_SET);
+					rv = 1;	/* out of sync */
+			} else
+				rv = 1;		/* read failure */
+			if (do_digest)
+				digest_update(&ctx, buf1, n1);
 		}
-	} else
+		lseek(from_fd, 0, SEEK_SET);
+		lseek(to_fd, 0, SEEK_SET);
+	} else {
 		rv = 1;	/* don't bother in this case */
+	}
 
 	if (do_digest) {
 		if (rv == 0)
@@ -1219,14 +1185,12 @@ copy(int from_fd, const char *from_name, int to_fd, const char *to_name,
 #ifndef BOOTSTRAP_XINSTALL
 	ssize_t ret;
 #endif
-	char *p;
-	int done_copy;
 	DIGEST_CTX ctx;
 
 	/* Rewind file descriptors. */
-	if (lseek(from_fd, (off_t)0, SEEK_SET) == (off_t)-1)
+	if (lseek(from_fd, 0, SEEK_SET) < 0)
 		err(EX_OSERR, "lseek: %s", from_name);
-	if (lseek(to_fd, (off_t)0, SEEK_SET) == (off_t)-1)
+	if (lseek(to_fd, 0, SEEK_SET) < 0)
 		err(EX_OSERR, "lseek: %s", to_name);
 
 #ifndef BOOTSTRAP_XINSTALL
@@ -1234,7 +1198,7 @@ copy(int from_fd, const char *from_name, int to_fd, const char *to_name,
 	if (digesttype == DIGEST_NONE) {
 		do {
 			ret = copy_file_range(from_fd, NULL, to_fd, NULL,
-			    SSIZE_MAX, 0);
+			    (size_t)size, 0);
 		} while (ret > 0);
 		if (ret == 0)
 			goto done;
@@ -1246,69 +1210,45 @@ copy(int from_fd, const char *from_name, int to_fd, const char *to_name,
 		}
 		/* Fall back */
 	}
-
 #endif
 	digest_init(&ctx);
 
-	done_copy = 0;
-	if (trymmap((size_t)size) &&
-	    (p = mmap(NULL, (size_t)size, PROT_READ, MAP_SHARED,
-		    from_fd, (off_t)0)) != MAP_FAILED) {
-		nw = write(to_fd, p, size);
-		if (nw != size) {
+	if (buf == NULL) {
+		/*
+		 * Note that buf and bufsize are static. If
+		 * malloc() fails, it will fail at the start
+		 * and not copy only some files.
+		 */
+		if (sysconf(_SC_PHYS_PAGES) > PHYSPAGES_THRESHOLD)
+			bufsize = MIN(BUFSIZE_MAX, MAXPHYS * 8);
+		else
+			bufsize = BUFSIZE_SMALL;
+		buf = malloc(bufsize);
+		if (buf == NULL)
+			err(1, "Not enough memory");
+	}
+	while ((nr = read(from_fd, buf, bufsize)) > 0) {
+		if ((nw = write(to_fd, buf, nr)) != nr) {
 			serrno = errno;
 			(void)unlink(to_name);
 			if (nw >= 0) {
 				errx(EX_OSERR,
-     "short write to %s: %jd bytes written, %jd bytes asked to write",
-				    to_name, (uintmax_t)nw, (uintmax_t)size);
+				    "short write to %s: %jd bytes written, "
+				    "%jd bytes asked to write",
+				    to_name, (uintmax_t)nw,
+				    (uintmax_t)size);
 			} else {
 				errno = serrno;
 				err(EX_OSERR, "%s", to_name);
 			}
 		}
-		digest_update(&ctx, p, size);
-		(void)munmap(p, size);
-		done_copy = 1;
+		digest_update(&ctx, buf, nr);
 	}
-	if (!done_copy) {
-		if (buf == NULL) {
-			/*
-			 * Note that buf and bufsize are static. If
-			 * malloc() fails, it will fail at the start
-			 * and not copy only some files.
-			 */
-			if (sysconf(_SC_PHYS_PAGES) >
-			    PHYSPAGES_THRESHOLD)
-				bufsize = MIN(BUFSIZE_MAX, MAXPHYS * 8);
-			else
-				bufsize = BUFSIZE_SMALL;
-			buf = malloc(bufsize);
-			if (buf == NULL)
-				err(1, "Not enough memory");
-		}
-		while ((nr = read(from_fd, buf, bufsize)) > 0) {
-			if ((nw = write(to_fd, buf, nr)) != nr) {
-				serrno = errno;
-				(void)unlink(to_name);
-				if (nw >= 0) {
-					errx(EX_OSERR,
-     "short write to %s: %jd bytes written, %jd bytes asked to write",
-					    to_name, (uintmax_t)nw,
-					    (uintmax_t)size);
-				} else {
-					errno = serrno;
-					err(EX_OSERR, "%s", to_name);
-				}
-			}
-			digest_update(&ctx, buf, nr);
-		}
-		if (nr != 0) {
-			serrno = errno;
-			(void)unlink(to_name);
-			errno = serrno;
-			err(EX_OSERR, "%s", from_name);
-		}
+	if (nr != 0) {
+		serrno = errno;
+		(void)unlink(to_name);
+		errno = serrno;
+		err(EX_OSERR, "%s", from_name);
 	}
 done:
 	if (safecopy && fsync(to_fd) == -1) {
@@ -1542,30 +1482,4 @@ usage(void)
 "               directory ...\n");
 	exit(EX_USAGE);
 	/* NOTREACHED */
-}
-
-/*
- * trymmap --
- *	return true (1) if mmap should be tried, false (0) if not.
- */
-static int
-trymmap(size_t filesize)
-{
-	/*
-	 * This function existed to skip mmap() for NFS file systems whereas
-	 * nowadays mmap() should be perfectly safe. Nevertheless, using mmap()
-	 * only reduces the number of system calls if we need multiple read()
-	 * syscalls, i.e. if the file size is > MAXBSIZE. However, mmap() is
-	 * more expensive than read() so set the threshold at 4 fewer syscalls.
-	 * Additionally, for larger file size mmap() can significantly increase
-	 * the number of page faults, so avoid it in that case.
-	 *
-	 * Note: the 8MB limit is not based on any meaningful benchmarking
-	 * results, it is simply reusing the same value that was used before
-	 * and also matches bin/cp.
-	 *
-	 * XXX: Maybe we shouldn't bother with mmap() at all, since we use
-	 * MAXBSIZE the syscall overhead of read() shouldn't be too high?
-	 */
-	return (filesize > 4 * MAXBSIZE && filesize < 8 * 1024 * 1024);
 }
