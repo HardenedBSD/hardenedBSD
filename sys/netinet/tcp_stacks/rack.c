@@ -19927,6 +19927,7 @@ rack_output(struct tcpcb *tp)
 
 #endif
 	int32_t idle, sendalot;
+	uint32_t tot_idle;
 	int32_t sub_from_prr = 0;
 	volatile int32_t sack_rxmit;
 	struct rack_sendmap *rsm = NULL;
@@ -20164,8 +20165,8 @@ rack_output(struct tcpcb *tp)
 	if ((tp->snd_una == tp->snd_max) &&
 	    rack->r_ctl.rc_went_idle_time &&
 	    TSTMP_GT(cts, rack->r_ctl.rc_went_idle_time)) {
-		idle = cts - rack->r_ctl.rc_went_idle_time;
-		if (idle > rack_min_probertt_hold) {
+		tot_idle = (cts - rack->r_ctl.rc_went_idle_time);
+		if (tot_idle > rack_min_probertt_hold) {
 			/* Count as a probe rtt */
 			if (rack->in_probe_rtt == 0) {
 				rack->r_ctl.rc_lower_rtt_us_cts = cts;
@@ -20176,7 +20177,6 @@ rack_output(struct tcpcb *tp)
 				rack_exit_probertt(rack, cts);
 			}
 		}
-		idle = 0;
 	}
 	if (rack_use_fsb &&
 	    (rack->r_ctl.fsb.tcp_ip_hdr) &&
@@ -22151,12 +22151,12 @@ send:
 			mtu = inp->inp_route.ro_nh->nh_mtu;
 	}
 #endif				/* INET */
-
-out:
 	if (lgb) {
 		lgb->tlb_errno = error;
 		lgb = NULL;
 	}
+
+out:
 	/*
 	 * In transmit state, time the transmission and arrange for the
 	 * retransmit.  In persist state, just set snd_max.
@@ -22371,6 +22371,7 @@ nomore:
 		sendalot = 0;
 		switch (error) {
 		case EPERM:
+		case EACCES:
 			tp->t_softerror = error;
 #ifdef TCP_ACCOUNTING
 			crtsc = get_cyclecount();

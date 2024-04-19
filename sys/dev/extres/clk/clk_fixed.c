@@ -163,13 +163,18 @@ clk_fixed_probe(device_t dev)
 			return (ENXIO);
 		}
 		device_set_desc(dev, "Fixed clock");
-		return (BUS_PROBE_DEFAULT);
+		break;
 	case CLK_TYPE_FIXED_FACTOR:
 		device_set_desc(dev, "Fixed factor clock");
-		return (BUS_PROBE_DEFAULT);
+		break;
 	default:
 		return (ENXIO);
 	}
+
+	if (!bootverbose)
+		device_quiet(dev);
+
+	return (BUS_PROBE_DEFAULT);
 }
 
 static int
@@ -258,9 +263,10 @@ clk_fixed_attach(device_t dev)
 		rv = ENXIO;
 		goto fail;
 	}
-#ifdef CLK_DEBUG
-	clkdom_dump(sc->clkdom);
-#endif
+
+	if (bootverbose)
+		clkdom_dump(sc->clkdom);
+
 	OF_prop_free(__DECONST(char *, def.clkdef.name));
 	OF_prop_free(def.clkdef.parent_names);
 	return (bus_generic_attach(dev));

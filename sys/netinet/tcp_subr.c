@@ -1077,7 +1077,7 @@ tcp_default_fb_init(struct tcpcb *tp, void **ptr)
 	/* We don't use the pointer */
 	*ptr = NULL;
 
-	KASSERT(tp->t_state >= 0 && tp->t_state < TCPS_TIME_WAIT,
+	KASSERT(tp->t_state < TCPS_TIME_WAIT,
 	    ("%s: connection %p in unexpected state %d", __func__, tp,
 	    tp->t_state));
 
@@ -4201,19 +4201,19 @@ tcp_change_time_units(struct tcpcb *tp, int granularity)
 			uint32_t val, frac;
 
 			val = USEC_2_TICKS(tp->t_rttvar);
-			frac = tp->t_srtt % (HPTS_USEC_IN_SEC / hz);
+			frac = tp->t_rttvar % (HPTS_USEC_IN_SEC / hz);
 			tp->t_rttvar = val <<  TCP_RTTVAR_SHIFT;
 			/*
 			 * frac is the fractional part here is left
 			 * over from converting to hz and shifting.
-			 * We need to convert this to the 5 bit
+			 * We need to convert this to the 4 bit
 			 * remainder.
 			 */
 			if (frac) {
 				if (hz == 1000) {
-					frac = (((uint64_t)frac *  (uint64_t)TCP_RTT_SCALE) / (uint64_t)HPTS_USEC_IN_MSEC);
+					frac = (((uint64_t)frac *  (uint64_t)TCP_RTTVAR_SCALE) / (uint64_t)HPTS_USEC_IN_MSEC);
 				} else {
-					frac = (((uint64_t)frac * (uint64_t)(hz) * (uint64_t)TCP_RTT_SCALE) /(uint64_t)HPTS_USEC_IN_SEC);
+					frac = (((uint64_t)frac * (uint64_t)(hz) * (uint64_t)TCP_RTTVAR_SCALE) /(uint64_t)HPTS_USEC_IN_SEC);
 				}
 				tp->t_rttvar += frac;
 			}

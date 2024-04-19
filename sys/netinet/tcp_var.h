@@ -88,6 +88,9 @@
 #define TCP_EI_BITS_2MS_TIMER	0x400	/* 2 MSL timer expired */
 
 #if defined(_KERNEL) || defined(_WANT_TCPCB)
+#include <sys/_callout.h>
+#include <sys/osd.h>
+
 #include <netinet/cc/cc.h>
 
 /* TCP segment queue entry */
@@ -925,10 +928,10 @@ struct in_conninfo;
  * and thus an "ALPHA" of 0.875.  rttvar has 2 bits to the right of the
  * binary point, and is smoothed with an ALPHA of 0.75.
  */
-#define	TCP_RTT_SCALE		32	/* multiplier for srtt; 3 bits frac. */
-#define	TCP_RTT_SHIFT		5	/* shift for srtt; 3 bits frac. */
-#define	TCP_RTTVAR_SCALE	16	/* multiplier for rttvar; 2 bits */
-#define	TCP_RTTVAR_SHIFT	4	/* shift for rttvar; 2 bits */
+#define	TCP_RTT_SCALE		32	/* multiplier for srtt; 5 bits frac. */
+#define	TCP_RTT_SHIFT		5	/* shift for srtt; 5 bits frac. */
+#define	TCP_RTTVAR_SCALE	16	/* multiplier for rttvar; 4 bits */
+#define	TCP_RTTVAR_SHIFT	4	/* shift for rttvar; 4 bits */
 #define	TCP_DELTA_SHIFT		2	/* see tcp_input.c */
 
 /*

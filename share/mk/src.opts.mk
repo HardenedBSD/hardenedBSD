@@ -207,7 +207,11 @@ __DEFAULT_NO_OPTIONS = \
     EXPERIMENTAL \
     FREEBSD_UPDATE \
     HESIOD \
+<<<<<<< HEAD
     LIB32 \
+=======
+    LOADER_BIOS_TEXTONLY \
+>>>>>>> origin/freebsd/14-stable/main
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
     LLVM_FULL_DEBUGINFO \
