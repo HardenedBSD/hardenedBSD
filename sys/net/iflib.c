@@ -194,6 +194,7 @@ struct iflib_ctx {
 #define	CORE_OFFSET_UNSPECIFIED	0xffff
 	uint8_t  ifc_sysctl_separate_txrx;
 	uint8_t  ifc_sysctl_use_logical_cores;
+	uint16_t ifc_sysctl_extra_msix_vectors;
 	bool	 ifc_cpus_are_physical_cores;
 
 	qidx_t ifc_sysctl_ntxds[8];
@@ -262,6 +263,13 @@ iflib_get_sctx(if_ctx_t ctx)
 {
 
 	return (ctx->ifc_sctx);
+}
+
+uint16_t
+iflib_get_extra_msix_vectors_sysctl(if_ctx_t ctx)
+{
+
+	return (ctx->ifc_sysctl_extra_msix_vectors);
 }
 
 #define IP_ALIGNED(m) ((((uintptr_t)(m)->m_data) & 0x3) == 0x2)
@@ -1461,8 +1469,8 @@ iflib_dma_alloc_align(if_ctx_t ctx, int size, int align, iflib_dma_info_t dma, i
 				&dma->idi_tag);
 	if (err) {
 		device_printf(dev,
-		    "%s: bus_dma_tag_create failed: %d\n",
-		    __func__, err);
+		    "%s: bus_dma_tag_create failed: %d (size=%d, align=%d)\n",
+		    __func__, err, size, align);
 		goto fail_0;
 	}
 
@@ -6191,6 +6199,81 @@ iflib_irq_set_affinity(if_ctx_t ctx, if_irq_t irq, iflib_intr_type_t type,
 	return (0);
 }
 
+/*
+ * Allocate a hardware interrupt for subctx using the parent (ctx)'s hardware
+ * resources.
+ *
+ * Similar to iflib_irq_alloc_generic(), but for interrupt type IFLIB_INTR_RXTX
+ * only.
+ *
+ * XXX: Could be removed if subctx's dev has its intr resource allocation
+ * methods replaced with custom ones?
+ */
+int
+iflib_irq_alloc_generic_subctx(if_ctx_t ctx, if_ctx_t subctx, if_irq_t irq,
+			       int rid, iflib_intr_type_t type,
+			       driver_filter_t *filter, void *filter_arg,
+			       int qid, const char *name)
+{
+	device_t dev, subdev;
+	struct grouptask *gtask;
+	struct taskqgroup *tqg;
+	iflib_filter_info_t info;
+	gtask_fn_t *fn;
+	int tqrid, err;
+	driver_filter_t *intr_fast;
+	void *q;
+
+	MPASS(ctx != NULL);
+	MPASS(subctx != NULL);
+
+	tqrid = rid;
+	dev = ctx->ifc_dev;
+	subdev = subctx->ifc_dev;
+
+	switch (type) {
+	case IFLIB_INTR_RXTX:
+		q = &subctx->ifc_rxqs[qid];
+		info = &subctx->ifc_rxqs[qid].ifr_filter_info;
+		gtask = &subctx->ifc_rxqs[qid].ifr_task;
+		tqg = qgroup_if_io_tqg;
+		fn = _task_fn_rx;
+		intr_fast = iflib_fast_intr_rxtx;
+		NET_GROUPTASK_INIT(gtask, 0, fn, q);
+		break;
+	default:
+		device_printf(dev, "%s: unknown net intr type for subctx %s (%d)\n",
+		    __func__, device_get_nameunit(subdev), type);
+		return (EINVAL);
+	}
+
+	info->ifi_filter = filter;
+	info->ifi_filter_arg = filter_arg;
+	info->ifi_task = gtask;
+	info->ifi_ctx = q;
+
+	NET_GROUPTASK_INIT(gtask, 0, fn, q);
+
+	/* Allocate interrupts from hardware using parent context */
+	err = _iflib_irq_alloc(ctx, irq, rid, intr_fast, NULL, info, name);
+	if (err != 0) {
+		device_printf(dev, "_iflib_irq_alloc failed for subctx %s: %d\n",
+		    device_get_nameunit(subdev), err);
+		return (err);
+	}
+
+	if (tqrid != -1) {
+		err = iflib_irq_set_affinity(ctx, irq, type, qid, gtask, tqg, q,
+		    name);
+		if (err)
+			return (err);
+	} else {
+		taskqgroup_attach(tqg, gtask, q, dev, irq->ii_res, name);
+	}
+
+	return (0);
+}
+
 int
 iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 			iflib_intr_type_t type, driver_filter_t *filter,
@@ -6803,6 +6886,12 @@ iflib_add_device_sysctl_pre(if_ctx_t ctx)
 	SYSCTL_ADD_U8(ctx_list, oid_list, OID_AUTO, "use_logical_cores",
 	    CTLFLAG_RDTUN, &ctx->ifc_sysctl_use_logical_cores, 0,
 	    "try to make use of logical cores for TX and RX");
+	SYSCTL_ADD_U16(ctx_list, oid_list, OID_AUTO, "use_extra_msix_vectors",
+	    CTLFLAG_RDTUN, &ctx->ifc_sysctl_extra_msix_vectors, 0,
+	    "attempt to reserve the given number of extra MSI-X vectors during driver load for the creation of additional interfaces later");
+	SYSCTL_ADD_INT(ctx_list, oid_list, OID_AUTO, "allocated_msix_vectors",
+       	    CTLFLAG_RDTUN, &ctx->ifc_softc_ctx.isc_vectors, 0,
+	    "total # of MSI-X vectors allocated by driver");
 
 	/* XXX change for per-queue sizes */
 	SYSCTL_ADD_PROC(ctx_list, oid_list, OID_AUTO, "override_ntxds",

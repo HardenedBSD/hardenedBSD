@@ -14998,13 +14998,6 @@ rack_do_closing(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		return (ret_val);
 	}
 	/*
-	 * If new data are received on a connection after the user processes
-	 * are gone, then RST the other end.
-	 */
-	if ((tp->t_flags & TF_CLOSED) && tlen &&
-	    rack_check_data_after_close(m, tp, &tlen, th, so))
-		return (1);
-	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
 	 * from the latest proposal of the tcplw@cray.com list (Braden
@@ -15112,13 +15105,6 @@ rack_do_lastack(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			      &rack->r_ctl.challenge_ack_cnt)) {
 		return (ret_val);
 	}
-	/*
-	 * If new data are received on a connection after the user processes
-	 * are gone, then RST the other end.
-	 */
-	if ((tp->t_flags & TF_CLOSED) && tlen &&
-	    rack_check_data_after_close(m, tp, &tlen, th, so))
-		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -17040,7 +17026,7 @@ rack_new_round_setup(struct tcpcb *tp, struct tcp_rack *rack, uint32_t high_seq)
 			log.u_bbr.flex1 = rack->r_ctl.current_round;
 			log.u_bbr.flex2 = rack->r_ctl.last_rnd_of_gp_rise;
 			log.u_bbr.flex3 = rack->r_ctl.gp_rnd_thresh;
-			log.u_bbr.flex5 = rack->r_ctl.gate_to_fs;
+			log.u_bbr.flex4 = rack->r_ctl.gate_to_fs;
 			log.u_bbr.flex5 = rack->r_ctl.ss_hi_fs;
 			log.u_bbr.flex8 = 40;
 			(void)tcp_log_event(tp, NULL, NULL, NULL, BBR_LOG_CWND, 0,
