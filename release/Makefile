@@ -143,13 +143,8 @@ base.txz:
 
 kernel.txz:
 	mkdir -p ${DISTDIR}
-<<<<<<< HEAD
-	cd ${WORLDDIR} && ${IMAKE} distributekernel packagekernel \
-		DISTDIR=${.OBJDIR}/${DISTDIR} KERNCONF=${KERNCONF}
-=======
-	( cd ${WORLDDIR} && ${IMAKE} distributekernel DISTDIR=${.OBJDIR}/${DISTDIR} )
-	( cd ${WORLDDIR} && ${IMAKE} packagekernel DISTDIR=${.OBJDIR}/${DISTDIR} )
->>>>>>> origin/freebsd/14-stable/main
+	( cd ${WORLDDIR} && ${IMAKE} distributekernel DISTDIR=${.OBJDIR}/${DISTDIR} KERNCONF=${KERNCONF})
+	( cd ${WORLDDIR} && ${IMAKE} packagekernel DISTDIR=${.OBJDIR}/${DISTDIR} KERNCONF=${KERNCONF})
 	mv ${DISTDIR}/kernel*.txz .
 
 src.txz:
