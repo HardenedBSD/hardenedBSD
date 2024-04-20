@@ -3355,6 +3355,7 @@ dev/usb/misc/cp2112.c		optional cp2112
 dev/usb/misc/udbp.c		optional udbp
 dev/usb/misc/ugold.c		optional ugold
 dev/usb/misc/uled.c		optional uled
+dev/usb/misc/i2ctinyusb.c	optional i2ctinyusb
 #
 # USB input drivers
 #
@@ -3645,7 +3646,6 @@ geom/label/g_label_flashmap.c	optional geom_label
 geom/label/g_label_iso9660.c	optional geom_label
 geom/label/g_label_msdosfs.c	optional geom_label
 geom/label/g_label_ntfs.c	optional geom_label
-geom/label/g_label_reiserfs.c	optional geom_label
 geom/label/g_label_ufs.c	optional geom_label
 geom/label/g_label_gpt.c	optional geom_label | geom_label_gpt
 geom/label/g_label_disk_ident.c	optional geom_label
