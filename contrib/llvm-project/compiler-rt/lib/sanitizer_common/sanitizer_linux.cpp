@@ -81,18 +81,11 @@
 #    include <sys/sysmacros.h>
 #  endif
 
-<<<<<<< HEAD
-#if SANITIZER_FREEBSD
-#include <sys/exec.h>
-#include <sys/sysctl.h>
-#include <machine/atomic.h>
-=======
 #  if SANITIZER_FREEBSD
 #    include <machine/atomic.h>
 #    include <sys/exec.h>
 #    include <sys/procctl.h>
 #    include <sys/sysctl.h>
->>>>>>> internal/freebsd/13-stable/main
 extern "C" {
 // <sys/umtx.h> must be included after <errno.h> and <sys/types.h> on
 // FreeBSD 9.2 and 10.0.
@@ -2287,27 +2280,6 @@ void CheckASLR() {
         GetArgv()[0]);
     Die();
   }
-<<<<<<< HEAD
-=======
-#  elif SANITIZER_FREEBSD
-  int aslr_status;
-  int r = internal_procctl(P_PID, 0, PROC_ASLR_STATUS, &aslr_status);
-  if (UNLIKELY(r == -1)) {
-    // We're making things less 'dramatic' here since
-    // the cmd is not necessarily guaranteed to be here
-    // just yet regarding FreeBSD release
-    return;
-  }
-  if ((aslr_status & PROC_ASLR_ACTIVE) != 0) {
-    VReport(1,
-            "This sanitizer is not compatible with enabled ASLR "
-            "and binaries compiled with PIE\n"
-            "ASLR will be disabled and the program re-executed.\n");
-    int aslr_ctl = PROC_ASLR_FORCE_DISABLE;
-    CHECK_NE(internal_procctl(P_PID, 0, PROC_ASLR_CTL, &aslr_ctl), -1);
-    ReExec();
-  }
->>>>>>> internal/freebsd/13-stable/main
 #  elif SANITIZER_PPC64V2
   // Disable ASLR for Linux PPC64LE.
   int old_personality = personality(0xffffffff);
