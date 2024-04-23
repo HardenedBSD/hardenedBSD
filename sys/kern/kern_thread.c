@@ -32,7 +32,6 @@
 #include "opt_hwpmc_hooks.h"
 #include "opt_pax.h"
 
-#include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/asan.h>
 #include <sys/kernel.h>
