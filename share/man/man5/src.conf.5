@@ -1325,30 +1325,6 @@ and related programs.
 Do not install the limited cloud init support scripts.
 .It Va WITHOUT_NVME
 Do not build nvme related tools and kernel modules.
-<<<<<<< HEAD
-.Pp
-This is a default setting on
-arm/armv7, powerpc/powerpc and riscv/riscv64.
-.It Va WITH_NVME
-Build nvme related tools and kernel modules.
-.Pp
-This is a default setting on
-amd64/amd64, arm64/aarch64, i386/i386, powerpc/powerpc64 and powerpc/powerpc64le.
-=======
-.It Va WITHOUT_OFED
-Do not build the
-.Dq "OpenFabrics Enterprise Distribution"
-InfiniBand software stack, including kernel modules and userspace libraries.
-.Pp
-This is a default setting on
-arm/armv7.
-When set, it enforces these options:
-.Pp
-.Bl -item -compact
-.It
-.Va WITHOUT_OFED_EXTRA
-.El
->>>>>>> internal/freebsd/current/main
 .It Va WITH_OFED
 Build the
 .Dq "OpenFabrics Enterprise Distribution"
