@@ -150,11 +150,6 @@ __DEFAULT_YES_OPTIONS = \
     NS_CACHING \
     NTP \
     NUAGEINIT \
-<<<<<<< HEAD
-    NVME \
-=======
-    OFED \
->>>>>>> internal/freebsd/current/main
     OPENSSL \
     PAM \
     PF \
