@@ -52,7 +52,6 @@ __DEFAULT_YES_OPTIONS = \
     SPLIT_KERNEL_DEBUG \
     TESTS \
     USB_GADGET_EXAMPLES \
-    VIMAGE \
     ZFS
 
 __DEFAULT_NO_OPTIONS = \
@@ -184,8 +183,7 @@ OPT_${opt}:=	${rep}
 #
 .for var in \
     INET \
-    INET6 \
-    VIMAGE
+    INET6
 .if defined(WITHOUT_${var}_SUPPORT) || ${MK_${var}} == "no"
 MK_${var}_SUPPORT:= no
 .else
