@@ -24,7 +24,6 @@ SRCS=	args.c \
 	message.c \
 	mytime.c \
 	options.c \
-	sandbox.c \
 	signals.c \
 	suffix.c \
 	util.c
@@ -43,10 +42,6 @@ WARNS?=	3
 CFLAGS+=	-DHAVE_CONFIG_H \
 		-I${LZMALIBDIR} \
 		-I${XZDIR}/common
-
-.if ${MK_CAPSICUM} == "no"
-CFLAGS+=	-DWITHOUT_CAPSICUM
-.endif
 
 LIBADD=	lzma
 

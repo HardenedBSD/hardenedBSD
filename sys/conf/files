@@ -718,12 +718,14 @@ ddb/db_access.c			optional ddb
 ddb/db_break.c			optional ddb
 ddb/db_capture.c		optional ddb
 ddb/db_command.c		optional ddb
+ddb/db_ctf.c			optional ddb
 ddb/db_examine.c		optional ddb
 ddb/db_expr.c			optional ddb
 ddb/db_input.c			optional ddb
 ddb/db_lex.c			optional ddb
 ddb/db_main.c			optional ddb
 ddb/db_output.c			optional ddb
+ddb/db_pprint.c			optional ddb
 ddb/db_print.c			optional ddb
 ddb/db_ps.c			optional ddb
 ddb/db_run.c			optional ddb
@@ -1596,9 +1598,9 @@ dev/dwc/if_dwc.c		optional dwc fdt
 dev/dwc/if_dwc_if.m		optional dwc fdt
 dev/dwc/dwc1000_core.c		optional dwc fdt
 dev/dwc/dwc1000_dma.c		optional dwc fdt
-dev/efidev/efidev.c		optional efirt
+dev/efidev/efidev.c		optional efirt efidev
 dev/efidev/efirt.c		optional efirt
-dev/efidev/efirtc.c		optional efirt
+dev/efidev/efirtc.c		optional efirt efirtc
 dev/e1000/if_em.c		optional em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/em_txrx.c		optional em \
@@ -1889,6 +1891,14 @@ dev/iscsi/icl_conn_if.m		optional cfiscsi | iscsi
 dev/iscsi/icl_soft.c		optional iscsi
 dev/iscsi/icl_soft_proxy.c	optional iscsi
 dev/iscsi/iscsi.c		optional iscsi scbus
+dev/iser/icl_iser.c		optional iser				\
+	compile-with "${OFED_C} -DICL_KERNEL_PROXY"
+dev/iser/iser_initiator.c	optional iser				\
+	compile-with "${OFED_C} -DICL_KERNEL_PROXY"
+dev/iser/iser_memory.c		optional iser				\
+	compile-with "${OFED_C} -DICL_KERNEL_PROXY"
+dev/iser/iser_verbs.c		optional iser				\
+	compile-with "${OFED_C} -DICL_KERNEL_PROXY"
 dev/ismt/ismt.c			optional ismt
 dev/isl/isl.c			optional isl iicbus
 dev/isp/isp.c			optional isp
@@ -3062,7 +3072,6 @@ dev/smc/if_smc.c		optional smc
 dev/smc/if_smc_acpi.c		optional smc acpi
 dev/smc/if_smc_fdt.c		optional smc fdt
 dev/snp/snp.c			optional snp
-dev/sound/clone.c		optional sound
 dev/sound/unit.c		optional sound
 dev/sound/pci/als4000.c		optional snd_als4000 pci
 dev/sound/pci/atiixp.c		optional snd_atiixp pci
@@ -3346,6 +3355,7 @@ dev/usb/misc/cp2112.c		optional cp2112
 dev/usb/misc/udbp.c		optional udbp
 dev/usb/misc/ugold.c		optional ugold
 dev/usb/misc/uled.c		optional uled
+dev/usb/misc/i2ctinyusb.c	optional i2ctinyusb
 #
 # USB input drivers
 #
@@ -3406,12 +3416,13 @@ dev/virtio/mmio/virtio_mmio_cmdline.c	optional	virtio_mmio
 dev/virtio/mmio/virtio_mmio_fdt.c	optional	virtio_mmio fdt
 dev/virtio/mmio/virtio_mmio_if.m	optional	virtio_mmio
 dev/virtio/network/if_vtnet.c		optional	vtnet
-dev/virtio/block/virtio_blk.c		optional	virtio_blk
 dev/virtio/balloon/virtio_balloon.c	optional	virtio_balloon
-dev/virtio/gpu/virtio_gpu.c		optional	virtio_gpu
-dev/virtio/scsi/virtio_scsi.c		optional	virtio_scsi
-dev/virtio/random/virtio_random.c	optional	virtio_random
+dev/virtio/block/virtio_blk.c		optional	virtio_blk
 dev/virtio/console/virtio_console.c	optional	virtio_console
+dev/virtio/gpu/virtio_gpu.c		optional	virtio_gpu
+dev/virtio/random/virtio_random.c	optional	virtio_random
+dev/virtio/scmi/virtio_scmi.c		optional	virtio_scmi
+dev/virtio/scsi/virtio_scsi.c		optional	virtio_scsi
 dev/vkbd/vkbd.c			optional vkbd
 dev/vmgenc/vmgenc_acpi.c	optional acpi
 dev/vmware/vmxnet3/if_vmx.c		optional vmx
@@ -3635,7 +3646,6 @@ geom/label/g_label_flashmap.c	optional geom_label
 geom/label/g_label_iso9660.c	optional geom_label
 geom/label/g_label_msdosfs.c	optional geom_label
 geom/label/g_label_ntfs.c	optional geom_label
-geom/label/g_label_reiserfs.c	optional geom_label
 geom/label/g_label_ufs.c	optional geom_label
 geom/label/g_label_gpt.c	optional geom_label | geom_label_gpt
 geom/label/g_label_disk_ident.c	optional geom_label
@@ -3862,7 +3872,7 @@ kern/subr_clock.c		standard
 kern/subr_compressor.c		standard \
 	compile-with "${NORMAL_C} -I$S/contrib/zstd/lib/freebsd"
 kern/subr_coverage.c		optional coverage \
-	compile-with "${NORMAL_C:N-fsanitize*}"
+	compile-with "${NORMAL_C:N-fsanitize*:N-fno-sanitize*}"
 kern/subr_counter.c		standard
 kern/subr_csan.c		optional kcsan \
 	compile-with "${NORMAL_C:N-fsanitize*:N-fstack-protector*}"
@@ -4298,6 +4308,7 @@ netgraph/ng_vlan_rotate.c	optional netgraph_vlan_rotate
 netinet/accf_data.c		optional accept_filter_data inet
 netinet/accf_dns.c		optional accept_filter_dns inet
 netinet/accf_http.c		optional accept_filter_http inet
+netinet/accf_tls.c		optional accept_filter_tls inet
 netinet/if_ether.c		optional inet ether
 netinet/igmp.c			optional inet
 netinet/in.c			optional inet

@@ -209,6 +209,7 @@ MAN=	aac.4 \
 	${_hv_vss.4} \
 	hwpmc.4 \
 	${_hwpstate_intel.4} \
+	i2ctinyusb.4 \
 	iavf.4 \
 	ichsmb.4 \
 	${_ichwd.4} \
@@ -406,9 +407,9 @@ MAN=	aac.4 \
 	${_if_ntb.4} \
 	null.4 \
 	numa.4 \
-	${_nvd.4} \
+	nvd.4 \
 	${_nvdimm.4} \
-	${_nvme.4} \
+	nvme.4 \
 	${_nvram.4} \
 	oce.4 \
 	ocs_fc.4\
@@ -736,10 +737,9 @@ MLINKS+=re.4 if_re.4
 MLINKS+=rl.4 if_rl.4
 MLINKS+=rtwn_pci.4 if_rtwn_pci.4
 MLINKS+=rue.4 if_rue.4
-MLINKS+=scsi.4 CAM.4 \
-	scsi.4 cam.4 \
-	scsi.4 scbus.4 \
-	scsi.4 SCSI.4
+MLINKS+=scsi.4 cam.4
+MLINKS+=scsi.4 scbus.4
+MLINKS+=scsi.4 SCSI.4
 MLINKS+=sge.4 if_sge.4
 MLINKS+=sis.4 if_sis.4
 MLINKS+=sk.4 if_sk.4
@@ -839,8 +839,6 @@ _ntb_hw_amd.4=	ntb_hw_amd.4
 _ntb_hw_intel.4=	ntb_hw_intel.4
 _ntb_hw_plx.4=	ntb_hw_plx.4
 _ntb_transport.4=ntb_transport.4
-_nvd.4=		nvd.4
-_nvme.4=	nvme.4
 _nvram.4=	nvram.4
 _padlock.4=	padlock.4
 _pchtherm.4=	pchtherm.4
@@ -886,11 +884,6 @@ MLINKS+=sume.4 if_sume.4
 _bhyve.4=	bhyve.4
 _vmm.4=		vmm.4
 .endif
-.endif
-
-.if ${MACHINE_CPUARCH} == "powerpc"
-_nvd.4= 	nvd.4
-_nvme.4=	nvme.4
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386" || \

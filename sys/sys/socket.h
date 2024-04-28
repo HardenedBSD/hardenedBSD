@@ -629,8 +629,11 @@ struct omsghdr {
  */
 enum shutdown_how {
 	SHUT_RD = 0,		/* shut down the reading side */
+#define	SHUT_RD		SHUT_RD
 	SHUT_WR,		/* shut down the writing side */
+#define	SHUT_WR		SHUT_WR
 	SHUT_RDWR		/* shut down both sides */
+#define	SHUT_RDWR	SHUT_RDWR
 };
 
 #if __BSD_VISIBLE
@@ -713,33 +716,10 @@ __END_DECLS
 #ifdef _KERNEL
 struct socket;
 
-struct inpcb *so_sotoinpcb(struct socket *so);
-struct sockbuf *so_sockbuf_snd(struct socket *);
-struct sockbuf *so_sockbuf_rcv(struct socket *);
-
-int so_state_get(const struct socket *);
-void so_state_set(struct socket *, int);
-
 int so_options_get(const struct socket *);
 void so_options_set(struct socket *, int);
 
 int so_error_get(const struct socket *);
 void so_error_set(struct socket *, int);
-
-int so_linger_get(const struct socket *);
-void so_linger_set(struct socket *, int);
-
-struct protosw *so_protosw_get(const struct socket *);
-void so_protosw_set(struct socket *, struct protosw *);
-
-void so_sorwakeup_locked(struct socket *so);
-void so_sowwakeup_locked(struct socket *so);
-
-void so_sorwakeup(struct socket *so);
-void so_sowwakeup(struct socket *so);
-
-void so_lock(struct socket *so);
-void so_unlock(struct socket *so);
-
 #endif /* _KERNEL */
 #endif /* !_SYS_SOCKET_H_ */

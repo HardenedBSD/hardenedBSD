@@ -79,7 +79,7 @@ extern u_long maxphys;		/* max raw I/O transfer size */
  */
 enum VM_GUEST { VM_GUEST_NO = 0, VM_GUEST_VM, VM_GUEST_XEN, VM_GUEST_HV,
 		VM_GUEST_VMWARE, VM_GUEST_KVM, VM_GUEST_BHYVE, VM_GUEST_VBOX,
-		VM_GUEST_PARALLELS, VM_LAST };
+		VM_GUEST_PARALLELS, VM_GUEST_LAST };
 
 #endif /* KERNEL */
 
@@ -400,8 +400,10 @@ extern int	cpu_disable_c2_sleep;
 extern int	cpu_disable_c3_sleep;
 
 extern void	(*tcp_hpts_softclock)(void);
+extern volatile uint32_t __read_frequently hpts_that_need_softclock;
+
 #define	tcp_hpts_softclock()	do {					\
-		if (tcp_hpts_softclock != NULL)				\
+		if (hpts_that_need_softclock > 0)			\
 			tcp_hpts_softclock();				\
 } while (0)
 

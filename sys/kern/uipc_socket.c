@@ -104,6 +104,7 @@
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_kern_tls.h"
+#include "opt_ktrace.h"
 #include "opt_sctp.h"
 
 #include <sys/param.h>
@@ -522,8 +523,12 @@ socreate(int dom, struct socket **aso, int type, int proto,
 
 	MPASS(prp->pr_attach);
 
-	if (IN_CAPABILITY_MODE(td) && (prp->pr_flags & PR_CAPATTACH) == 0)
-		return (ECAPMODE);
+	if ((prp->pr_flags & PR_CAPATTACH) == 0) {
+		if (CAP_TRACING(td))
+			ktrcapfail(CAPFAIL_PROTO, &proto);
+		if (IN_CAPABILITY_MODE(td))
+			return (ECAPMODE);
+	}
 
 	if (prison_check_af(cred, prp->pr_domain->dom_family) != 0)
 		return (EPROTONOSUPPORT);
@@ -756,14 +761,25 @@ solisten_clone(struct socket *head)
 	 * including those completely irrelevant to a new born socket.  For
 	 * compatibility with older versions we will inherit a list of
 	 * meaningful options.
+	 * The crucial bit to inherit is SO_ACCEPTFILTER.  We need it present
+	 * in the child socket for soisconnected() promoting socket from the
+	 * incomplete queue to complete.  It will be cleared before the child
+	 * gets available to accept(2).
 	 */
-	so->so_options = head->so_options & (SO_KEEPALIVE | SO_DONTROUTE |
-	    SO_LINGER | SO_OOBINLINE | SO_NOSIGPIPE);
+	so->so_options = head->so_options & (SO_ACCEPTFILTER | SO_KEEPALIVE |
+	    SO_DONTROUTE | SO_LINGER | SO_OOBINLINE | SO_NOSIGPIPE);
 	so->so_linger = head->so_linger;
 	so->so_state = head->so_state;
 	so->so_fibnum = head->so_fibnum;
 	so->so_proto = head->so_proto;
 	so->so_cred = crhold(head->so_cred);
+	if (V_socket_hhh[HHOOK_SOCKET_NEWCONN]->hhh_nhooks > 0) {
+		if (hhook_run_socket(so, head, HHOOK_SOCKET_NEWCONN)) {
+			sodealloc(so);
+			log(LOG_DEBUG, "%s: hhook run failed\n", __func__);
+			return (NULL);
+		}
+	}
 #ifdef MAC
 	mac_socket_newconn(head, so);
 #endif
@@ -922,6 +938,10 @@ sopeeloff(struct socket *head)
 	so->so_snd.sb_timeo = head->so_snd.sb_timeo;
 	so->so_rcv.sb_flags |= head->so_rcv.sb_flags & SB_AUTOSIZE;
 	so->so_snd.sb_flags |= head->so_snd.sb_flags & SB_AUTOSIZE;
+	if ((so->so_proto->pr_flags & PR_SOCKBUF) == 0) {
+		so->so_snd.sb_mtx = &so->so_snd_mtx;
+		so->so_rcv.sb_mtx = &so->so_rcv_mtx;
+	}
 
 	soref(so);
 
@@ -2869,13 +2889,10 @@ soreceive_dgram(struct socket *so, struct sockaddr **psa, struct uio *uio,
 		    ("m->m_type == %d", m->m_type));
 		if (psa != NULL)
 			*psa = sodupsockaddr(mtod(m, struct sockaddr *),
-			    M_NOWAIT);
+			    M_WAITOK);
 		m = m_free(m);
 	}
-	if (m == NULL) {
-		/* XXXRW: Can this happen? */
-		return (0);
-	}
+	KASSERT(m, ("%s: no data or control after soname", __func__));
 
 	/*
 	 * Packet to copyout() is now in 'm' and it is disconnected from the
@@ -4254,34 +4271,6 @@ sotoxsocket(struct socket *so, struct xsocket *xso)
 	}
 }
 
-struct sockbuf *
-so_sockbuf_rcv(struct socket *so)
-{
-
-	return (&so->so_rcv);
-}
-
-struct sockbuf *
-so_sockbuf_snd(struct socket *so)
-{
-
-	return (&so->so_snd);
-}
-
-int
-so_state_get(const struct socket *so)
-{
-
-	return (so->so_state);
-}
-
-void
-so_state_set(struct socket *so, int val)
-{
-
-	so->so_state = val;
-}
-
 int
 so_options_get(const struct socket *so)
 {
@@ -4308,77 +4297,4 @@ so_error_set(struct socket *so, int val)
 {
 
 	so->so_error = val;
-}
-
-int
-so_linger_get(const struct socket *so)
-{
-
-	return (so->so_linger);
-}
-
-void
-so_linger_set(struct socket *so, int val)
-{
-
-	KASSERT(val >= 0 && val <= USHRT_MAX && val <= (INT_MAX / hz),
-	    ("%s: val %d out of range", __func__, val));
-
-	so->so_linger = val;
-}
-
-struct protosw *
-so_protosw_get(const struct socket *so)
-{
-
-	return (so->so_proto);
-}
-
-void
-so_protosw_set(struct socket *so, struct protosw *val)
-{
-
-	so->so_proto = val;
-}
-
-void
-so_sorwakeup(struct socket *so)
-{
-
-	sorwakeup(so);
-}
-
-void
-so_sowwakeup(struct socket *so)
-{
-
-	sowwakeup(so);
-}
-
-void
-so_sorwakeup_locked(struct socket *so)
-{
-
-	sorwakeup_locked(so);
-}
-
-void
-so_sowwakeup_locked(struct socket *so)
-{
-
-	sowwakeup_locked(so);
-}
-
-void
-so_lock(struct socket *so)
-{
-
-	SOCK_LOCK(so);
-}
-
-void
-so_unlock(struct socket *so)
-{
-
-	SOCK_UNLOCK(so);
 }

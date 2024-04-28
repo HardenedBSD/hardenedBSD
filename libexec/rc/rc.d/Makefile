@@ -17,7 +17,6 @@ CONFS=	DAEMON \
 	cfumass \
 	cleanvar \
 	cleartmp \
-	cron \
 	ctld \
 	ddb \
 	defaultroute \
@@ -128,6 +127,10 @@ GGATEDPACKAGE=		ggate
 CONFGROUPS+=		RESOLVCONF
 RESOLVCONF=		resolv
 RESOLVCONFPACKAGE=	resolvconf
+
+CONFGROUPS+=		CRON
+CRON+=			cron
+CRONPACKAGE=		cron
 
 .if ${MK_NIS} != "no"
 CONFS+=	ypbind \
@@ -257,7 +260,9 @@ CONSOLEPACKAGE=	console-tools
 .endif
 
 .if ${MK_LPR} != "no"
-CONFS+=		lpd
+CONFGROUPS+=	LP
+LP+=		lpd
+LPPACKAGE=	lp
 .endif
 
 .if ${MK_KERBEROS} != "no"
@@ -311,6 +316,12 @@ CONFS+=		routed
 CONFGROUPS+=	SMRCD
 SMRCD=		sendmail
 SMRCDPACKAGE=	sendmail
+.endif
+
+.if ${MK_NUAGEINIT} != "no"
+CONFGROUPS+=	NIUAGEINIT
+NIUAGEINIT=		nuageinit
+NIUAGEINITPACKAGE=	nuageinit
 .endif
 
 .if ${MK_UNBOUND} != "no"

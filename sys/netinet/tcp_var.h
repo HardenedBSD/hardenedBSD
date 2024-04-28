@@ -86,6 +86,9 @@
 #define TCP_EI_BITS_2MS_TIMER	0x400	/* 2 MSL timer expired */
 
 #if defined(_KERNEL) || defined(_WANT_TCPCB)
+#include <sys/_callout.h>
+#include <sys/osd.h>
+
 #include <netinet/cc/cc.h>
 
 /* TCP segment queue entry */
@@ -812,14 +815,6 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
 #define	ENTER_RECOVERY(t_flags) t_flags |= (TF_CONGRECOVERY | TF_FASTRECOVERY)
 #define	EXIT_RECOVERY(t_flags) t_flags &= ~(TF_CONGRECOVERY | TF_FASTRECOVERY)
 
-#if defined(_KERNEL)
-#if !defined(TCP_RFC7413)
-#define	IS_FASTOPEN(t_flags)		(false)
-#else
-#define	IS_FASTOPEN(t_flags)		(t_flags & TF_FASTOPEN)
-#endif
-#endif
-
 #define	BYTES_THIS_ACK(tp, th)	(th->th_ack - tp->snd_una)
 
 /*
@@ -910,10 +905,10 @@ struct in_conninfo;
  * and thus an "ALPHA" of 0.875.  rttvar has 2 bits to the right of the
  * binary point, and is smoothed with an ALPHA of 0.75.
  */
-#define	TCP_RTT_SCALE		32	/* multiplier for srtt; 3 bits frac. */
-#define	TCP_RTT_SHIFT		5	/* shift for srtt; 3 bits frac. */
-#define	TCP_RTTVAR_SCALE	16	/* multiplier for rttvar; 2 bits */
-#define	TCP_RTTVAR_SHIFT	4	/* shift for rttvar; 2 bits */
+#define	TCP_RTT_SCALE		32	/* multiplier for srtt; 5 bits frac. */
+#define	TCP_RTT_SHIFT		5	/* shift for srtt; 5 bits frac. */
+#define	TCP_RTTVAR_SCALE	16	/* multiplier for rttvar; 4 bits */
+#define	TCP_RTTVAR_SHIFT	4	/* shift for rttvar; 4 bits */
 #define	TCP_DELTA_SHIFT		2	/* see tcp_input.c */
 
 /*
@@ -1101,22 +1096,31 @@ struct	tcpstat {
 #define	TI_UNLOCKED	1
 #define	TI_RLOCKED	2
 #include <sys/counter.h>
+#include <netinet/in_kdtrace.h>
 
 VNET_PCPUSTAT_DECLARE(struct tcpstat, tcpstat);	/* tcp statistics */
 /*
  * In-kernel consumers can use these accessor macros directly to update
  * stats.
  */
-#define	TCPSTAT_ADD(name, val)	\
-    VNET_PCPUSTAT_ADD(struct tcpstat, tcpstat, name, (val))
+#define TCPSTAT_ADD(name, val)                                           \
+	do {                                                             \
+		MIB_SDT_PROBE1(tcp, count, name, (val));                 \
+		VNET_PCPUSTAT_ADD(struct tcpstat, tcpstat, name, (val)); \
+	} while (0)
 #define	TCPSTAT_INC(name)	TCPSTAT_ADD(name, 1)
 
 /*
  * Kernel module consumers must use this accessor macro.
  */
 void	kmod_tcpstat_add(int statnum, int val);
-#define	KMOD_TCPSTAT_ADD(name, val)					\
-    kmod_tcpstat_add(offsetof(struct tcpstat, name) / sizeof(uint64_t), val)
+#define KMOD_TCPSTAT_ADD(name, val)                               \
+	do {                                                      \
+		MIB_SDT_PROBE1(tcp, count, name, (val));          \
+		kmod_tcpstat_add(offsetof(struct tcpstat, name) / \
+			sizeof(uint64_t),                         \
+		    val);                                         \
+	} while (0)
 #define	KMOD_TCPSTAT_INC(name)	KMOD_TCPSTAT_ADD(name, 1)
 
 /*

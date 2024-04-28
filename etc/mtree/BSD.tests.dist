@@ -459,6 +459,8 @@
             atf-sh
             ..
         ..
+        nuageinit
+        ..
         rc
         ..
         rtld-elf
@@ -1184,6 +1186,8 @@
         tar
         ..
         tftp
+        ..
+        touch
         ..
         tr
         ..

@@ -220,7 +220,7 @@ read_elf_hints(const char *hintsfile, bool must_exist, bool force_be)
 	close(fd);
 
 	hdr = (struct elfhints_hdr *)mapbase;
-	is_be = be32toh(hdr->magic) == ELFHINTS_MAGIC;
+	is_be = hdr->magic == htobe32(ELFHINTS_MAGIC);
 	if (COND_SWAP(hdr->magic) != ELFHINTS_MAGIC)
 		errx(1, "\"%s\": invalid file format", hintsfile);
 	if (force_be && !is_be)
@@ -246,10 +246,10 @@ update_elf_hints(const char *hintsfile, int argc, char **argv, bool merge,
 	int i;
 
 	/*
-	 * Remove "be32toh(1) == 1" from this condition to create
-	 * little-endian hints files on all architectures by default.
+	 * Create little-endian hints files on all architectures unless
+	 * ldconfig has been invoked with the -B option.
 	 */
-	is_be = be32toh(1) == 1 || force_be;
+	is_be = force_be;
 	if (merge)
 		read_elf_hints(hintsfile, false, force_be);
 	for (i = 0;  i < argc;  i++) {

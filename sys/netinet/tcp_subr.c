@@ -1086,7 +1086,7 @@ tcp_default_fb_init(struct tcpcb *tp, void **ptr)
 	/* We don't use the pointer */
 	*ptr = NULL;
 
-	KASSERT(tp->t_state >= 0 && tp->t_state < TCPS_TIME_WAIT,
+	KASSERT(tp->t_state < TCPS_TIME_WAIT,
 	    ("%s: connection %p in unexpected state %d", __func__, tp,
 	    tp->t_state));
 
@@ -2395,9 +2395,8 @@ tcp_discardcb(struct tcpcb *tp)
 #endif
 
 	INP_WLOCK_ASSERT(inp);
+	MPASS(!callout_active(&tp->t_callout));
 	MPASS(TAILQ_EMPTY(&tp->snd_holes));
-
-	tcp_timer_stop(tp);
 
 	/* free the reassembly queue, if any */
 	tcp_reass_flush(tp);
@@ -3282,7 +3281,7 @@ tcp_drop_syn_sent(struct inpcb *inp, int errno)
 	if (tp->t_state != TCPS_SYN_SENT)
 		return (inp);
 
-	if (IS_FASTOPEN(tp->t_flags))
+	if (tp->t_flags & TF_FASTOPEN)
 		tcp_fastopen_disable_path(tp);
 
 	tp = tcp_drop(tp, errno);
@@ -3981,13 +3980,6 @@ tcp_inptoxtp(const struct inpcb *inp, struct xtcpcb *xt)
 
 	xt->xt_len = sizeof(struct xtcpcb);
 	in_pcbtoxinpcb(inp, &xt->xt_inp);
-	/*
-	 * TCP doesn't use inp_ppcb pointer, we embed inpcb into tcpcb.
-	 * Fixup the pointer that in_pcbtoxinpcb() has set.  When printing
-	 * TCP netstat(1) used to use this pointer, so this fixup needs to
-	 * stay for stable/14.
-	 */
-	xt->xt_inp.inp_ppcb = (uintptr_t)tp;
 }
 
 void
@@ -4248,19 +4240,19 @@ tcp_change_time_units(struct tcpcb *tp, int granularity)
 			uint32_t val, frac;
 
 			val = USEC_2_TICKS(tp->t_rttvar);
-			frac = tp->t_srtt % (HPTS_USEC_IN_SEC / hz);
+			frac = tp->t_rttvar % (HPTS_USEC_IN_SEC / hz);
 			tp->t_rttvar = val <<  TCP_RTTVAR_SHIFT;
 			/*
 			 * frac is the fractional part here is left
 			 * over from converting to hz and shifting.
-			 * We need to convert this to the 5 bit
+			 * We need to convert this to the 4 bit
 			 * remainder.
 			 */
 			if (frac) {
 				if (hz == 1000) {
-					frac = (((uint64_t)frac *  (uint64_t)TCP_RTT_SCALE) / (uint64_t)HPTS_USEC_IN_MSEC);
+					frac = (((uint64_t)frac *  (uint64_t)TCP_RTTVAR_SCALE) / (uint64_t)HPTS_USEC_IN_MSEC);
 				} else {
-					frac = (((uint64_t)frac * (uint64_t)(hz) * (uint64_t)TCP_RTT_SCALE) /(uint64_t)HPTS_USEC_IN_SEC);
+					frac = (((uint64_t)frac * (uint64_t)(hz) * (uint64_t)TCP_RTTVAR_SCALE) /(uint64_t)HPTS_USEC_IN_SEC);
 				}
 				tp->t_rttvar += frac;
 			}

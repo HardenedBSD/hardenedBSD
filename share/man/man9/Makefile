@@ -5,6 +5,7 @@ MAN=	accept_filter.9 \
 	accf_data.9 \
 	accf_dns.9 \
 	accf_http.9 \
+	accf_tls.9 \
 	acl.9 \
 	alq.9 \
 	altq.9 \
@@ -898,6 +899,7 @@ MLINKS+=counter.9 counter_u64_alloc.9 \
 	counter.9 counter_u64_add.9 \
 	counter.9 counter_enter.9 \
 	counter.9 counter_exit.9 \
+	counter.9 counter_ratecheck.9 \
 	counter.9 counter_u64_add_protected.9 \
 	counter.9 counter_u64_fetch.9 \
 	counter.9 counter_u64_zero.9 \
@@ -996,7 +998,8 @@ MLINKS+=dev_clone.9 drain_dev_clone_events.9
 MLINKS+=dev_refthread.9 devvn_refthread.9 \
 	dev_refthread.9 dev_relthread.9
 MLINKS+=devfs_set_cdevpriv.9 devfs_clear_cdevpriv.9 \
-	devfs_set_cdevpriv.9 devfs_get_cdevpriv.9
+	devfs_set_cdevpriv.9 devfs_get_cdevpriv.9 \
+	devfs_set_cdevpriv.9 devfs_foreach_cdevpriv.9
 MLINKS+=device_add_child.9 device_add_child_ordered.9
 MLINKS+=device_enable.9 device_disable.9 \
 	device_enable.9 device_is_enabled.9
@@ -2159,6 +2162,7 @@ MLINKS+=syscall_helper_register.9 syscall_helper_unregister.9 \
 	syscall_helper_register.9 SYSCALL_INIT_HELPER_COMPAT_F.9 \
 	syscall_helper_register.9 SYSCALL_INIT_HELPER_F.9
 MLINKS+=sysctl.9 SYSCTL_DECL.9 \
+	sysctl.9 SYSCTL_ADD_CONST_STRING.9 \
 	sysctl.9 SYSCTL_ADD_INT.9 \
 	sysctl.9 SYSCTL_ADD_LONG.9 \
 	sysctl.9 SYSCTL_ADD_NODE.9 \

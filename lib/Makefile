@@ -16,6 +16,7 @@ SUBDIR_BOOTSTRAP= \
 	libc++ \
 	libc++experimental \
 	libcxxrt \
+	libdiff \
 	libelf \
 	libssp \
 	libssp_nonshared \
@@ -172,6 +173,7 @@ SUBDIR+=	clang
 SUBDIR.${MK_CUSE}+= 	libcuse
 SUBDIR.${MK_TOOLCHAIN}+=libpe
 SUBDIR.${MK_DIALOG}+=	libdpv libfigpar
+SUBDIR.${MK_FDT}+=	libfdt
 SUBDIR.${MK_FILE}+=	libmagic
 SUBDIR.${MK_GPIO}+=	libgpio
 SUBDIR.${MK_GSSAPI}+=	libgssapi librpcsec_gss
@@ -182,7 +184,7 @@ SUBDIR.${MK_LDNS}+=	libldns
 SUBDIR.${MK_STATS}+=	libstats
 
 # The libraries under libclang_rt can only be built by clang.
-.if ${COMPILER_TYPE} == "clang"
+.if ${COMPILER_TYPE} == "clang" && ${MK_CLANG} != "no"
 _libclang_rt=	libclang_rt
 .elif (${MK_ASAN} != "no" || ${MK_UBSAN} != "no") && make(all)
 .error Requested build with sanitizers but cannot build runtime libraries!
@@ -203,6 +205,9 @@ SUBDIR.${MK_PMC}+=	libopencsd
 
 .if ${MACHINE_CPUARCH} == "amd64"
 SUBDIR.${MK_PMC}+=	libipt
+.endif
+
+.if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "aarch64"
 SUBDIR.${MK_BHYVE}+=	libvmmapi
 .endif
 

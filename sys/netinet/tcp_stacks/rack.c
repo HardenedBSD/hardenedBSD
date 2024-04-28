@@ -13585,7 +13585,7 @@ rack_process_data(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * then we just ignore the text.
 	 */
 	tfo_syn = ((tp->t_state == TCPS_SYN_RECEIVED) &&
-		   IS_FASTOPEN(tp->t_flags));
+	    (tp->t_flags & TF_FASTOPEN));
 	if ((tlen || (thflags & TH_FIN) || (tfo_syn && tlen > 0)) &&
 	    TCPS_HAVERCVDFIN(tp->t_state) == 0) {
 		tcp_seq save_start = th->th_seq;
@@ -14194,7 +14194,7 @@ rack_do_syn_sent(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		 * If not all the data that was sent in the TFO SYN
 		 * has been acked, resend the remainder right away.
 		 */
-		if (IS_FASTOPEN(tp->t_flags) &&
+		if ((tp->t_flags & TF_FASTOPEN) &&
 		    (tp->snd_una != tp->snd_max)) {
 			/* Was it a partial ack? */
 			if (SEQ_LT(th->th_ack, tp->snd_max))
@@ -14373,7 +14373,7 @@ rack_do_syn_recv(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		ctf_do_dropwithreset(m, tp, th, BANDLIM_RST_OPENPORT, tlen);
 		return (1);
 	}
-	if (IS_FASTOPEN(tp->t_flags)) {
+	if (tp->t_flags & TF_FASTOPEN) {
 		/*
 		 * When a TFO connection is in SYN_RECEIVED, the
 		 * only valid packets are the initial SYN, a
@@ -14454,7 +14454,7 @@ rack_do_syn_recv(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * processing; else drop segment and return.
 	 */
 	if ((thflags & TH_ACK) == 0) {
-		if (IS_FASTOPEN(tp->t_flags)) {
+		if (tp->t_flags & TF_FASTOPEN) {
 			rack_cc_conn_init(tp);
 		}
 		return (rack_process_data(m, th, so, tp, drop_hdrlen, tlen,
@@ -14475,7 +14475,7 @@ rack_do_syn_recv(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * FIN-WAIT-1
 	 */
 	tp->t_starttime = ticks;
-	if (IS_FASTOPEN(tp->t_flags) && tp->t_tfo_pending) {
+	if ((tp->t_flags & TF_FASTOPEN) && tp->t_tfo_pending) {
 		tcp_fastopen_decrement_counter(tp->t_tfo_pending);
 		tp->t_tfo_pending = NULL;
 	}
@@ -14492,7 +14492,7 @@ rack_do_syn_recv(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		 * is not harmless as it would undo the snd_cwnd reduction
 		 * that occurs when a TFO SYN|ACK is retransmitted.
 		 */
-		if (!IS_FASTOPEN(tp->t_flags))
+		if (!(tp->t_flags & TF_FASTOPEN))
 			rack_cc_conn_init(tp);
 	}
 	/*
@@ -14998,13 +14998,6 @@ rack_do_closing(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		return (ret_val);
 	}
 	/*
-	 * If new data are received on a connection after the user processes
-	 * are gone, then RST the other end.
-	 */
-	if ((tp->t_flags & TF_CLOSED) && tlen &&
-	    rack_check_data_after_close(m, tp, &tlen, th, so))
-		return (1);
-	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
 	 * from the latest proposal of the tcplw@cray.com list (Braden
@@ -15112,13 +15105,6 @@ rack_do_lastack(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			      &rack->r_ctl.challenge_ack_cnt)) {
 		return (ret_val);
 	}
-	/*
-	 * If new data are received on a connection after the user processes
-	 * are gone, then RST the other end.
-	 */
-	if ((tp->t_flags & TF_CLOSED) && tlen &&
-	    rack_check_data_after_close(m, tp, &tlen, th, so))
-		return (1);
 	/*
 	 * If last ACK falls within this segment's sequence numbers, record
 	 * its timestamp. NOTE: 1) That the test incorporates suggestions
@@ -17040,7 +17026,7 @@ rack_new_round_setup(struct tcpcb *tp, struct tcp_rack *rack, uint32_t high_seq)
 			log.u_bbr.flex1 = rack->r_ctl.current_round;
 			log.u_bbr.flex2 = rack->r_ctl.last_rnd_of_gp_rise;
 			log.u_bbr.flex3 = rack->r_ctl.gp_rnd_thresh;
-			log.u_bbr.flex5 = rack->r_ctl.gate_to_fs;
+			log.u_bbr.flex4 = rack->r_ctl.gate_to_fs;
 			log.u_bbr.flex5 = rack->r_ctl.ss_hi_fs;
 			log.u_bbr.flex8 = 40;
 			(void)tcp_log_event(tp, NULL, NULL, NULL, BBR_LOG_CWND, 0,
@@ -18198,7 +18184,7 @@ rack_do_segment_nounlock(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 			if ((tp->t_flags & TF_SACK_PERMIT) &&
 			    (to.to_flags & TOF_SACKPERM) == 0)
 				tp->t_flags &= ~TF_SACK_PERMIT;
-			if (IS_FASTOPEN(tp->t_flags)) {
+			if (tp->t_flags & TF_FASTOPEN) {
 				if (to.to_flags & TOF_FASTOPEN) {
 					uint16_t mss;
 
@@ -21283,7 +21269,8 @@ rack_output(struct tcpcb *tp)
 	unsigned ipsec_optlen = 0;
 
 #endif
-	int32_t idle, sendalot, tot_idle;
+	int32_t idle, sendalot;
+	uint32_t tot_idle;
 	int32_t sub_from_prr = 0;
 	volatile int32_t sack_rxmit;
 	struct rack_sendmap *rsm = NULL;
@@ -21346,7 +21333,7 @@ rack_output(struct tcpcb *tp)
 	 * For TFO connections in SYN_RECEIVED, only allow the initial
 	 * SYN|ACK and those sent by the retransmit timer.
 	 */
-	if (IS_FASTOPEN(tp->t_flags) &&
+	if ((tp->t_flags & TF_FASTOPEN) &&
 	    (tp->t_state == TCPS_SYN_RECEIVED) &&
 	    SEQ_GT(tp->snd_max, tp->snd_una) &&    /* initial SYN|ACK sent */
 	    (rack->r_ctl.rc_resend == NULL)) {         /* not a retransmit */
@@ -21494,7 +21481,7 @@ rack_output(struct tcpcb *tp)
 	 * only allow the initial SYN or SYN|ACK and those sent
 	 * by the retransmit timer.
 	 */
-	if (IS_FASTOPEN(tp->t_flags) &&
+	if ((tp->t_flags & TF_FASTOPEN) &&
 	    ((tp->t_state == TCPS_SYN_RECEIVED) ||
 	     (tp->t_state == TCPS_SYN_SENT)) &&
 	    SEQ_GT(tp->snd_max, tp->snd_una) && /* initial SYN or SYN|ACK sent */
@@ -21525,8 +21512,8 @@ rack_output(struct tcpcb *tp)
 	if ((tp->snd_una == tp->snd_max) &&
 	    rack->r_ctl.rc_went_idle_time &&
 	    (cts > rack->r_ctl.rc_went_idle_time)) {
-		tot_idle = idle = (cts - rack->r_ctl.rc_went_idle_time);
-		if (idle > (uint64_t)rack_min_probertt_hold) {
+		tot_idle = (cts - rack->r_ctl.rc_went_idle_time);
+		if (tot_idle > rack_min_probertt_hold) {
 			/* Count as a probe rtt */
 			if (rack->in_probe_rtt == 0) {
 				rack->r_ctl.rc_lower_rtt_us_cts = cts;
@@ -21537,7 +21524,6 @@ rack_output(struct tcpcb *tp)
 				rack_exit_probertt(rack, cts);
 			}
 		}
-		idle = 0;
 	}
 	if(rack->policer_detect_on) {
 		/*
@@ -21949,7 +21935,8 @@ skip_fast_output:
 	}
 	SOCKBUF_LOCK(sb);
 	if ((sack_rxmit == 0) &&
-	    (TCPS_HAVEESTABLISHED(tp->t_state) || IS_FASTOPEN(tp->t_flags))) {
+	    (TCPS_HAVEESTABLISHED(tp->t_state) ||
+	    (tp->t_flags & TF_FASTOPEN))) {
 		/*
 		 * We are not retransmitting (sack_rxmit is 0) so we
 		 * are sending new data. This is always based on snd_max.
@@ -22075,7 +22062,7 @@ skip_fast_output:
 		 * no data please.
 		 */
 		if ((sack_rxmit == 0) &&
-		    (!IS_FASTOPEN(tp->t_flags))){
+		    !(tp->t_flags & TF_FASTOPEN)) {
 			len = 0;
 			sb_offset = 0;
 		}
@@ -22135,7 +22122,7 @@ skip_fast_output:
 		 * When sending additional segments following a TFO SYN|ACK,
 		 * do not include the SYN bit.
 		 */
-		if (IS_FASTOPEN(tp->t_flags) &&
+		if ((tp->t_flags & TF_FASTOPEN) &&
 		    (tp->t_state == TCPS_SYN_RECEIVED))
 			flags &= ~TH_SYN;
 	}
@@ -22160,7 +22147,7 @@ skip_fast_output:
 	 *
 	 *  - When the socket is in the CLOSED state (RST is being sent)
 	 */
-	if (IS_FASTOPEN(tp->t_flags) &&
+	if ((tp->t_flags & TF_FASTOPEN) &&
 	    (((flags & TH_SYN) && (tp->t_rxtshift > 0)) ||
 	     ((tp->t_state == TCPS_SYN_SENT) &&
 	      (tp->t_tfo_client_cookie_len == 0)) ||
@@ -22169,7 +22156,7 @@ skip_fast_output:
 		len = 0;
 	}
 	/* Without fast-open there should never be data sent on a SYN */
-	if ((flags & TH_SYN) && (!IS_FASTOPEN(tp->t_flags))) {
+	if ((flags & TH_SYN) && !(tp->t_flags & TF_FASTOPEN)) {
 		len = 0;
 	}
 	if ((len > segsiz) && (tcp_dsack_block_exists(tp))) {
@@ -22498,7 +22485,7 @@ just_return_nolock:
 	{
 		int app_limited = CTF_JR_SENT_DATA;
 
-		if ((IS_FASTOPEN(tp->t_flags) == 0) &&
+		if ((tp->t_flags & TF_FASTOPEN) == 0 &&
 		    (flags & TH_FIN) &&
 		    (len == 0) &&
 		    (sbused(sb) == (tp->snd_max - tp->snd_una)) &&
@@ -22866,7 +22853,7 @@ send:
 			 * have caused the original SYN or SYN|ACK to have
 			 * been dropped by a middlebox.
 			 */
-			if (IS_FASTOPEN(tp->t_flags) &&
+			if ((tp->t_flags & TF_FASTOPEN) &&
 			    (tp->t_rxtshift == 0)) {
 				if (tp->t_state == TCPS_SYN_RECEIVED) {
 					to.to_tfo_len = TCP_FASTOPEN_COOKIE_LEN;
@@ -22964,7 +22951,7 @@ send:
 		 * If we wanted a TFO option to be added, but it was unable
 		 * to fit, ensure no data is sent.
 		 */
-		if (IS_FASTOPEN(tp->t_flags) && wanted_cookie &&
+		if ((tp->t_flags & TF_FASTOPEN) && wanted_cookie &&
 		    !(to.to_flags & TOF_FASTOPEN))
 			len = 0;
 	}
@@ -23717,12 +23704,12 @@ send:
 			mtu = inp->inp_route.ro_nh->nh_mtu;
 	}
 #endif				/* INET */
-
-out:
 	if (lgb) {
 		lgb->tlb_errno = error;
 		lgb = NULL;
 	}
+
+out:
 	/*
 	 * In transmit state, time the transmission and arrange for the
 	 * retransmit.  In persist state, just set snd_max.

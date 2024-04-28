@@ -88,7 +88,6 @@ struct snd_mixer;
 #include <dev/sound/pcm/feeder.h>
 #include <dev/sound/pcm/mixer.h>
 #include <dev/sound/pcm/dsp.h>
-#include <dev/sound/clone.h>
 #include <dev/sound/unit.h>
 
 #define	PCM_SOFTC_SIZE	(sizeof(struct snddev_info))
@@ -112,14 +111,9 @@ struct snd_mixer;
 #define PCMMAXDEV		(snd_max_d())
 #define PCMMAXCHAN		(snd_max_c())
 
-#define PCMMAXCLONE		PCMMAXCHAN
-
 #define PCMUNIT(x)		(snd_unit2u(dev2unit(x)))
 #define PCMDEV(x)		(snd_unit2d(dev2unit(x)))
 #define PCMCHAN(x)		(snd_unit2c(dev2unit(x)))
-
-/* XXX unit2minor compat */
-#define PCMMINOR(x)	(x)
 
 /*
  * By design, limit possible channels for each direction.
@@ -177,6 +171,9 @@ struct snd_mixer;
 				 ((x)->flags & SD_F_REGISTERED))
 
 #define	PCM_DETACHING(x)	((x)->flags & SD_F_DETACHING)
+
+#define	PCM_CHANCOUNT(d)	\
+	(d->playcount + d->pvchancount + d->reccount + d->rvchancount)
 
 /* many variables should be reduced to a range. Here define a macro */
 #define RANGE(var, low, high) (var) = \
@@ -287,9 +284,6 @@ struct snd_mixer;
 #define SND_DEV_DSP_SPDIFOUT	19	/* /dev/dsp_spdifout */
 #define SND_DEV_DSP_SPDIFIN	20	/* /dev/dsp_spdifin  */
 
-#define SND_DEV_LAST		SND_DEV_DSP_SPDIFIN
-#define SND_DEV_MAX		PCMMAXDEV
-
 #define DSP_DEFAULT_SPEED	8000
 
 #define ON		1
@@ -344,17 +338,8 @@ void snd_mtxassert(void *m);
 #define	snd_mtxlock(m) mtx_lock(m)
 #define	snd_mtxunlock(m) mtx_unlock(m)
 
-typedef int (*sndstat_handler)(struct sbuf *s, device_t dev, int verbose);
-int sndstat_register(device_t dev, char *str, sndstat_handler handler);
+int sndstat_register(device_t dev, char *str);
 int sndstat_unregister(device_t dev);
-
-/* usage of flags in device config entry (config file) */
-#define DV_F_DRQ_MASK	0x00000007	/* mask for secondary drq */
-#define	DV_F_DUAL_DMA	0x00000010	/* set to use secondary dma channel */
-
-/* ought to be made obsolete but still used by mss */
-#define	DV_F_DEV_MASK	0x0000ff00	/* force device type/class */
-#define	DV_F_DEV_SHIFT	8		/* force device type/class */
 
 /*
  * this is rather kludgey- we need to duplicate these struct def'ns from sound.c
@@ -374,9 +359,7 @@ struct snddev_info {
 			} opened;
 		} pcm;
 	} channels;
-	TAILQ_HEAD(dsp_cdevinfo_linkhead, dsp_cdevinfo) dsp_cdevinfo_pool;
-	struct snd_clone *clones;
-	unsigned devcount, playcount, reccount, pvchancount, rvchancount ;
+	unsigned playcount, reccount, pvchancount, rvchancount;
 	unsigned flags;
 	unsigned int bufsz;
 	void *devinfo;
@@ -384,6 +367,7 @@ struct snddev_info {
 	char status[SND_STATUSLEN];
 	struct mtx *lock;
 	struct cdev *mixer_dev;
+	struct cdev *dsp_dev;
 	uint32_t pvchanrate, pvchanformat;
 	uint32_t rvchanrate, rvchanformat;
 	int32_t eqpreamp;
@@ -519,7 +503,7 @@ int	sound_oss_card_info(oss_card_info *);
 		mtx_unlock(&Giant);					\
 	}								\
 } while (0)
-#else /* SND_DIAGNOSTIC */
+#else /* !SND_DIAGNOSTIC */
 #define PCM_WAIT(x)		do {					\
 	PCM_LOCKASSERT(x);						\
 	while ((x)->flags & SD_F_BUSY)					\
@@ -590,7 +574,7 @@ int	sound_oss_card_info(oss_card_info *);
 		mtx_unlock(&Giant);					\
 	}								\
 } while (0)
-#endif /* !SND_DIAGNOSTIC */
+#endif /* SND_DIAGNOSTIC */
 
 #define PCM_GIANT_LEAVE(x)						\
 	PCM_GIANT_EXIT(x);						\

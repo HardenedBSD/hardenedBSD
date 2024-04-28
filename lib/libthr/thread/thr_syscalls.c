@@ -198,10 +198,10 @@ __thr_fcntl(int fd, int cmd, ...)
 	va_start(ap, cmd);
 	if (cmd == F_OSETLKW || cmd == F_SETLKW) {
 		_thr_cancel_enter(curthread);
-		ret = __sys_fcntl(fd, cmd, va_arg(ap, void *));
+		ret = __sys_fcntl(fd, cmd, (intptr_t)va_arg(ap, void *));
 		_thr_cancel_leave(curthread, ret == -1);
 	} else {
-		ret = __sys_fcntl(fd, cmd, va_arg(ap, void *));
+		ret = __sys_fcntl(fd, cmd, (intptr_t)va_arg(ap, void *));
 	}
 	va_end(ap);
 
@@ -651,7 +651,7 @@ __thr_interpose_libc(void)
 #undef SLOT
 
 #define	SLOT(name)					\
-	*(__libsys_interposing_slot(INTERPOS_##name)) =	\
+	*(__libc_interposing_slot(INTERPOS_##name)) =	\
 	    (interpos_func_t)__thr_##name;
 	SLOT(accept);
 	SLOT(accept4);

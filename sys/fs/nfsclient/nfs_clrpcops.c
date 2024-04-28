@@ -561,34 +561,21 @@ nfsrpc_openrpc(struct nfsmount *nmp, vnode_t vp, u_int8_t *nfhp, int fhlen,
 		*tl = txdr_unsigned(delegtype);
 	} else {
 		if (dp != NULL) {
-			if (NFSHASNFSV4N(nmp)) {
+			if (NFSHASNFSV4N(nmp))
 				*tl = txdr_unsigned(
 				    NFSV4OPEN_CLAIMDELEGATECURFH);
-				NFSLOCKMNT(nmp);
-				if ((nmp->nm_privflag & NFSMNTP_BUGGYFBSDSRV) !=
-				    0) {
-					NFSUNLOCKMNT(nmp);
-					/*
-					 * Add a stateID argument to make old
-					 * broken FreeBSD NFSv4.1/4.2 servers
-					 * happy.
-					 */
-					NFSM_BUILD(tl, uint32_t *,NFSX_STATEID);
-					*tl++ = 0;
-					*tl++ = dp->nfsdl_stateid.other[0];
-					*tl++ = dp->nfsdl_stateid.other[1];
-					*tl = dp->nfsdl_stateid.other[2];
-				} else
-					NFSUNLOCKMNT(nmp);
-			} else {
+			else
 				*tl = txdr_unsigned(NFSV4OPEN_CLAIMDELEGATECUR);
-				NFSM_BUILD(tl, u_int32_t *, NFSX_STATEID);
+			NFSM_BUILD(tl, u_int32_t *, NFSX_STATEID);
+			if (NFSHASNFSV4N(nmp))
+				*tl++ = 0;
+			else
 				*tl++ = dp->nfsdl_stateid.seqid;
-				*tl++ = dp->nfsdl_stateid.other[0];
-				*tl++ = dp->nfsdl_stateid.other[1];
-				*tl = dp->nfsdl_stateid.other[2];
+			*tl++ = dp->nfsdl_stateid.other[0];
+			*tl++ = dp->nfsdl_stateid.other[1];
+			*tl = dp->nfsdl_stateid.other[2];
+			if (!NFSHASNFSV4N(nmp))
 				(void)nfsm_strtom(nd, name, namelen);
-			}
 		} else if (NFSHASNFSV4N(nmp)) {
 			*tl = txdr_unsigned(NFSV4OPEN_CLAIMFH);
 		} else {
@@ -839,6 +826,7 @@ nfsrpc_doclose(struct nfsmount *nmp, struct nfsclopen *op, NFSPROC_T *p,
 	u_int64_t off = 0, len = 0;
 	u_int32_t type = NFSV4LOCKT_READ;
 	int error, do_unlock, trycnt;
+	bool own_not_null;
 
 	tcred = newnfs_getcred();
 	newnfs_copycred(&op->nfso_cred, tcred);
@@ -905,22 +893,29 @@ nfsrpc_doclose(struct nfsmount *nmp, struct nfsclopen *op, NFSPROC_T *p,
 	 * There could be other Opens for different files on the same
 	 * OpenOwner, so locking is required.
 	 */
-	NFSLOCKCLSTATE();
-	nfscl_lockexcl(&op->nfso_own->nfsow_rwlock, NFSCLSTATEMUTEXPTR);
-	NFSUNLOCKCLSTATE();
+	own_not_null = false;
+	if (op->nfso_own != NULL) {
+		own_not_null = true;
+		NFSLOCKCLSTATE();
+		nfscl_lockexcl(&op->nfso_own->nfsow_rwlock, NFSCLSTATEMUTEXPTR);
+		NFSUNLOCKCLSTATE();
+	}
 	do {
 		error = nfscl_tryclose(op, tcred, nmp, p, loop_on_delayed);
 		if (error == NFSERR_GRACE)
 			(void) nfs_catnap(PZERO, error, "nfs_close");
 	} while (error == NFSERR_GRACE);
-	NFSLOCKCLSTATE();
-	nfscl_lockunlock(&op->nfso_own->nfsow_rwlock);
+	if (own_not_null) {
+		NFSLOCKCLSTATE();
+		nfscl_lockunlock(&op->nfso_own->nfsow_rwlock);
+	}
 
 	LIST_FOREACH_SAFE(lp, &op->nfso_lock, nfsl_list, nlp)
 		nfscl_freelockowner(lp, 0);
 	if (freeop && error != NFSERR_DELAY)
 		nfscl_freeopen(op, 0, true);
-	NFSUNLOCKCLSTATE();
+	if (own_not_null)
+		NFSUNLOCKCLSTATE();
 	NFSFREECRED(tcred);
 	return (error);
 }

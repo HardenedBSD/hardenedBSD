@@ -27,9 +27,12 @@ CFLAGS+= -I${SRCTOP}/cddl/compat/opensolaris/include
 CFLAGS+= -include ${SRCTOP}/sys/contrib/openzfs/include/os/freebsd/spl/sys/ccompile.h
 CFLAGS+= -DHAVE_ISSETUGID  -DHAVE_CONFIG_H -DHAVE_XDR_BYTESREC
 
+<<<<<<< HEAD
 
 CFLAGS.nvpair.c+= -UHAVE_RPC_TYPES
 
 CFI_OVERRIDE=	-fno-sanitize=cfi-icall
 
+=======
+>>>>>>> internal/hardened/current/master
 .include <bsd.lib.mk>

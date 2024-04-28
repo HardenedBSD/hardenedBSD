@@ -96,10 +96,10 @@ BSM=		audit.h \
 BSMPACKAGE=	libbsm
 BSMDIR=		${INCLUDEDIR}/bsm
 
-.PATH: ${SRCTOP}/sys/security/audit
-SECAUDIT=	audit.h \
-		audit_ioctl.h \
-		audit_private.h
+.PATH: ${SRCTOP}/sys/security
+SECAUDIT=	audit/audit.h \
+		audit/audit_ioctl.h \
+		audit/audit_private.h
 SECAUDITPACKAGE=	libbsm
 SECAUDITDIR=	${INCLUDEDIR}/security/audit
 
@@ -347,7 +347,7 @@ _MARCHS+=	x86
 
 META_TARGETS+=	compat
 stage_includes: ${SHARED}
-SDESTDIR=	${SYSROOT:U${DESTDIR}}
+SDESTDIR?=	${SYSROOT:U${DESTDIR}}
 
 # Take care of stale directory-level symlinks.
 # Note: The "|| true" after find is needed in case one of the directories does

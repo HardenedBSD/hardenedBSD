@@ -6196,7 +6196,7 @@ again:
 				break;
 			}
 
-			/* Only add the addres if we've actually allowed the state. */
+			/* Only add the address if we've actually allowed the state. */
 			pf_sctp_multihome_add_addr(pd, &j->src, v_tag);
 
 			if (! do_extra) {
@@ -7240,6 +7240,7 @@ pf_route(struct mbuf **m, struct pf_krule *r, struct ifnet *oifp,
 	struct pf_ksrc_node	*sn = NULL;
 	int			 error = 0;
 	uint16_t		 ip_len, ip_off;
+	uint16_t		 tmp;
 	int			 r_rt, r_dir;
 
 	KASSERT(m && *m && r && oifp, ("%s: invalid parameters", __func__));
@@ -7381,11 +7382,26 @@ pf_route(struct mbuf **m, struct pf_krule *r, struct ifnet *oifp,
 		m0->m_pkthdr.csum_flags &= ~CSUM_SCTP;
 	}
 
-	/*
-	 * Make sure dummynet gets the correct direction, in case it needs to
-	 * re-inject later.
-	 */
-	pd->dir = PF_OUT;
+	if (pd->dir == PF_IN) {
+		/*
+		 * Make sure dummynet gets the correct direction, in case it needs to
+		 * re-inject later.
+		 */
+		pd->dir = PF_OUT;
+
+		/*
+		 * The following processing is actually the rest of the inbound processing, even
+		 * though we've marked it as outbound (so we don't look through dummynet) and it
+		 * happens after the outbound processing (pf_test(PF_OUT) above).
+		 * Swap the dummynet pipe numbers, because it's going to come to the wrong
+		 * conclusion about what direction it's processing, and we can't fix it or it
+		 * will re-inject incorrectly. Swapping the pipe numbers means that its incorrect
+		 * decision will pick the right pipe, and everything will mostly work as expected.
+		 */
+		tmp = pd->act.dnrpipe;
+		pd->act.dnrpipe = pd->act.dnpipe;
+		pd->act.dnpipe = tmp;
+	}
 
 	/*
 	 * If small enough for interface, or the interface will take
@@ -7434,6 +7450,7 @@ pf_route(struct mbuf **m, struct pf_krule *r, struct ifnet *oifp,
 		if (error == 0) {
 			m_clrprotoflags(m0);
 			md = m0;
+			pd->pf_mtag = pf_find_mtag(md);
 			error = pf_dummynet_route(pd, s, r, ifp,
 			    sintosa(&dst), &md);
 			if (md != NULL)
@@ -7795,6 +7812,9 @@ pf_pdesc_to_dnflow(const struct pf_pdesc *pd, const struct pf_krule *r,
 		dndir = pd->dir;
 	}
 
+	if (pd->pf_mtag->flags & PF_MTAG_FLAG_DUMMYNETED)
+		return (false);
+
 	memset(dnflow, 0, sizeof(*dnflow));
 
 	if (pd->dport != NULL)
@@ -7934,8 +7954,24 @@ pf_dummynet_route(struct pf_pdesc *pd, struct pf_kstate *s,
 				    sizeof(struct sockaddr_in6));
 		}
 
+		if (s != NULL && s->nat_rule.ptr != NULL &&
+		    s->nat_rule.ptr->action == PF_RDR &&
+		    (
+#ifdef INET
+		    (pd->af == AF_INET && IN_LOOPBACK(ntohl(pd->dst->v4.s_addr))) ||
+#endif
+		    (pd->af == AF_INET6 && IN6_IS_ADDR_LOOPBACK(&pd->dst->v6)))) {
+			/*
+			 * If we're redirecting to loopback mark this packet
+			 * as being local. Otherwise it might get dropped
+			 * if dummynet re-injects.
+			 */
+			(*m0)->m_pkthdr.rcvif = V_loif;
+		}
+
 		if (pf_pdesc_to_dnflow(pd, r, s, &dnflow)) {
 			pd->pf_mtag->flags |= PF_MTAG_FLAG_DUMMYNET;
+			pd->pf_mtag->flags |= PF_MTAG_FLAG_DUMMYNETED;
 			ip_dn_io_ptr(m0, &dnflow);
 			if (*m0 != NULL) {
 				pd->pf_mtag->flags &= ~PF_MTAG_FLAG_ROUTE_TO;

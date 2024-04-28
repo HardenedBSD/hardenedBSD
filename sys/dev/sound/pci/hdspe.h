@@ -28,6 +28,7 @@
  */
 
 #define	PCI_VENDOR_XILINX		0x10ee
+#define	PCI_VENDOR_RME			0x1d18 /* Newer firmware versions. */
 #define	PCI_DEVICE_XILINX_HDSPE		0x3fc6 /* AIO, MADI, AES, RayDAT */
 #define	PCI_CLASS_REVISION		0x08
 #define	PCI_REVISION_AIO		212
@@ -184,6 +185,7 @@ struct sc_chinfo {
 	/* Buffer */
 	uint32_t	*data;
 	uint32_t	size;
+	uint32_t	position;
 
 	/* Flags */
 	uint32_t	run;

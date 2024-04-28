@@ -549,9 +549,10 @@ A FIB
 .Ar fib_number
 is assigned to all packets encapsulated by tunnel interface, e.g.,
 .Xr gif 4 ,
-.Xr gre 4
+.Xr gre 4 ,
+.Xr vxlan 4 ,
 and
-.Xr vxlan 4 .
+.Xr wg 4 .
 .It Cm maclabel Ar label
 If Mandatory Access Control support is enabled in the kernel,
 set the MAC label to
@@ -1068,7 +1069,7 @@ Legacy
 .Cm wds
 devices have a fixed peer relationship and do not, for example, roam
 if their peer stops communicating.
-For completeness a Dynamic WDS (DWDS) interface may marked as
+For completeness a Dynamic WDS (DWDS) interface may be marked as
 .Fl wdslegacy .
 .It Cm bssid
 Request a unique local mac address for the cloned device.

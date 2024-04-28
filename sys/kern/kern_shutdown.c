@@ -231,6 +231,7 @@ bool scheduler_stopped __read_frequently;
 
 int dumping __read_mostly;		/* system is dumping */
 int rebooting __read_mostly;		/* system is rebooting */
+bool dumped_core __read_mostly;		/* system successfully dumped core */
 /*
  * Used to serialize between sysctl kern.shutdown.dumpdevname and list
  * modifications via ioctl.
@@ -417,8 +418,10 @@ doadump(boolean_t textdump)
 
 		TAILQ_FOREACH(di, &dumper_configs, di_next) {
 			error = dumpsys(di);
-			if (error == 0)
+			if (error == 0) {
+				dumped_core = true;
 				break;
+			}
 		}
 	}
 

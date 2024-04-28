@@ -23,6 +23,8 @@ SHLIB_MAJOR= 7
 WARNS?=	2
 MK_SSP=		no
 
+INCS=	libsys.h _libsys.h
+
 CFLAGS+=-I${LIBSYS_SRCTOP}/include -I${LIBC_SRCTOP}/include
 CFLAGS+=-I${LIBSYS_SRCTOP}/${LIBC_ARCH}
 CFLAGS+=-I${LIBC_SRCTOP}/${LIBC_ARCH}
@@ -58,7 +60,8 @@ MIASM=
 NOASM=
 
 SYM_MAPS+=	${LIBSYS_SRCTOP}/Symbol.map
-SRCS+=	auxv.c
+SRCS+=	auxv.c \
+	interposing_table.c
 
 .include "${LIBSYS_SRCTOP}/Makefile.sys"
 
