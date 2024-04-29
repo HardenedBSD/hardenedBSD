@@ -983,13 +983,9 @@ defaultclass=
 defaultLgroup=
 defaultgroups=
 defaultshell="${DEFAULTSHELL}"
-<<<<<<< HEAD
 defaultHomePerm="750"
-=======
-defaultHomePerm=
 zfsopt=
 Zencrypt="no"
->>>>>>> origin/freebsd/14-stable/main
 
 # Make sure the user running this program is root. This isn't a security
 # measure as much as it is a useful method of reminding the user to
