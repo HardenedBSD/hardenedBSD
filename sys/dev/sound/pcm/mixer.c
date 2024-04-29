@@ -727,7 +727,7 @@ mixer_init(device_t dev, kobj_class_t cls, void *devinfo)
 	u_int16_t v;
 	struct cdev *pdev;
 	const char *name;
-	int i, unit, devunit, val;
+	int i, unit, val;
 
 	snddev = device_get_softc(dev);
 	if (snddev == NULL)
@@ -764,8 +764,7 @@ mixer_init(device_t dev, kobj_class_t cls, void *devinfo)
 
 	mixer_setrecsrc(m, 0); /* Set default input. */
 
-	devunit = snd_mkunit(unit, SND_DEV_CTL, 0);
-	pdev = make_dev(&mixer_cdevsw, devunit, UID_ROOT, GID_WHEEL, 0666,
+	pdev = make_dev(&mixer_cdevsw, SND_DEV_CTL, UID_ROOT, GID_WHEEL, 0666,
 	    "mixer%d", unit);
 	pdev->si_drv1 = m;
 	snddev->mixer_dev = pdev;
@@ -1377,11 +1376,14 @@ mixer_clone(void *arg,
 	if (*dev != NULL)
 		return;
 	if (strcmp(name, "mixer") == 0) {
+		bus_topo_lock();
 		d = devclass_get_softc(pcm_devclass, snd_unit);
-		if (PCM_REGISTERED(d) && d->mixer_dev != NULL) {
+		/* See related comment in dsp_clone(). */
+		if (d != NULL && PCM_REGISTERED(d) && d->mixer_dev != NULL) {
 			*dev = d->mixer_dev;
 			dev_ref(*dev);
 		}
+		bus_topo_unlock();
 	}
 }
 

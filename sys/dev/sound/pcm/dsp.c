@@ -181,8 +181,8 @@ getchns(struct dsp_cdevpriv *priv, uint32_t prio)
 		pcm_setflags(d->dev, flags);
 		if (ch != NULL) {
 			CHN_LOCK(ch);
-			pcm_chnref(ch, -1);
-			pcm_chnrelease(ch);
+			chn_ref(ch, -1);
+			chn_release(ch);
 		}
 		PCM_RELEASE(d);
 		PCM_UNLOCK(d);
@@ -301,7 +301,7 @@ dsp_close(void *data)
 			wdref--;
 		else {
 			CHN_LOCK(volch);
-			pcm_chnref(volch, -1);
+			chn_ref(volch, -1);
 			CHN_UNLOCK(volch);
 		}
 	}
@@ -332,12 +332,12 @@ dsp_close(void *data)
 				free_unr(pcmsg_unrhdr, sg_ids);
 
 			CHN_LOCK(rdch);
-			pcm_chnref(rdch, rdref);
+			chn_ref(rdch, rdref);
 			chn_abort(rdch); /* won't sleep */
 			rdch->flags &= ~(CHN_F_RUNNING | CHN_F_MMAP |
 			    CHN_F_DEAD | CHN_F_EXCLUSIVE);
 			chn_reset(rdch, 0, 0);
-			pcm_chnrelease(rdch);
+			chn_release(rdch);
 		}
 		if (wrch != NULL) {
 			/*
@@ -350,12 +350,12 @@ dsp_close(void *data)
 				free_unr(pcmsg_unrhdr, sg_ids);
 
 			CHN_LOCK(wrch);
-			pcm_chnref(wrch, wdref);
+			chn_ref(wrch, wdref);
 			chn_flush(wrch); /* may sleep */
 			wrch->flags &= ~(CHN_F_RUNNING | CHN_F_MMAP |
 			    CHN_F_DEAD | CHN_F_EXCLUSIVE);
 			chn_reset(wrch, 0, 0);
-			pcm_chnrelease(wrch);
+			chn_release(wrch);
 		}
 		PCM_LOCK(d);
 	}
@@ -444,14 +444,14 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 	if (DSP_F_READ(flags)) {
 		/* open for read */
 		rderror = pcm_chnalloc(d, &rdch, PCMDIR_REC,
-		    td->td_proc->p_pid, td->td_proc->p_comm, -1);
+		    td->td_proc->p_pid, td->td_proc->p_comm);
 
 		if (rderror == 0 && chn_reset(rdch, fmt, spd) != 0)
 			rderror = ENXIO;
 
 		if (rderror != 0) {
 			if (rdch != NULL)
-				pcm_chnrelease(rdch);
+				chn_release(rdch);
 			if (!DSP_F_DUPLEX(flags)) {
 				PCM_RELEASE_QUICK(d);
 				PCM_GIANT_EXIT(d);
@@ -463,7 +463,7 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 				rdch->flags |= CHN_F_NBIO;
 			if (flags & O_EXCL)
 				rdch->flags |= CHN_F_EXCLUSIVE;
-			pcm_chnref(rdch, 1);
+			chn_ref(rdch, 1);
 			chn_vpc_reset(rdch, SND_VOL_C_PCM, 0);
 		 	CHN_UNLOCK(rdch);
 		}
@@ -472,14 +472,14 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 	if (DSP_F_WRITE(flags)) {
 		/* open for write */
 		wrerror = pcm_chnalloc(d, &wrch, PCMDIR_PLAY,
-		    td->td_proc->p_pid, td->td_proc->p_comm, -1);
+		    td->td_proc->p_pid, td->td_proc->p_comm);
 
 		if (wrerror == 0 && chn_reset(wrch, fmt, spd) != 0)
 			wrerror = ENXIO;
 
 		if (wrerror != 0) {
 			if (wrch != NULL)
-				pcm_chnrelease(wrch);
+				chn_release(wrch);
 			if (!DSP_F_DUPLEX(flags)) {
 				if (rdch != NULL) {
 					/*
@@ -487,8 +487,8 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 					 * created record channel
 					 */
 					CHN_LOCK(rdch);
-					pcm_chnref(rdch, -1);
-					pcm_chnrelease(rdch);
+					chn_ref(rdch, -1);
+					chn_release(rdch);
 				}
 				PCM_RELEASE_QUICK(d);
 				PCM_GIANT_EXIT(d);
@@ -500,7 +500,7 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 				wrch->flags |= CHN_F_NBIO;
 			if (flags & O_EXCL)
 				wrch->flags |= CHN_F_EXCLUSIVE;
-			pcm_chnref(wrch, 1);
+			chn_ref(wrch, 1);
 			chn_vpc_reset(wrch, SND_VOL_C_PCM, 0);
 			CHN_UNLOCK(wrch);
 		}
@@ -630,68 +630,12 @@ dsp_write(struct cdev *i_dev, struct uio *buf, int flag)
 }
 
 static int
-dsp_get_volume_channel(struct dsp_cdevpriv *priv, struct pcm_channel **volch)
-{
-	struct snddev_info *d;
-	struct pcm_channel *c;
-	int unit;
-
-	KASSERT(volch != NULL,
-	    ("%s(): NULL query priv=%p volch=%p", __func__, priv, volch));
-
-	d = priv->sc;
-	if (!PCM_REGISTERED(d)) {
-		*volch = NULL;
-		return (EINVAL);
-	}
-
-	PCM_UNLOCKASSERT(d);
-
-	*volch = NULL;
-
-	c = priv->volch;
-	if (c != NULL) {
-		if (!(c->feederflags & (1 << FEEDER_VOLUME)))
-			return (-1);
-		*volch = c;
-		return (0);
-	}
-
-	PCM_LOCK(d);
-	PCM_WAIT(d);
-	PCM_ACQUIRE(d);
-
-	unit = dev2unit(d->dsp_dev);
-
-	CHN_FOREACH(c, d, channels.pcm) {
-		CHN_LOCK(c);
-		if (c->unit != unit) {
-			CHN_UNLOCK(c);
-			continue;
-		}
-		*volch = c;
-		pcm_chnref(c, 1);
-		priv->volch = c;
-		CHN_UNLOCK(c);
-		PCM_RELEASE(d);
-		PCM_UNLOCK(d);
-		return ((c->feederflags & (1 << FEEDER_VOLUME)) ? 0 : -1);
-	}
-
-	PCM_RELEASE(d);
-	PCM_UNLOCK(d);
-
-	return (EINVAL);
-}
-
-static int
 dsp_ioctl_channel(struct dsp_cdevpriv *priv, struct pcm_channel *volch,
     u_long cmd, caddr_t arg)
 {
 	struct snddev_info *d;
 	struct pcm_channel *rdch, *wrch;
-	int j, devtype, ret;
-	int left, right, center, mute;
+	int j, left, right, center, mute;
 
 	d = priv->sc;
 	if (!PCM_REGISTERED(d) || !(pcm_getflags(d->dev) & SD_F_VPC))
@@ -714,19 +658,6 @@ dsp_ioctl_channel(struct dsp_cdevpriv *priv, struct pcm_channel *volch,
 			volch = rdch;
 		else if (j == SOUND_MIXER_PCM && wrch != NULL)
 			volch = wrch;
-	}
-
-	devtype = PCMDEV(d->dsp_dev);
-
-	/* Look super harder */
-	if (volch == NULL &&
-	    (devtype == SND_DEV_DSPHW_PLAY || devtype == SND_DEV_DSPHW_VPLAY ||
-	    devtype == SND_DEV_DSPHW_REC || devtype == SND_DEV_DSPHW_VREC)) {
-		ret = dsp_get_volume_channel(priv, &volch);
-		if (ret != 0)
-			return (ret);
-		if (volch == NULL)
-			return (EINVAL);
 	}
 
 	/* Final validation */
@@ -2071,11 +2002,19 @@ dsp_clone(void *arg, struct ucred *cred, char *name, int namelen,
 	}
 	return;
 found:
+	bus_topo_lock();
 	d = devclass_get_softc(pcm_devclass, snd_unit);
-	if (!PCM_REGISTERED(d))
-		return;
-	*dev = d->dsp_dev;
-	dev_ref(*dev);
+	/*
+	 * If we only have a single soundcard attached and we detach it right
+	 * before entering dsp_clone(), there is a chance pcm_unregister() will
+	 * have returned already, meaning it will have set snd_unit to -1, and
+	 * thus devclass_get_softc() will return NULL here.
+	 */
+	if (d != NULL && PCM_REGISTERED(d) && d->dsp_dev != NULL) {
+		*dev = d->dsp_dev;
+		dev_ref(*dev);
+	}
+	bus_topo_unlock();
 }
 
 static void
@@ -2083,8 +2022,6 @@ dsp_sysinit(void *p)
 {
 	if (dsp_ehtag != NULL)
 		return;
-	/* initialize unit numbering */
-	snd_unit_init();
 	dsp_ehtag = EVENTHANDLER_REGISTER(dev_clone, dsp_clone, 0, 1000);
 }
 
@@ -2101,20 +2038,19 @@ SYSINIT(dsp_sysinit, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, dsp_sysinit, NULL);
 SYSUNINIT(dsp_sysuninit, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, dsp_sysuninit, NULL);
 
 char *
-dsp_unit2name(char *buf, size_t len, int unit)
+dsp_unit2name(char *buf, size_t len, struct pcm_channel *ch)
 {
-	int i, dtype;
+	int i;
 
 	KASSERT(buf != NULL && len != 0,
 	    ("bogus buf=%p len=%ju", buf, (uintmax_t)len));
 
-	dtype = snd_unit2d(unit);
-
 	for (i = 0; i < nitems(dsp_cdevs); i++) {
-		if (dtype != dsp_cdevs[i].type || dsp_cdevs[i].alias != NULL)
+		if (ch->type != dsp_cdevs[i].type || dsp_cdevs[i].alias != NULL)
 			continue;
-		snprintf(buf, len, "%s%d%s%d", dsp_cdevs[i].name,
-		    snd_unit2u(unit), dsp_cdevs[i].sep, snd_unit2c(unit));
+		snprintf(buf, len, "%s%d%s%d",
+		    dsp_cdevs[i].name, device_get_unit(ch->dev),
+		    dsp_cdevs[i].sep, ch->unit);
 		return (buf);
 	}
 
@@ -2202,12 +2138,10 @@ dsp_oss_audioinfo(struct cdev *i_dev, oss_audioinfo *ai)
 				if (devfs_foreach_cdevpriv(i_dev,
 				    dsp_oss_audioinfo_cb, ch) != 0) {
 					devname = dsp_unit2name(buf,
-					    sizeof(buf), ch->unit);
+					    sizeof(buf), ch);
 				}
-			} else if (ai->dev == nchan) {
-				devname = dsp_unit2name(buf, sizeof(buf),
-				    ch->unit);
-			}
+			} else if (ai->dev == nchan)
+				devname = dsp_unit2name(buf, sizeof(buf), ch);
 			if (devname != NULL)
 				break;
 			CHN_UNLOCK(ch);

@@ -332,6 +332,8 @@ chn_sleep(struct pcm_channel *c, int timeout)
 	int ret;
 
 	CHN_LOCKASSERT(c);
+	KASSERT((c->flags & CHN_F_SLEEPING) == 0,
+	    ("%s(): entered with CHN_F_SLEEPING", __func__));
 
 	if (c->flags & CHN_F_DEAD)
 		return (EINVAL);
@@ -1162,9 +1164,6 @@ chn_init(struct pcm_channel *c, void *devinfo, int dir, int direction)
 	struct snd_dbuf *b, *bs;
 	int i, ret;
 
-	if (chn_timeout < CHN_TIMEOUT_MIN || chn_timeout > CHN_TIMEOUT_MAX)
-		chn_timeout = CHN_TIMEOUT;
-
 	chn_lockinit(c, dir);
 
 	b = NULL;
@@ -1277,11 +1276,13 @@ out:
 	return 0;
 }
 
-int
+void
 chn_kill(struct pcm_channel *c)
 {
-    	struct snd_dbuf *b = c->bufhard;
-    	struct snd_dbuf *bs = c->bufsoft;
+	struct snd_dbuf *b = c->bufhard;
+	struct snd_dbuf *bs = c->bufsoft;
+
+	PCM_BUSYASSERT(c->parentsnddev);
 
 	if (CHN_STARTED(c)) {
 		CHN_LOCK(c);
@@ -1297,8 +1298,45 @@ chn_kill(struct pcm_channel *c)
 	CHN_LOCK(c);
 	c->flags |= CHN_F_DEAD;
 	chn_lockdestroy(c);
+	kobj_delete(c->methods, M_DEVBUF);
+	free(c, M_DEVBUF);
+}
+
+void
+chn_shutdown(struct pcm_channel *c)
+{
+	CHN_LOCKASSERT(c);
+
+	chn_wakeup(c);
+	c->flags |= CHN_F_DEAD;
+}
+
+/* release a locked channel and unlock it */
+int
+chn_release(struct pcm_channel *c)
+{
+	PCM_BUSYASSERT(c->parentsnddev);
+	CHN_LOCKASSERT(c);
+
+	c->flags &= ~CHN_F_BUSY;
+	c->pid = -1;
+	strlcpy(c->comm, CHN_COMM_UNUSED, sizeof(c->comm));
+	CHN_UNLOCK(c);
 
 	return (0);
+}
+
+int
+chn_ref(struct pcm_channel *c, int ref)
+{
+	PCM_BUSYASSERT(c->parentsnddev);
+	CHN_LOCKASSERT(c);
+	KASSERT((c->refcount + ref) >= 0,
+	    ("%s(): new refcount will be negative", __func__));
+
+	c->refcount += ref;
+
+	return (c->refcount);
 }
 
 int
