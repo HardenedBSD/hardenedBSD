@@ -40,6 +40,9 @@ main() {
 		clang)
 			pkgdeps="lld libcompiler_rt-dev"
 			;;
+		periodic)
+			pkgdeps="cron"
+			;;
 
 		# -dev packages that have no corresponding non-dev package
 		# as a dependency.
@@ -153,7 +156,7 @@ EOF
 		PKG_WWW "${PKG_WWW}" \
 		PKG_MAINTAINER "${PKG_MAINTAINER}" \
 		UCLFILES "${srctree}/release/packages/" \
-		${uclsource} ${uclfile}
+		${uclfile} ${uclfile}
 
 	return 0
 }

@@ -62,7 +62,7 @@ struct pfctl_status {
 	struct pfctl_status_counters	 lcounters;
 	struct pfctl_status_counters	 fcounters;
 	struct pfctl_status_counters	 scounters;
-	uint64_t	pcounters[2][2][3];
+	uint64_t	pcounters[2][2][2];
 	uint64_t	bcounters[2][2];
 };
 
@@ -390,8 +390,10 @@ struct pfctl_syncookies {
 struct pfctl_handle;
 struct pfctl_handle	*pfctl_open(const char *pf_device);
 void	pfctl_close(struct pfctl_handle *);
+int	pfctl_fd(struct pfctl_handle *);
 
 int	pfctl_startstop(struct pfctl_handle *h, int start);
+struct pfctl_status* pfctl_get_status_h(struct pfctl_handle *h);
 struct pfctl_status* pfctl_get_status(int dev);
 uint64_t pfctl_status_counter(struct pfctl_status *status, int id);
 uint64_t pfctl_status_lcounter(struct pfctl_status *status, int id);
