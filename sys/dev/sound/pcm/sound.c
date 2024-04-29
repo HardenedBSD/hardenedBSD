@@ -678,23 +678,50 @@ pcm_addchan(device_t dev, int dir, kobj_class_t cls, void *devinfo)
 	return (err);
 }
 
-static int
-pcm_killchan(device_t dev)
+static void
+pcm_killchans(struct snddev_info *d)
 {
-	struct snddev_info *d = device_get_softc(dev);
 	struct pcm_channel *ch;
 	int error;
+	bool found;
 
 	PCM_BUSYASSERT(d);
+	do {
+		found = false;
+		CHN_FOREACH(ch, d, channels.pcm) {
+			CHN_LOCK(ch);
+			/*
+			 * Make sure no channel has went to sleep in the
+			 * meantime.
+			 */
+			chn_shutdown(ch);
+			/*
+			 * We have to give a thread sleeping in chn_sleep() a
+			 * chance to observe that the channel is dead.
+			 */
+			if ((ch->flags & CHN_F_SLEEPING) == 0) {
+				found = true;
+				CHN_UNLOCK(ch);
+				break;
+			}
+			CHN_UNLOCK(ch);
+		}
 
-	ch = CHN_FIRST(d, channels.pcm);
+		/*
+		 * All channels are still sleeping. Sleep for a bit and try
+		 * again to see if any of them is awake now.
+		 */
+		if (!found) {
+			pause_sbt("pcmkillchans", SBT_1MS * 5, 0, 0);
+			continue;
+		}
 
-	PCM_LOCK(d);
-	error = pcm_chn_remove(d, ch);
-	PCM_UNLOCK(d);
-	if (error)
-		return (error);
-	return (pcm_chn_destroy(ch));
+		PCM_LOCK(d);
+		error = pcm_chn_remove(d, ch);
+		PCM_UNLOCK(d);
+		if (error == 0)
+			pcm_chn_destroy(ch);
+	} while (!CHN_EMPTY(d, channels.pcm));
 }
 
 static int
@@ -896,8 +923,8 @@ pcm_sysinit(device_t dev)
 	SYSCTL_ADD_UINT(device_get_sysctl_ctx(dev),
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
 	    OID_AUTO, "mode", CTLFLAG_RD, NULL, mode,
-	    "mode (1=mixer, 2=play, 4=rec. The values are OR'ed if more than one"
-	    "mode is supported)");
+	    "mode (1=mixer, 2=play, 4=rec. The values are OR'ed if more than "
+	    "one mode is supported)");
 	if (d->flags & SD_F_AUTOVCHAN)
 		vchan_initsys(dev);
 	if (d->flags & SD_F_EQ)
@@ -1005,22 +1032,14 @@ pcm_unregister(device_t dev)
 
 	CHN_FOREACH(ch, d, channels.pcm) {
 		CHN_LOCK(ch);
-		if (ch->flags & CHN_F_SLEEPING) {
-			/*
-			 * We are detaching, so do not wait for the timeout in
-			 * chn_read()/chn_write(). Wake up the thread and kill
-			 * the channel immediately.
-			 */
-			CHN_BROADCAST(&ch->intr_cv);
-			ch->flags |= CHN_F_DEAD;
-		}
+		/*
+		 * Do not wait for the timeout in chn_read()/chn_write(). Wake
+		 * up the sleeping thread and kill the channel.
+		 */
+		chn_shutdown(ch);
 		chn_abort(ch);
 		CHN_UNLOCK(ch);
 	}
-
-	dsp_destroy_dev(dev);
-
-	(void)mixer_uninit(dev);
 
 	/* remove /dev/sndstat entry first */
 	sndstat_unregister(dev);
@@ -1039,8 +1058,10 @@ pcm_unregister(device_t dev)
 		d->rec_sysctl_tree = NULL;
 	}
 
-	while (!CHN_EMPTY(d, channels.pcm))
-		pcm_killchan(dev);
+	dsp_destroy_dev(dev);
+	(void)mixer_uninit(dev);
+
+	pcm_killchans(d);
 
 	PCM_LOCK(d);
 	PCM_RELEASE(d);

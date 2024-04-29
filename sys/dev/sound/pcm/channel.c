@@ -332,6 +332,8 @@ chn_sleep(struct pcm_channel *c, int timeout)
 	int ret;
 
 	CHN_LOCKASSERT(c);
+	KASSERT((c->flags & CHN_F_SLEEPING) == 0,
+	    ("%s(): entered with CHN_F_SLEEPING", __func__));
 
 	if (c->flags & CHN_F_DEAD)
 		return (EINVAL);
@@ -1301,17 +1303,13 @@ chn_kill(struct pcm_channel *c)
 	return (0);
 }
 
-/* XXX Obsolete. Use *_matrix() variant instead. */
-int
-chn_setvolume(struct pcm_channel *c, int left, int right)
+void
+chn_shutdown(struct pcm_channel *c)
 {
-	int ret;
+	CHN_LOCKASSERT(c);
 
-	ret = chn_setvolume_matrix(c, SND_VOL_C_MASTER, SND_CHN_T_FL, left);
-	ret |= chn_setvolume_matrix(c, SND_VOL_C_MASTER, SND_CHN_T_FR,
-	    right) << 8;
-
-	return (ret);
+	chn_wakeup(c);
+	c->flags |= CHN_F_DEAD;
 }
 
 int
