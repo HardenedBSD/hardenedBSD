@@ -1333,7 +1333,6 @@ t4_attach(device_t dev)
 		rc = partition_resources(sc);
 		if (rc != 0)
 			goto done; /* error message displayed already */
-		t4_intr_clear(sc);
 	}
 
 	rc = get_params__post_init(sc);
@@ -1402,13 +1401,10 @@ t4_attach(device_t dev)
 		 * depends on the link settings which will be known when the
 		 * link comes up.
 		 */
-		if (is_t6(sc)) {
+		if (is_t6(sc))
 			pi->fcs_reg = -1;
-		} else if (is_t4(sc)) {
-			pi->fcs_reg = PORT_REG(pi->tx_chan,
-			    A_MPS_PORT_STAT_RX_PORT_CRC_ERROR_L);
-		} else {
-			pi->fcs_reg = T5_PORT_REG(pi->tx_chan,
+		else {
+			pi->fcs_reg = t4_port_reg(sc, pi->tx_chan,
 			    A_MPS_PORT_STAT_RX_PORT_CRC_ERROR_L);
 		}
 		pi->fcs_base = 0;
@@ -2292,7 +2288,6 @@ t4_resume(device_t dev)
 		rc = partition_resources(sc);
 		if (rc != 0)
 			goto done; /* error message displayed already */
-		t4_intr_clear(sc);
 	}
 
 	rc = get_params__post_init(sc);
@@ -3909,6 +3904,9 @@ rw_via_memwin(struct adapter *sc, int idx, uint32_t addr, uint32_t *val,
 
 	return (0);
 }
+
+CTASSERT(M_TID_COOKIE == M_COOKIE);
+CTASSERT(MAX_ATIDS <= (M_TID_TID + 1));
 
 static void
 t4_init_atid_table(struct adapter *sc)
@@ -8020,9 +8018,8 @@ cxgbe_sysctls(struct port_info *pi)
 
 #define T4_REGSTAT(name, stat, desc) \
     SYSCTL_ADD_OID(ctx, children, OID_AUTO, #name, \
-        CTLTYPE_U64 | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, \
-	(is_t4(sc) ? PORT_REG(pi->tx_chan, A_MPS_PORT_STAT_##stat##_L) : \
-	T5_PORT_REG(pi->tx_chan, A_MPS_PORT_STAT_##stat##_L)), \
+	CTLTYPE_U64 | CTLFLAG_RD | CTLFLAG_MPSAFE, sc, \
+	t4_port_reg(sc, pi->tx_chan, A_MPS_PORT_STAT_##stat##_L), \
         sysctl_handle_t4_reg64, "QU", desc)
 
 /* We get these from port_stats and they may be stale by up to 1s */
