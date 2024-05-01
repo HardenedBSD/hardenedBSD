@@ -1,8 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2012 NetApp, Inc.
- * Copyright (c) 2013 Neel Natu <neel@freebsd.org>
+ * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,30 +26,28 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _UART_BACKEND_H_
-#define	_UART_BACKEND_H_
+#ifndef _BHYVECTL_H_
+#define	_BHYVECTL_H_
 
 #include <stdbool.h>
 
-#include "mevent.h"
+#define	OPT_START	1000
+#define	OPT_START_MD	2000
 
-struct uart_softc;
-struct vm_snapshot_meta;
+#define	REQ_ARG		required_argument
+#define	NO_ARG		no_argument
+#define	OPT_ARG		optional_argument
 
-void	uart_rxfifo_drain(struct uart_softc *sc, bool loopback);
-int	uart_rxfifo_getchar(struct uart_softc *sc);
-int	uart_rxfifo_numchars(struct uart_softc *sc);
-int	uart_rxfifo_putchar(struct uart_softc *sc, uint8_t ch, bool loopback);
-void	uart_rxfifo_reset(struct uart_softc *sc, int size);
-int	uart_rxfifo_size(struct uart_softc *sc);
-#ifdef BHYVE_SNAPSHOT
-int	uart_rxfifo_snapshot(struct uart_softc *sc,
-	    struct vm_snapshot_meta *meta);
+struct option;
+struct vmctx;
+struct vmexit;
+
+void bhyvectl_md_main(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid,
+    bool get_all);
+struct option *bhyvectl_opts(const struct option *options, size_t count);
+void bhyvectl_handle_opt(const struct option *opts, int opt);
+const char *bhyvectl_opt_desc(int opt);
+void bhyvectl_dump_vm_run_exitcode(struct vm_exit *vmexit, int vcpu);
+void usage(const struct option *opts);
+
 #endif
-
-struct uart_softc *uart_init(void);
-int	uart_tty_open(struct uart_softc *sc, const char *path,
-	    void (*drain)(int, enum ev_type, void *), void *arg);
-void	uart_softc_lock(struct uart_softc *sc);
-void	uart_softc_unlock(struct uart_softc *sc);
-#endif /* _UART_BACKEND_H_ */
