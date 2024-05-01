@@ -6742,13 +6742,14 @@ static unsigned int t4_get_mps_bg_map(struct adapter *adap, int idx)
 {
 	u32 n;
 
-	if (adap->params.mps_bg_map)
+	if (adap->params.mps_bg_map != UINT32_MAX)
 		return ((adap->params.mps_bg_map >> (idx << 3)) & 0xff);
 
-	n = G_NUMPORTS(t4_read_reg(adap, A_MPS_CMN_CTL));
-	if (n == 0)
+	n = adap->params.nports;
+	MPASS(n > 0 && n <= MAX_NPORTS);
+	if (n == 1)
 		return idx == 0 ? 0xf : 0;
-	if (n == 1 && chip_id(adap) <= CHELSIO_T5)
+	if (n == 2 && chip_id(adap) <= CHELSIO_T5)
 		return idx < 2 ? (3 << (2 * idx)) : 0;
 	return 1 << idx;
 }
@@ -6758,12 +6759,12 @@ static unsigned int t4_get_mps_bg_map(struct adapter *adap, int idx)
  */
 static unsigned int t4_get_rx_e_chan_map(struct adapter *adap, int idx)
 {
-	u32 n = G_NUMPORTS(t4_read_reg(adap, A_MPS_CMN_CTL));
+	const u32 n = adap->params.nports;
 	const u32 all_chan = (1 << adap->chip_params->nchan) - 1;
 
-	if (n == 0)
+	if (n == 1)
 		return idx == 0 ? all_chan : 0;
-	if (n == 1 && chip_id(adap) <= CHELSIO_T5)
+	if (n == 2 && chip_id(adap) <= CHELSIO_T5)
 		return idx < 2 ? (3 << (2 * idx)) : 0;
 	return 1 << idx;
 }
@@ -6773,16 +6774,17 @@ static unsigned int t4_get_rx_e_chan_map(struct adapter *adap, int idx)
  */
 static unsigned int t4_get_rx_c_chan(struct adapter *adap, int idx)
 {
-	u32 param, val;
-	int ret;
-
-	param = (V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) |
-	    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_TPCHMAP));
-	ret = t4_query_params(adap, adap->mbox, adap->pf, 0, 1, &param, &val);
-	if (!ret)
-		return (val >> (8 * idx)) & 0xff;
-
+	if (adap->params.tp_ch_map != UINT32_MAX)
+		return (adap->params.tp_ch_map >> (8 * idx)) & 0xff;
         return 0;
+}
+
+/*
+ * TP TX c-channel associated with the port.
+ */
+static unsigned int t4_get_tx_c_chan(struct adapter *adap, int idx)
+{
+	return idx;
 }
 
 /**
@@ -9816,10 +9818,10 @@ int t4_port_init(struct adapter *adap, int mbox, int pf, int vf, int port_id)
 		} while ((adap->params.portvec & (1 << j)) == 0);
 	}
 
-	p->tx_chan = j;
+	p->tx_chan = t4_get_tx_c_chan(adap, j);
+	p->rx_chan = t4_get_rx_c_chan(adap, j);
 	p->mps_bg_map = t4_get_mps_bg_map(adap, j);
 	p->rx_e_chan_map = t4_get_rx_e_chan_map(adap, j);
-	p->rx_c_chan = t4_get_rx_c_chan(adap, j);
 	p->lport = j;
 
 	if (!(adap->flags & IS_VF) ||
