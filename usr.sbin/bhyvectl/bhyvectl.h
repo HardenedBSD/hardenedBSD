@@ -1,5 +1,7 @@
 /*-
- * Copyright (c) 2011-2014 Jung-uk Kim <jkim@FreeBSD.org>
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,10 +13,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY NETAPP, INC ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL NETAPP, INC OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -24,31 +26,28 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _X86_VMWARE_H_
-#define	_X86_VMWARE_H_
+#ifndef _BHYVECTL_H_
+#define	_BHYVECTL_H_
 
-#define	VMW_HVMAGIC		0x564d5868
-#define	VMW_HVPORT		0x5658
+#include <stdbool.h>
 
-#define	VMW_HVCMD_GETVERSION	10
-#define	VMW_HVCMD_GUESTRPC	30
-#define	VMW_HVCMD_GETHZ		45
-#define	VMW_HVCMD_GETVCPU_INFO	68
+#define	OPT_START	1000
+#define	OPT_START_MD	2000
 
-#define	VMW_HVCMD_DEFAULT_PARAM	UINT_MAX
+#define	REQ_ARG		required_argument
+#define	NO_ARG		no_argument
+#define	OPT_ARG		optional_argument
 
-#define	VMW_VCPUINFO_LEGACY_X2APIC	(1 << 3)
-#define	VMW_VCPUINFO_VCPU_RESERVED	(1 << 31)
+struct option;
+struct vmctx;
+struct vmexit;
 
-static __inline void
-vmware_hvcall(int chan, u_int cmd, u_int param, u_int *p)
-{
+void bhyvectl_md_main(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid,
+    bool get_all);
+struct option *bhyvectl_opts(const struct option *options, size_t count);
+void bhyvectl_handle_opt(const struct option *opts, int opt);
+const char *bhyvectl_opt_desc(int opt);
+void bhyvectl_dump_vm_run_exitcode(struct vm_exit *vmexit, int vcpu);
+void usage(const struct option *opts);
 
-	__asm __volatile("inl %w3, %0"
-	: "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3])
-	: "0" (VMW_HVMAGIC), "1" (param), "2" (cmd),
-	  "3" (VMW_HVPORT | (chan << 16))
-	: "memory");
-}
-
-#endif /* !_X86_VMWARE_H_ */
+#endif

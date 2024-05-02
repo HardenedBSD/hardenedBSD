@@ -1,9 +1,12 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2012 NetApp, Inc.
- * Copyright (c) 2013 Neel Natu <neel@freebsd.org>
- * All rights reserved.
+ * Copyright (c) 2024 Mark Johnston <markj@FreeBSD.org>
+ *
+ * This software was developed by the University of Cambridge Computer
+ * Laboratory (Department of Computer Science and Technology) under Innovate
+ * UK project 105694, "Digital Security by Design (DSbD) Technology Platform
+ * Prototype".
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,30 +30,53 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _UART_BACKEND_H_
-#define	_UART_BACKEND_H_
+#include <sys/types.h>
 
+#include <err.h>
+#include <fcntl.h>
+#include <getopt.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#include "mevent.h"
+#include <vmmapi.h>
 
-struct uart_softc;
-struct vm_snapshot_meta;
+#include "bhyvectl.h"
 
-void	uart_rxfifo_drain(struct uart_softc *sc, bool loopback);
-int	uart_rxfifo_getchar(struct uart_softc *sc);
-int	uart_rxfifo_numchars(struct uart_softc *sc);
-int	uart_rxfifo_putchar(struct uart_softc *sc, uint8_t ch, bool loopback);
-void	uart_rxfifo_reset(struct uart_softc *sc, int size);
-int	uart_rxfifo_size(struct uart_softc *sc);
-#ifdef BHYVE_SNAPSHOT
-int	uart_rxfifo_snapshot(struct uart_softc *sc,
-	    struct vm_snapshot_meta *meta);
-#endif
+void
+bhyvectl_dump_vm_run_exitcode(struct vm_exit *vmexit __unused,
+    int vcpu __unused)
+{
+}
 
-struct uart_softc *uart_init(void);
-int	uart_tty_open(struct uart_softc *sc, const char *path,
-	    void (*drain)(int, enum ev_type, void *), void *arg);
-void	uart_softc_lock(struct uart_softc *sc);
-void	uart_softc_unlock(struct uart_softc *sc);
-#endif /* _UART_BACKEND_H_ */
+struct option *
+bhyvectl_opts(const struct option *options, size_t count)
+{
+	struct option *all_opts;
+
+	all_opts = calloc(count + 1, sizeof(struct option));
+	if (all_opts == NULL)
+		err(1, "calloc");
+	memcpy(all_opts, options, count * sizeof(struct option));
+	return (all_opts);
+}
+
+void
+bhyvectl_handle_opt(const struct option *opts __unused, int opt __unused)
+{
+}
+
+const char *
+bhyvectl_opt_desc(int opt __unused)
+{
+	/* No arm64-specific options yet. */
+	return ("???");
+}
+
+void
+bhyvectl_md_main(struct vmctx *ctx __unused, struct vcpu *vcpu __unused,
+    int vcpuid __unused, bool get_all __unused)
+{
+}
