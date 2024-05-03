@@ -410,6 +410,9 @@ MAN=	aac.4 \
 	nvd.4 \
 	${_nvdimm.4} \
 	nvme.4 \
+	nvmf.4 \
+	nvmf_tcp.4 \
+	nvmft.4 \
 	${_nvram.4} \
 	oce.4 \
 	ocs_fc.4\
