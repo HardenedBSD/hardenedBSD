@@ -13,7 +13,11 @@
 #define HAVE_ENDIAN 0
 #define HAVE_ERR 1
 #define HAVE_FTS 1
+#if defined(__GLIBC__) || defined(__APPLE__)
+#define HAVE_FTS_COMPARE_CONST 0
+#else
 #define HAVE_FTS_COMPARE_CONST 1
+#endif
 #define HAVE_GETLINE 1
 #define HAVE_GETSUBOPT 1
 #define HAVE_ISBLANK 1
