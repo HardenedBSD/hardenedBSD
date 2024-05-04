@@ -8,6 +8,7 @@ MK_CFI=	no
 .PATH:	${SRCTOP}/contrib/ntp/ntpd \
 	${.OBJDIR}
 
+PACKAGE=	ntp
 DIRS=	ETC_NTP
 ETC_NTP=	/etc/ntp
 ETC_NTP_MODE=	0700
