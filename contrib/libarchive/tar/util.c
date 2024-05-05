@@ -24,7 +24,6 @@
  */
 
 #include "bsdtar_platform.h"
-__FBSDID("$FreeBSD$");
 
 #ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
@@ -471,7 +470,7 @@ edit_pathname(struct bsdtar *bsdtar, struct archive_entry *entry)
 	const char *original_name = name;
 	const char *hardlinkname = archive_entry_hardlink(entry);
 	const char *original_hardlinkname = hardlinkname;
-#if defined(HAVE_REGEX_H) || defined(HAVE_PCREPOSIX_H)
+#if defined(HAVE_REGEX_H) || defined(HAVE_PCREPOSIX_H) || defined(HAVE_PCRE2POSIX_H)
 	char *subst_name;
 	int r;
 
@@ -668,12 +667,8 @@ list_item_verbose(struct bsdtar *bsdtar, FILE *out, struct archive_entry *entry)
 	time_t			 tim;
 	static time_t		 now;
 	struct tm		*ltime;
-#if defined(HAVE_LOCALTIME_R) || defined(HAVE__LOCALTIME64_S)
+#if defined(HAVE_LOCALTIME_R) || defined(HAVE_LOCALTIME_S)
 	struct tm		tmbuf;
-#endif
-#if defined(HAVE__LOCALTIME64_S)
-	errno_t			terr;
-	__time64_t		tmptime;
 #endif
 
 	/*
@@ -746,15 +741,10 @@ list_item_verbose(struct bsdtar *bsdtar, FILE *out, struct archive_entry *entry)
 		fmt = bsdtar->day_first ? DAY_FMT " %b  %Y" : "%b " DAY_FMT "  %Y";
 	else
 		fmt = bsdtar->day_first ? DAY_FMT " %b %H:%M" : "%b " DAY_FMT " %H:%M";
-#if defined(HAVE_LOCALTIME_R)
+#if defined(HAVE_LOCALTIME_S)
+	ltime = localtime_s(&tmbuf, &tim) ? NULL : &tmbuf;
+#elif defined(HAVE_LOCALTIME_R)
 	ltime = localtime_r(&tim, &tmbuf);
-#elif defined(HAVE__LOCALTIME64_S)
-	tmptime = tim;
-	terr = _localtime64_s(&tmbuf, &tmptime);
-	if (terr)
-		ltime = NULL;
-	else
-		ltime = &tmbuf;
 #else
 	ltime = localtime(&tim);
 #endif

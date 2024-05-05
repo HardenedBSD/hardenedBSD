@@ -24,7 +24,6 @@
  */
 
 #include "archive_platform.h"
-__FBSDID("$FreeBSD$");
 
 /*
  * This file contains the "essential" portions of the write API, that
@@ -115,7 +114,7 @@ archive_write_new(void)
 
 	/* Initialize a block of nulls for padding purposes. */
 	a->null_length = 1024;
-	nulls = (unsigned char *)calloc(1, a->null_length);
+	nulls = (unsigned char *)calloc(a->null_length, sizeof(unsigned char));
 	if (nulls == NULL) {
 		free(a);
 		return (NULL);
@@ -308,6 +307,25 @@ int
 __archive_write_output(struct archive_write *a, const void *buff, size_t length)
 {
 	return (__archive_write_filter(a->filter_first, buff, length));
+}
+
+static int
+__archive_write_filters_flush(struct archive_write *a)
+{
+	struct archive_write_filter *f;
+	int ret, ret1;
+
+	ret = ARCHIVE_OK;
+	for (f = a->filter_first; f != NULL; f = f->next_filter) {
+		if (f->flush != NULL && f->bytes_written > 0) {
+			ret1 = (f->flush)(f);
+			if (ret1 < ret)
+				ret = ret1;
+			if (ret1 < ARCHIVE_WARN)
+				f->state = ARCHIVE_WRITE_FILTER_STATE_FATAL;
+		}
+	}
+	return (ret);
 }
 
 int
@@ -739,6 +757,18 @@ _archive_write_header(struct archive *_a, struct archive_entry *entry)
 		    "Can't add archive to itself");
 		return (ARCHIVE_FAILED);
 	}
+
+	/* Flush filters at boundary. */
+	r2 = __archive_write_filters_flush(a);
+	if (r2 == ARCHIVE_FAILED) {
+		return (ARCHIVE_FAILED);
+	}
+	if (r2 == ARCHIVE_FATAL) {
+		a->archive.state = ARCHIVE_STATE_FATAL;
+		return (ARCHIVE_FATAL);
+	}
+	if (r2 < ret)
+		ret = r2;
 
 	/* Format and write header. */
 	r2 = ((a->format_write_header)(a, entry));

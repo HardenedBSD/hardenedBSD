@@ -734,7 +734,7 @@ archive_read_support_format_rar(struct archive *_a)
   archive_check_magic(_a, ARCHIVE_READ_MAGIC, ARCHIVE_STATE_NEW,
                       "archive_read_support_format_rar");
 
-  rar = (struct rar *)calloc(sizeof(*rar), 1);
+  rar = (struct rar *)calloc(1, sizeof(*rar));
   if (rar == NULL)
   {
     archive_set_error(&a->archive, ENOMEM, "Can't allocate rar data");
@@ -1062,7 +1062,7 @@ archive_read_format_rar_read_header(struct archive_read *a,
 		      return (ARCHIVE_FATAL);
 	      }
 	      p = h;
-	      crc32_val = crc32(crc32_val, (const unsigned char *)p, to_read);
+	      crc32_val = crc32(crc32_val, (const unsigned char *)p, (unsigned int)to_read);
 	      __archive_read_consume(a, to_read);
 	      skip -= to_read;
       }
@@ -1830,12 +1830,8 @@ read_exttime(const char *p, struct rar *rar, const char *endp)
   struct tm *tm;
   time_t t;
   long nsec;
-#if defined(HAVE_LOCALTIME_R) || defined(HAVE__LOCALTIME64_S)
+#if defined(HAVE_LOCALTIME_R) || defined(HAVE_LOCALTIME_S)
   struct tm tmbuf;
-#endif
-#if defined(HAVE__LOCALTIME64_S)
-  errno_t terr;
-  __time64_t tmptime;
 #endif
 
   if (p + 2 > endp)
@@ -1868,15 +1864,10 @@ read_exttime(const char *p, struct rar *rar, const char *endp)
         rem = (((unsigned)(unsigned char)*p) << 16) | (rem >> 8);
         p++;
       }
-#if defined(HAVE_LOCALTIME_R)
+#if defined(HAVE_LOCALTIME_S)
+      tm = localtime_s(&tmbuf, &t) ? NULL : &tmbuf;
+#elif defined(HAVE_LOCALTIME_R)
       tm = localtime_r(&t, &tmbuf);
-#elif defined(HAVE__LOCALTIME64_S)
-      tmptime = t;
-      terr = _localtime64_s(&tmbuf, &tmptime);
-      if (terr)
-        tm = NULL;
-      else
-        tm = &tmbuf;
 #else
       tm = localtime(&t);
 #endif
@@ -2185,6 +2176,19 @@ read_data_compressed(struct archive_read *a, const void **buff, size_t *size,
     {
       start = rar->offset;
       end = start + rar->dictionary_size;
+
+      /* We don't want to overflow the window and overwrite data that we write
+       * at 'start'. Therefore, reduce the end length by the maximum match size,
+       * which is 260 bytes. You can compute this maximum by looking at the
+       * definition of 'expand', in particular when 'symbol >= 271'. */
+      /* NOTE: It's possible for 'dictionary_size' to be less than this 260
+       * value, however that will only be the case when 'unp_size' is small,
+       * which should only happen when the entry size is small and there's no
+       * risk of overflowing the buffer */
+      if (rar->dictionary_size > 260) {
+        end -= 260;
+      }
+
       if (rar->filters.filterstart < end) {
         end = rar->filters.filterstart;
       }
@@ -3446,7 +3450,7 @@ compile_program(const uint8_t *bytes, size_t length)
   prog = calloc(1, sizeof(*prog));
   if (!prog)
     return NULL;
-  prog->fingerprint = crc32(0, bytes, length) | ((uint64_t)length << 32);
+  prog->fingerprint = crc32(0, bytes, (unsigned int)length) | ((uint64_t)length << 32);
 
   if (membr_bits(&br, 1))
   {
@@ -3608,7 +3612,15 @@ execute_filter_delta(struct rar_filter *filter, struct rar_virtual_machine *vm)
   {
     uint8_t lastbyte = 0;
     for (idx = i; idx < length; idx += numchannels)
+    {
+      /*
+       * The src block should not overlap with the dst block.
+       * If so it would be better to consider this archive is broken.
+       */
+      if (src >= dst)
+        return 0;
       lastbyte = dst[idx] = lastbyte - *src++;
+    }
   }
 
   filter->filteredblockaddress = length;
@@ -3624,7 +3636,7 @@ execute_filter_e8(struct rar_filter *filter, struct rar_virtual_machine *vm, siz
   uint32_t filesize = 0x1000000;
   uint32_t i;
 
-  if (length > PROGRAM_WORK_SIZE || length < 4)
+  if (length > PROGRAM_WORK_SIZE || length <= 4)
     return 0;
 
   for (i = 0; i <= length - 5; i++)
@@ -3710,6 +3722,13 @@ execute_filter_audio(struct rar_filter *filter, struct rar_virtual_machine *vm)
     memset(&state, 0, sizeof(state));
     for (j = i; j < length; j += numchannels)
     {
+      /*
+       * The src block should not overlap with the dst block.
+       * If so it would be better to consider this archive is broken.
+       */
+      if (src >= dst)
+        return 0;
+
       int8_t delta = (int8_t)*src++;
       uint8_t predbyte, byte;
       int prederror;

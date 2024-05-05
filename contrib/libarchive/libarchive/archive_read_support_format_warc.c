@@ -24,7 +24,6 @@
  */
 
 #include "archive_platform.h"
-__FBSDID("$FreeBSD$");
 
 /**
  * WARC is standardised by ISO TC46/SC4/WG12 and currently available as
@@ -216,6 +215,7 @@ _warc_rdhdr(struct archive_read *a, struct archive_entry *entry)
 	const char *buf;
 	ssize_t nrd;
 	const char *eoh;
+	char *tmp;
 	/* for the file name, saves some strndup()'ing */
 	warc_string_t fnam;
 	/* warc record type, not that we really use it a lot */
@@ -322,7 +322,14 @@ start_over:
 		 * malloc()+free() roundtrip */
 		if (fnam.len + 1U > w->pool.len) {
 			w->pool.len = ((fnam.len + 64U) / 64U) * 64U;
-			w->pool.str = realloc(w->pool.str, w->pool.len);
+			tmp = realloc(w->pool.str, w->pool.len);
+			if (tmp == NULL) {
+				archive_set_error(
+					&a->archive, ENOMEM,
+					"Out of memory");
+				return (ARCHIVE_FATAL);
+			}
+			w->pool.str = tmp;
 		}
 		memcpy(w->pool.str, fnam.str, fnam.len);
 		w->pool.str[fnam.len] = '\0';
@@ -530,11 +537,11 @@ strtoi_lim(const char *str, const char **ep, int llim, int ulim)
 static time_t
 time_from_tm(struct tm *t)
 {
-#if HAVE_TIMEGM
+#if HAVE__MKGMTIME
+        return _mkgmtime(t);
+#elif HAVE_TIMEGM
         /* Use platform timegm() if available. */
         return (timegm(t));
-#elif HAVE__MKGMTIME64
-        return (_mkgmtime64(t));
 #else
         /* Else use direct calculation using POSIX assumptions. */
         /* First, fix up tm_yday based on the year/month/day. */

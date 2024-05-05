@@ -25,8 +25,6 @@
 
 #include "archive_platform.h"
 
-__FBSDID("$FreeBSD$");
-
 #ifdef HAVE_ERRNO_H
 #include <errno.h>
 #endif
@@ -192,7 +190,7 @@ bzip2_reader_init(struct archive_read_filter *self)
 	self->code = ARCHIVE_FILTER_BZIP2;
 	self->name = "bzip2";
 
-	state = (struct private_data *)calloc(sizeof(*state), 1);
+	state = (struct private_data *)calloc(1, sizeof(*state));
 	out_block = (unsigned char *)malloc(out_block_size);
 	if (state == NULL || out_block == NULL) {
 		archive_set_error(&self->archive->archive, ENOMEM,
@@ -230,7 +228,7 @@ bzip2_filter_read(struct archive_read_filter *self, const void **p)
 
 	/* Empty our output buffer. */
 	state->stream.next_out = state->out_block;
-	state->stream.avail_out = state->out_block_size;
+	state->stream.avail_out = (uint32_t)state->out_block_size;
 
 	/* Try to fill the output buffer. */
 	for (;;) {
@@ -288,7 +286,7 @@ bzip2_filter_read(struct archive_read_filter *self, const void **p)
 			return (ARCHIVE_FATAL);
 		}
 		state->stream.next_in = (char *)(uintptr_t)read_buf;
-		state->stream.avail_in = ret;
+		state->stream.avail_in = (uint32_t)ret;
 		/* There is no more data, return whatever we have. */
 		if (ret == 0) {
 			state->eof = 1;

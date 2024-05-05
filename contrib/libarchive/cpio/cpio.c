@@ -26,7 +26,6 @@
 
 
 #include "cpio_platform.h"
-__FBSDID("$FreeBSD$");
 
 #include <sys/types.h>
 #include <archive.h>
@@ -108,22 +107,22 @@ static int	entry_to_archive(struct cpio *, struct archive_entry *);
 static int	file_to_archive(struct cpio *, const char *);
 static void	free_cache(struct name_cache *cache);
 static void	list_item_verbose(struct cpio *, struct archive_entry *);
-static void	long_help(void) __LA_DEAD;
+static __LA_NORETURN void	long_help(void);
 static const char *lookup_gname(struct cpio *, gid_t gid);
 static int	lookup_gname_helper(struct cpio *,
 		    const char **name, id_t gid);
 static const char *lookup_uname(struct cpio *, uid_t uid);
 static int	lookup_uname_helper(struct cpio *,
 		    const char **name, id_t uid);
-static void	mode_in(struct cpio *) __LA_DEAD;
-static void	mode_list(struct cpio *) __LA_DEAD;
+static __LA_NORETURN void	mode_in(struct cpio *);
+static __LA_NORETURN void	mode_list(struct cpio *);
 static void	mode_out(struct cpio *);
 static void	mode_pass(struct cpio *, const char *);
 static const char *remove_leading_slash(const char *);
 static int	restore_time(struct cpio *, struct archive_entry *,
 		    const char *, int fd);
-static void	usage(void) __LA_DEAD;
-static void	version(void) __LA_DEAD;
+static __LA_NORETURN void	usage(void);
+static __LA_NORETURN void	version(void);
 static const char * passphrase_callback(struct archive *, void *);
 static void	passphrase_free(char *);
 
@@ -251,7 +250,7 @@ main(int argc, char *argv[])
 			break;
 		case 'h':
 			long_help();
-			break;
+			/* NOTREACHED */
 		case 'I': /* NetBSD/OpenBSD */
 			cpio->filename = cpio->argument;
 			break;
@@ -358,7 +357,7 @@ main(int argc, char *argv[])
 			break;
 		case OPTION_VERSION: /* GNU convention */
 			version();
-			break;
+			/* NOTREACHED */
 #if 0
 	        /*
 		 * cpio_getopt() handles -W specially, so it's not
@@ -427,7 +426,7 @@ main(int argc, char *argv[])
 			mode_list(cpio);
 		else
 			mode_in(cpio);
-		break;
+		/* NOTREACHED */
 	case 'p':
 		if (*cpio->argv == NULL || **cpio->argv == '\0')
 			lafe_errc(1, 0,
@@ -442,6 +441,8 @@ main(int argc, char *argv[])
 	archive_match_free(cpio->matching);
 	free_cache(cpio->gname_cache);
 	free_cache(cpio->uname_cache);
+	archive_read_close(cpio->archive_read_disk);
+	archive_read_free(cpio->archive_read_disk);
 	free(cpio->destdir);
 	passphrase_free(cpio->ppbuff);
 	return (cpio->return_value);
@@ -1144,19 +1145,15 @@ list_item_verbose(struct cpio *cpio, struct archive_entry *entry)
 {
 	char			 size[32];
 	char			 date[32];
-	char			 uids[16], gids[16];
+	char			 uids[22], gids[22];
 	const char 		*uname, *gname;
 	FILE			*out = stdout;
 	const char		*fmt;
 	time_t			 mtime;
 	static time_t		 now;
 	struct tm		*ltime;
-#if defined(HAVE_LOCALTIME_R) || defined(HAVE__LOCALTIME64_S)
+#if defined(HAVE_LOCALTIME_R) || defined(HAVE_LOCALTIME_S)
 	struct tm		tmbuf;
-#endif
-#if defined(HAVE__LOCALTIME64_S)
-	errno_t			terr;
-	__time64_t		tmptime;
 #endif
 
 	if (!now)
@@ -1205,19 +1202,17 @@ list_item_verbose(struct cpio *cpio, struct archive_entry *entry)
 	else
 		fmt = cpio->day_first ? "%e %b %H:%M" : "%b %e %H:%M";
 #endif
-#if defined(HAVE_LOCALTIME_R)
+#if defined(HAVE_LOCALTIME_S)
+	ltime = localtime_s(&tmbuf, &mtime) ? NULL : &tmbuf;
+#elif defined(HAVE_LOCALTIME_R)
 	ltime = localtime_r(&mtime, &tmbuf);
-#elif defined(HAVE__LOCALTIME64_S)
-	tmptime = mtime;
-	terr = _localtime64_s(&tmbuf, &tmptime);
-	if (terr)
-		ltime = NULL;
-	else
-		ltime = &tmbuf;
 #else
 	ltime = localtime(&mtime);
 #endif
-	strftime(date, sizeof(date), fmt, ltime);
+	if (ltime != NULL)
+		strftime(date, sizeof(date), fmt, ltime);
+	else
+		strcpy(date, "invalid mtime");
 
 	fprintf(out, "%s%3d %-8s %-8s %8s %12s %s",
 	    archive_entry_strmode(entry),

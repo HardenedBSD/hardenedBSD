@@ -24,7 +24,6 @@
  */
 
 #include "archive_platform.h"
-__FBSDID("$FreeBSD$");
 
 #ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
@@ -154,10 +153,10 @@ file_skip(struct archive *a, void *client_data, int64_t request)
 #ifdef __ANDROID__
         /* fileno() isn't safe on all platforms ... see above. */
 	if (lseek(fileno(mine->f), skip, SEEK_CUR) < 0)
-#elif HAVE_FSEEKO
-	if (fseeko(mine->f, skip, SEEK_CUR) != 0)
 #elif HAVE__FSEEKI64
 	if (_fseeki64(mine->f, skip, SEEK_CUR) != 0)
+#elif HAVE_FSEEKO
+	if (fseeko(mine->f, skip, SEEK_CUR) != 0)
 #else
 	if (fseek(mine->f, skip, SEEK_CUR) != 0)
 #endif
