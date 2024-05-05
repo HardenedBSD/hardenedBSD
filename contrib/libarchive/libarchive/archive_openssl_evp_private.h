@@ -33,12 +33,8 @@
 #include <openssl/evp.h>
 #include <openssl/opensslv.h>
 
-<<<<<<< HEAD
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || ( defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20700000L )
-=======
 #if OPENSSL_VERSION_NUMBER < 0x10100000L || \
     (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2070000fL)
->>>>>>> internal/freebsd/13-stable/main
 #include <stdlib.h> /* malloc, free */
 #include <string.h> /* memset */
 static inline EVP_MD_CTX *EVP_MD_CTX_new(void)
