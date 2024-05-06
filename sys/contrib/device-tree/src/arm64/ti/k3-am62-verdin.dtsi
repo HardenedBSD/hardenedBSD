@@ -19,6 +19,8 @@
 	};
 
 	aliases {
+		can0 = &main_mcan0;
+		can1 = &mcu_mcan0;
 		ethernet0 = &cpsw_port1;
 		ethernet1 = &cpsw_port2;
 		i2c0 = &main_i2c0;
@@ -228,6 +230,13 @@
 	pinctrl_qspi1_io3_gpio: main-gpio0-6-default-pins {
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x0018, PIN_INPUT, 7) /* (F24) OSPI0_D3.GPIO0_6 */ /* SODIMM 62 */
+		>;
+	};
+
+	/* Verdin SPI_1 CS as GPIO */
+	pinctrl_qspi1_io4_gpio: main-gpio0-7-default-pins {
+		pinctrl-single,pins = <
+			AM62X_IOPAD(0x001c, PIN_INPUT, 7) /* (J23) OSPI0_D4.GPIO0_7 */ /* SODIMM 202 */
 		>;
 	};
 
@@ -597,9 +606,15 @@
 	pinctrl_spi1: main-spi1-default-pins {
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x0020, PIN_INPUT, 1) /* (J25) OSPI0_D5.SPI1_CLK */ /* SODIMM 196 */
-			AM62X_IOPAD(0x001c, PIN_INPUT, 1) /* (J23) OSPI0_D4.SPI1_CS0 */ /* SODIMM 202 */
 			AM62X_IOPAD(0x0024, PIN_INPUT, 1) /* (H25) OSPI0_D6.SPI1_D0  */ /* SODIMM 200 */
 			AM62X_IOPAD(0x0028, PIN_INPUT, 1) /* (J22) OSPI0_D7.SPI1_D1  */ /* SODIMM 198 */
+		>;
+	};
+
+	/* Verdin SPI_1 CS */
+	pinctrl_spi1_cs0: main-spi1-cs0-default-pins {
+		pinctrl-single,pins = <
+			AM62X_IOPAD(0x001c, PIN_INPUT, 1) /* (J23) OSPI0_D4.SPI1_CS0 */ /* SODIMM 202 */
 		>;
 	};
 
@@ -732,6 +747,14 @@
 		>;
 	};
 
+	/* Verdin CAN_2 */
+	pinctrl_mcu_mcan0: mcu-mcan0-default-pins {
+		pinctrl-single,pins = <
+			AM62X_MCU_IOPAD(0x0038, PIN_INPUT,  0) /* (B3) MCU_MCAN0_RX */ /* SODIMM 26 */
+			AM62X_MCU_IOPAD(0x0034, PIN_OUTPUT, 0) /* (D6) MCU_MCAN0_TX */ /* SODIMM 24 */
+		>;
+	};
+
 	/* Verdin UART_4 - Reserved to Cortex-M4 */
 	pinctrl_mcu_uart0: mcu-uart0-default-pins {
 		pinctrl-single,pins = <
@@ -756,6 +779,11 @@
 			AM62X_MCU_IOPAD(0x0028, PIN_OUTPUT,       0) /* (C5) WKUP_UART0_TXD  */ /* SODIMM 139 */
 		>;
 	};
+};
+
+/* VERDIN I2S_1_MCLK */
+&audio_refclk1 {
+	assigned-clock-rates = <25000000>;
 };
 
 &cpsw3g {
@@ -797,6 +825,26 @@
 		reset-deassert-us = <1000>;
 		ti,fifo-depth = <DP83867_PHYCR_FIFO_DEPTH_4_B_NIB>;
 		ti,rx-internal-delay = <DP83867_RGMIIDCTL_2_00_NS>;
+	};
+};
+
+&dss {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_parallel_rgb>;
+	status = "disabled";
+};
+
+&dss_ports {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* VP2: DPI Output */
+	port@1 {
+		reg = <1>;
+
+		dpi_out: endpoint {
+			remote-endpoint = <&rgb_in>;
+		};
 	};
 };
 
@@ -1026,6 +1074,7 @@
 		vddc-supply = <&reg_1v2_dsi>;
 		vddmipi-supply = <&reg_1v2_dsi>;
 		vddio-supply = <&reg_1v8_dsi>;
+		status = "disabled";
 
 		dsi_bridge_ports: ports {
 			#address-cells = <1>;
@@ -1036,6 +1085,7 @@
 
 				rgb_in: endpoint {
 					data-lines = <18>;
+					remote-endpoint = <&dpi_out>;
 				};
 			};
 
@@ -1238,12 +1288,10 @@
 	status = "disabled";
 };
 
-/* Verdin CAN_2 - Reserved to Cortex-M4 */
-
 /* Verdin SPI_1 */
 &main_spi1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_spi1>;
+	pinctrl-0 = <&pinctrl_spi1>, <&pinctrl_spi1_cs0>;
 	ti,pindir-d0-out-d1-in;
 	status = "disabled";
 };
@@ -1331,6 +1379,13 @@
 		"",
 		"",
 		"";
+};
+
+/* Verdin CAN_2 */
+&mcu_mcan0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_mcu_mcan0>;
+	status = "disabled";
 };
 
 /* Verdin UART_4 - Cortex-M4 UART */

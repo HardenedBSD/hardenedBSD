@@ -47,18 +47,16 @@ properties:
   reset-gpios:
     description:
       Optional GPIO for resetting the device.
-      If not present the device is not resetted during the probe.
+      If not present the device is not reset during the probe.
     maxItems: 1
 
   honeywell,pmin-pascal:
     description:
       Minimum pressure value the sensor can measure in pascal.
-    $ref: /schemas/types.yaml#/definitions/uint32
 
   honeywell,pmax-pascal:
     description:
       Maximum pressure value the sensor can measure in pascal.
-    $ref: /schemas/types.yaml#/definitions/uint32
 
   honeywell,transfer-function:
     description: |
