@@ -130,11 +130,7 @@
 #endif
 
 /* Define if the Sparc target is built in */
-#ifdef LLVM_TARGET_ENABLE_SPARC
-#define LLVM_HAS_SPARC_TARGET 1
-#else
 #define LLVM_HAS_SPARC_TARGET 0
-#endif
 
 /* Define if the SPIRV target is built in */
 #define LLVM_HAS_SPIRV_TARGET 0
@@ -180,10 +176,10 @@
 #define LLVM_VERSION_MINOR 1
 
 /* Patch version of the LLVM API */
-#define LLVM_VERSION_PATCH 4
+#define LLVM_VERSION_PATCH 5
 
 /* LLVM version string */
-#define LLVM_VERSION_STRING "18.1.4"
+#define LLVM_VERSION_STRING "18.1.5"
 
 /* Whether LLVM records statistics for use with GetStatistics(),
  * PrintStatistics() or PrintStatisticsJSON()
