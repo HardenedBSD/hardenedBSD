@@ -121,12 +121,16 @@ static void _bus_dmamap_count_phys(bus_dma_tag_t dmat, bus_dmamap_t map,
 static MALLOC_DEFINE(M_BUSDMA, "busdma", "busdma metadata");
 
 #define	dmat_alignment(dmat)	((dmat)->common.alignment)
+#define	dmat_bounce_flags(dmat)	((dmat)->bounce_flags)
+#define	dmat_boundary(dmat)	((dmat)->common.boundary)
 #define	dmat_domain(dmat)	((dmat)->common.domain)
 #define	dmat_flags(dmat)	((dmat)->common.flags)
 #define	dmat_highaddr(dmat)	((dmat)->common.highaddr)
 #define	dmat_lowaddr(dmat)	((dmat)->common.lowaddr)
 #define	dmat_lockfunc(dmat)	((dmat)->common.lockfunc)
 #define	dmat_lockfuncarg(dmat)	((dmat)->common.lockfuncarg)
+#define	dmat_maxsegsz(dmat)	((dmat)->common.maxsegsz)
+#define	dmat_nsegments(dmat)	((dmat)->common.nsegments)
 
 #include "../../kern/subr_busdma_bounce.c"
 
@@ -639,7 +643,7 @@ _bus_dmamap_pagesneeded(bus_dma_tag_t dmat, bus_dmamap_t map, vm_paddr_t buf,
 	count = 0;
 	curaddr = buf;
 	while (buflen != 0) {
-		sgsize = MIN(buflen, dmat->common.maxsegsz);
+		sgsize = buflen;
 		if (must_bounce(dmat, map, curaddr, sgsize)) {
 			sgsize = MIN(sgsize,
 			    PAGE_SIZE - (curaddr & PAGE_MASK));
@@ -692,15 +696,13 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, pmap_t pmap,
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
-			sg_len = PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK);
-			sg_len = MIN(sg_len, dmat->common.maxsegsz);
+			sg_len = MIN(vendaddr - vaddr,
+			    PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK));
 			if (pmap == kernel_pmap)
 				paddr = pmap_kextract(vaddr);
 			else
 				paddr = pmap_extract(pmap, vaddr);
-			if (must_bounce(dmat, map, paddr,
-			    min(vendaddr - vaddr, (PAGE_SIZE - ((vm_offset_t)vaddr &
-			    PAGE_MASK)))) != 0) {
+			if (must_bounce(dmat, map, paddr, sg_len) != 0) {
 				sg_len = roundup2(sg_len,
 				    dmat->common.alignment);
 				map->pagesneeded++;
@@ -709,47 +711,6 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, pmap_t pmap,
 		}
 		CTR1(KTR_BUSDMA, "pagesneeded= %d\n", map->pagesneeded);
 	}
-}
-
-/*
- * Add a single contiguous physical range to the segment list.
- */
-static bus_size_t
-_bus_dmamap_addseg(bus_dma_tag_t dmat, bus_dmamap_t map, bus_addr_t curaddr,
-    bus_size_t sgsize, bus_dma_segment_t *segs, int *segp)
-{
-	int seg;
-
-	/*
-	 * Make sure we don't cross any boundaries.
-	 */
-	if (!vm_addr_bound_ok(curaddr, sgsize, dmat->common.boundary))
-		sgsize = roundup2(curaddr, dmat->common.boundary) - curaddr;
-
-	/*
-	 * Insert chunk into a segment, coalescing with
-	 * previous segment if possible.
-	 */
-	seg = *segp;
-	if (seg == -1) {
-		seg = 0;
-		segs[seg].ds_addr = curaddr;
-		segs[seg].ds_len = sgsize;
-	} else {
-		if (curaddr == segs[seg].ds_addr + segs[seg].ds_len &&
-		    (segs[seg].ds_len + sgsize) <= dmat->common.maxsegsz &&
-		    vm_addr_bound_ok(segs[seg].ds_addr,
-		    segs[seg].ds_len + sgsize, dmat->common.boundary))
-			segs[seg].ds_len += sgsize;
-		else {
-			if (++seg >= dmat->common.nsegments)
-				return (0);
-			segs[seg].ds_addr = curaddr;
-			segs[seg].ds_len = sgsize;
-		}
-	}
-	*segp = seg;
-	return (sgsize);
 }
 
 /*
@@ -783,7 +744,7 @@ bounce_bus_dmamap_load_phys(bus_dma_tag_t dmat, bus_dmamap_t map,
 
 	while (buflen > 0) {
 		curaddr = buf;
-		sgsize = MIN(buflen, dmat->common.maxsegsz);
+		sgsize = buflen;
 		if (map->pagesneeded != 0 &&
 		    must_bounce(dmat, map, curaddr, sgsize)) {
 			/*
@@ -817,9 +778,8 @@ bounce_bus_dmamap_load_phys(bus_dma_tag_t dmat, bus_dmamap_t map,
 			} else
 				sl->datacount += sgsize;
 		}
-		sgsize = _bus_dmamap_addseg(dmat, map, curaddr, sgsize, segs,
-		    segp);
-		if (sgsize == 0)
+		if (!_bus_dmamap_addsegs(dmat, map, curaddr, sgsize, segs,
+		    segp))
 			break;
 		buf += sgsize;
 		buflen -= sgsize;
@@ -895,7 +855,7 @@ bounce_bus_dmamap_load_buffer(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 		/*
 		 * Compute the segment size, and adjust counts.
 		 */
-		sgsize = MIN(buflen, dmat->common.maxsegsz);
+		sgsize = buflen;
 		if ((map->flags & DMAMAP_FROM_DMAMEM) == 0)
 			sgsize = MIN(sgsize, PAGE_SIZE - (curaddr & PAGE_MASK));
 
@@ -934,9 +894,8 @@ bounce_bus_dmamap_load_buffer(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 			} else
 				sl->datacount += sgsize;
 		}
-		sgsize = _bus_dmamap_addseg(dmat, map, curaddr, sgsize, segs,
-		    segp);
-		if (sgsize == 0)
+		if (!_bus_dmamap_addsegs(dmat, map, curaddr, sgsize, segs,
+		    segp))
 			break;
 		vaddr += sgsize;
 		buflen -= sgsize;
