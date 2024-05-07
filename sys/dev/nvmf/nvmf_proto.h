@@ -22,8 +22,6 @@
  * NVMe over Fabrics specification definitions
  */
 
-#pragma pack(push, 1)
-
 #define	NVME_NQN_FIELD_SIZE		256
 
 struct nvmf_capsule_cmd {
@@ -174,7 +172,7 @@ struct nvmf_fabric_cmd {
 	uint16_t	cid;
 	uint8_t		fctype;
 	uint8_t		reserved2[59];
-};
+} __aligned(8);
 
 struct nvmf_fabric_auth_recv_cmd {
 	uint8_t		opcode;
@@ -763,7 +761,5 @@ _Static_assert(offsetof(struct nvme_tcp_r2t_hdr, cccid) == 8, "Incorrect offset"
 _Static_assert(offsetof(struct nvme_tcp_r2t_hdr, ttag) == 10, "Incorrect offset");
 _Static_assert(offsetof(struct nvme_tcp_r2t_hdr, r2to) == 12, "Incorrect offset");
 _Static_assert(offsetof(struct nvme_tcp_r2t_hdr, r2tl) == 16, "Incorrect offset");
-
-#pragma pack(pop)
 
 #endif /* __NVMF_PROTO_H__ */
