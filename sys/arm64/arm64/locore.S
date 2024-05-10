@@ -29,6 +29,7 @@
 #include <sys/syscall.h>
 #include <machine/asm.h>
 #include <machine/armreg.h>
+#include <machine/cpu.h>
 #include <machine/hypervisor.h>
 #include <machine/param.h>
 #include <machine/pte.h>
@@ -192,12 +193,50 @@ END(_start)
 
 #ifdef SMP
 /*
- * mpentry(unsigned long)
+ * void
+ * mpentry_psci(unsigned long)
  *
- * Called by a core when it is being brought online.
+ * Called by a core when it is being brought online with psci.
  * The data in x0 is passed straight to init_secondary.
  */
-ENTRY(mpentry)
+ENTRY(mpentry_psci)
+	mov	x26, xzr
+	b	mpentry_common
+END(mpentry_psci)
+
+/*
+ * void
+ * mpentry_spintable(void)
+ *
+ * Called by a core when it is being brought online with a spin-table.
+ * Reads the new CPU ID and passes this to init_secondary.
+ */
+ENTRY(mpentry_spintable)
+	ldr	x26, =spintable_wait
+	b	mpentry_common
+END(mpentry_spintable)
+
+/* Wait for the current CPU to be released */
+LENTRY(spintable_wait)
+	/* Read the affinity bits from mpidr_el1 */
+	mrs	x1, mpidr_el1
+	ldr	x2, =CPU_AFF_MASK
+	and	x1, x1, x2
+
+	adrp	x2, ap_cpuid
+1:
+	ldr	x0, [x2, :lo12:ap_cpuid]
+	cmp	x0, x1
+	b.ne	1b
+
+	str	xzr, [x2, :lo12:ap_cpuid]
+	dsb	sy
+	sev
+
+	ret
+LEND(mpentry_spintable)
+
+LENTRY(mpentry_common)
 	/* Disable interrupts */
 	msr	daifset, #DAIF_INTR
 
@@ -227,6 +266,14 @@ ENTRY(mpentry)
 
 mp_virtdone:
 	BTI_J
+
+	/*
+	 * Allow this CPU to wait until the kernel is ready for it,
+	 * e.g. with spin-table but each CPU uses the same release address
+	 */
+	cbz	x26, 1f
+	blr	x26
+1:
 
 	/* Start using the AP boot stack */
 	adrp	x4, bootstack
@@ -258,7 +305,7 @@ mp_virtdone:
 	msr	tpidr_el1, x18
 
 	b	init_secondary
-END(mpentry)
+LEND(mpentry_common)
 #endif
 
 /*
@@ -382,14 +429,16 @@ LEND(get_load_phys_addr)
  *  All the memory must not cross a 1GiB boundaty
  *  x28 contains the physical address we were loaded from
  *
- * TODO: This is out of date.
- *  There are at least 5 pages before that address for the page tables
+ *  There are 7 or 8 pages before that address for the page tables
  *   The pages used are:
+ *    - The Kernel L3 tables (only for 16k kernel)
  *    - The Kernel L2 table
  *    - The Kernel L1 table
  *    - The Kernel L0 table             (TTBR1)
+ *    - The identity (PA = VA) L2 table
  *    - The identity (PA = VA) L1 table
- *    - The identity (PA = VA) L0 table (TTBR0)
+ *    - The identity (PA = VA) L0 table (Early TTBR0)
+ *    - The Kernel empty L0 table       (Late TTBR0)
  */
 LENTRY(create_pagetables)
 	/* Save the Link register */
@@ -473,17 +522,27 @@ common:
 	 * when the page size is larger than 4k, L2 blocks are too large to
 	 * map the kernel with such an alignment.
 	 */
+#define	PTE_SHIFT	L3_SHIFT
+#define	BUILD_PTE_FUNC	build_l3_page_pagetable
+#else
+#define	PTE_SHIFT	L2_SHIFT
+#define	BUILD_PTE_FUNC	build_l2_block_pagetable
+#endif
 
-	/* Get the number of l3 pages to allocate, rounded down */
-	lsr	x10, x8, #(L3_SHIFT)
+	/* Get the number of blocks/pages to allocate, rounded down */
+	lsr	x10, x8, #(PTE_SHIFT)
 
-	/* Create the kernel space L2 table */
+	/* Create the kernel space PTE table */
 	mov	x6, x26
 	mov	x7, #(ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK))
 	mov	x8, #(KERNBASE)
 	mov	x9, x28
-	bl	build_l3_page_pagetable
+	bl	BUILD_PTE_FUNC
 
+#undef PTE_SHIFT
+#undef BUILD_PTE_FUNC
+
+#if PAGE_SIZE != PAGE_SIZE_4K
 	/* Move to the l2 table */
 	ldr	x9, =(PAGE_SIZE * L3_PAGE_COUNT)
 	add	x26, x26, x9
@@ -492,16 +551,6 @@ common:
 	mov	x9, x6
 	mov	x6, x26
 	bl	link_l2_pagetable
-#else
-	/* Get the number of l2 pages to allocate, rounded down */
-	lsr	x10, x8, #(L2_SHIFT)
-
-	/* Create the kernel space L2 table */
-	mov	x6, x26
-	mov	x7, #(ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK))
-	mov	x8, #(KERNBASE)
-	mov	x9, x28
-	bl	build_l2_block_pagetable
 #endif
 
 	/* Move to the l1 table */
