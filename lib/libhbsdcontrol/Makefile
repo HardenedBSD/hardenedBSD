@@ -3,7 +3,7 @@
 PACKAGE=lib${LIB}
 SHLIBDIR?= /lib
 
-LIB=	hbsdcontrol
+LIB=		hbsdcontrol
 SHLIB_MAJOR=	0
 
 CFLAGS+=	-I${.CURDIR}
