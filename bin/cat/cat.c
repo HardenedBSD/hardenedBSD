@@ -41,6 +41,7 @@
 #include <netdb.h>
 #endif
 
+#include <capsicum_helpers.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
@@ -53,9 +54,14 @@
 #include <wchar.h>
 #include <wctype.h>
 
+#include <libcasper.h>
+#include <casper/cap_fileargs.h>
+#include <casper/cap_net.h>
+
 static int bflag, eflag, lflag, nflag, sflag, tflag, vflag;
 static int rval;
 static const char *filename;
+static fileargs_t *fa;
 
 static void usage(void) __dead2;
 static void scanfiles(char *argv[], int cooked);
@@ -66,6 +72,8 @@ static ssize_t in_kernel_copy(int);
 static void raw_cat(int);
 
 #ifndef NO_UDOM_SUPPORT
+static cap_channel_t *capnet;
+
 static int udom_open(const char *path, int flags);
 #endif
 
@@ -98,8 +106,6 @@ static int udom_open(const char *path, int flags);
 #define SUPPORTED_FLAGS "belnstuv"
 #endif
 
-<<<<<<< HEAD
-=======
 #ifndef NO_UDOM_SUPPORT
 static void
 init_casper_net(cap_channel_t *casper)
@@ -147,7 +153,6 @@ init_casper(int argc, char *argv[])
 	cap_close(casper);
 }
 
->>>>>>> internal/freebsd/current/main
 int
 main(int argc, char *argv[])
 {
@@ -186,6 +191,7 @@ main(int argc, char *argv[])
 			usage();
 		}
 	argv += optind;
+	argc -= optind;
 
 	if (lflag) {
 		stdout_lock.l_len = 0;
@@ -196,8 +202,6 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "stdout");
 	}
 
-<<<<<<< HEAD
-=======
 	init_casper(argc, argv);
 
 	caph_cache_catpages();
@@ -205,7 +209,6 @@ main(int argc, char *argv[])
 	if (caph_enter_casper() != 0)
 		err(EXIT_FAILURE, "capsicum");
 
->>>>>>> internal/freebsd/current/main
 	if (bflag || eflag || nflag || sflag || tflag || vflag)
 		scanfiles(argv, 1);
 	else
@@ -242,7 +245,7 @@ scanfiles(char *argv[], int cooked __unused)
 			fd = STDIN_FILENO;
 		} else {
 			filename = path;
-			fd = open(path, O_RDONLY);
+			fd = fileargs_open(fa, path);
 #ifndef NO_UDOM_SUPPORT
 			if (fd < 0 && errno == EOPNOTSUPP)
 				fd = udom_open(path, O_RDONLY);
@@ -435,32 +438,39 @@ udom_open(const char *path, int flags)
 {
 	struct addrinfo hints, *res, *res0;
 	char rpath[PATH_MAX];
-	int fd = -1;
-	int error;
+	int error, fd, serrno;
+	cap_rights_t rights;
 
 	/*
 	 * Construct the unix domain socket address and attempt to connect.
 	 */
 	bzero(&hints, sizeof(hints));
 	hints.ai_family = AF_LOCAL;
-	if (realpath(path, rpath) == NULL)
+
+	if (fileargs_realpath(fa, path, rpath) == NULL)
 		return (-1);
-	error = getaddrinfo(rpath, NULL, &hints, &res0);
+
+	error = cap_getaddrinfo(capnet, rpath, NULL, &hints, &res0);
 	if (error) {
 		warn("%s", gai_strerror(error));
 		errno = EINVAL;
 		return (-1);
 	}
+	cap_rights_init(&rights, CAP_CONNECT, CAP_READ, CAP_WRITE,
+	    CAP_SHUTDOWN, CAP_FSTAT, CAP_FCNTL);
+
+	/* Default error if something goes wrong. */
+	serrno = EINVAL;
+
 	for (res = res0; res != NULL; res = res->ai_next) {
 		fd = socket(res->ai_family, res->ai_socktype,
 		    res->ai_protocol);
 		if (fd < 0) {
+			serrno = errno;
 			freeaddrinfo(res0);
+			errno = serrno;
 			return (-1);
 		}
-<<<<<<< HEAD
-		error = connect(fd, res->ai_addr, res->ai_addrlen);
-=======
 		if (caph_rights_limit(fd, &rights) != 0) {
 			serrno = errno;
 			close(fd);
@@ -469,34 +479,23 @@ udom_open(const char *path, int flags)
 			return (-1);
 		}
 		error = cap_connect(capnet, fd, res->ai_addr, res->ai_addrlen);
->>>>>>> internal/freebsd/current/main
 		if (error == 0)
 			break;
 		else {
+			serrno = errno;
 			close(fd);
-			fd = -1;
 		}
 	}
 	freeaddrinfo(res0);
 
+	if (res == NULL) {
+		errno = serrno;
+		return (-1);
+	}
+
 	/*
 	 * handle the open flags by shutting down appropriate directions
 	 */
-<<<<<<< HEAD
-	if (fd >= 0) {
-		switch(flags & O_ACCMODE) {
-		case O_RDONLY:
-			if (shutdown(fd, SHUT_WR) == -1)
-				warn(NULL);
-			break;
-		case O_WRONLY:
-			if (shutdown(fd, SHUT_RD) == -1)
-				warn(NULL);
-			break;
-		default:
-			break;
-		}
-=======
 
 	switch (flags & O_ACCMODE) {
 	case O_RDONLY:
@@ -519,7 +518,6 @@ udom_open(const char *path, int flags)
 		close(fd);
 		errno = serrno;
 		return (-1);
->>>>>>> internal/freebsd/current/main
 	}
 	return (fd);
 }
