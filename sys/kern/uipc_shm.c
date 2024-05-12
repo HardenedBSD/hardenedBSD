@@ -1173,7 +1173,6 @@ kern_shm_open2(struct thread *td, const char *userpath, int flags, mode_t mode,
 	if ((shmflags & SHM_ALLOW_SEALING) != 0)
 		initial_seals &= ~F_SEAL_SEAL;
 
-<<<<<<< HEAD
 #ifdef CAPABILITY_MODE
 	/*
 	 * shm_open(2) is only allowed for anonymous objects when SHM hardening
@@ -1191,8 +1190,6 @@ kern_shm_open2(struct thread *td, const char *userpath, int flags, mode_t mode,
 	}
 #endif
 
-=======
->>>>>>> origin/freebsd/14-stable/main
 	AUDIT_ARG_FFLAGS(flags);
 	AUDIT_ARG_MODE(mode);
 
