@@ -1,8 +1,14 @@
-/* $NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $ */
+/*	$NetBSD: strings.h,v 1.3 2008/04/28 20:22:54 martin Exp $	*/
 
-/*
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
+/*-
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2007 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,40 +31,37 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef _SSP_STRINGS_H_
+#define _SSP_STRINGS_H_
 
-#include <sys/cdefs.h>
-__COPYRIGHT("@(#) Copyright (c) 2008\
- The NetBSD Foundation, inc. All rights reserved.");
-__RCSID("$NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $");
+#include <ssp/ssp.h>
+#include <string.h>
 
-#include <stdio.h>
+#if __SSP_FORTIFY_LEVEL > 0
 
-#ifdef __FreeBSD__
-/* _FORTIFY_SOURCE, at the very least, may #define a gets() macro. */
-#undef gets
+#define _ssp_bcopy(srcvar, src, dstvar, dst, lenvar,  len) ({	\
+    const void *srcvar = (src);			\
+    void *dstvar = (dst);			\
+    size_t lenvar = (len);			\
+    ((__ssp_bos0(dstvar) != (size_t)-1) ?	\
+    __builtin___memmove_chk(dstvar, srcvar, lenvar,	\
+        __ssp_bos0(dstvar)) :			\
+    __memmove_ichk(dstvar, srcvar, lenvar));	\
+})
 
-/*
- * We want to test the gets() implementation, but cannot simply link against
- * the gets symbol because it is not in the default version. (We've made it
- * unavailable by default on FreeBSD because it should not be used.)
- *
- * The next two lines create an unsafe_gets() function that resolves to
- * gets@FBSD_1.0, which we call from our local gets() implementation.
- */
-__sym_compat(gets, unsafe_gets, FBSD_1.0);
-char *unsafe_gets(char *);
+#define	bcopy(src, dst, len)			\
+    _ssp_bcopy(__ssp_var(srcv), src, __ssp_var(dstv), dst, __ssp_var(lenv), len)
 
-char *gets(char *buf)
-{
-	return unsafe_gets(buf);
-}
-#endif
+#define _ssp_bzero(dstvar, dst, lenvar, len) ({		\
+    void *dstvar = (dst);			\
+    size_t lenvar = (len);			\
+    ((__ssp_bos0(dstvar) != (size_t)-1) ?	\
+    __builtin___memset_chk(dstvar, 0, lenvar,	\
+        __ssp_bos0(dstvar)) : \
+    __memset_ichk(dstvar, 0, lenvar));		\
+})
 
-int
-main(int argc, char *argv[])
-{
-	char b[10];
-	(void)gets(b);
-	(void)printf("%s\n", b);
-	return 0;
-}
+#define	bzero(dst, len)	_ssp_bzero(__ssp_var(dstv), dst, __ssp_var(lenv), len)
+
+#endif /* __SSP_FORTIFY_LEVEL > 0 */
+#endif /* _SSP_STRINGS_H_ */

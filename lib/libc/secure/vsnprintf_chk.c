@@ -1,8 +1,12 @@
-/* $NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $ */
-
-/*
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
+/*-
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,40 +29,21 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include <sys/cdefs.h>
-__COPYRIGHT("@(#) Copyright (c) 2008\
- The NetBSD Foundation, inc. All rights reserved.");
-__RCSID("$NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $");
+__RCSID("$NetBSD: vsnprintf_chk.c,v 1.5 2008/04/28 20:23:00 martin Exp $");
 
+#include <stdarg.h>
 #include <stdio.h>
 
-#ifdef __FreeBSD__
-/* _FORTIFY_SOURCE, at the very least, may #define a gets() macro. */
-#undef gets
-
-/*
- * We want to test the gets() implementation, but cannot simply link against
- * the gets symbol because it is not in the default version. (We've made it
- * unavailable by default on FreeBSD because it should not be used.)
- *
- * The next two lines create an unsafe_gets() function that resolves to
- * gets@FBSD_1.0, which we call from our local gets() implementation.
- */
-__sym_compat(gets, unsafe_gets, FBSD_1.0);
-char *unsafe_gets(char *);
-
-char *gets(char *buf)
-{
-	return unsafe_gets(buf);
-}
-#endif
+#include <ssp/stdio.h>
+#undef vsnprintf
 
 int
-main(int argc, char *argv[])
+__vsnprintf_chk(char * __restrict buf, size_t len, int flags, size_t slen,
+    const char * __restrict fmt, va_list ap)
 {
-	char b[10];
-	(void)gets(b);
-	(void)printf("%s\n", b);
-	return 0;
+	if (len > slen)
+		__chk_fail();
+
+	return (vsnprintf(buf, len, fmt, ap));
 }

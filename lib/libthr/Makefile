@@ -11,7 +11,13 @@ LDFLAGS+=	-Wl,--rpath=/usr/lib${COMPAT_libcompat}
 
 .include <src.opts.mk>
 MK_SSP=	no
+<<<<<<< HEAD
 MK_LTOLIB=	no
+=======
+# SSP forced off already implies FORTIFY_SOURCE=0, but we must make sure that
+# one cannot turn it back on.
+FORTIFY_SOURCE=	0
+>>>>>>> internal/freebsd/current/main
 
 LIB=thr
 SHLIB_MAJOR= 3

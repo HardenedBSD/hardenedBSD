@@ -1,8 +1,14 @@
-/* $NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $ */
+/*	$NetBSD: unistd.h,v 1.7 2015/06/25 18:41:03 joerg Exp $	*/
 
-/*
- * Copyright (c) 2008 The NetBSD Foundation, Inc.
+/*-
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Christos Zoulas.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,40 +31,28 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef _SSP_UNISTD_H_
+#define _SSP_UNISTD_H_
 
-#include <sys/cdefs.h>
-__COPYRIGHT("@(#) Copyright (c) 2008\
- The NetBSD Foundation, inc. All rights reserved.");
-__RCSID("$NetBSD: h_gets.c,v 1.1 2010/12/27 02:04:19 pgoyette Exp $");
+#include <ssp/ssp.h>
 
-#include <stdio.h>
+#if __SSP_FORTIFY_LEVEL > 0
+__BEGIN_DECLS
 
-#ifdef __FreeBSD__
-/* _FORTIFY_SOURCE, at the very least, may #define a gets() macro. */
-#undef gets
-
-/*
- * We want to test the gets() implementation, but cannot simply link against
- * the gets symbol because it is not in the default version. (We've made it
- * unavailable by default on FreeBSD because it should not be used.)
- *
- * The next two lines create an unsafe_gets() function that resolves to
- * gets@FBSD_1.0, which we call from our local gets() implementation.
- */
-__sym_compat(gets, unsafe_gets, FBSD_1.0);
-char *unsafe_gets(char *);
-
-char *gets(char *buf)
-{
-	return unsafe_gets(buf);
-}
+#ifndef _FORTIFY_SOURCE_read
+#define	_FORTIFY_SOURCE_read	read
 #endif
 
-int
-main(int argc, char *argv[])
-{
-	char b[10];
-	(void)gets(b);
-	(void)printf("%s\n", b);
-	return 0;
-}
+__ssp_redirect0(ssize_t, _FORTIFY_SOURCE_read, (int __fd, void *__buf,
+    size_t __len), (__fd, __buf, __len));
+
+__ssp_redirect(ssize_t, readlink, (const char *__restrict __path, \
+    char *__restrict __buf, size_t __len), (__path, __buf, __len));
+
+__ssp_redirect_raw(char *, getcwd, getcwd, (char *__buf, size_t __len),
+    (__buf, __len), __buf != 0, __ssp_bos);
+
+__END_DECLS
+
+#endif /* __SSP_FORTIFY_LEVEL > 0 */
+#endif /* _SSP_UNISTD_H_ */
