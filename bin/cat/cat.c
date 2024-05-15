@@ -110,6 +110,56 @@ static int udom_open(const char *path, int flags);
 #define SUPPORTED_FLAGS "belnstuv"
 #endif
 
+<<<<<<< HEAD
+=======
+#ifndef NO_UDOM_SUPPORT
+static void
+init_casper_net(cap_channel_t *casper)
+{
+	cap_net_limit_t *limit;
+	int familylimit;
+
+	capnet = cap_service_open(casper, "system.net");
+	if (capnet == NULL)
+		err(EXIT_FAILURE, "unable to create network service");
+
+	limit = cap_net_limit_init(capnet, CAPNET_NAME2ADDR |
+	    CAPNET_CONNECTDNS);
+	if (limit == NULL)
+		err(EXIT_FAILURE, "unable to create limits");
+
+	familylimit = AF_LOCAL;
+	cap_net_limit_name2addr_family(limit, &familylimit, 1);
+
+	if (cap_net_limit(limit) != 0)
+		err(EXIT_FAILURE, "unable to apply limits");
+}
+#endif
+
+static void
+init_casper(int argc, char *argv[])
+{
+	cap_channel_t *casper;
+	cap_rights_t rights;
+
+	casper = cap_init();
+	if (casper == NULL)
+		err(EXIT_FAILURE, "unable to create Casper");
+
+	fa = fileargs_cinit(casper, argc, argv, O_RDONLY, 0,
+	    cap_rights_init(&rights, CAP_READ, CAP_FSTAT, CAP_FCNTL, CAP_SEEK),
+	    FA_OPEN | FA_REALPATH);
+	if (fa == NULL)
+		err(EXIT_FAILURE, "unable to create fileargs");
+
+#ifndef NO_UDOM_SUPPORT
+	init_casper_net(casper);
+#endif
+
+	cap_close(casper);
+}
+
+>>>>>>> internal/freebsd/13-stable/main
 int
 main(int argc, char *argv[])
 {
@@ -154,10 +204,20 @@ main(int argc, char *argv[])
 		stdout_lock.l_start = 0;
 		stdout_lock.l_type = F_WRLCK;
 		stdout_lock.l_whence = SEEK_SET;
-		if (fcntl(STDOUT_FILENO, F_SETLKW, &stdout_lock) == -1)
+		if (fcntl(STDOUT_FILENO, F_SETLKW, &stdout_lock) != 0)
 			err(EXIT_FAILURE, "stdout");
 	}
 
+<<<<<<< HEAD
+=======
+	init_casper(argc, argv);
+
+	caph_cache_catpages();
+
+	if (caph_enter_casper() != 0)
+		err(EXIT_FAILURE, "capsicum");
+
+>>>>>>> internal/freebsd/13-stable/main
 	if (bflag || eflag || nflag || sflag || tflag || vflag)
 		scanfiles(argv, 1);
 	else
@@ -385,7 +445,18 @@ udom_open(const char *path, int flags)
 			freeaddrinfo(res0);
 			return (-1);
 		}
+<<<<<<< HEAD
 		error = connect(fd, res->ai_addr, res->ai_addrlen);
+=======
+		if (caph_rights_limit(fd, &rights) != 0) {
+			serrno = errno;
+			close(fd);
+			freeaddrinfo(res0);
+			errno = serrno;
+			return (-1);
+		}
+		error = cap_connect(capnet, fd, res->ai_addr, res->ai_addrlen);
+>>>>>>> internal/freebsd/13-stable/main
 		if (error == 0)
 			break;
 		else {
@@ -411,6 +482,19 @@ udom_open(const char *path, int flags)
 		default:
 			break;
 		}
+<<<<<<< HEAD
+=======
+
+		cap_rights_clear(&rights, CAP_CONNECT, CAP_SHUTDOWN);
+		if (caph_rights_limit(fd, &rights) != 0) {
+			serrno = errno;
+			close(fd);
+			errno = serrno;
+			return (-1);
+		}
+	} else {
+		errno = serrno;
+>>>>>>> internal/freebsd/13-stable/main
 	}
 	return (fd);
 }
