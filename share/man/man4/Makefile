@@ -101,6 +101,7 @@ MAN=	aac.4 \
 	cc_vegas.4 \
 	${_ccd.4} \
 	ccr.4 \
+	cd9660.4 \
 	cd.4 \
 	cdce.4 \
 	cdceem.4 \
@@ -128,6 +129,7 @@ MAN=	aac.4 \
 	dcons_crom.4 \
 	ddb.4 \
 	devctl.4 \
+	devfs.4 \
 	disc.4 \
 	disk.4 \
 	divert.4 \
@@ -148,18 +150,22 @@ MAN=	aac.4 \
 	etherswitch.4 \
 	eventtimers.4 \
 	exca.4 \
+	ext2fs.4 \
 	e6060sw.4 \
 	fd.4 \
 	fdc.4 \
+	fdescfs.4 \
 	fdt.4 \
 	fdt_pinctrl.4 \
 	fdtbus.4 \
 	ffclock.4 \
+	ffs.4 \
 	filemon.4 \
 	firewire.4 \
 	${_ftgpio.4} \
 	${_ftwd.4} \
 	full.4 \
+	fusefs.4 \
 	fwe.4 \
 	fwip.4 \
 	fwohci.4 \
@@ -277,6 +283,9 @@ MAN=	aac.4 \
 	le.4 \
 	led.4 \
 	lge.4 \
+	lindebugfs.4 \
+	linprocfs.4 \
+	linsysfs.4 \
 	${_linux.4} \
 	liquidio.4 \
 	lm75.4 \
@@ -323,7 +332,9 @@ MAN=	aac.4 \
 	mpr.4 \
 	mps.4 \
 	mpt.4 \
+	mqueuefs.4 \
 	mrsas.4 \
+	msdosfs.4 \
 	msk.4 \
 	mtio.4 \
 	multicast.4 \
@@ -406,6 +417,7 @@ MAN=	aac.4 \
 	${_nda.4} \
 	${_if_ntb.4} \
 	null.4 \
+	nullfs.4 \
 	numa.4 \
 	nvd.4 \
 	${_nvdimm.4} \
@@ -448,6 +460,7 @@ MAN=	aac.4 \
 	ppc.4 \
 	ppi.4 \
 	procdesc.4 \
+	procfs.4 \
 	proto.4 \
 	ps4dshock.4 \
 	psm.4 \
@@ -506,6 +519,7 @@ MAN=	aac.4 \
 	sk.4 \
 	${_smartpqi.4} \
 	smb.4 \
+	smbfs.4 \
 	smbios.4 \
 	smbus.4 \
 	smp.4 \
@@ -550,6 +564,7 @@ MAN=	aac.4 \
 	syscons.4 \
 	sysmouse.4 \
 	tap.4 \
+	tarfs.4 \
 	targ.4 \
 	tcp.4 \
 	tcp_bbr.4 \
@@ -559,6 +574,7 @@ MAN=	aac.4 \
 	textdump.4 \
 	ti.4 \
 	timecounters.4 \
+	tmpfs.4 \
 	${_tpm.4} \
 	tslog.4 \
 	tty.4 \
@@ -567,6 +583,7 @@ MAN=	aac.4 \
 	tws.4 \
 	udp.4 \
 	udplite.4 \
+	unionfs.4 \
 	ure.4 \
 	vale.4 \
 	vga.4 \
@@ -672,6 +689,7 @@ MLINKS+=em.4 if_em.4 \
 MLINKS+=enc.4 if_enc.4
 MLINKS+=epair.4 if_epair.4
 MLINKS+=et.4 if_et.4
+MLINKS+=ext2fs.4 ext4fs.4 \
 MLINKS+=fd.4 stderr.4 \
 	fd.4 stdin.4 \
 	fd.4 stdout.4
@@ -721,6 +739,7 @@ MLINKS+=mfi.4 mfi_linux.4 \
 	mfi.4 mfip.4
 MLINKS+=mlx5en.4 mce.4
 MLINKS+=mos.4 if_mos.4
+MLINKS+=msdosfs.4 msdos.4
 MLINKS+=msk.4 if_msk.4
 MLINKS+=mwl.4 if_mwl.4
 MLINKS+=mxge.4 if_mxge.4
@@ -915,6 +934,10 @@ __arches=	${MAN_ARCH}
 SUBDIR+=	man4.${__arch}
 .endif
 .endfor
+
+.if ${MK_AUTOFS} != "no"
+MAN+=		autofs.4
+.endif
 
 .if ${MK_BLUETOOTH} != "no"
 MAN+=		ng_bluetooth.4
