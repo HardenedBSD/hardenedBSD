@@ -310,7 +310,16 @@ __DEFAULT_YES_OPTIONS+=LLDB
 .else
 __DEFAULT_NO_OPTIONS+=LLDB
 .endif
+<<<<<<< HEAD
 
+=======
+# LIB32 is not supported on all 64-bit architectures.
+.if (${__T:Maarch64*} != "" && ((defined(X_COMPILER_TYPE) && ${X_COMPILER_TYPE} != "gcc") || (!defined(X_COMPILER_TYPE) && ${COMPILER_TYPE} != "gcc"))) || ${__T} == "amd64" || ${__T} == "powerpc64"
+__DEFAULT_YES_OPTIONS+=LIB32
+.else
+BROKEN_OPTIONS+=LIB32
+.endif
+>>>>>>> internal/freebsd/current/main
 # EFI doesn't exist on powerpc (well, officially) and doesn't work on i386
 .if ${__T:Mpowerpc*} || ${__T} == "i386"
 BROKEN_OPTIONS+=EFI
