@@ -72,6 +72,11 @@ __DEFAULT_YES_OPTIONS = \
 
 __DEFAULT_NO_OPTIONS = \
     ASAN \
+<<<<<<< HEAD
+=======
+    BIND_NOW \
+    BRANCH_PROTECTION \
+>>>>>>> internal/freebsd/current/main
     CCACHE_BUILD \
     CTF \
     INSTALL_AS_USER \
@@ -87,7 +92,19 @@ __DEFAULT_DEPENDENT_OPTIONS = \
     STALE_STAGED/STAGING \
 
 
+<<<<<<< HEAD
 __SINGLE_OPTIONS =
+=======
+.if ${MACHINE_CPUARCH} != "aarch64"
+BROKEN_OPTIONS+=	BRANCH_PROTECTION
+.endif
+
+__SINGLE_OPTIONS = \
+   INIT_ALL
+
+__INIT_ALL_OPTIONS=	none pattern zero
+__INIT_ALL_DEFAULT=	none
+>>>>>>> internal/freebsd/current/main
 
 .-include <local.opts.mk>
 
