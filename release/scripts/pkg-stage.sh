@@ -12,8 +12,12 @@ export ROOTDIR="$PWD/dvd"
 export PKGCMD="/usr/sbin/pkg -d --rootdir ${ROOTDIR}"
 export PORTSDIR="${PORTSDIR:-/usr/ports}"
 
+<<<<<<< HEAD
 _DVD_PACKAGES="archivers/unzip
 devel/git
+=======
+_DVD_PACKAGES="devel/git@lite
+>>>>>>> origin/freebsd/14-stable/main
 graphics/drm-kmod
 graphics/drm-510-kmod
 graphics/drm-515-kmod
@@ -21,18 +25,19 @@ misc/freebsd-doc-all
 net/mpd5
 net/rsync
 ports-mgmt/pkg
-ports-mgmt/portmaster
 shells/bash
 shells/zsh
 security/sudo
 sysutils/screen
+sysutils/seatd
 sysutils/tmux
 www/firefox
 www/links
-x11-drivers/xf86-video-vmware
 x11/gnome
 x11/kde5
-x11/xorg"
+x11/sddm
+x11/xorg
+x11-wm/sway"
 
 # If NOPORTS is set for the release, do not attempt to build pkg(8).
 if [ ! -f ${PORTSDIR}/Makefile ]; then
@@ -59,10 +64,10 @@ fi
 # Ensure the ports listed in _DVD_PACKAGES exist to sanitize the
 # final list.
 for _P in ${_DVD_PACKAGES}; do
-	if [ -d "${PORTSDIR}/${_P}" ]; then
+	if [ -d "${PORTSDIR}/${_P%%@*}" ]; then
 		DVD_PACKAGES="${DVD_PACKAGES} ${_P}"
 	else
-		echo "*** Skipping nonexistent port: ${_P}"
+		echo "*** Skipping nonexistent port: ${_P%%@*}"
 	fi
 done
 
