@@ -178,7 +178,7 @@ static int sysctl_stack_guard_page(SYSCTL_HANDLER_ARGS);
 			start = end;			\
 		}
 
-#ifndef UMA_MD_SMALL_ALLOC
+#ifndef UMA_USE_DMAP
 
 /*
  * Allocate a new slab for kernel map entries.  The kernel map may be locked or
@@ -270,7 +270,7 @@ vm_map_startup(void)
 	kmapentzone = uma_zcreate("KMAP ENTRY", sizeof(struct vm_map_entry),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR,
 	    UMA_ZONE_VM | UMA_ZONE_NOBUCKET);
-#ifndef UMA_MD_SMALL_ALLOC
+#ifndef UMA_USE_DMAP
 	/* Reserve an extra map entry for use when replenishing the reserve. */
 	uma_zone_reserve(kmapentzone, KMAPENT_RESERVE + 1);
 	uma_prealloc(kmapentzone, KMAPENT_RESERVE + 1);
@@ -678,7 +678,7 @@ _vm_map_unlock(vm_map_t map, const char *file, int line)
 
 	VM_MAP_UNLOCK_CONSISTENT(map);
 	if (map->system_map) {
-#ifndef UMA_MD_SMALL_ALLOC
+#ifndef UMA_USE_DMAP
 		if (map == kernel_map && (map->flags & MAP_REPLENISH) != 0) {
 			uma_prealloc(kmapentzone, 1);
 			map->flags &= ~MAP_REPLENISH;
@@ -955,7 +955,7 @@ vm_map_entry_create(vm_map_t map)
 {
 	vm_map_entry_t new_entry;
 
-#ifndef UMA_MD_SMALL_ALLOC
+#ifndef UMA_USE_DMAP
 	if (map == kernel_map) {
 		VM_MAP_ASSERT_LOCKED(map);
 

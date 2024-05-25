@@ -234,7 +234,7 @@
 #define	VM_INITIAL_PAGEIN	16
 #endif
 
-#define	UMA_MD_SMALL_ALLOC
+#define UMA_USE_DMAP
 
 #ifndef LOCORE
 extern vm_paddr_t dmap_phys_base;
@@ -257,5 +257,6 @@ extern vm_offset_t init_pt_va;
  * Need a page dump array for minidump.
  */
 #define MINIDUMP_PAGE_TRACKING	1
+#define MINIDUMP_STARTUP_PAGE_TRACKING 1
 
 #endif /* !_MACHINE_VMPARAM_H_ */
