@@ -1630,7 +1630,8 @@ pmap_init_pv_table(void)
 
 /*
  *	Initialize the pmap module.
- *	Called by vm_init, to initialize any structures that the pmap
+ *
+ *	Called by vm_mem_init(), to initialize any structures that the pmap
  *	system needs to map virtual memory.
  */
 void
