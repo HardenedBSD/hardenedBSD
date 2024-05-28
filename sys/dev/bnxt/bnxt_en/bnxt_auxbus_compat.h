@@ -1,7 +1,7 @@
 /*-
  * Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2016 Broadcom, All Rights Reserved.
+ * Copyright (c) 2024 Broadcom, All Rights Reserved.
  * The term Broadcom refers to Broadcom Limited and/or its subsidiaries
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,17 +26,50 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#include "bnxt.h"
+#ifndef _BNXT_AUXILIARY_COMPAT_H_
+#define _BNXT_AUXILIARY_COMPAT_H_
 
-int bnxt_init_sysctl_ctx(struct bnxt_softc *softc);
-int bnxt_free_sysctl_ctx(struct bnxt_softc *softc);
-int bnxt_create_port_stats_sysctls(struct bnxt_softc *softc);
-int bnxt_create_tx_sysctls(struct bnxt_softc *softc, int txr);
-int bnxt_create_rx_sysctls(struct bnxt_softc *softc, int rxr);
-int bnxt_create_ver_sysctls(struct bnxt_softc *softc);
-int bnxt_create_nvram_sysctls(struct bnxt_nvram_info *ni);
-int bnxt_create_config_sysctls_pre(struct bnxt_softc *softc);
-int bnxt_create_config_sysctls_post(struct bnxt_softc *softc);
-int bnxt_create_hw_lro_sysctls(struct bnxt_softc *softc);
-int bnxt_create_pause_fc_sysctls(struct bnxt_softc *softc);
+#include <linux/device.h>
+#include <linux/idr.h>
+
+#define KBUILD_MODNAME		"if_bnxt"
+#define AUXILIARY_NAME_SIZE	32
+
+struct auxiliary_device_id {
+	char name[AUXILIARY_NAME_SIZE];
+	uint64_t driver_data;
+};
+
+struct auxiliary_device {
+	struct device dev;
+	const char *name;
+	uint32_t id;
+	struct list_head list;
+};
+
+struct auxiliary_driver {
+	int (*probe)(struct auxiliary_device *auxdev, const struct auxiliary_device_id *id);
+	void (*remove)(struct auxiliary_device *auxdev);
+	const char *name;
+	struct device_driver driver;
+	const struct auxiliary_device_id *id_table;
+	struct list_head list;
+};
+
+int auxiliary_device_init(struct auxiliary_device *auxdev);
+int auxiliary_device_add(struct auxiliary_device *auxdev);
+void auxiliary_device_uninit(struct auxiliary_device *auxdev);
+void auxiliary_device_delete(struct auxiliary_device *auxdev);
+int auxiliary_driver_register(struct auxiliary_driver *auxdrv);
+void auxiliary_driver_unregister(struct auxiliary_driver *auxdrv);
+
+static inline void *auxiliary_get_drvdata(struct auxiliary_device *auxdev)
+{
+	return dev_get_drvdata(&auxdev->dev);
+}
+
+static inline void auxiliary_set_drvdata(struct auxiliary_device *auxdev, void *data)
+{
+	dev_set_drvdata(&auxdev->dev, data);
+}
+#endif /* _BNXT_AUXILIARY_COMPAT_H_ */
