@@ -4566,9 +4566,8 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *ptep, pd_entry_t newpte,
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-
-	if ((newpte & ATTR_SW_NO_PROMOTE) != 0)
-		panic("%s: Updating non-promote pte", __func__);
+	KASSERT((newpte & ATTR_SW_NO_PROMOTE) == 0,
+	    ("%s: Updating non-promote pte", __func__));
 
 	/*
 	 * Ensure we don't get switched out with the page table in an
@@ -4609,9 +4608,8 @@ pmap_update_strided(pmap_t pmap, pd_entry_t *ptep, pd_entry_t *ptep_end,
 	register_t intr;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
-
-	if ((newpte & ATTR_SW_NO_PROMOTE) != 0)
-		panic("%s: Updating non-promote pte", __func__);
+	KASSERT((newpte & ATTR_SW_NO_PROMOTE) == 0,
+	    ("%s: Updating non-promote pte", __func__));
 
 	/*
 	 * Ensure we don't get switched out with the page table in an
