@@ -1972,7 +1972,8 @@ pf_rule_to_krule(const struct pf_rule *rule, struct pf_krule *krule)
 	krule->os_fingerprint = rule->os_fingerprint;
 
 	krule->rtableid = rule->rtableid;
-	bcopy(rule->timeout, krule->timeout, sizeof(krule->timeout));
+	/* pf_rule->timeout is smaller than pf_krule->timeout */
+	bcopy(rule->timeout, krule->timeout, sizeof(rule->timeout));
 	krule->max_states = rule->max_states;
 	krule->max_src_nodes = rule->max_src_nodes;
 	krule->max_src_states = rule->max_src_states;
@@ -2422,6 +2423,24 @@ pf_stop(void)
 	sx_xunlock(&V_pf_ioctl_lock);
 
 	return (error);
+}
+
+void
+pf_ioctl_clear_status(void)
+{
+	PF_RULES_WLOCK();
+	for (int i = 0; i < PFRES_MAX; i++)
+		counter_u64_zero(V_pf_status.counters[i]);
+	for (int i = 0; i < FCNT_MAX; i++)
+		pf_counter_u64_zero(&V_pf_status.fcounters[i]);
+	for (int i = 0; i < SCNT_MAX; i++)
+		counter_u64_zero(V_pf_status.scounters[i]);
+	for (int i = 0; i < KLCNT_MAX; i++)
+		counter_u64_zero(V_pf_status.lcounters[i]);
+	V_pf_status.since = time_second;
+	if (*V_pf_status.ifname)
+		pfi_update_status(V_pf_status.ifname, NULL);
+	PF_RULES_WUNLOCK();
 }
 
 static int
@@ -3765,19 +3784,7 @@ DIOCGETSTATESV2_full:
 	}
 
 	case DIOCCLRSTATUS: {
-		PF_RULES_WLOCK();
-		for (int i = 0; i < PFRES_MAX; i++)
-			counter_u64_zero(V_pf_status.counters[i]);
-		for (int i = 0; i < FCNT_MAX; i++)
-			pf_counter_u64_zero(&V_pf_status.fcounters[i]);
-		for (int i = 0; i < SCNT_MAX; i++)
-			counter_u64_zero(V_pf_status.scounters[i]);
-		for (int i = 0; i < KLCNT_MAX; i++)
-			counter_u64_zero(V_pf_status.lcounters[i]);
-		V_pf_status.since = time_second;
-		if (*V_pf_status.ifname)
-			pfi_update_status(V_pf_status.ifname, NULL);
-		PF_RULES_WUNLOCK();
+		pf_ioctl_clear_status();
 		break;
 	}
 

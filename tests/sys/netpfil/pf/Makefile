@@ -7,6 +7,7 @@ TESTS_SUBDIRS+=	ioctl
 
 ATF_TESTS_SH+=	altq \
 		anchor \
+		debug \
 		divert-to \
 		dup \
 		ether \
@@ -41,6 +42,7 @@ ATF_TESTS_SH+=	altq \
 		set_skip \
 		set_tos \
 		src_track \
+		status \
 		syncookie \
 		synproxy \
 		table \

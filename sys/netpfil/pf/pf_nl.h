@@ -47,6 +47,9 @@ enum {
 	PFNL_CMD_KILLSTATES = 9,
 	PFNL_CMD_SET_STATUSIF = 10,
 	PFNL_CMD_GET_STATUS = 11,
+	PFNL_CMD_CLEAR_STATUS = 12,
+	PFNL_CMD_NATLOOK = 13,
+	PFNL_CMD_SET_DEBUG = 14,
 	__PFNL_CMD_MAX,
 };
 #define PFNL_CMD_MAX (__PFNL_CMD_MAX -1)
@@ -313,6 +316,22 @@ enum pf_get_status_types_t {
 	PF_GS_CHKSUM		= 14, /* byte array */
 	PF_GS_PCOUNTERS		= 15, /* u64 array */
 	PF_GS_BCOUNTERS		= 16, /* u64 array */
+};
+
+enum pf_natlook_types_t {
+	PF_NL_UNSPEC,
+	PF_NL_AF		= 1, /* u8 */
+	PF_NL_DIRECTION		= 2, /* u8 */
+	PF_NL_PROTO		= 3, /* u8 */
+	PF_NL_SRC_ADDR		= 4, /* in6_addr */
+	PF_NL_DST_ADDR		= 5, /* in6_addr */
+	PF_NL_SRC_PORT		= 6, /* u16 */
+	PF_NL_DST_PORT		= 7, /* u16 */
+};
+
+enum pf_set_debug_types_t {
+	PF_SD_UNSPEC,
+	PF_SD_LEVEL		= 1, /* u32 */
 };
 
 #ifdef _KERNEL

@@ -109,6 +109,35 @@ pfctl_fd(struct pfctl_handle *h)
 }
 
 static int
+pfctl_do_netlink_cmd(struct pfctl_handle *h, uint cmd)
+{
+	struct snl_errmsg_data e = {};
+	struct snl_writer nw;
+	struct nlmsghdr *hdr;
+	uint32_t seq_id;
+	int family_id;
+
+	family_id = snl_get_genl_family(&h->ss, PFNL_FAMILY_NAME);
+	if (family_id == 0)
+		return (ENOTSUP);
+
+	snl_init_writer(&h->ss, &nw);
+	hdr = snl_create_genl_msg_request(&nw, family_id, cmd);
+
+	hdr = snl_finalize_msg(&nw);
+	if (hdr == NULL)
+		return (ENOMEM);
+	seq_id = hdr->nlmsg_seq;
+
+	snl_send_message(&h->ss, hdr);
+
+	while ((hdr = snl_read_reply_multi(&h->ss, seq_id, &e)) != NULL) {
+	}
+
+	return (e.error);
+}
+
+static int
 pfctl_do_ioctl(int dev, uint cmd, size_t size, nvlist_t **nvl)
 {
 	struct pfioc_nv nv;
@@ -229,31 +258,7 @@ pf_nvuint_64_array(const nvlist_t *nvl, const char *name, size_t maxelems,
 int
 pfctl_startstop(struct pfctl_handle *h, int start)
 {
-	struct snl_errmsg_data e = {};
-	struct snl_writer nw;
-	struct nlmsghdr *hdr;
-	uint32_t seq_id;
-	int family_id;
-
-	family_id = snl_get_genl_family(&h->ss, PFNL_FAMILY_NAME);
-	if (family_id == 0)
-		return (ENOTSUP);
-
-	snl_init_writer(&h->ss, &nw);
-	hdr = snl_create_genl_msg_request(&nw, family_id,
-	    start ? PFNL_CMD_START : PFNL_CMD_STOP);
-
-	hdr = snl_finalize_msg(&nw);
-	if (hdr == NULL)
-		return (ENOMEM);
-	seq_id = hdr->nlmsg_seq;
-
-	snl_send_message(&h->ss, hdr);
-
-	while ((hdr = snl_read_reply_multi(&h->ss, seq_id, &e)) != NULL) {
-	}
-
-	return (e.error);
+	return (pfctl_do_netlink_cmd(h, start ? PFNL_CMD_START : PFNL_CMD_STOP));
 }
 
 static void
@@ -486,6 +491,11 @@ pfctl_get_status(int dev)
 	nvlist_destroy(nvl);
 
 	return (status);
+}
+int
+pfctl_clear_status(struct pfctl_handle *h)
+{
+	return (pfctl_do_netlink_cmd(h, PFNL_CMD_CLEAR_STATUS));
 }
 
 static uint64_t
@@ -2411,6 +2421,93 @@ pfctl_set_statusif(struct pfctl_handle *h, const char *ifname)
 	hdr = snl_create_genl_msg_request(&nw, family_id, PFNL_CMD_SET_STATUSIF);
 
 	snl_add_msg_attr_string(&nw, PF_SS_IFNAME, ifname);
+
+	if ((hdr = snl_finalize_msg(&nw)) == NULL)
+		return (ENXIO);
+
+	seq_id = hdr->nlmsg_seq;
+
+	if (! snl_send_message(&h->ss, hdr))
+		return (ENXIO);
+
+	while ((hdr = snl_read_reply_multi(&h->ss, seq_id, &e)) != NULL) {
+	}
+
+	return (e.error);
+}
+
+#define	_IN(_field)	offsetof(struct genlmsghdr, _field)
+#define	_OUT(_field)	offsetof(struct pfctl_natlook, _field)
+static struct snl_attr_parser ap_natlook[] = {
+	{ .type = PF_NL_SRC_ADDR, .off = _OUT(saddr), .cb = snl_attr_get_in6_addr },
+	{ .type = PF_NL_DST_ADDR, .off = _OUT(daddr), .cb = snl_attr_get_in6_addr },
+	{ .type = PF_NL_SRC_PORT, .off = _OUT(sport), .cb = snl_attr_get_uint16 },
+	{ .type = PF_NL_DST_PORT, .off = _OUT(dport), .cb = snl_attr_get_uint16 },
+};
+static struct snl_field_parser fp_natlook[] = {};
+#undef _IN
+#undef _OUT
+SNL_DECLARE_PARSER(natlook_parser, struct genlmsghdr, fp_natlook, ap_natlook);
+
+int
+pfctl_natlook(struct pfctl_handle *h, const struct pfctl_natlook_key *k,
+    struct pfctl_natlook *r)
+{
+	struct snl_writer nw;
+	struct snl_errmsg_data e = {};
+	struct nlmsghdr *hdr;
+	uint32_t seq_id;
+	int family_id;
+
+	family_id = snl_get_genl_family(&h->ss, PFNL_FAMILY_NAME);
+	if (family_id == 0)
+		return (ENOTSUP);
+
+	snl_init_writer(&h->ss, &nw);
+	hdr = snl_create_genl_msg_request(&nw, family_id, PFNL_CMD_NATLOOK);
+	hdr->nlmsg_flags |= NLM_F_DUMP;
+
+	snl_add_msg_attr_u8(&nw, PF_NL_AF, k->af);
+	snl_add_msg_attr_u8(&nw, PF_NL_DIRECTION, k->direction);
+	snl_add_msg_attr_u8(&nw, PF_NL_PROTO, k->proto);
+	snl_add_msg_attr_ip6(&nw, PF_NL_SRC_ADDR, &k->saddr.v6);
+	snl_add_msg_attr_ip6(&nw, PF_NL_DST_ADDR, &k->daddr.v6);
+	snl_add_msg_attr_u16(&nw, PF_NL_SRC_PORT, k->sport);
+	snl_add_msg_attr_u16(&nw, PF_NL_DST_PORT, k->dport);
+
+	if ((hdr = snl_finalize_msg(&nw)) == NULL)
+		return (ENXIO);
+
+	seq_id = hdr->nlmsg_seq;
+
+	if (! snl_send_message(&h->ss, hdr))
+		return (ENXIO);
+
+	while ((hdr = snl_read_reply_multi(&h->ss, seq_id, &e)) != NULL) {
+		if (! snl_parse_nlmsg(&h->ss, hdr, &natlook_parser, r))
+			continue;
+	}
+
+	return (e.error);
+}
+
+int
+pfctl_set_debug(struct pfctl_handle *h, uint32_t level)
+{
+	struct snl_writer nw;
+	struct snl_errmsg_data e = {};
+	struct nlmsghdr *hdr;
+	uint32_t seq_id;
+	int family_id;
+
+	family_id = snl_get_genl_family(&h->ss, PFNL_FAMILY_NAME);
+	if (family_id == 0)
+		return (ENOTSUP);
+
+	snl_init_writer(&h->ss, &nw);
+	hdr = snl_create_genl_msg_request(&nw, family_id, PFNL_CMD_SET_DEBUG);
+
+	snl_add_msg_attr_u32(&nw, PF_SD_LEVEL, level);
 
 	if ((hdr = snl_finalize_msg(&nw)) == NULL)
 		return (ENXIO);
