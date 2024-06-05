@@ -1,10 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2021 Andrew Turner
- *
- * This work was supported by Innovate UK project 105694, "Digital Security
- * by Design (DSbD) Technology Platform Prototype".
+ * Copyright (C) 2020 Arm Ltd
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,17 +25,15 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/elf_common.h>
-
-#include <machine/asm.h>
-#include <machine/param.h>
-
 	.section .rodata
-	.align PAGE_SHIFT
-	.globl vmm_hyp_code
-vmm_hyp_code:
-	.incbin "vmm_hyp_blob.bin"
-	.globl vmm_hyp_code_end
-vmm_hyp_code_end:
+	.globl _binary_linux_vdso_so_o_start
+_binary_linux_vdso_so_o_start:
+	.incbin "linux_vdso.so.o"
+	.globl _binary_linux_vdso_so_o_end
+_binary_linux_vdso_so_o_end:
 
+#if defined(__aarch64__)
+#include <sys/elf_common.h>
+#include <machine/asm.h>
 GNU_PROPERTY_AARCH64_FEATURE_1_NOTE(GNU_PROPERTY_AARCH64_FEATURE_1_VAL)
+#endif
