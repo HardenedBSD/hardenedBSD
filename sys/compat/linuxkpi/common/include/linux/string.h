@@ -97,6 +97,18 @@ kmemdup(const void *src, size_t len, gfp_t gfp)
 	return (dst);
 }
 
+/* See slab.h for kvmalloc/kvfree(). */
+static inline void *
+kvmemdup(const void *src, size_t len, gfp_t gfp)
+{
+	void *dst;
+
+	dst = kvmalloc(len, gfp);
+	if (dst != NULL)
+		memcpy(dst, src, len);
+	return (dst);
+}
+
 static inline char *
 strndup_user(const char __user *ustr, long n)
 {
@@ -272,5 +284,12 @@ memcpy_and_pad(void *dst, size_t dstlen, const void *src, size_t len, int ch)
 	size_t _o = offsetofend(typeof(*(ptr)), smember);		\
 	memset(_ptr + _o, _c, sizeof(*(ptr)) - _o);			\
 })
+
+static inline void
+memzero_explicit(void *p, size_t s)
+{
+	memset(p, 0, s);
+	__asm__ __volatile__("": :"r"(p) :"memory");
+}
 
 #endif	/* _LINUXKPI_LINUX_STRING_H_ */

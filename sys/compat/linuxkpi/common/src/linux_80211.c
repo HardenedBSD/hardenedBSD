@@ -546,7 +546,7 @@ lkpi_l80211_to_net80211_cyphers(uint32_t wlan_cipher_suite)
 	case WLAN_CIPHER_SUITE_TKIP:
 		return (IEEE80211_CRYPTO_TKIP);
 	case WLAN_CIPHER_SUITE_CCMP:
-		return (IEEE80211_CIPHER_AES_CCM);
+		return (IEEE80211_CRYPTO_AES_CCM);
 	case WLAN_CIPHER_SUITE_WEP104:
 		return (IEEE80211_CRYPTO_WEP);
 	case WLAN_CIPHER_SUITE_AES_CMAC:
@@ -4802,7 +4802,6 @@ linuxkpi_ieee80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb,
     struct ieee80211_sta *sta, struct napi_struct *napi __unused,
     struct list_head *list __unused)
 {
-	struct epoch_tracker et;
 	struct lkpi_hw *lhw;
 	struct ieee80211com *ic;
 	struct mbuf *m;
@@ -4926,6 +4925,7 @@ no_trace_beacons:
 		goto err;
 	}
 
+	lsta = NULL;
 	if (sta != NULL) {
 		lsta = STA_TO_LSTA(sta);
 		ni = ieee80211_ref_node(lsta->ni);
@@ -5020,7 +5020,6 @@ skip_device_ts:
 	}
 #endif
 
-	NET_EPOCH_ENTER(et);
 	if (ni != NULL) {
 		ok = ieee80211_input_mimo(ni, m);
 		ieee80211_free_node(ni);
@@ -5030,7 +5029,6 @@ skip_device_ts:
 		ok = ieee80211_input_mimo_all(ic, m);
 		/* mbuf got consumed. */
 	}
-	NET_EPOCH_EXIT(et);
 
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_RX)
