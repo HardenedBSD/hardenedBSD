@@ -332,6 +332,11 @@ vt9p_attach(device_t dev)
 	cv_init(&chan->submit_cv, "Conditional variable for submit queue" );
 	chan->max_nsegs = MAX_SUPPORTED_SGS;
 	chan->vt9p_sglist = sglist_alloc(chan->max_nsegs, M_NOWAIT);
+	if (chan->vt9p_sglist == NULL) {
+		err = ENOMEM;
+		/* XXX: Cleanup */
+		goto out;
+	}
 
 	/* Negotiate the features from the host */
 	virtio_set_feature_desc(dev, virtio_9p_feature_desc);
