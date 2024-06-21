@@ -333,7 +333,7 @@ vt9p_attach(device_t dev)
 	chan->max_nsegs = MAX_SUPPORTED_SGS;
 	chan->vt9p_sglist = sglist_alloc(chan->max_nsegs, M_NOWAIT);
 	if (chan->vt9p_sglist == NULL) {
-		err = ENOMEM;
+		error = ENOMEM;
 		/* XXX: Cleanup */
 		goto out;
 	}
