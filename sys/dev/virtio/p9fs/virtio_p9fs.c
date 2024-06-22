@@ -76,6 +76,7 @@ struct vt9p_softc {
 /* Global channel list, Each channel will correspond to a mount point */
 static STAILQ_HEAD( ,vt9p_softc) global_chan_list;
 struct mtx global_chan_list_mtx;
+int __insecure_kmod = 1;
 
 static struct virtio_feature_desc virtio_9p_feature_desc[] = {
 	{ VIRTIO_9PNET_F_MOUNT_TAG,	"9PMountTag" },
