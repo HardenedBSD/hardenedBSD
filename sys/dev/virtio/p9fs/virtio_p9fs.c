@@ -373,12 +373,6 @@ vt9p_attach(device_t dev)
 	SYSCTL_ADD_STRING(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "p9fs_mount_tag",
 	    CTLFLAG_RD, chan->mount_tag, 0, "Mount tag");
 
-	if (chan->vt9p_sglist == NULL) {
-		error = ENOMEM;
-		P9_DEBUG(ERROR, "%s: Cannot allocate sglist\n", __func__);
-		goto out;
-	}
-
 	/* We expect one virtqueue, for requests. */
 	error = vt9p_alloc_virtqueue(chan);
 
