@@ -193,6 +193,9 @@ req_retry:
 			 */
 			cv_wait(&chan->submit_cv, VT9P_MTX(chan));
 			P9_DEBUG(TRANS, "%s: retry virtio request\n", __func__);
+			/*
+			 * HBSD: Potential DoS here in case of queue contention.
+			 */
 			goto req_retry;
 		} else {
 			P9_DEBUG(ERROR, "%s: virtio enuqueue failed \n", __func__);
@@ -355,6 +358,9 @@ vt9p_attach(device_t dev)
 		P9_DEBUG(ERROR, "%s: Mount tag feature not supported by host\n", __func__);
 		goto out;
 	}
+	/*
+	 * HBSD: Need reasonableness checks on mount_tag_len here.
+	 */
 	mount_tag = malloc(mount_tag_len + 1, M_P9FS_MNTTAG,
 	    M_WAITOK | M_ZERO);
 
