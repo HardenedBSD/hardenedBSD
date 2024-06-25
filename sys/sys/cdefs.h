@@ -40,7 +40,10 @@
 #endif
 
 /*
- * Testing against Clang-specific extensions.
+ * Provide clang-compatible testing macros. All supported versions of gcc (10+)
+ * provide all of these except has_feature and has_extension which are new in
+ * gcc 14. Keep the older ifndefs, though, for non-gcc compilers that may lack
+ * them like tcc and pcc.
  */
 #ifndef	__has_attribute
 #define	__has_attribute(x)	0
@@ -616,14 +619,6 @@
 #define	__EXT1_VISIBLE		0
 #endif
 #endif /* __STDC_WANT_LIB_EXT1__ */
-
-/*
- * Old versions of GCC use non-standard ARM arch symbols; acle-compat.h
- * translates them to __ARM_ARCH and the modern feature symbols defined by ARM.
- */
-#if defined(__arm__) && !defined(__ARM_ARCH)
-#include <machine/acle-compat.h>
-#endif
 
 /*
  * Nullability qualifiers: currently only supported by Clang.

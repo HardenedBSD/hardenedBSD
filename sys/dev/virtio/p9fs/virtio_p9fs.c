@@ -338,7 +338,11 @@ vt9p_attach(device_t dev)
 	chan->vt9p_sglist = sglist_alloc(chan->max_nsegs, M_NOWAIT);
 	if (chan->vt9p_sglist == NULL) {
 		error = ENOMEM;
+<<<<<<< HEAD
 		/* XXX: Cleanup */
+=======
+		P9_DEBUG(ERROR, "%s: Cannot allocate sglist\n", __func__);
+>>>>>>> internal/freebsd/current/main
 		goto out;
 	}
 
