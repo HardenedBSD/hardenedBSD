@@ -35,6 +35,7 @@
 #include <linux/gfp.h>
 #include <linux/kernel.h>
 #include <linux/mm_types.h>
+#include <linux/mmzone.h>
 #include <linux/pfn.h>
 #include <linux/list.h>
 #include <linux/mmap_lock.h>
@@ -278,14 +279,27 @@ extern long
 get_user_pages(unsigned long start, unsigned long nr_pages,
     unsigned int gup_flags, struct page **,
     struct vm_area_struct **);
+#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60500
+#define	get_user_pages(start, nr_pages, gup_flags, pages)	\
+	get_user_pages(start, nr_pages, gup_flags, pages, NULL)
+#endif
 
+#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60500
+static inline long
+pin_user_pages(unsigned long start, unsigned long nr_pages,
+    unsigned int gup_flags, struct page **pages)
+{
+	return (get_user_pages(start, nr_pages, gup_flags, pages));
+}
+#else
 static inline long
 pin_user_pages(unsigned long start, unsigned long nr_pages,
     unsigned int gup_flags, struct page **pages,
     struct vm_area_struct **vmas)
 {
-	return get_user_pages(start, nr_pages, gup_flags, pages, vmas);
+	return (get_user_pages(start, nr_pages, gup_flags, pages, vmas));
 }
+#endif
 
 extern int
 __get_user_pages_fast(unsigned long start, int nr_pages, int write,
