@@ -4190,14 +4190,12 @@ prison_priv_check(struct ucred *cred, int priv)
 			return (0);
 		return (EPERM);
 
-<<<<<<< HEAD
 	case PRIV_KENV_DUMP:
 	case PRIV_KENV_GET:
 	case PRIV_KENV_SET:
 	case PRIV_KENV_UNSET:
 		return (EPERM);
 
-=======
 		/*
 		 * Conditionally allow privileged process in the jail adjust
 		 * machine time.
@@ -4220,7 +4218,6 @@ prison_priv_check(struct ucred *cred, int priv)
 		else
 			return (EPERM);
 
->>>>>>> internal/freebsd/current/main
 	default:
 		/*
 		 * In all remaining cases, deny the privilege request.  This
