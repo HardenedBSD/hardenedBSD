@@ -392,7 +392,9 @@ static struct ctladm_opts cctl_fe_table[] = {
 static int
 cctl_port(int fd, int argc, char **argv, char *combinedopt)
 {
+	char result_buf[1024];
 	int c;
+	uint64_t created_port = -1;
 	int32_t targ_port = -1;
 	int retval = 0;
 	int wwnn_set = 0, wwpn_set = 0;
@@ -541,7 +543,7 @@ cctl_port(int fd, int argc, char **argv, char *combinedopt)
 	 * we'll throw an error, since that only works on one port at a time.
 	 */
 	if ((port_type != CTL_PORT_NONE) && (targ_port != -1)) {
-		warnx("%s: can only specify one of -t or -n", __func__);
+		warnx("%s: can only specify one of -t or -p", __func__);
 		retval = 1;
 		goto bailout;
 	} else if ((targ_port == -1) && (port_type == CTL_PORT_NONE))
@@ -573,20 +575,18 @@ cctl_port(int fd, int argc, char **argv, char *combinedopt)
 		break;
 	}
 	case CCTL_PORT_MODE_REMOVE:
-		if (targ_port == -1) {
-			warnx("%s: -r requires -p", __func__);
-			retval = 1;
-			goto bailout;
-		}
 		/* FALLTHROUGH */
 	case CCTL_PORT_MODE_CREATE: {
 		bzero(&req, sizeof(req));
 		strlcpy(req.driver, driver, sizeof(req.driver));
+		req.result = result_buf;
+		req.result_len = sizeof(result_buf);
 
 		if (port_mode == CCTL_PORT_MODE_REMOVE) {
 			req.reqtype = CTL_REQ_REMOVE;
-			nvlist_add_stringf(option_list, "port_id", "%d",
-			    targ_port);
+			if (targ_port != -1)
+				nvlist_add_stringf(option_list, "port_id", "%d",
+				    targ_port);
 		} else
 			req.reqtype = CTL_REQ_CREATE;
 
@@ -614,6 +614,20 @@ cctl_port(int fd, int argc, char **argv, char *combinedopt)
 			warnx("warning: %s", req.error_str);
 			break;
 		case CTL_LUN_OK:
+			if (port_mode == CCTL_PORT_MODE_CREATE) {
+				req.result_nvl = nvlist_unpack(result_buf, req.result_len, 0);
+				if (req.result_nvl == NULL) {
+					warnx("error unpacking result nvlist");
+					break;
+				}
+				created_port = nvlist_get_number(req.result_nvl, "port_id");
+				printf("Port created successfully\n"
+				    "frontend: %s\n"
+				    "port:     %ju\n", driver,
+				    (uintmax_t) created_port);
+				nvlist_destroy(req.result_nvl);
+			} else
+				printf("Port destroyed successfully\n");
 			break;
 		default:
 			warnx("unknown status: %d", req.status);
@@ -625,7 +639,7 @@ cctl_port(int fd, int argc, char **argv, char *combinedopt)
 	}
 	case CCTL_PORT_MODE_SET:
 		if (targ_port == -1) {
-			warnx("%s: -w and -W require -n", __func__);
+			warnx("%s: -w and -W require -p", __func__);
 			retval = 1;
 			goto bailout;
 		}
@@ -674,7 +688,8 @@ bailout:
 	return (retval);
 
 bailout_badarg:
-	warnx("%s: only one of -l, -o or -w/-W may be specified", __func__);
+	warnx("%s: only one of -c, -r, -l, -o or -w/-W may be specified",
+		__func__);
 	return (1);
 }
 
