@@ -2974,7 +2974,6 @@ again:
 			ret = pax_mprotect_enforce(p, map, old_prot,
 			    new_prot);
 			if (ret != 0) {
-				vm_map_unlock(map);
 				return (ret);
 			}
 		}
