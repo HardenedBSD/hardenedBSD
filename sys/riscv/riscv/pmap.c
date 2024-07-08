@@ -93,7 +93,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 /*
  *	Manages physical address maps.
  *
@@ -112,6 +111,8 @@
  *	to which processors are currently using which maps,
  *	and to when physical maps must be made correct.
  */
+
+#include "opt_pmap.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1050,10 +1051,8 @@ pmap_extract(pmap_t pmap, vm_offset_t va)
 	if (l2p != NULL && ((l2 = pmap_load(l2p)) & PTE_V) != 0) {
 		if ((l2 & PTE_RWX) == 0) {
 			l3p = pmap_l2_to_l3(l2p, va);
-			if (l3p != NULL) {
-				pa = PTE_TO_PHYS(pmap_load(l3p));
-				pa |= (va & L3_OFFSET);
-			}
+			pa = PTE_TO_PHYS(pmap_load(l3p));
+			pa |= (va & L3_OFFSET);
 		} else {
 			/* L2 is a superpage mapping. */
 			pa = L2PTE_TO_PHYS(l2);
@@ -1127,8 +1126,6 @@ pmap_kextract(vm_offset_t va)
 		}
 
 		l3 = pmap_l2_to_l3(&l2e, va);
-		if (l3 == NULL)
-			panic("pmap_kextract: No l3...");
 		pa = PTE_TO_PHYS(pmap_load(l3));
 		pa |= (va & PAGE_MASK);
 	}
@@ -1891,7 +1888,6 @@ static const uint64_t pc_freemask[_NPCM] = {
 	[_NPCM - 1] = PC_FREEL
 };
 
-#if 0
 #ifdef PV_STATS
 static int pc_chunk_count, pc_chunk_allocs, pc_chunk_frees, pc_chunk_tryfail;
 
@@ -1916,7 +1912,6 @@ SYSCTL_LONG(_vm_pmap, OID_AUTO, pv_entry_count, CTLFLAG_RD, &pv_entry_count, 0,
 SYSCTL_INT(_vm_pmap, OID_AUTO, pv_entry_spare, CTLFLAG_RD, &pv_entry_spare, 0,
 	"Current number of spare pv entries");
 #endif
-#endif /* 0 */
 
 /*
  * We are in a serious low memory condition.  Resort to
@@ -2101,10 +2096,9 @@ retry:
 				goto retry;
 			reclaimed = true;
 		}
-		/* XXX PV STATS */
-#if 0
+		PV_STAT(atomic_add_int(&pc_chunk_count, 1));
+		PV_STAT(atomic_add_int(&pc_chunk_allocs, 1));
 		dump_add_page(m->phys_addr);
-#endif
 		pc = (void *)PHYS_TO_DMAP(m->phys_addr);
 		pc->pc_pmap = pmap;
 		pc->pc_map[0] = PC_FREEN;
@@ -2112,6 +2106,7 @@ retry:
 		pc->pc_map[2] = PC_FREEL;
 		TAILQ_INSERT_HEAD(&pmap->pm_pvchunk, pc, pc_list);
 		TAILQ_INSERT_TAIL(&new_tail, pc, pc_lru);
+		PV_STAT(atomic_add_int(&pv_entry_spare, _NPCPV));
 
 		/*
 		 * The reclaim might have freed a chunk from the current pmap.
@@ -2222,6 +2217,7 @@ pmap_pv_demote_l2(pmap_t pmap, vm_offset_t va, vm_paddr_t pa,
 	TAILQ_INSERT_TAIL(&m->md.pv_list, pv, pv_next);
 	m->md.pv_gen++;
 	/* Instantiate the remaining 511 pv entries. */
+	PV_STAT(atomic_add_long(&pv_entry_allocs, Ln_ENTRIES - 1));
 	va_last = va + L2_SIZE - PAGE_SIZE;
 	for (;;) {
 		pc = TAILQ_FIRST(&pmap->pm_pvchunk);
@@ -2250,7 +2246,8 @@ out:
 		TAILQ_REMOVE(&pmap->pm_pvchunk, pc, pc_list);
 		TAILQ_INSERT_TAIL(&pmap->pm_pvchunk, pc, pc_list);
 	}
-	/* XXX PV stats */
+	PV_STAT(atomic_add_long(&pv_entry_count, Ln_ENTRIES - 1));
+	PV_STAT(atomic_add_int(&pv_entry_spare, -(Ln_ENTRIES - 1)));
 }
 
 #if VM_NRESERVLEVEL > 0
@@ -2504,8 +2501,6 @@ pmap_remove(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 			va_next = eva;
 
 		l2 = pmap_l1_to_l2(l1, sva);
-		if (l2 == NULL)
-			continue;
 		if ((l2e = pmap_load(l2)) == 0)
 			continue;
 		if ((l2e & PTE_RWX) != 0) {
@@ -2689,7 +2684,7 @@ resume:
 			va_next = eva;
 
 		l2 = pmap_l1_to_l2(l1, sva);
-		if (l2 == NULL || (l2e = pmap_load(l2)) == 0)
+		if ((l2e = pmap_load(l2)) == 0)
 			continue;
 		if ((l2e & PTE_RWX) != 0) {
 			if (sva + L2_SIZE == va_next && eva >= va_next) {
@@ -2769,7 +2764,7 @@ pmap_fault(pmap_t pmap, vm_offset_t va, vm_prot_t ftype)
 		goto done;
 	if ((l2e & PTE_RWX) == 0) {
 		pte = pmap_l2_to_l3(l2, va);
-		if (pte == NULL || ((oldpte = pmap_load(pte)) & PTE_V) == 0)
+		if (((oldpte = pmap_load(pte)) & PTE_V) == 0)
 			goto done;
 	} else {
 		pte = l2;
@@ -4769,7 +4764,7 @@ pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode)
 			continue;
 		}
 		l2 = pmap_l1_to_l2(l1, tmpva);
-		if (l2 == NULL || ((l2e = pmap_load(l2)) & PTE_V) == 0)
+		if (((l2e = pmap_load(l2)) & PTE_V) == 0)
 			return (EINVAL);
 		if ((l2e & PTE_RWX) != 0) {
 			/*
@@ -4783,7 +4778,7 @@ pmap_change_attr_locked(vm_offset_t va, vm_size_t size, int mode)
 			continue;
 		}
 		l3 = pmap_l2_to_l3(l2, tmpva);
-		if (l3 == NULL || ((l3e = pmap_load(l3)) & PTE_V) == 0)
+		if (((l3e = pmap_load(l3)) & PTE_V) == 0)
 			return (EINVAL);
 		/*
 		 * TODO: Update the L3 entry if the attributes don't match once
