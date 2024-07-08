@@ -51,6 +51,41 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20240527: csh: Remove hardlink /.cshrc
+OLD_FILES+=.cshrc
+
+# 20240511: move file system driver manuals to section four
+OLD_FILES+=usr/share/man/man5/autofs.5.gz
+OLD_FILES+=usr/share/man/man5/cd9660.5.gz
+OLD_FILES+=usr/share/man/man5/devfs.5.gz
+OLD_FILES+=usr/share/man/man5/ext2fs.5.gz
+OLD_FILES+=usr/share/man/man5/ext4fs.5.gz
+OLD_FILES+=usr/share/man/man5/fdescfs.5.gz
+OLD_FILES+=usr/share/man/man5/fusefs.5.gz
+OLD_FILES+=usr/share/man/man5/lindebugfs.5.gz
+OLD_FILES+=usr/share/man/man5/linprocfs.5.gz
+OLD_FILES+=usr/share/man/man5/linsysfs.5.gz
+OLD_FILES+=usr/share/man/man5/mqueuefs.5.gz
+OLD_FILES+=usr/share/man/man5/msdosfs.5.gz
+OLD_FILES+=usr/share/man/man5/msdos.5.gz
+OLD_FILES+=usr/share/man/man5/nullfs.5.gz
+OLD_FILES+=usr/share/man/man5/procfs.5.gz
+OLD_FILES+=usr/share/man/man5/smbfs.5.gz
+OLD_FILES+=usr/share/man/man5/tarfs.5.gz
+OLD_FILES+=usr/share/man/man5/tmpfs.5.gz
+OLD_FILES+=usr/share/man/man5/unionfs.5.gz
+OLD_FILES+=usr/share/man/man7/ffs.7.gz
+
+# 20240508: Remove remnants of portsnap(8)
+OLD_DIRS+=var/db/portsnap
+
+# 20240507: remove gbde
+OLD_FILES+=boot/kernel/geom_bde.ko
+OLD_FILES+=etc/rc.d/gbde
+OLD_FILES+=sbin/gbde
+OLD_FILES+=usr/share/man/man4/gbde.4.gz
+OLD_FILES+=usr/share/man/man8/gbde.8.gz
+
 # 20240422: remove improperly installed libcxxrt.so.1
 MOVED_LIBS+=usr/lib/libcxxrt.so.1
 
@@ -335,6 +370,7 @@ OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-aarch64.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-i386.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-powerpc64.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-powerpc64le.a
+OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-riscv64.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.asan_static-x86_64.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.cfi-aarch64.a
 OLD_FILES+=usr/lib/clang/17/lib/freebsd/libclang_rt.cfi-arm.a
@@ -9481,11 +9517,6 @@ OLD_FILES+=usr/share/man/man4/imm.4.gz
 OLD_FILES+=usr/share/man/man4/vpo.4.gz
 
 # 20200104: gcc libssp removed
-OLD_FILES+=usr/include/ssp/ssp.h
-OLD_FILES+=usr/include/ssp/stdio.h
-OLD_FILES+=usr/include/ssp/string.h
-OLD_FILES+=usr/include/ssp/unistd.h
-OLD_DIRS+=usr/include/ssp
 OLD_FILES+=usr/lib/libssp.a
 
 # 20191229: GEOM_SCHED class and gsched tool removed

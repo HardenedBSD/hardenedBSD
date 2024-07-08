@@ -55,6 +55,17 @@ void *_rtld_tlsdesc_dynamic(void *);
 void _exit(int);
 
 bool
+arch_digest_dynamic(struct Struct_Obj_Entry *obj, const Elf_Dyn *dynp)
+{
+	if (dynp->d_tag == DT_AARCH64_VARIANT_PCS) {
+		obj->variant_pcs = true;
+		return (true);
+	}
+
+	return (false);
+}
+
+bool
 arch_digest_note(struct Struct_Obj_Entry *obj __unused, const Elf_Note *note)
 {
 	const char *note_name;
@@ -172,7 +183,7 @@ struct tls_data {
 	Elf_Addr	tls_offs;
 };
 
-static Elf_Addr
+static struct tls_data *
 reloc_tlsdesc_alloc(int tlsindex, Elf_Addr tlsoffs)
 {
 	struct tls_data *tlsdesc;
@@ -182,17 +193,25 @@ reloc_tlsdesc_alloc(int tlsindex, Elf_Addr tlsoffs)
 	tlsdesc->tls_index = tlsindex;
 	tlsdesc->tls_offs = tlsoffs;
 
-	return ((Elf_Addr)tlsdesc);
+	return (tlsdesc);
 }
 
+struct tlsdesc_entry {
+	void	*(*func)(void *);
+	union {
+		Elf_Ssize	addend;
+		Elf_Size	offset;
+		struct tls_data	*data;
+	};
+};
+
 static void
-reloc_tlsdesc(const Obj_Entry *obj, const Elf_Rela *rela, Elf_Addr *where,
-    int flags, RtldLockState *lockstate)
+reloc_tlsdesc(const Obj_Entry *obj, const Elf_Rela *rela,
+    struct tlsdesc_entry *where, int flags, RtldLockState *lockstate)
 {
 	const Elf_Sym *def;
 	const Obj_Entry *defobj;
 	Elf_Addr offs;
-
 
 	offs = 0;
 	if (ELF_R_SYM(rela->r_info) != 0) {
@@ -204,8 +223,8 @@ reloc_tlsdesc(const Obj_Entry *obj, const Elf_Rela *rela, Elf_Addr *where,
 		obj = defobj;
 		if (def->st_shndx == SHN_UNDEF) {
 			/* Weak undefined thread variable */
-			where[0] = (Elf_Addr)_rtld_tlsdesc_undef;
-			where[1] = rela->r_addend;
+			where->func = _rtld_tlsdesc_undef;
+			where->addend = rela->r_addend;
 			return;
 		}
 	}
@@ -213,12 +232,12 @@ reloc_tlsdesc(const Obj_Entry *obj, const Elf_Rela *rela, Elf_Addr *where,
 
 	if (obj->tlsoffset != 0) {
 		/* Variable is in initialy allocated TLS segment */
-		where[0] = (Elf_Addr)_rtld_tlsdesc_static;
-		where[1] = obj->tlsoffset + offs;
+		where->func = _rtld_tlsdesc_static;
+		where->offset = obj->tlsoffset + offs;
 	} else {
 		/* TLS offest is unknown at load time, use dynamic resolving */
-		where[0] = (Elf_Addr)_rtld_tlsdesc_dynamic;
-		where[1] = reloc_tlsdesc_alloc(obj->tlsindex, offs);
+		where->func = _rtld_tlsdesc_dynamic;
+		where->data = reloc_tlsdesc_alloc(obj->tlsindex, offs);
 	}
 }
 
@@ -228,23 +247,58 @@ reloc_tlsdesc(const Obj_Entry *obj, const Elf_Rela *rela, Elf_Addr *where,
 int
 reloc_plt(Obj_Entry *obj, int flags, RtldLockState *lockstate)
 {
+	const Obj_Entry *defobj;
 	const Elf_Rela *relalim;
 	const Elf_Rela *rela;
+	const Elf_Sym *def, *sym;
+	bool lazy;
 
 	relalim = (const Elf_Rela *)((const char *)obj->pltrela +
 	    obj->pltrelasize);
 	for (rela = obj->pltrela; rela < relalim; rela++) {
-		Elf_Addr *where;
+		Elf_Addr *where, target;
 
 		where = (Elf_Addr *)(obj->relocbase + rela->r_offset);
 
 		switch(ELF_R_TYPE(rela->r_info)) {
 		case R_AARCH64_JUMP_SLOT:
-			*where += (Elf_Addr)obj->relocbase;
+			lazy = true;
+			if (obj->variant_pcs) {
+				sym = &obj->symtab[ELF_R_SYM(rela->r_info)];
+				/*
+				 * Variant PCS functions don't follow the
+				 * standard register convention. Because of
+				 * this we can't use lazy relocation and
+				 * need to set the target address.
+				 */
+				if ((sym->st_other & STO_AARCH64_VARIANT_PCS) !=
+				    0)
+					lazy = false;
+			}
+			if (lazy) {
+				*where += (Elf_Addr)obj->relocbase;
+			} else {
+				def = find_symdef(ELF_R_SYM(rela->r_info), obj,
+				    &defobj, SYMLOOK_IN_PLT | flags, NULL,
+				    lockstate);
+				if (def == NULL)
+					return (-1);
+				if (ELF_ST_TYPE(def->st_info) == STT_GNU_IFUNC){
+					obj->gnu_ifunc = true;
+					continue;
+				}
+				target = (Elf_Addr)(defobj->relocbase +
+				    def->st_value);
+				/*
+				 * Ignore ld_bind_not as it requires lazy
+				 * binding
+				 */
+				*where = target;
+			}
 			break;
 		case R_AARCH64_TLSDESC:
-			reloc_tlsdesc(obj, rela, where, SYMLOOK_IN_PLT | flags,
-			    lockstate);
+			reloc_tlsdesc(obj, rela, (struct tlsdesc_entry *)where,
+			    SYMLOOK_IN_PLT | flags, lockstate);
 			break;
 		case R_AARCH64_IRELATIVE:
 			obj->irelative = true;
@@ -503,7 +557,8 @@ reloc_non_plt(Obj_Entry *obj, Obj_Entry *obj_rtld, int flags,
 			}
 			break;
 		case R_AARCH64_TLSDESC:
-			reloc_tlsdesc(obj, rela, where, flags, lockstate);
+			reloc_tlsdesc(obj, rela, (struct tlsdesc_entry *)where,
+			    flags, lockstate);
 			break;
 		case R_AARCH64_TLS_TPREL64:
 			/*

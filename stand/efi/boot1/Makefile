@@ -12,11 +12,12 @@ CFLAGS+=	-DEFI_BOOT1
 # seems to matter on arm64 where wchar_t defaults to an int instead
 # of a short. There's no good cast to use here so just ignore the
 # warnings for now.
-CWARNFLAGS.proto.c+=	-Wno-format
-CWARNFLAGS.boot1.c+=	-Wno-format
+CWARNFLAGS.proto.c      += -Wno-format
+CWARNFLAGS.boot1.c      += -Wno-format
+CWARNFLAGS.ufs_module.c += -Wno-format
+CWARNFLAGS.zfs_module.c += -Wno-format
 
 # Disable bogus alignment issues
-CWARNFLAGS.ufs_module.c += -Wno-format
 CWARNFLAGS.ufs_module.c += -Wno-cast-align
 
 # Disable warnings that are currently incompatible with the zfs boot code
@@ -29,7 +30,7 @@ CWARNFLAGS.zfs_module.c += -Wno-unused-parameter
 CWARNFLAGS.zfs_module.c += -Wno-unused-function
 
 # architecture-specific loader code
-SRCS+=	boot1.c proto.c self_reloc.c start.S ufs_module.c devpath.c
+SRCS+=	boot1.c proto.c self_reloc.c start.S ufs_module.c
 .if ${MK_LOADER_ZFS} != "no"
 SRCS+=		zfs_module.c
 CFLAGS.zfs_module.c+=	-I${ZFSSRC}
@@ -58,7 +59,6 @@ CFLAGS+=	-DEFI_DEBUG
 .PATH:		${EFISRC}/loader/arch/${MACHINE}
 .PATH:		${EFISRC}/loader
 .PATH:		${LDRSRC}
-.PATH:		${EFISRC}/libefi
 CFLAGS+=	-I${LDRSRC}
 
 FILES=	${BOOT1}.efi

@@ -105,7 +105,7 @@ static int
 mvs_ch_probe(device_t dev)
 {
 
-	device_set_desc_copy(dev, "Marvell SATA channel");
+	device_set_desc(dev, "Marvell SATA channel");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -1798,7 +1798,7 @@ completeall:
 	}
 	xpt_setup_ccb(&ccb->ccb_h, ch->hold[i]->ccb_h.path,
 	    ch->hold[i]->ccb_h.pinfo.priority);
-	if (ccb->ccb_h.func_code == XPT_ATA_IO) {
+	if (ch->hold[i]->ccb_h.func_code == XPT_ATA_IO) {
 		/* READ LOG */
 		ccb->ccb_h.recovery_type = RECOVERY_READ_LOG;
 		ccb->ccb_h.func_code = XPT_ATA_IO;

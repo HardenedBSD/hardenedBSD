@@ -27,7 +27,7 @@
 .\" ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd February 10, 2024
+.Dd June 18, 2024
 .Dt RC.SUBR 8
 .Os
 .Sh NAME
@@ -773,6 +773,8 @@ Login class to use with
 .Va ${name}_limits .
 Defaults to
 .Dq Li daemon .
+.It Va ${name}_offcmd
+Shell commands to run during start if a service is not enabled.
 .It Va ${name}_oomprotect
 .Xr protect 1
 .Va command
@@ -826,8 +828,15 @@ This is a generic version of
 or
 .Va ${name}_nice .
 .It Va ${name}_setup
-Command to be run prior to
-.Va command .
+Optional command to be run during
+.Cm start ,
+.Cm restart ,
+and
+.Cm reload
+prior to the respective
+.Ar argument Ns Va _precmd .
+If the command fails for any reason it will output a warning,
+but execution will continue.
 .It Ar argument Ns Va _cmd
 Shell commands which override the default method for
 .Ar argument .

@@ -1615,8 +1615,8 @@ nkpt_init(vm_paddr_t addr)
 	 * Secondly, device memory mapped as part of setting up the low-
 	 * level console(s) is taken from KVA, starting at virtual_avail.
 	 * This is because cninit() is called after pmap_bootstrap() but
-	 * before vm_init() and pmap_init(). 20MB for a frame buffer is
-	 * not uncommon.
+	 * before vm_mem_init() and pmap_init(). 20MB for a frame buffer
+	 * is not uncommon.
 	 */
 	pt_pages += 32;		/* 64MB additional slop. */
 #endif
@@ -2455,7 +2455,8 @@ pmap_init_pv_table(void)
 
 /*
  *	Initialize the pmap module.
- *	Called by vm_init, to initialize any structures that the pmap
+ *
+ *	Called by vm_mem_init(), to initialize any structures that the pmap
  *	system needs to map virtual memory.
  */
 void
@@ -6801,8 +6802,7 @@ retry_pdpe:
 		 */
 		if ((ptpaddr & PG_PS) != 0) {
 			/*
-			 * Are we protecting the entire large page?  If not,
-			 * demote the mapping and fall through.
+			 * Are we protecting the entire large page?
 			 */
 			if (sva + NBPDR == va_next && eva >= va_next) {
 				/*
@@ -6812,9 +6812,23 @@ retry_pdpe:
 				if (pmap_protect_pde(pmap, pde, sva, prot))
 					anychanged = true;
 				continue;
-			} else if (!pmap_demote_pde(pmap, pde, sva)) {
+			}
+
+			/*
+			 * Does the large page mapping need to change?  If so,
+			 * demote it and fall through.
+			 */
+			pbits = ptpaddr;
+			if ((prot & VM_PROT_WRITE) == 0)
+				pbits &= ~(PG_RW | PG_M);
+			if ((prot & VM_PROT_EXECUTE) == 0)
+				pbits |= pg_nx;
+			if (ptpaddr == pbits || !pmap_demote_pde(pmap, pde,
+			    sva)) {
 				/*
-				 * The large page mapping was destroyed.
+				 * Either the large page mapping doesn't need
+				 * to change, or it was destroyed during
+				 * demotion.
 				 */
 				continue;
 			}
@@ -7600,10 +7614,13 @@ pmap_enter_pde(pmap_t pmap, vm_offset_t va, pd_entry_t newpde, u_int flags,
 	if ((newpde & PG_W) != 0 && pmap != kernel_pmap) {
 		uwptpg = pmap_alloc_pt_page(pmap, pmap_pde_pindex(va),
 		    VM_ALLOC_WIRED);
-		if (uwptpg == NULL)
+		if (uwptpg == NULL) {
+			pmap_abort_ptp(pmap, va, pdpg);
 			return (KERN_RESOURCE_SHORTAGE);
+		}
 		if (pmap_insert_pt_page(pmap, uwptpg, true, false)) {
 			pmap_free_pt_page(pmap, uwptpg, false);
+			pmap_abort_ptp(pmap, va, pdpg);
 			return (KERN_RESOURCE_SHORTAGE);
 		}
 
@@ -7823,7 +7840,8 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	 * If both the PTP and the reservation are fully populated, then
 	 * attempt promotion.
 	 */
-	if ((mpte == NULL || mpte->ref_count == NPTEPG) &&
+	if ((prot & VM_PROT_NO_PROMOTE) == 0 &&
+	    (mpte == NULL || mpte->ref_count == NPTEPG) &&
 	    (m->flags & PG_FICTITIOUS) == 0 &&
 	    vm_reserv_level_iffullpop(m) == 0) {
 		if (pde == NULL)
@@ -11452,7 +11470,7 @@ pmap_pkru_deassign_all(pmap_t pmap)
 static bool
 pmap_pkru_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 {
-	struct pmap_pkru_range *ppr, *prev_ppr;
+	struct pmap_pkru_range *next_ppr, *ppr;
 	vm_offset_t va;
 
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
@@ -11461,19 +11479,19 @@ pmap_pkru_same(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 	    sva >= VM_MAXUSER_ADDRESS)
 		return (true);
 	MPASS(eva <= VM_MAXUSER_ADDRESS);
-	for (va = sva; va < eva; prev_ppr = ppr) {
-		ppr = rangeset_lookup(&pmap->pm_pkru, va);
-		if (va == sva)
-			prev_ppr = ppr;
-		else if ((ppr == NULL) ^ (prev_ppr == NULL))
+	ppr = rangeset_lookup(&pmap->pm_pkru, sva);
+	if (ppr == NULL) {
+		ppr = rangeset_next(&pmap->pm_pkru, sva);
+		return (ppr == NULL ||
+		    ppr->pkru_rs_el.re_start >= eva);
+	}
+	while ((va = ppr->pkru_rs_el.re_end) < eva) {
+		next_ppr = rangeset_next(&pmap->pm_pkru, va);
+		if (next_ppr == NULL ||
+		    va != next_ppr->pkru_rs_el.re_start ||
+		    ppr->pkru_keyidx != next_ppr->pkru_keyidx)
 			return (false);
-		if (ppr == NULL) {
-			va += PAGE_SIZE;
-			continue;
-		}
-		if (prev_ppr->pkru_keyidx != ppr->pkru_keyidx)
-			return (false);
-		va = ppr->pkru_rs_el.re_end;
+		ppr = next_ppr;
 	}
 	return (true);
 }
@@ -11672,15 +11690,16 @@ pmap_pkru_clear(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
  * Reserve enough memory to:
  * 1) allocate PDP pages for the shadow map(s),
  * 2) shadow the boot stack of KSTACK_PAGES pages,
- * so we need one PD page, one or two PT pages, and KSTACK_PAGES shadow pages
- * per shadow map.
+ * 3) assuming that the kernel stack does not cross a 1GB boundary,
+ * so we need one or two PD pages, one or two PT pages, and KSTACK_PAGES shadow
+ * pages per shadow map.
  */
 #ifdef KASAN
 #define	SAN_EARLY_PAGES	\
-	(NKASANPML4E + 1 + 2 + howmany(KSTACK_PAGES, KASAN_SHADOW_SCALE))
+	(NKASANPML4E + 2 + 2 + howmany(KSTACK_PAGES, KASAN_SHADOW_SCALE))
 #else
 #define	SAN_EARLY_PAGES	\
-	(NKMSANSHADPML4E + NKMSANORIGPML4E + 2 * (1 + 2 + KSTACK_PAGES))
+	(NKMSANSHADPML4E + NKMSANORIGPML4E + 2 * (2 + 2 + KSTACK_PAGES))
 #endif
 
 static uint64_t __nosanitizeaddress __nosanitizememory

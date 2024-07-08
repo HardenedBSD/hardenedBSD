@@ -179,7 +179,7 @@
 		gpmi: nand-controller@1806000 {
 			compatible = "fsl,imx6q-gpmi-nand";
 			#address-cells = <1>;
-			#size-cells = <1>;
+			#size-cells = <0>;
 			reg = <0x01806000 0x2000>, <0x01808000 0x2000>;
 			reg-names = "gpmi-nand", "bch";
 			interrupts = <0 15 IRQ_TYPE_LEVEL_HIGH>;
@@ -364,7 +364,7 @@
 						<&sdma 20 23 1>, <&sdma 21 23 1>, <&sdma 22 23 1>;
 					dma-names = "rxa", "rxb", "rxc",
 						    "txa", "txb", "txc";
-					fsl,asrc-rate  = <48000>;
+					fsl,asrc-rate = <48000>;
 					fsl,asrc-width = <16>;
 					status = "okay";
 				};

@@ -106,7 +106,7 @@ ukswitch_probe(device_t dev)
 	sc = device_get_softc(dev);
 	bzero(sc, sizeof(*sc));
 
-	device_set_desc_copy(dev, "Generic MDIO switch driver");
+	device_set_desc(dev, "Generic MDIO switch driver");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -124,12 +124,6 @@ ukswitch_attach_phys(struct ukswitch_softc *sc)
 		sc->ifpport[phy] = port;
 		sc->portphy[port] = phy;
 		sc->ifp[port] = if_alloc(IFT_ETHER);
-		if (sc->ifp[port] == NULL) {
-			device_printf(sc->sc_dev, "couldn't allocate ifnet structure\n");
-			err = ENOMEM;
-			break;
-		}
-
 		if_setsoftc(sc->ifp[port], sc);
 		if_setflags(sc->ifp[port], IFF_UP | IFF_BROADCAST |
 		    IFF_DRV_RUNNING | IFF_SIMPLEX);
@@ -514,7 +508,7 @@ ukswitch_writephy(device_t dev, int phy, int reg, int data)
 static int
 ukswitch_readreg(device_t dev, int addr)
 {
-	struct ukswitch_softc *sc;
+	struct ukswitch_softc *sc __diagused;
 
 	sc = device_get_softc(dev);
 	UKSWITCH_LOCK_ASSERT(sc, MA_OWNED);
@@ -526,7 +520,7 @@ ukswitch_readreg(device_t dev, int addr)
 static int
 ukswitch_writereg(device_t dev, int addr, int value)
 {
-	struct ukswitch_softc *sc;
+	struct ukswitch_softc *sc __diagused;
 
 	sc = device_get_softc(dev);
 	UKSWITCH_LOCK_ASSERT(sc, MA_OWNED);

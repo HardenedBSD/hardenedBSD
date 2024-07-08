@@ -45,7 +45,7 @@ The
 boot process loads system bootstrap code located in an EFI System Partition
 (ESP).
 The ESP is a GPT or MBR partition with a specific identifier that contains an
-.Xr msdosfs 5
+.Xr msdosfs 4
 FAT file system with a specified file hierarchy.
 .Bl -column -offset indent "Partition Scheme" "ESP Identifier"
 .It Sy "Partition Scheme" Ta Sy "ESP Identifier"
@@ -110,7 +110,7 @@ Typical non-default kernel (optional)
 .Sh SEE ALSO
 .Xr vt 4 ,
 .Xr boot.config 5 ,
-.Xr msdosfs 5 ,
+.Xr msdosfs 4 ,
 .Xr boot 8 ,
 .Xr efibootmgr 8 ,
 .Xr efidp 8 ,
@@ -126,7 +126,7 @@ boot support for amd64 first appeared in
 .Fx 10.1 ;
 for arm64 in
 .Fx 11.0 ;
-for armv6 and armv7 in
+for armv7 in
 .Fx 12.0 ;
 and for riscv in
 .Fx 13.0 .

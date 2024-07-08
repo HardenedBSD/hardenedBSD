@@ -160,7 +160,7 @@ main(int argc, char *argv[])
 			options_extra_enabled = 0;
 			break;
 		case 'p':
-			packetdroppercentage = atoi(optarg);
+			packetdroppercentage = (unsigned int)atoi(optarg);
 			tftp_log(LOG_INFO,
 			    "Randomly dropping %d out of 100 packets",
 			    packetdroppercentage);
@@ -451,9 +451,9 @@ static char *
 parse_header(int peer, char *recvbuffer, size_t size,
 	char **filename, char **mode)
 {
-	char	*cp;
-	int	i;
 	struct formats *pf;
+	char	*cp;
+	size_t	i;
 
 	*mode = NULL;
 	cp = recvbuffer;
@@ -470,12 +470,11 @@ parse_header(int peer, char *recvbuffer, size_t size,
 
 	i = get_field(peer, cp, size);
 	*mode = cp;
-	cp += i;
 
 	/* Find the file transfer mode */
-	for (cp = *mode; *cp; cp++)
-		if (isupper(*cp))
-			*cp = tolower(*cp);
+	for (; *cp; cp++)
+		if (isupper((unsigned char)*cp))
+			*cp = tolower((unsigned char)*cp);
 	for (pf = formats; pf->f_mode; pf++)
 		if (strcmp(pf->f_mode, *mode) == 0)
 			break;
@@ -612,12 +611,20 @@ tftp_rrq(int peer, char *recvbuffer, size_t size)
 static int
 find_next_name(char *filename, int *fd)
 {
-	int i;
-	time_t tval;
-	size_t len;
-	struct tm lt;
-	char yyyymmdd[MAXPATHLEN];
+	/*
+	 * GCC "knows" that we might write all of yyyymmdd plus the static
+	 * elemenents in the format into into newname and thus complains
+	 * unless we reduce the size.  This array is still too big, but since
+	 * the format is user supplied, it's not clear what a better limit
+	 * value would be and this is sufficent to silence the warnings.
+	 */
+	static const int suffix_len = strlen("..00");
+	char yyyymmdd[MAXPATHLEN - suffix_len];
 	char newname[MAXPATHLEN];
+	int i, ret;
+	time_t tval;
+	size_t len, namelen;
+	struct tm lt;
 
 	/* Create the YYYYMMDD part of the filename */
 	time(&tval);
@@ -625,26 +632,33 @@ find_next_name(char *filename, int *fd)
 	len = strftime(yyyymmdd, sizeof(yyyymmdd), newfile_format, &lt);
 	if (len == 0) {
 		syslog(LOG_WARNING,
-			"Filename suffix too long (%d characters maximum)",
-			MAXPATHLEN);
+			"Filename suffix too long (%zu characters maximum)",
+			sizeof(yyyymmdd) - 1);
 		return (EACCESS);
 	}
 
 	/* Make sure the new filename is not too long */
-	if (strlen(filename) > MAXPATHLEN - len - 5) {
+	namelen = strlen(filename);
+	if (namelen >= sizeof(newname) - len - suffix_len) {
 		syslog(LOG_WARNING,
-			"Filename too long (%zd characters, %zd maximum)",
-			strlen(filename), MAXPATHLEN - len - 5);
+			"Filename too long (%zu characters, %zu maximum)",
+			namelen,
+			sizeof(newname) - len - suffix_len - 1);
 		return (EACCESS);
 	}
 
 	/* Find the first file which doesn't exist */
 	for (i = 0; i < 100; i++) {
-		sprintf(newname, "%s.%s.%02d", filename, yyyymmdd, i);
-		*fd = open(newname,
-		    O_WRONLY | O_CREAT | O_EXCL,
-		    S_IRUSR | S_IWUSR | S_IRGRP |
-		    S_IWGRP | S_IROTH | S_IWOTH);
+		ret = snprintf(newname, sizeof(newname), "%s.%s.%02d",
+		    filename, yyyymmdd, i);
+		/*
+		 * Size checked above so this can't happen, we'd use a
+		 * (void) cast, but gcc intentionally ignores that if
+		 * snprintf has __attribute__((warn_unused_result)).
+		 */
+		if (ret < 0 || (size_t)ret >= sizeof(newname))
+			__unreachable();
+		*fd = open(newname, O_WRONLY | O_CREAT | O_EXCL, 0666);
 		if (*fd > 0)
 			return 0;
 	}
@@ -666,28 +680,27 @@ find_next_name(char *filename, int *fd)
 int
 validate_access(int peer, char **filep, int mode)
 {
-	struct stat stbuf;
-	int	fd;
-	int	error;
-	struct dirlist *dirp;
 	static char pathname[MAXPATHLEN];
+	struct stat sb;
+	struct dirlist *dirp;
 	char *filename = *filep;
+	int	err, fd;
 
 	/*
 	 * Prevent tricksters from getting around the directory restrictions
 	 */
-	if (strstr(filename, "/../"))
+	if (strncmp(filename, "../", 3) == 0 ||
+	    strstr(filename, "/../") != NULL)
 		return (EACCESS);
 
 	if (*filename == '/') {
 		/*
-		 * Allow the request if it's in one of the approved locations.
-		 * Special case: check the null prefix ("/") by looking
-		 * for length = 1 and relying on the arg. processing that
-		 * it's a /.
+		 * Absolute file name: allow the request if it's in one of the
+		 * approved locations.
 		 */
 		for (dirp = dirs; dirp->name != NULL; dirp++) {
 			if (dirp->len == 1)
+				/* Only "/" can have len 1 */
 				break;
 			if (strncmp(filename, dirp->name, dirp->len) == 0 &&
 			    filename[dirp->len] == '/')
@@ -696,30 +709,20 @@ validate_access(int peer, char **filep, int mode)
 		/* If directory list is empty, allow access to any file */
 		if (dirp->name == NULL && dirp != dirs)
 			return (EACCESS);
-		if (stat(filename, &stbuf) < 0)
+		if (stat(filename, &sb) != 0)
 			return (errno == ENOENT ? ENOTFOUND : EACCESS);
-		if ((stbuf.st_mode & S_IFMT) != S_IFREG)
+		if (!S_ISREG(sb.st_mode))
 			return (ENOTFOUND);
 		if (mode == RRQ) {
-			if ((stbuf.st_mode & S_IROTH) == 0)
+			if ((sb.st_mode & S_IROTH) == 0)
 				return (EACCESS);
 		} else {
-			if (check_woth && ((stbuf.st_mode & S_IWOTH) == 0))
+			if (check_woth && (sb.st_mode & S_IWOTH) == 0)
 				return (EACCESS);
 		}
 	} else {
-		int err;
-
 		/*
 		 * Relative file name: search the approved locations for it.
-		 * Don't allow write requests that avoid directory
-		 * restrictions.
-		 */
-
-		if (!strncmp(filename, "../", 3))
-			return (EACCESS);
-
-		/*
 		 * If the file exists in one of the directories and isn't
 		 * readable, continue looking. However, change the error code
 		 * to give an indication that the file exists.
@@ -727,18 +730,20 @@ validate_access(int peer, char **filep, int mode)
 		err = ENOTFOUND;
 		for (dirp = dirs; dirp->name != NULL; dirp++) {
 			snprintf(pathname, sizeof(pathname), "%s/%s",
-				dirp->name, filename);
-			if (stat(pathname, &stbuf) == 0 &&
-			    (stbuf.st_mode & S_IFMT) == S_IFREG) {
-				if (mode == RRQ) {
-					if ((stbuf.st_mode & S_IROTH) != 0)
-						break;
-				} else {
-					if (!check_woth || ((stbuf.st_mode & S_IWOTH) != 0))
-						break;
-				}
-				err = EACCESS;
+			    dirp->name, filename);
+			if (stat(pathname, &sb) != 0)
+				continue;
+			if (!S_ISREG(sb.st_mode))
+				continue;
+			err = EACCESS;
+			if (mode == RRQ) {
+				if ((sb.st_mode & S_IROTH) == 0)
+					continue;
+			} else {
+				if (check_woth && (sb.st_mode & S_IWOTH) == 0)
+					continue;
 			}
+			break;
 		}
 		if (dirp->name != NULL)
 			*filep = filename = pathname;
@@ -752,27 +757,27 @@ validate_access(int peer, char **filep, int mode)
 	 * This option is handled here because it (might) require(s) the
 	 * size of the file.
 	 */
-	option_tsize(peer, NULL, mode, &stbuf);
+	option_tsize(peer, NULL, mode, &sb);
 
-	if (mode == RRQ)
+	if (mode == RRQ) {
 		fd = open(filename, O_RDONLY);
-	else {
-		if (create_new) {
-			if (increase_name) {
-				error = find_next_name(filename, &fd);
-				if (error > 0)
-					return (error + 100);
-			} else
-				fd = open(filename,
-				    O_WRONLY | O_TRUNC | O_CREAT,
-				    S_IRUSR | S_IWUSR | S_IRGRP |
-				    S_IWGRP | S_IROTH | S_IWOTH );
-		} else
-			fd = open(filename, O_WRONLY | O_TRUNC);
+	} else if (create_new) {
+		if (increase_name) {
+			err = find_next_name(filename, &fd);
+			if (err > 0)
+				return (err + 100);
+		} else {
+			fd = open(filename,
+			    O_WRONLY | O_TRUNC | O_CREAT,
+			    S_IRUSR | S_IWUSR | S_IRGRP |
+			    S_IWGRP | S_IROTH | S_IWOTH );
+		}
+	} else {
+		fd = open(filename, O_WRONLY | O_TRUNC);
 	}
 	if (fd < 0)
 		return (errno + 100);
-	file = fdopen(fd, (mode == RRQ)? "r":"w");
+	file = fdopen(fd, mode == RRQ ? "r" : "w");
 	if (file == NULL) {
 		close(fd);
 		return (errno + 100);

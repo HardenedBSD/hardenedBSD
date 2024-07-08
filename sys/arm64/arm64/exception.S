@@ -25,6 +25,8 @@
  *
  */
 
+#include <sys/elf_common.h>
+
 #include <machine/asm.h>
 #include <machine/armreg.h>
 #include "assym.inc"
@@ -250,9 +252,11 @@ ENTRY(handle_el0_sync)
 	KMSAN_ENTER
 	ldr	x0, [x18, #PC_CURTHREAD]
 	mov	x1, sp
+	mov	x22, x0
 	str	x1, [x0, #TD_FRAME]
 	bl	do_el0_sync
 	do_ast
+	str	xzr, [x22, #TD_FRAME]
 	KMSAN_LEAVE
 	restore_registers 0
 	ERET
@@ -324,3 +328,4 @@ exception_vectors:
 	vempty 0		/* FIQ 32-bit EL0 */
 	vector el0_serror 0	/* Error 32-bit EL0 */
 
+GNU_PROPERTY_AARCH64_FEATURE_1_NOTE(GNU_PROPERTY_AARCH64_FEATURE_1_VAL)

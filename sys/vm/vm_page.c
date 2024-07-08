@@ -333,9 +333,9 @@ vm_page_blacklist_add(vm_paddr_t pa, bool verbose)
 	if (m == NULL)
 		return (true); /* page does not exist, no failure */
 
-	vmd = vm_pagequeue_domain(m);
+	vmd = VM_DOMAIN(vm_phys_domain(pa));
 	vm_domain_free_lock(vmd);
-	found = vm_phys_unfree_page(m);
+	found = vm_phys_unfree_page(pa);
 	vm_domain_free_unlock(vmd);
 	if (found) {
 		vm_domain_freecnt_inc(vmd, -1);
@@ -497,9 +497,8 @@ vm_page_domain_init(int domain)
  * lists.
  */
 void
-vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
+vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind, int pool)
 {
-
 	m->object = NULL;
 	m->ref_count = 0;
 	m->busy_lock = VPB_FREED;
@@ -509,7 +508,7 @@ vm_page_init_page(vm_page_t m, vm_paddr_t pa, int segind)
 	m->psind = 0;
 	m->segind = segind;
 	m->order = VM_NFREEORDER;
-	m->pool = VM_FREEPOOL_DEFAULT;
+	m->pool = pool;
 	m->valid = m->dirty = 0;
 	pmap_page_init(m);
 }
@@ -569,6 +568,9 @@ vm_page_startup(vm_offset_t vaddr)
 #if defined(__i386__) && defined(VM_PHYSSEG_DENSE)
 	long ii;
 #endif
+#ifdef VM_FREEPOOL_LAZYINIT
+	int lazyinit;
+#endif
 
 	vaddr = round_page(vaddr);
 
@@ -620,11 +622,7 @@ vm_page_startup(vm_offset_t vaddr)
 	vm_page_dump = (void *)(uintptr_t)pmap_map(&vaddr, new_end,
 	    new_end + vm_page_dump_size, VM_PROT_READ | VM_PROT_WRITE);
 	bzero((void *)vm_page_dump, vm_page_dump_size);
-#else
-	(void)last_pa;
-#endif
-#if defined(__aarch64__) || defined(__amd64__) || \
-    defined(__riscv) || defined(__powerpc64__)
+#if MINIDUMP_STARTUP_PAGE_TRACKING
 	/*
 	 * Include the UMA bootstrap pages, witness pages and vm_page_dump
 	 * in a crash dump.  When pmap_map() uses the direct map, they are
@@ -632,6 +630,9 @@ vm_page_startup(vm_offset_t vaddr)
 	 */
 	for (pa = new_end; pa < end; pa += PAGE_SIZE)
 		dump_add_page(pa);
+#endif
+#else
+	(void)last_pa;
 #endif
 	phys_avail[biggestone + 1] = new_end;
 #ifdef __amd64__
@@ -728,8 +729,7 @@ vm_page_startup(vm_offset_t vaddr)
 	 */
 	new_end = vm_reserv_startup(&vaddr, new_end);
 #endif
-#if defined(__aarch64__) || defined(__amd64__) || \
-    defined(__riscv) || defined(__powerpc64__)
+#if MINIDUMP_PAGE_TRACKING && MINIDUMP_STARTUP_PAGE_TRACKING
 	/*
 	 * Include vm_page_array and vm_reserv_array in a crash dump.
 	 */
@@ -751,6 +751,11 @@ vm_page_startup(vm_offset_t vaddr)
 	 */
 	vm_phys_init();
 
+#ifdef VM_FREEPOOL_LAZYINIT
+	lazyinit = 1;
+	TUNABLE_INT_FETCH("debug.vm.lazy_page_init", &lazyinit);
+#endif
+
 	/*
 	 * Initialize the page structures and add every available page to the
 	 * physical memory allocator's free lists.
@@ -758,16 +763,58 @@ vm_page_startup(vm_offset_t vaddr)
 #if defined(__i386__) && defined(VM_PHYSSEG_DENSE)
 	for (ii = 0; ii < vm_page_array_size; ii++) {
 		m = &vm_page_array[ii];
-		vm_page_init_page(m, (first_page + ii) << PAGE_SHIFT, 0);
+		vm_page_init_page(m, (first_page + ii) << PAGE_SHIFT, 0,
+		    VM_FREEPOOL_DEFAULT);
 		m->flags = PG_FICTITIOUS;
 	}
 #endif
 	vm_cnt.v_page_count = 0;
 	for (segind = 0; segind < vm_phys_nsegs; segind++) {
 		seg = &vm_phys_segs[segind];
-		for (m = seg->first_page, pa = seg->start; pa < seg->end;
-		    m++, pa += PAGE_SIZE)
-			vm_page_init_page(m, pa, segind);
+
+		/*
+		 * If lazy vm_page initialization is not enabled, simply
+		 * initialize all of the pages in the segment.  Otherwise, we
+		 * only initialize:
+		 * 1. Pages not covered by phys_avail[], since they might be
+		 *    freed to the allocator at some future point, e.g., by
+		 *    kmem_bootstrap_free().
+		 * 2. The first page of each run of free pages handed to the
+		 *    vm_phys allocator, which in turn defers initialization
+		 *    of pages until they are needed.
+		 * This avoids blocking the boot process for long periods, which
+		 * may be relevant for VMs (which ought to boot as quickly as
+		 * possible) and/or systems with large amounts of physical
+		 * memory.
+		 */
+#ifdef VM_FREEPOOL_LAZYINIT
+		if (lazyinit) {
+			startp = seg->start;
+			for (i = 0; phys_avail[i + 1] != 0; i += 2) {
+				if (startp >= seg->end)
+					break;
+
+				if (phys_avail[i + 1] < startp)
+					continue;
+				if (phys_avail[i] <= startp) {
+					startp = phys_avail[i + 1];
+					continue;
+				}
+
+				m = vm_phys_seg_paddr_to_vm_page(seg, startp);
+				for (endp = MIN(phys_avail[i], seg->end);
+				    startp < endp; startp += PAGE_SIZE, m++) {
+					vm_page_init_page(m, startp, segind,
+					    VM_FREEPOOL_DEFAULT);
+				}
+			}
+		} else
+#endif
+			for (m = seg->first_page, pa = seg->start;
+			    pa < seg->end; m++, pa += PAGE_SIZE) {
+				vm_page_init_page(m, pa, segind,
+				    VM_FREEPOOL_DEFAULT);
+			}
 
 		/*
 		 * Add the segment's pages that are covered by one of
@@ -784,7 +831,13 @@ vm_page_startup(vm_offset_t vaddr)
 			if (pagecount == 0)
 				continue;
 
-			m = seg->first_page + atop(startp - seg->start);
+			m = vm_phys_seg_paddr_to_vm_page(seg, startp);
+#ifdef VM_FREEPOOL_LAZYINIT
+			if (lazyinit) {
+				vm_page_init_page(m, startp, segind,
+				    VM_FREEPOOL_LAZYINIT);
+			}
+#endif
 			vmd = VM_DOMAIN(seg->domain);
 			vm_domain_free_lock(vmd);
 			vm_phys_enqueue_contig(m, pagecount);
@@ -1419,6 +1472,56 @@ vm_page_dirty_KBI(vm_page_t m)
 }
 
 /*
+ * Insert the given page into the given object at the given pindex.  mpred is
+ * used for memq linkage.  From vm_page_insert, lookup is true, mpred is
+ * initially NULL, and this procedure looks it up.  From vm_page_insert_after,
+ * lookup is false and mpred is known to the caller to be valid, and may be
+ * NULL if this will be the page with the lowest pindex.
+ *
+ * The procedure is marked __always_inline to suggest to the compiler to
+ * eliminate the lookup parameter and the associated alternate branch.
+ */
+static __always_inline int
+vm_page_insert_lookup(vm_page_t m, vm_object_t object, vm_pindex_t pindex,
+    vm_page_t mpred, bool lookup)
+{
+	int error;
+
+	VM_OBJECT_ASSERT_WLOCKED(object);
+	KASSERT(m->object == NULL,
+	    ("vm_page_insert: page %p already inserted", m));
+
+	/*
+	 * Record the object/offset pair in this page.
+	 */
+	m->object = object;
+	m->pindex = pindex;
+	m->ref_count |= VPRC_OBJREF;
+
+	/*
+	 * Add this page to the object's radix tree, and look up mpred if
+	 * needed.
+	 */
+	if (lookup)
+		error = vm_radix_insert_lookup_lt(&object->rtree, m, &mpred);
+	else
+		error = vm_radix_insert(&object->rtree, m);
+	if (__predict_false(error != 0)) {
+		m->object = NULL;
+		m->pindex = 0;
+		m->ref_count &= ~VPRC_OBJREF;
+		return (1);
+	}
+
+	/*
+	 * Now link into the object's ordered list of backed pages.
+	 */
+	vm_page_insert_radixdone(m, object, mpred);
+	vm_pager_page_inserted(object, m);
+	return (0);
+}
+
+/*
  *	vm_page_insert:		[ internal use only ]
  *
  *	Inserts the given mem entry into the object and object list.
@@ -1428,11 +1531,7 @@ vm_page_dirty_KBI(vm_page_t m)
 int
 vm_page_insert(vm_page_t m, vm_object_t object, vm_pindex_t pindex)
 {
-	vm_page_t mpred;
-
-	VM_OBJECT_ASSERT_WLOCKED(object);
-	mpred = vm_radix_lookup_le(&object->rtree, pindex);
-	return (vm_page_insert_after(m, object, pindex, mpred));
+	return (vm_page_insert_lookup(m, object, pindex, NULL, true));
 }
 
 /*
@@ -1449,42 +1548,7 @@ static int
 vm_page_insert_after(vm_page_t m, vm_object_t object, vm_pindex_t pindex,
     vm_page_t mpred)
 {
-	vm_page_t msucc;
-
-	VM_OBJECT_ASSERT_WLOCKED(object);
-	KASSERT(m->object == NULL,
-	    ("vm_page_insert_after: page already inserted"));
-	if (mpred != NULL) {
-		KASSERT(mpred->object == object,
-		    ("vm_page_insert_after: object doesn't contain mpred"));
-		KASSERT(mpred->pindex < pindex,
-		    ("vm_page_insert_after: mpred doesn't precede pindex"));
-		msucc = TAILQ_NEXT(mpred, listq);
-	} else
-		msucc = TAILQ_FIRST(&object->memq);
-	if (msucc != NULL)
-		KASSERT(msucc->pindex > pindex,
-		    ("vm_page_insert_after: msucc doesn't succeed pindex"));
-
-	/*
-	 * Record the object/offset pair in this page.
-	 */
-	m->object = object;
-	m->pindex = pindex;
-	m->ref_count |= VPRC_OBJREF;
-
-	/*
-	 * Now link into the object's ordered list of backed pages.
-	 */
-	if (vm_radix_insert(&object->rtree, m)) {
-		m->object = NULL;
-		m->pindex = 0;
-		m->ref_count &= ~VPRC_OBJREF;
-		return (1);
-	}
-	vm_page_insert_radixdone(m, object, mpred);
-	vm_pager_page_inserted(object, m);
-	return (0);
+	return (vm_page_insert_lookup(m, object, pindex, mpred, false));
 }
 
 /*
@@ -1512,6 +1576,13 @@ vm_page_insert_radixdone(vm_page_t m, vm_object_t object, vm_page_t mpred)
 		    ("vm_page_insert_radixdone: object doesn't contain mpred"));
 		KASSERT(mpred->pindex < m->pindex,
 		    ("vm_page_insert_radixdone: mpred doesn't precede pindex"));
+		KASSERT(TAILQ_NEXT(mpred, listq) == NULL ||
+		    m->pindex < TAILQ_NEXT(mpred, listq)->pindex,
+		    ("vm_page_insert_radixdone: pindex doesn't precede msucc"));
+	} else {
+		KASSERT(TAILQ_EMPTY(&object->memq) ||
+		    m->pindex < TAILQ_FIRST(&object->memq)->pindex,
+		    ("vm_page_insert_radixdone: no mpred but not first page"));
 	}
 
 	if (mpred != NULL)
@@ -1853,9 +1924,6 @@ vm_page_rename(vm_page_t m, vm_object_t new_object, vm_pindex_t new_pindex)
 	VM_OBJECT_ASSERT_WLOCKED(new_object);
 
 	KASSERT(m->ref_count != 0, ("vm_page_rename: page %p has no refs", m));
-	mpred = vm_radix_lookup_le(&new_object->rtree, new_pindex);
-	KASSERT(mpred == NULL || mpred->pindex != new_pindex,
-	    ("vm_page_rename: pindex already renamed"));
 
 	/*
 	 * Create a custom version of vm_page_insert() which does not depend
@@ -1864,7 +1932,7 @@ vm_page_rename(vm_page_t m, vm_object_t new_object, vm_pindex_t new_pindex)
 	 */
 	opidx = m->pindex;
 	m->pindex = new_pindex;
-	if (vm_radix_insert(&new_object->rtree, m)) {
+	if (vm_radix_insert_lookup_lt(&new_object->rtree, m, &mpred) != 0) {
 		m->pindex = opidx;
 		return (1);
 	}
@@ -1927,7 +1995,7 @@ vm_page_alloc_domain(vm_object_t object, vm_pindex_t pindex, int domain,
 
 /*
  * Allocate a page in the specified object with the given page index.  To
- * optimize insertion of the page into the object, the caller must also specifiy
+ * optimize insertion of the page into the object, the caller must also specify
  * the resident page in the object with largest index smaller than the given
  * page index, or NULL if no such page exists.
  */

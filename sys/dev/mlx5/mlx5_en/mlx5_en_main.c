@@ -2331,9 +2331,7 @@ mlx5e_get_wqe_sz(struct mlx5e_priv *priv, u32 *wqe_sz, u32 *nsegs)
 	 * Stride size is 16 * (n + 1), as the first segment is
 	 * control.
 	 */
-	for (n = howmany(r, MLX5E_MAX_RX_BYTES); !powerof2(n + 1); n++)
-		;
-
+	n = roundup_pow_of_two(1 + howmany(r, MLX5E_MAX_RX_BYTES)) - 1;
 	if (n > MLX5E_MAX_BUSDMA_RX_SEGS)
 		return (-ENOMEM);
 
@@ -3674,6 +3672,9 @@ out:
 		/* Check if module is present before doing an access */
 		module_status = mlx5_query_module_status(priv->mdev, module_num);
 		if (module_status != MLX5_MODULE_STATUS_PLUGGED_ENABLED) {
+			mlx5_en_err(ifp,
+			    "Query module %d status: not plugged (%d), eeprom reading is not supported\n",
+			    module_num, module_status);
 			error = EINVAL;
 			goto err_i2c;
 		}
@@ -4485,10 +4486,6 @@ mlx5e_create_ifp(struct mlx5_core_dev *mdev)
 	    M_MLX5EN, mlx5_dev_domainset(mdev), M_WAITOK | M_ZERO);
 
 	ifp = priv->ifp = if_alloc_dev(IFT_ETHER, mdev->pdev->dev.bsddev);
-	if (ifp == NULL) {
-		mlx5_core_err(mdev, "if_alloc() failed\n");
-		goto err_free_priv;
-	}
 	/* setup all static fields */
 	if (mlx5e_priv_static_init(priv, mdev, mdev->priv.eq_table.num_comp_vectors)) {
 		mlx5_core_err(mdev, "mlx5e_priv_static_init() failed\n");
@@ -4828,8 +4825,6 @@ err_free_sysctl:
 
 err_free_ifp:
 	if_free(ifp);
-
-err_free_priv:
 	free(priv, M_MLX5EN);
 	return (NULL);
 }

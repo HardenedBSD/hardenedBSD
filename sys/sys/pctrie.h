@@ -36,6 +36,8 @@
 
 #ifdef _KERNEL
 
+typedef void (*pctrie_cb_t)(void *ptr, void *arg);
+
 #define	PCTRIE_DEFINE_SMR(name, type, field, allocfn, freefn, smr)	\
     PCTRIE_DEFINE(name, type, field, allocfn, freefn)			\
 									\
@@ -46,6 +48,16 @@ name##_PCTRIE_LOOKUP_UNLOCKED(struct pctrie *ptree, uint64_t key)	\
 	return name##_PCTRIE_VAL2PTR(pctrie_lookup_unlocked(ptree,	\
 	    key, (smr)));						\
 }									\
+
+#ifdef INVARIANTS
+void		pctrie_subtree_lookup_gt_assert(struct pctrie_node *node,
+		    uint64_t key, struct pctrie *ptree, uint64_t *res);
+void		pctrie_subtree_lookup_lt_assert(struct pctrie_node *node,
+		    uint64_t key, struct pctrie *ptree, uint64_t *res);
+#else
+#define	pctrie_subtree_lookup_gt_assert(node, key, ptree, res)
+#define	pctrie_subtree_lookup_lt_assert(node, key, ptree, res)
+#endif
 
 #define	PCTRIE_DEFINE(name, type, field, allocfn, freefn)		\
 									\
@@ -73,20 +85,106 @@ name##_PCTRIE_PTR2VAL(struct type *ptr)					\
 	return &ptr->field;						\
 }									\
 									\
-static __inline int							\
+static __inline __unused int						\
 name##_PCTRIE_INSERT(struct pctrie *ptree, struct type *ptr)		\
 {									\
 	struct pctrie_node *parent;					\
 	void *parentp;							\
 	uint64_t *val = name##_PCTRIE_PTR2VAL(ptr);			\
 									\
-	parentp = pctrie_insert_lookup(ptree, val);			\
+	parentp = pctrie_insert_lookup_strict(ptree, val);		\
 	if (parentp == NULL)						\
 		return (0);						\
 	parent = allocfn(ptree);					\
-	if (parent == NULL)						\
+	if (__predict_false(parent == NULL))				\
 		return (ENOMEM);					\
 	pctrie_insert_node(parentp, parent, val);			\
+	return (0);							\
+}									\
+									\
+static __inline __unused int						\
+name##_PCTRIE_FIND_OR_INSERT(struct pctrie *ptree, struct type *ptr,	\
+    struct type **found_out_opt)					\
+{									\
+	struct pctrie_node *parent;					\
+	void *parentp;							\
+	uint64_t *val = name##_PCTRIE_PTR2VAL(ptr);			\
+	uint64_t *found;						\
+									\
+	parentp = pctrie_insert_lookup(ptree, val, &found);		\
+	if (found != NULL) {						\
+		if (found_out_opt != NULL)				\
+			*found_out_opt = name##_PCTRIE_VAL2PTR(found);	\
+		return (EEXIST);					\
+	}								\
+	if (parentp == NULL)						\
+		return (0);						\
+	parent = allocfn(ptree);					\
+	if (__predict_false(parent == NULL))				\
+		return (ENOMEM);					\
+	pctrie_insert_node(parentp, parent, val);			\
+	return (0);							\
+}									\
+									\
+static __inline __unused int						\
+name##_PCTRIE_INSERT_LOOKUP_GE(struct pctrie *ptree, struct type *ptr,	\
+    struct type **found_out)						\
+{									\
+	struct pctrie_node *parent, *neighbor;				\
+	void *parentp;							\
+	uint64_t *val = name##_PCTRIE_PTR2VAL(ptr);			\
+	uint64_t *found;						\
+									\
+	parentp = pctrie_insert_lookup_gt(ptree, val, &found,		\
+	    &neighbor);							\
+	if (__predict_false(found != NULL)) {				\
+		*found_out = name##_PCTRIE_VAL2PTR(found);		\
+		return (EEXIST);					\
+	}								\
+	if (parentp != NULL) {						\
+		parent = allocfn(ptree);				\
+		if (__predict_false(parent == NULL)) {			\
+			*found_out = NULL;				\
+			return (ENOMEM);				\
+		}							\
+		if (neighbor == parentp)				\
+			neighbor = parent;				\
+		pctrie_insert_node(parentp, parent, val);		\
+	}								\
+	found = pctrie_subtree_lookup_gt(neighbor, *val);		\
+	*found_out = name##_PCTRIE_VAL2PTR(found);			\
+	pctrie_subtree_lookup_gt_assert(neighbor, *val, ptree, found);	\
+	return (0);							\
+}									\
+									\
+static __inline __unused int						\
+name##_PCTRIE_INSERT_LOOKUP_LE(struct pctrie *ptree, struct type *ptr,	\
+    struct type **found_out)						\
+{									\
+	struct pctrie_node *parent, *neighbor;				\
+	void *parentp;							\
+	uint64_t *val = name##_PCTRIE_PTR2VAL(ptr);			\
+	uint64_t *found;						\
+									\
+	parentp = pctrie_insert_lookup_lt(ptree, val, &found,		\
+	    &neighbor);							\
+	if (__predict_false(found != NULL)) {				\
+		*found_out = name##_PCTRIE_VAL2PTR(found);		\
+		return (EEXIST);					\
+	}								\
+	if (parentp != NULL) {						\
+		parent = allocfn(ptree);				\
+		if (__predict_false(parent == NULL)) {			\
+			*found_out = NULL;				\
+			return (ENOMEM);				\
+		}							\
+		if (neighbor == parentp)				\
+			neighbor = parent;				\
+		pctrie_insert_node(parentp, parent, val);		\
+	}								\
+	found = pctrie_subtree_lookup_lt(neighbor, *val);		\
+	*found_out = name##_PCTRIE_VAL2PTR(found);			\
+	pctrie_subtree_lookup_lt_assert(neighbor, *val, ptree, found);	\
 	return (0);							\
 }									\
 									\
@@ -119,6 +217,25 @@ name##_PCTRIE_RECLAIM(struct pctrie *ptree)				\
 	for (freenode = pctrie_reclaim_begin(&node, ptree);		\
 	    freenode != NULL;						\
 	    freenode = pctrie_reclaim_resume(&node))			\
+		freefn(ptree, freenode);				\
+}									\
+									\
+/*									\
+ * While reclaiming all internal trie nodes, invoke callback(leaf, arg)	\
+ * on every leaf in the trie, in order.					\
+ */									\
+static __inline __unused void						\
+name##_PCTRIE_RECLAIM_CALLBACK(struct pctrie *ptree,			\
+    void (*typed_cb)(struct type *, void *), void *arg)			\
+{									\
+	struct pctrie_node *freenode, *node;				\
+	pctrie_cb_t callback = (pctrie_cb_t)typed_cb;			\
+									\
+	for (freenode = pctrie_reclaim_begin_cb(&node, ptree,		\
+	    callback, __offsetof(struct type, field), arg);		\
+	    freenode != NULL;						\
+	    freenode = pctrie_reclaim_resume_cb(&node,			\
+	    callback, __offsetof(struct type, field), arg))		\
 		freefn(ptree, freenode);				\
 }									\
 									\
@@ -155,7 +272,14 @@ name##_PCTRIE_REMOVE_LOOKUP(struct pctrie *ptree, uint64_t key)		\
 	return name##_PCTRIE_VAL2PTR(val);				\
 }
 
-void		*pctrie_insert_lookup(struct pctrie *ptree, uint64_t *val);
+void		*pctrie_insert_lookup(struct pctrie *ptree, uint64_t *val,
+		    uint64_t **found_out);
+void		*pctrie_insert_lookup_gt(struct pctrie *ptree, uint64_t *val,
+		    uint64_t **found_out, struct pctrie_node **neighbor_out);
+void		*pctrie_insert_lookup_lt(struct pctrie *ptree, uint64_t *val,
+		    uint64_t **found_out, struct pctrie_node **neighbor_out);
+void		*pctrie_insert_lookup_strict(struct pctrie *ptree,
+		    uint64_t *val);
 void		pctrie_insert_node(void *parentp,
 		    struct pctrie_node *parent, uint64_t *val);
 uint64_t	*pctrie_lookup(struct pctrie *ptree, uint64_t key);
@@ -166,9 +290,18 @@ uint64_t	*pctrie_lookup_unlocked(struct pctrie *ptree, uint64_t key,
 struct pctrie_node *pctrie_reclaim_begin(struct pctrie_node **pnode,
 		    struct pctrie *ptree);
 struct pctrie_node *pctrie_reclaim_resume(struct pctrie_node **pnode);
+struct pctrie_node *pctrie_reclaim_begin_cb(struct pctrie_node **pnode,
+		    struct pctrie *ptree,
+		    pctrie_cb_t callback, int keyoff, void *arg);
+struct pctrie_node *pctrie_reclaim_resume_cb(struct pctrie_node **pnode,
+		    pctrie_cb_t callback, int keyoff, void *arg);
 uint64_t	*pctrie_remove_lookup(struct pctrie *ptree, uint64_t index,
 		    struct pctrie_node **killnode);
 uint64_t	*pctrie_replace(struct pctrie *ptree, uint64_t *newval);
+uint64_t	*pctrie_subtree_lookup_gt(struct pctrie_node *node,
+		    uint64_t key);
+uint64_t	*pctrie_subtree_lookup_lt(struct pctrie_node *node,
+		    uint64_t key);
 size_t		pctrie_node_size(void);
 int		pctrie_zone_init(void *mem, int size, int flags);
 

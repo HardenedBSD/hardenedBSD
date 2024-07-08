@@ -1705,8 +1705,9 @@ pmap_pt2pg_init(pmap_t pmap, vm_offset_t va, vm_page_t m)
 
 /*
  *  Initialize the pmap module.
- *  Called by vm_init, to initialize any structures that the pmap
- *  system needs to map virtual memory.
+ *
+ *  Called by vm_mem_init(), to initialize any structures that the pmap system
+ *  needs to map virtual memory.
  */
 void
 pmap_init(void)
@@ -3363,7 +3364,7 @@ pmap_change_pte1(pmap_t pmap, pt1_entry_t *pte1p, vm_offset_t va,
 		 * will be affected by the broken mapping, disable interrupts
 		 * until the mapping change is completed.
 		 */
-		cspr = disable_interrupts(PSR_I | PSR_F);
+		cspr = disable_interrupts(PSR_I);
 		pte1_clear(pte1p);
 		pmap_tlb_flush_pte1(pmap, va, npte1);
 		pte1_store(pte1p, npte1);
@@ -3388,7 +3389,7 @@ pmap_change_pte1(pmap_t pmap, pt1_entry_t *pte1p, vm_offset_t va,
 		 * mappings. It's absolutely safe in UP case when interrupts
 		 * are disabled.
 		 */
-		cspr = disable_interrupts(PSR_I | PSR_F);
+		cspr = disable_interrupts(PSR_I);
 		pte1_clear(pte1p);
 		pmap_tlb_flush_pte1(pmap, va, npte1);
 		pte1_store(pte1p, npte1);

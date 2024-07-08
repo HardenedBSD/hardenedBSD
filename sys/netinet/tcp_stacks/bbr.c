@@ -2356,11 +2356,11 @@ bbr_log_to_event(struct tcp_bbr *bbr, uint32_t cts, int32_t to_num)
 		log.u_bbr.flex1 = bbr->bbr_timer_src;
 		log.u_bbr.flex2 = 0;
 		log.u_bbr.flex3 = bbr->r_ctl.rc_hpts_flags;
-		ar = (uint64_t)(bbr->r_ctl.rc_resend);
+		ar = (uintptr_t)(bbr->r_ctl.rc_resend);
 		ar >>= 32;
 		ar &= 0x00000000ffffffff;
 		log.u_bbr.flex4 = (uint32_t)ar;
-		ar = (uint64_t)bbr->r_ctl.rc_resend;
+		ar = (uintptr_t)bbr->r_ctl.rc_resend;
 		ar &= 0x00000000ffffffff;
 		log.u_bbr.flex5 = (uint32_t)ar;
 		log.u_bbr.flex6 = TICKS_2_USEC(bbr->rc_tp->t_rxtcur);
@@ -2718,12 +2718,13 @@ bbr_type_log_hdwr_pacing(struct tcp_bbr *bbr, const struct ifnet *ifp,
 {
 	if (tcp_bblogging_on(bbr->rc_tp)) {
 		union tcp_log_stackspecific log;
+		uint64_t ifp64 = (uintptr_t)ifp;
 
 		bbr_fill_in_logging_data(bbr, &log.u_bbr, cts);
 		log.u_bbr.flex1 = ((hw_rate >> 32) & 0x00000000ffffffff);
 		log.u_bbr.flex2 = (hw_rate & 0x00000000ffffffff);
-		log.u_bbr.flex3 = (((uint64_t)ifp  >> 32) & 0x00000000ffffffff);
-		log.u_bbr.flex4 = ((uint64_t)ifp & 0x00000000ffffffff);
+		log.u_bbr.flex3 = ((ifp64  >> 32) & 0x00000000ffffffff);
+		log.u_bbr.flex4 = (ifp64 & 0x00000000ffffffff);
 		log.u_bbr.bw_inuse = rate;
 		log.u_bbr.flex5 = line;
 		log.u_bbr.flex6 = error;
@@ -5134,6 +5135,16 @@ bbr_timeout_rxt(struct tcpcb *tp, struct tcp_bbr *bbr, uint32_t cts)
 				tp->t_flags2 |= TF2_PLPMTU_PMTUD;
 				tp->t_flags2 &= ~TF2_PLPMTU_BLACKHOLE;
 				tp->t_maxseg = tp->t_pmtud_saved_maxseg;
+				if (tp->t_maxseg < V_tcp_mssdflt) {
+					/*
+					 * The MSS is so small we should not 
+					 * process incoming SACK's since we are 
+					 * subject to attack in such a case.
+					 */
+					tp->t_flags2 |= TF2_PROC_SACK_PROHIBIT;
+				} else {
+					tp->t_flags2 &= ~TF2_PROC_SACK_PROHIBIT;
+				}
 				KMOD_TCPSTAT_INC(tcps_pmtud_blackhole_failed);
 			}
 		}
@@ -7556,7 +7567,7 @@ proc_sack:
 	 * Sort the SACK blocks so we can update the rack scoreboard with
 	 * just one pass.
 	 */
-	new_sb = sack_filter_blks(&bbr->r_ctl.bbr_sf, sack_blocks,
+	new_sb = sack_filter_blks(tp, &bbr->r_ctl.bbr_sf, sack_blocks,
 				  num_sack_blks, th->th_ack);
 	ctf_log_sack_filter(bbr->rc_tp, new_sb, sack_blocks);
 	BBR_STAT_ADD(bbr_sack_blocks, num_sack_blks);
@@ -11323,7 +11334,14 @@ bbr_do_segment_nounlock(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 	tcp_dooptions(&to, (u_char *)(th + 1),
 	    (th->th_off << 2) - sizeof(struct tcphdr),
 	    (thflags & TH_SYN) ? TO_SYN : 0);
-
+	if (tp->t_flags2 & TF2_PROC_SACK_PROHIBIT) {
+		/*
+		 * We don't look at sack's from the
+		 * peer because the MSS is too small which
+		 * can subject us to an attack.
+		 */
+		to.to_flags &= ~TOF_SACK;
+	}
 	/*
 	 * If timestamps were negotiated during SYN/ACK and a
 	 * segment without a timestamp is received, silently drop
@@ -13773,6 +13791,16 @@ nomore:
 				if (old_maxseg <= tp->t_maxseg) {
 					/* Huh it did not shrink? */
 					tp->t_maxseg = old_maxseg - 40;
+					if (tp->t_maxseg < V_tcp_mssdflt) {
+						/*
+						 * The MSS is so small we should not 
+						 * process incoming SACK's since we are 
+						 * subject to attack in such a case.
+						 */
+						tp->t_flags2 |= TF2_PROC_SACK_PROHIBIT;
+					} else {
+						tp->t_flags2 &= ~TF2_PROC_SACK_PROHIBIT;
+					}
 					bbr_log_msgsize_fail(bbr, tp, len, maxseg, mtu, 0, tso, cts);
 				}
 				/*

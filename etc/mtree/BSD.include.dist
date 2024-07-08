@@ -153,6 +153,8 @@
         ..
         nvme
         ..
+        nvmf
+        ..
         ofw
         ..
         pbio
@@ -369,6 +371,8 @@
         ..
         mac_veriexec
         ..
+    ..
+    ssp
     ..
     sys
         disk

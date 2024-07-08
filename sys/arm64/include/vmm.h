@@ -127,6 +127,7 @@ struct vm_eventinfo {
 
 int vm_create(const char *name, struct vm **retvm);
 struct vcpu *vm_alloc_vcpu(struct vm *vm, int vcpuid);
+void vm_disable_vcpu_creation(struct vm *vm);
 void vm_slock_vcpus(struct vm *vm);
 void vm_unlock_vcpus(struct vm *vm);
 void vm_destroy(struct vm *vm);
@@ -199,13 +200,6 @@ void vm_exit_astpending(struct vcpu *vcpu, uint64_t pc);
 cpuset_t vm_active_cpus(struct vm *vm);
 cpuset_t vm_debug_cpus(struct vm *vm);
 cpuset_t vm_suspended_cpus(struct vm *vm);
-
-static __inline bool
-virt_enabled(void)
-{
-
-	return (has_hyp());
-}
 
 static __inline int
 vcpu_rendezvous_pending(struct vm_eventinfo *info)
@@ -295,9 +289,11 @@ struct vre {
  */
 enum vm_cap_type {
 	VM_CAP_HALT_EXIT,
-	VM_CAP_MTRAP_EXIT,
 	VM_CAP_PAUSE_EXIT,
 	VM_CAP_UNRESTRICTED_GUEST,
+	VM_CAP_BRK_EXIT,
+	VM_CAP_SS_EXIT,
+	VM_CAP_MASK_HWINTR,
 	VM_CAP_MAX
 };
 
@@ -312,6 +308,8 @@ enum vm_exitcode {
 	VM_EXITCODE_PAGING,
 	VM_EXITCODE_SMCCC,
 	VM_EXITCODE_DEBUG,
+	VM_EXITCODE_BRK,
+	VM_EXITCODE_SS,
 	VM_EXITCODE_MAX
 };
 

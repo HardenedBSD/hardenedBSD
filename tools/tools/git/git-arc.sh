@@ -53,7 +53,7 @@ Commands:
   list <commit>|<commit range>
   patch [-c] <diff1> [<diff2> ...]
   stage [-b branch] [<commit>|<commit range>]
-  update [-m message] [<commit>|<commit range>]
+  update [-l] [-m message] [<commit>|<commit range>]
 
 Description:
   Create or manage FreeBSD Phabricator reviews based on git commits.  There
@@ -100,11 +100,11 @@ Config Variables:
     arc.browse [bool]  -- Try to open newly created reviews in a browser tab.
                           Defaults to false.
 
-    arc.list [bool]    -- Always use "list mode" (-l) with create.  In this
-                          mode, the list of git revisions to create reviews for
-                          is listed with a single prompt before creating
-                          reviews.  The diffs for individual commits are not
-                          shown.
+    arc.list [bool]    -- Always use "list mode" (-l) with create and update.
+			  In this mode, the list of git revisions to use
+                          is listed with a single prompt before creating or
+                          updating reviews.  The diffs for individual commits
+			  are not shown.
 
     arc.verbose [bool] -- Verbose output.  Equivalent to the -v flag.
 
@@ -145,6 +145,16 @@ Examples:
 __EOF__
 
     exit 1
+}
+
+#
+# Fetch the value of a boolean config variable ($1) and return true
+# (0) if the variable is true.  The default value to use if the
+# variable is not set is passed in $2.
+#
+get_bool_config()
+{
+    test "$(git config --bool --get $1 2>/dev/null || echo $2)" != "false"
 }
 
 #
@@ -378,7 +388,7 @@ gitarc__create()
 
     list=
     prev=""
-    if [ "$(git config --bool --get arc.list 2>/dev/null || echo false)" != "false" ]; then
+    if get_bool_config arc.list false; then
         list=1
     fi
     doprompt=1
@@ -669,10 +679,18 @@ gitarc__stage()
 
 gitarc__update()
 {
-    local commit commits diff have_msg msg
+    local commit commits diff doprompt have_msg list o msg
 
-    while getopts m: o; do
+    list=
+    if get_bool_config arc.list false; then
+        list=1
+    fi
+    doprompt=1
+    while getopts lm: o; do
         case "$o" in
+        l)
+            list=1
+            ;;
         m)
             msg="$OPTARG"
             have_msg=1
@@ -685,10 +703,21 @@ gitarc__update()
     shift $((OPTIND-1))
 
     commits=$(build_commit_list "$@")
+
+    if [ "$list" ]; then
+        for commit in ${commits}; do
+            git --no-pager show --oneline --no-patch "$commit"
+        done | git_pager
+        if ! prompt; then
+            return
+        fi
+        doprompt=
+    fi
+
     for commit in ${commits}; do
         diff=$(commit2diff "$commit")
 
-        if ! show_and_prompt "$commit"; then
+        if [ "$doprompt" ] && ! show_and_prompt "$commit"; then
             break
         fi
 
@@ -708,7 +737,7 @@ gitarc__update()
 set -e
 
 ASSUME_YES=
-if [ "$(git config --bool --get arc.assume-yes 2>/dev/null || echo false)" != "false" ]; then
+if get_bool_config arc.assume-yes false; then
     ASSUME_YES=1
 fi
 
@@ -782,7 +811,7 @@ list|patch)
     ;;
 esac
 
-if [ "$(git config --bool --get arc.browse 2>/dev/null || echo false)" != "false" ]; then
+if get_bool_config arc.browse false; then
     BROWSE=--browse
 fi
 

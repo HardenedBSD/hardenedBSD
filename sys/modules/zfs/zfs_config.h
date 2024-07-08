@@ -87,6 +87,9 @@
 #define HAVE_AVX512VL 1
 #endif
 
+/* backtrace() is available */
+/* #undef HAVE_BACKTRACE */
+
 /* bdevname() is available */
 /* #undef HAVE_BDEVNAME */
 
@@ -418,6 +421,9 @@
 /* Define if the GNU gettext() function is already present or preinstalled. */
 /* #undef HAVE_GETTEXT */
 
+/* Define to 1 if you have the 'gettid' function. */
+/* #undef HAVE_GETTID */
+
 /* iops->get_acl() exists */
 /* #undef HAVE_GET_ACL */
 
@@ -595,6 +601,9 @@
 /* Define if compiler supports -Winfinite-recursion */
 /* #undef HAVE_KERNEL_INFINITE_RECURSION */
 
+/* kernel defines intptr_t */
+/* #undef HAVE_KERNEL_INTPTR_T */
+
 /* kernel has kernel_neon_* functions */
 /* #undef HAVE_KERNEL_NEON */
 
@@ -654,6 +663,12 @@
 
 /* Define if you have [udev] */
 /* #undef HAVE_LIBUDEV */
+
+/* Define if you have [unwind] */
+/* #undef HAVE_LIBUNWIND */
+
+/* libunwind has unw_get_elf_filename */
+/* #undef HAVE_LIBUNWIND_ELF */
 
 /* Define if you have [uuid] */
 /* #undef HAVE_LIBUUID */
@@ -1179,7 +1194,7 @@
 /* #undef ZFS_IS_GPL_COMPATIBLE */
 
 /* Define the project alias string. */
-#define ZFS_META_ALIAS "zfs-2.2.99-456-FreeBSD_g1f940de07"
+#define ZFS_META_ALIAS "zfs-2.2.99-517-FreeBSD_ge2357561b"
 
 /* Define the project author. */
 #define ZFS_META_AUTHOR "OpenZFS"
@@ -1209,7 +1224,7 @@
 #define ZFS_META_NAME "zfs"
 
 /* Define the project release. */
-#define ZFS_META_RELEASE "456-FreeBSD_g1f940de07"
+#define ZFS_META_RELEASE "517-FreeBSD_ge2357561b"
 
 /* Define the project version. */
 #define ZFS_META_VERSION "2.2.99"

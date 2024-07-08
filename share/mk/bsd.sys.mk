@@ -298,7 +298,14 @@ CXXFLAGS.clang+=	 -Wno-c++11-extensions
 # Don't use -Wstack-protector as it breaks world with -Werror.
 SSP_CFLAGS?=	-fstack-protector-strong
 CFLAGS+=	${SSP_CFLAGS}
+FORTIFY_SOURCE?=	2
+.else
+FORTIFY_SOURCE?=	0
 .endif # SSP
+.if ${FORTIFY_SOURCE} > 0
+CFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE}
+CXXFLAGS+=	-D_FORTIFY_SOURCE=${FORTIFY_SOURCE}
+.endif
 
 # Additional flags passed in CFLAGS and CXXFLAGS when MK_DEBUG_FILES is
 # enabled.

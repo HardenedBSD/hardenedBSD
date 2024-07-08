@@ -15,20 +15,22 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/capsicum.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/capsicum.h>
+#ifndef DIFF_NO_MMAP
+#include <sys/mman.h>
+#endif
+#include <sys/stat.h>
 
 #include <capsicum_helpers.h>
 #include <err.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <time.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "diff.h"
@@ -216,10 +218,14 @@ diffreg_new(char *file1, char *file2, int flags, int capsicum)
 		rc = D_ERROR;
 		goto done;
 	}
+	if (left.atomizer_flags & DIFF_ATOMIZER_FILE_TRUNCATED)
+		warnx("%s truncated", file1);
 	if (diff_atomize_file(&right, cfg, f2, (uint8_t *)str2, st2.st_size, diff_flags)) {
 		rc = D_ERROR;
 		goto done;
 	}
+	if (right.atomizer_flags & DIFF_ATOMIZER_FILE_TRUNCATED)
+		warnx("%s truncated", file2);
 
 	result = diff_main(cfg, &left, &right);
 	if (result->rc != DIFF_RC_OK) {
@@ -266,10 +272,12 @@ done:
 	diff_result_free(result);
 	diff_data_free(&left);
 	diff_data_free(&right);
+#ifndef DIFF_NO_MMAP
 	if (str1)
 		munmap(str1, st1.st_size);
 	if (str2)
 		munmap(str2, st2.st_size);
+#endif
 	fclose(f1);
 	fclose(f2);
 

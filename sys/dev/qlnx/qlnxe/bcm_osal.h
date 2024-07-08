@@ -72,7 +72,7 @@ extern void qlnx_dma_free_coherent(void *ecore_dev, void *v_addr,
                         bus_addr_t phys, uint32_t size);
 
 extern void qlnx_link_update(void *p_hwfn);
-extern void qlnx_barrier(void *p_hwfn);
+extern void qlnx_barrier(void *p_dev);
 
 extern void *qlnx_zalloc(uint32_t size);
 
@@ -101,24 +101,6 @@ extern void qlnx_vf_flr_update(void *p_hwfn);
 #define s32 uint32_t
 
 #ifndef QLNX_RDMA
-
-static __inline unsigned long
-roundup_pow_of_two(unsigned long x)
-{
-	return (1UL << flsl(x - 1));
-}
-
-static __inline int
-is_power_of_2(unsigned long n)
-{
-	return (n == roundup_pow_of_two(n));
-}
-
-static __inline unsigned long
-rounddown_pow_of_two(unsigned long x)
-{
-	return (1UL << (flsl(x) - 1));
-}
 
 #define max_t(type, val1, val2) \
 	((type)(val1) > (type)(val2) ? (type)(val1) : (val2))
@@ -213,14 +195,14 @@ typedef struct osal_list_t
 #define OSAL_SPIN_LOCK_ALLOC(p_hwfn, mutex)
 #define OSAL_SPIN_LOCK_DEALLOC(mutex) mtx_destroy(mutex)
 #define OSAL_SPIN_LOCK_INIT(lock) {\
-		mtx_init(lock, __func__, MTX_NETWORK_LOCK, MTX_SPIN); \
+		mtx_init(lock, __func__, "OSAL spin lock", MTX_SPIN); \
 	}
 
 #define OSAL_SPIN_UNLOCK(lock) {\
-		mtx_unlock(lock); \
+		mtx_unlock_spin(lock); \
 	}
 #define OSAL_SPIN_LOCK(lock) {\
-		mtx_lock(lock); \
+		mtx_lock_spin(lock); \
 	}
 
 #define OSAL_MUTEX_ALLOC(p_hwfn, mutex)

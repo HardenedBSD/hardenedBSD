@@ -4,7 +4,7 @@
 
 PACKAGE=clibs
 CLEANFILES= osreldate.h version
-SUBDIR= arpa protocols rpcsvc rpc xlocale
+SUBDIR= arpa protocols rpcsvc rpc ssp xlocale
 .if ${MACHINE_CPUARCH} == "amd64"
 SUBDIR+=		i386
 INCLUDE_SUBDIRS+=	i386
@@ -182,6 +182,11 @@ OPENCRYPTODIR=	${INCLUDEDIR}/crypto
 NVME=		nvme.h
 NVMEDIR=	${INCLUDEDIR}/dev/nvme
 
+.PATH: ${SRCTOP}/sys/dev/nvmf
+NVMF=		nvmf.h \
+		nvmf_proto.h
+NVMFDIR=	${INCLUDEDIR}/dev/nvmf
+
 .PATH: ${SRCTOP}/sys/dev/pci
 PCI=		pcireg.h
 PCIDIR=		${INCLUDEDIR}/dev/pci
@@ -255,6 +260,7 @@ INCSGROUPS=	INCS \
 		HYPERV \
 		OPENCRYPTO \
 		NVME \
+		NVMF \
 		PCI \
 		RPC \
 		SECAUDIT \

@@ -26,11 +26,11 @@
 #include <err.h>
 #include <errno.h>
 #include <getopt.h>
-#include <stdlib.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <limits.h>
 
 #include "diff.h"
 #include "xmalloc.h"
@@ -368,7 +368,6 @@ main(int argc, char **argv)
 					optarg);
 			break;
 		case OPT_NO_DEREFERENCE:
-			rflag = true;
 			noderef = true;
 			break;
 		case OPT_VERSION:

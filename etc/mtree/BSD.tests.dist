@@ -419,6 +419,8 @@
         ..
         libdevdctl
         ..
+        libdiff
+        ..
         libexecinfo
         ..
         libkvm
@@ -833,6 +835,8 @@
                     etalon
                     ..
                 ..
+                virstor
+                ..
             ..
         ..
         kern
@@ -1220,6 +1224,8 @@
     ..
     usr.sbin
         chown
+        ..
+        ctladm
         ..
         daemon
         ..

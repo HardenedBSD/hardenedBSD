@@ -133,7 +133,6 @@ device		nvd		# expose NVMe namespaces as disks, depends on nvme
 # SCSI Controllers
 device		aacraid		# Adaptec by PMC RAID
 device		ahc		# AHA2940 and onboard AIC7xxx devices
-options 	AHC_ALLOW_MEMIO	# Attempt to use memory mapped I/O
 device		isp		# Qlogic family
 device		ispfw		# Firmware module for Qlogic host adapters
 device		mrsas		# LSI/Avago MegaRAID SAS/SATA, 6Gb/s and 12Gb/s
@@ -188,6 +187,7 @@ device		mlx5en		# Ethernet driver
 
 # Pseudo devices.
 device		crypto		# core crypto support
+device		ossl		# OpenSSL OpenCrypto module
 device		loop		# Network loopback
 device		ether		# Ethernet support
 device		vlan		# 802.1Q VLAN support

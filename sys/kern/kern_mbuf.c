@@ -1212,6 +1212,7 @@ mb_free_ext(struct mbuf *m)
 			break;
 		case EXT_SFBUF:
 		case EXT_NET_DRV:
+		case EXT_CTL:
 		case EXT_MOD_TYPE:
 		case EXT_DISPOSABLE:
 			KASSERT(mref->m_ext.ext_free != NULL,
@@ -1588,6 +1589,25 @@ m_freem(struct mbuf *mb)
 	MBUF_PROBE1(m__freem, mb);
 	while (mb != NULL)
 		mb = m_free(mb);
+}
+
+/*
+ * Free an entire chain of mbufs and associated external buffers, following
+ * both m_next and m_nextpkt linkage.
+ * Note: doesn't support NULL argument.
+ */
+void
+m_freemp(struct mbuf *m)
+{
+	struct mbuf *n;
+
+	MBUF_PROBE1(m__freemp, m);
+	do {
+		n = m->m_nextpkt;
+		while (m != NULL)
+			m = m_free(m);
+		m = n;
+	} while (m != NULL);
 }
 
 /*

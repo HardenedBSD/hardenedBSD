@@ -132,7 +132,6 @@ SRCF+=		floatundisf
 #
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
 SRCF+=		divxc3
-SRCF+=		extendxftf2
 SRCF+=		fixxfdi
 SRCF+=		fixxfti
 SRCF+=		fixunsxfdi
@@ -142,7 +141,6 @@ SRCF+=		floattixf
 SRCF+=		floatuntixf
 SRCF+=		mulxc3
 SRCF+=		powixf2
-SRCF+=		trunctfxf2
 
 # Avoid using SSE2 instructions on i386, if unsupported.
 .if ${MACHINE_CPUARCH} == "i386" && empty(MACHINE_CPU:Msse2)
@@ -152,6 +150,12 @@ SRCS+=		floatundixf.c
 SRCF+=		floatdixf
 SRCF+=		floatundixf
 .endif
+.endif
+
+# 128-bit float is an amd64 feature
+.if ${MACHINE_CPUARCH} == "amd64"
+SRCF+=		extendxftf2
+SRCF+=		trunctfxf2
 .endif
 
 # __cpu_model support, only used on aarch64 and x86
@@ -229,7 +233,6 @@ SRCF+=		comparesf2
 # Helper to reduce complexity of _Float16 and __bf16 statements below.
 .if ${MACHINE_CPUARCH} == "aarch64" || \
     ${MACHINE_CPUARCH} == "amd64" || \
-    ${MACHINE_CPUARCH} == "arm" || \
     (${MACHINE_CPUARCH} == "i386" && !empty(MACHINE_CPU:Msse2))
 CRT_COMMON_F16_ARCH=t
 .endif
@@ -239,7 +242,8 @@ CRT_COMMON_F16_ARCH=t
 # versions.
 #
 .if ((${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 150000) && \
-     (defined(CRT_COMMON_F16_ARCH) || ${MACHINE_CPUARCH} == "riscv")) || \
+     (defined(CRT_COMMON_F16_ARCH) || \
+      ${MACHINE_CPUARCH} == "arm" || ${MACHINE_CPUARCH} == "riscv")) || \
     ((${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 120000) && \
      (defined(CRT_COMMON_F16_ARCH)))
 CFLAGS+=	-DCOMPILER_RT_HAS_FLOAT16

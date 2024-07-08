@@ -100,7 +100,7 @@ mtkswitch_probe(device_t dev)
 	bzero(sc, sizeof(*sc));
 	sc->sc_switchtype = switch_type;
 
-	device_set_desc_copy(dev, "MTK Switch Driver");
+	device_set_desc(dev, "MTK Switch Driver");
 
 	return (0);
 }
@@ -121,12 +121,6 @@ mtkswitch_attach_phys(struct mtkswitch_softc *sc)
 			continue;
 		}
 		sc->ifp[phy] = if_alloc(IFT_ETHER);
-		if (sc->ifp[phy] == NULL) {
-			device_printf(sc->sc_dev, "couldn't allocate ifnet structure\n");
-			err = ENOMEM;
-			break;
-		}
-
 		sc->ifp[phy]->if_softc = sc;
 		sc->ifp[phy]->if_flags |= IFF_UP | IFF_BROADCAST |
 		    IFF_DRV_RUNNING | IFF_SIMPLEX;

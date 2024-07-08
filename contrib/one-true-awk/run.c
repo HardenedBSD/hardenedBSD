@@ -1827,7 +1827,7 @@ Cell *split(Node **a, int nnn)	/* split(a[0], a[1], a[2]); a[3] is type */
 		for (;;) {
 			n++;
 			t = s;
-			while (*s != sep && *s != '\n' && *s != '\0')
+			while (*s != sep && *s != '\0')
 				s++;
 			temp = *s;
 			setptr(s, '\0');
@@ -2501,7 +2501,7 @@ void backsub(char **pb_ptr, const char **sptr_ptr);
 Cell *dosub(Node **a, int subop)        /* sub and gsub */
 {
 	fa *pfa;
-	int tempstat;
+	int tempstat = 0;
 	char *repl;
 	Cell *x;
 

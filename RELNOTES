@@ -10,9 +10,46 @@ newline.  Entries should be separated by a newline.
 
 Changes to this file should not be MFCed.
 
+822ca3276345:
+	byacc was updated to 20240109.
+
+21817992b331:
+	ncurses was updated to 6.5.
+
+1687d77197c0:
+	Filesystem manual pages have been moved to section four.
+	Please check ports you are maintaining for crossreferences.
+
+8aac90f18aef:
+	new MAC/do policy and mdo(1) utility which enables a user to
+	become another user without the requirement of setuid root.
+
+7398d1ece5cf:
+	hw.snd.version is removed.
+
+a15f7c96a276,a8089ea5aee5:
+	NVMe over Fabrics controller.  The nvmft(4) kernel module adds
+	a new frontend to the CAM target layer which exports ctl(4)
+	LUNs as NVMe namespaces to remote hosts.  The nvmfd(8) daemon
+	is responsible for accepting incoming connection requests and
+	handing off connected queue pairs to nvmft(4).
+
+a1eda74167b5,1058c12197ab:
+	NVMe over Fabrics host.  New commands added to nvmecontrol(8)
+	to establish connections to remote controllers.  Once
+	connections are established they are handed off to the nvmf(4)
+	kernel module which creates nvmeX devices and exports remote
+	namespaces as nda(4) disks.
+
 25723d66369f:
 	As a side-effect of retiring the unit.* code in sound(4), the
 	hw.snd.maxunit loader(8) tunable is also retired.
+
+eeb04a736cb9:
+	date(1) now supports nanoseconds. For example:
+	`date -Ins` prints "2024-04-22T12:20:28,763742224+02:00" and
+	`date +%N` prints "415050400".
+
 6d5ce2bb6344:
 	The default value of the nfs_reserved_port_only rc.conf(5) setting has
 	changed.  The FreeBSD NFS server now requires the source port of

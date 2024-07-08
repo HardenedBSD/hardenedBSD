@@ -58,7 +58,7 @@ ParseDependency(suff-main-several.1:)
 Parsing line 39: 	: Making ${.TARGET} out of nothing.
 Parsing line 40: next-main: suff-main-several.{2,3,4}
 ParseDependency(next-main: suff-main-several.{2,3,4})
-# LinkSource: added child next-main - suff-main-several.{2,3,4}
+Target "next-main" depends on "suff-main-several.{2,3,4}"
 # next-main, unmade, type OP_DEPENDS|OP_HAS_COMMANDS, flags none
 # suff-main-several.{2,3,4}, unmade, type none, flags none
 Parsing line 42: .MAKEFLAGS: -d0 -dg1
@@ -88,6 +88,7 @@ ParseDependency(.MAKEFLAGS: -d0 -dg1)
 .MAKE.GID        = <details omitted>
 .MAKE.JOBS.C     = <details omitted>
 .MAKE.LEVEL      = <details omitted>
+.MAKE.LEVEL.ENV  = MAKELEVEL
 .MAKE.MAKEFILES  = <details omitted>
 .MAKE.MAKEFILE_PREFERENCE = <details omitted>
 .MAKE.OS         = <details omitted>
@@ -106,7 +107,6 @@ MACHINE_ARCH     = <details omitted>
 MAKE             = <details omitted>
 MFLAGS           =   -r -k -d mps -d 0 -d g1
 #*** Command-line Variables:
-.MAKE.LEVEL.ENV  = MAKELEVEL
 
 #*** Directory Cache:
 # Stats: 0 hits 2 misses 0 near misses 0 losers (0%)

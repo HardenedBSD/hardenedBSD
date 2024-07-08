@@ -28,12 +28,17 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/elf_common.h>
+
+#include <machine/asm.h>
 #include <machine/param.h>
 
-	.rodata
+	.section .rodata
 	.align PAGE_SHIFT
 	.globl vmm_hyp_code
 vmm_hyp_code:
 	.incbin "vmm_hyp_blob.bin"
 	.globl vmm_hyp_code_end
 vmm_hyp_code_end:
+
+GNU_PROPERTY_AARCH64_FEATURE_1_NOTE(GNU_PROPERTY_AARCH64_FEATURE_1_VAL)

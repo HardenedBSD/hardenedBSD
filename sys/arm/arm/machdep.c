@@ -316,7 +316,7 @@ spinlock_enter(void)
 
 	td = curthread;
 	if (td->td_md.md_spinlock_count == 0) {
-		cspr = disable_interrupts(PSR_I | PSR_F);
+		cspr = disable_interrupts(PSR_I);
 		td->td_md.md_spinlock_count = 1;
 		td->td_md.md_saved_cspr = cspr;
 		critical_enter();
@@ -553,7 +553,7 @@ initarm(struct arm_boot_params *abp)
 
 	/* Establish static device mappings. */
 	err_devmap = platform_devmap_init();
-	devmap_bootstrap(0, NULL);
+	devmap_bootstrap();
 	vm_max_kernel_address = platform_lastaddr();
 
 	/*

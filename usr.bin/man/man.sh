@@ -36,9 +36,6 @@ ulimit -t 20
 # do not ignore the exit status of roff tools
 set -o pipefail
 
-# ignore SIGPIPE exits because pagers may exit before reading all their input.
-trap '' SIGPIPE
-
 # Usage: add_to_manpath path
 # Adds a variable to manpath while ensuring we don't have duplicates.
 # Returns true if we were able to add something. False otherwise.
@@ -201,6 +198,10 @@ decho() {
 # Returns true if glob resolves to a real file and store the first
 # found filename in the variable $found
 exists() {
+	if [ -z "$1" ]; then
+		return 1
+	fi
+
 	local IFS
 
 	# Don't accidentally inherit callers IFS (breaks perl manpages)
@@ -318,9 +319,10 @@ man_check_for_so() {
 	# We need to loop to accommodate multiple .so directives.
 	while true
 	do
-		line=$($cattool "$manpage" 2>/dev/null | head -n1)
+		line=$($cattool "$manpage" 2>/dev/null | grep -E -m1 -v '^\.\\"[ ]*|^[ ]*$')
 		case "$line" in
-		.so*)	trim "${line#.so}"
+               '.so /'*) break ;; # ignore absolute path
+               '.so '*) trim "${line#.so}"
 			decho "$manpage includes $tstr"
 			# Glob and check for the file.
 			if ! check_man "$1/$tstr" ""; then

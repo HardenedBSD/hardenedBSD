@@ -128,6 +128,14 @@ pf_counter_u64_critical_exit(void)
 }
 
 static inline void
+pf_counter_u64_rollup_protected(struct pf_counter_u64 *pfcu64, uint64_t n)
+{
+
+	MPASS(curthread->td_critnest > 0);
+	pfcu64->pfcu64_value += n;
+}
+
+static inline void
 pf_counter_u64_add_protected(struct pf_counter_u64 *pfcu64, uint32_t n)
 {
 	struct pf_counter_u64_pcpu *pcpu;
@@ -248,6 +256,13 @@ static inline void
 pf_counter_u64_critical_exit(void)
 {
 
+}
+
+static inline void
+pf_counter_u64_rollup_protected(struct pf_counter_u64 *pfcu64, uint64_t n)
+{
+
+	counter_u64_add(pfcu64->counter, n);
 }
 
 static inline void
@@ -2258,9 +2273,11 @@ pf_get_time(void)
 }
 
 extern struct pf_kstate		*pf_find_state_byid(uint64_t, uint32_t);
-extern struct pf_kstate		*pf_find_state_all(struct pf_state_key_cmp *,
+extern struct pf_kstate		*pf_find_state_all(
+				    const struct pf_state_key_cmp *,
 				    u_int, int *);
-extern bool			pf_find_state_all_exists(struct pf_state_key_cmp *,
+extern bool			pf_find_state_all_exists(
+				    const struct pf_state_key_cmp *,
 				    u_int);
 extern struct pf_ksrc_node	*pf_find_src_node(struct pf_addr *,
 				    struct pf_krule *, sa_family_t,
@@ -2474,7 +2491,7 @@ void			 pf_init_keth(struct pf_keth_ruleset *);
 int			 pf_kanchor_setup(struct pf_krule *,
 			    const struct pf_kruleset *, const char *);
 int			 pf_kanchor_copyout(const struct pf_kruleset *,
-			    const struct pf_krule *, char *);
+			    const struct pf_krule *, char *, size_t);
 int			 pf_kanchor_nvcopyout(const struct pf_kruleset *,
 			    const struct pf_krule *, nvlist_t *);
 void			 pf_kanchor_remove(struct pf_krule *);
@@ -2502,6 +2519,12 @@ int			 pf_ioctl_getrules(struct pfioc_rule *);
 int			 pf_ioctl_addrule(struct pf_krule *, uint32_t,
 			    uint32_t, const char *, const char *, uid_t uid,
 			    pid_t);
+void			 pf_ioctl_clear_status(void);
+int			 pf_ioctl_get_timeout(int, int *);
+int			 pf_ioctl_set_timeout(int, int, int *);
+int			 pf_ioctl_get_limit(int, unsigned int *);
+int			 pf_ioctl_set_limit(int, unsigned int, unsigned int *);
+int			 pf_ioctl_begin_addrs(uint32_t *);
 
 void			 pf_krule_free(struct pf_krule *);
 void			 pf_krule_clear_counters(struct pf_krule *);
@@ -2548,7 +2571,7 @@ struct pf_krule		*pf_get_translation(struct pf_pdesc *, struct mbuf *,
 
 struct pf_state_key	*pf_state_key_setup(struct pf_pdesc *, struct pf_addr *,
 			    struct pf_addr *, u_int16_t, u_int16_t);
-struct pf_state_key	*pf_state_key_clone(struct pf_state_key *);
+struct pf_state_key	*pf_state_key_clone(const struct pf_state_key *);
 void			 pf_rule_to_actions(struct pf_krule *,
 			    struct pf_rule_actions *);
 int			 pf_normalize_mss(struct mbuf *m, int off,
