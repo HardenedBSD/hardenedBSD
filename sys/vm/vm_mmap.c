@@ -287,6 +287,18 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 	if (pax_disallow_map32bit_active(td, flags))
 		return (EPERM);
 #endif
+#if defined(PAX_ASLR)
+	/*
+	 * Disallow executable superpage mappings. Encourage smaller granularity
+	 * so as not to reduce ASLR effectiveness.
+	 */
+	if (pax_aslr_active(p)) {
+		if (align == MAP_ALIGNED_SUPER &&
+		    ((prot & PROT_EXEC) == PROT_EXEC)) {
+			align = 0;
+		}
+	}
+#endif
 
 	/*
 	 * Check for illegal addresses.  Watch out for address wrap... Note

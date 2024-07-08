@@ -1033,13 +1033,20 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	 * loadable segment to the max supported superpage size. Too
 	 * large alignment requests are not useful and are indicators
 	 * of corrupted or outright malicious binary.
+	 *
+	 * HardenedBSD note: Enforce smallest unit alignment. Do not permit
+	 * superpage mappings.
 	 */
 	maxalign = PAGE_SIZE;
+#ifdef PAX_ASLR
+	maxsalign = PAGE_SIZE * 1024;
+#else
 	maxsalign = PAGE_SIZE * 1024;
 	for (i = MAXPAGESIZES - 1; i > 0; i--) {
 		if (pagesizes[i] > maxsalign)
 			maxsalign = pagesizes[i];
 	}
+#endif
 
 	mapsz = 0;
 

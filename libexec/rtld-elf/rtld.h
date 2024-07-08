@@ -414,4 +414,11 @@ void ifunc_init(Elf_Auxinfo[__min_size(AT_COUNT)]);
 void init_pltgot(Obj_Entry *);
 void allocate_initial_tls(Obj_Entry *);
 
+/*
+ * HardenedBSD additions.
+ */
+#ifdef HARDENEDBSD
+bool is_rtld_hardened(void);
+#endif
+
 #endif /* } */

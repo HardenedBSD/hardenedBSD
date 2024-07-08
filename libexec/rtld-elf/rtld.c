@@ -339,12 +339,21 @@ cache_harden_rtld(void)
     sz = sizeof(int);
     err = sysctlbyname("hardening.harden_rtld", &res, &sz, NULL, 0);
     if (err == 0) {
-        harden_rtld = res;
+	if (res < 0) {
+	    harden_rtld = true;
+	}
+	harden_rtld = (res > 0);
     } else {
         harden_rtld = true;
     }
 
     return (harden_rtld);
+}
+
+bool
+is_rtld_hardened(void)
+{
+	return (harden_rtld == true);
 }
 #endif
 
