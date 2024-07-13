@@ -1,11 +1,7 @@
-/*	$NetBSD: ssp.h,v 1.13 2015/09/03 20:43:47 plunky Exp $	*/
-
 /*-
- * Copyright (c) 2006, 2011 The NetBSD Foundation, Inc.
- * All rights reserved.
+ * SPDX-License-Identifier: BSD-2-Clause
  *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Christos Zoulas.
+ * Copyright (c) 2024, Klara, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,10 +24,37 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _SECURE_SSP_INTERNAL_H_
-#define _SECURE_SSP_INTERNAL_H_
+#ifndef _SSP_POLL_H_
+#define _SSP_POLL_H_
 
-#define __ssp_overlap(a, b, l) \
-    (((a) <= (b) && (b) < (a) + (l)) || ((b) <= (a) && (a) < (b) + (l)))
+#include <ssp/ssp.h>
 
-#endif /* _SECURE_SSP_INTERNAL_H_ */
+#if __SSP_FORTIFY_LEVEL > 0
+
+__BEGIN_DECLS
+
+__ssp_redirect_raw_impl(int, poll, poll,
+    (struct pollfd fds[], nfds_t nfds, int timeout))
+{
+	if (__ssp_bos(fds) / sizeof(fds[0]) < nfds)
+		__chk_fail();
+
+	return (__ssp_real(poll)(fds, nfds, timeout));
+}
+
+
+__ssp_redirect_raw_impl(int, ppoll, ppoll,
+    (struct pollfd fds[], nfds_t nfds,
+    const struct timespec *__restrict timeout,
+    const sigset_t *__restrict newsigmask))
+{
+	if (__ssp_bos(fds) / sizeof(fds[0]) < nfds)
+		__chk_fail();
+
+	return (__ssp_real(ppoll)(fds, nfds, timeout, newsigmask));
+}
+
+__END_DECLS
+
+#endif /* __SSP_FORTIFY_LEVEL > 0 */
+#endif /* _SSP_POLL_H_ */
