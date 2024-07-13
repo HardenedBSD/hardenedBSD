@@ -71,6 +71,12 @@ struct ipsecrequest {
 	u_int level;		/* IPsec level defined below. */
 };
 
+struct ipsec_accel_adddel_sp_tq {
+	struct vnet *adddel_vnet;
+	struct task adddel_task;
+	int adddel_scheduled;
+};
+
 /* Security Policy Data Base */
 struct secpolicy {
 	TAILQ_ENTRY(secpolicy) chain;
@@ -102,6 +108,11 @@ struct secpolicy {
 	time_t lastused;	/* updated every when kernel sends a packet */
 	long lifetime;		/* duration of the lifetime of this policy */
 	long validtime;		/* duration this policy is valid without use */
+	CK_LIST_HEAD(, ifp_handle_sp) accel_ifps;
+	struct ipsec_accel_adddel_sp_tq accel_add_tq;
+	struct ipsec_accel_adddel_sp_tq accel_del_tq;
+	struct inpcb *ipsec_accel_add_sp_inp;
+	const char *accel_ifname;
 };
 
 /*
@@ -336,8 +347,9 @@ void ipsec_setspidx_inpcb(struct inpcb *, struct secpolicyindex *, u_int);
 void ipsec4_setsockaddrs(const struct mbuf *, union sockaddr_union *,
     union sockaddr_union *);
 int ipsec4_common_input_cb(struct mbuf *, struct secasvar *, int, int);
-int ipsec4_check_pmtu(struct mbuf *, struct secpolicy *, int);
-int ipsec4_process_packet(struct mbuf *, struct secpolicy *, struct inpcb *);
+int ipsec4_check_pmtu(struct ifnet *, struct mbuf *, struct secpolicy *, int);
+int ipsec4_process_packet(struct ifnet *, struct mbuf *, struct secpolicy *,
+    struct inpcb *, u_long);
 int ipsec_process_done(struct mbuf *, struct secpolicy *, struct secasvar *,
     u_int);
 
