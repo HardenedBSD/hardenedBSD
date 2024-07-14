@@ -1186,8 +1186,26 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	vmspace = imgp->proc->p_vmspace;
 	addr = round_page((vm_offset_t)vmspace->vm_daddr + lim_max(td,
 	    RLIMIT_DATA));
+<<<<<<< HEAD
 	map->anon_loc = addr;
 	PROC_UNLOCK(imgp->proc);
+=======
+	if ((map->flags & MAP_ASLR) != 0) {
+		maxv1 = maxv / 2 + addr / 2;
+		error = __CONCAT(rnd_, __elfN(base))(map, addr, maxv1,
+#if VM_NRESERVLEVEL > 0
+		    pagesizes[VM_NRESERVLEVEL] != 0 ?
+		    /* Align anon_loc to the largest superpage size. */
+		    pagesizes[VM_NRESERVLEVEL] :
+#endif
+		    pagesizes[0], &anon_loc);
+		if (error != 0)
+			goto ret;
+		map->anon_loc = anon_loc;
+	} else {
+		map->anon_loc = addr;
+	}
+>>>>>>> internal/freebsd/current/main
 
 	imgp->entry_addr = entry;
 
