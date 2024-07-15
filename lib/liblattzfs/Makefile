@@ -19,8 +19,10 @@ CFLAGS+= 	-I${SRCTOP}/sys/contrib/openzfs/lib/libspl/include/os/freebsd
 CFLAGS+= 	-I${SRCTOP}/sys
 CFLAGS+= 	-I${SRCTOP}/cddl/compat/opensolaris/include
 CFLAGS+= 	-include ${SRCTOP}/sys/contrib/openzfs/include/os/freebsd/spl/sys/ccompile.h
-CFLAGS+= 	-DHAVE_ISSETUGID
+CFLAGS+= 	-DHAVE_ISSETUGID -DHAVE_STRLCAT -DHAVE_STRLCPY
 
 LIBADD+=		zfs nvpair spl
+
+FORTIFY_SOURCE=	0
 
 .include <bsd.lib.mk>
