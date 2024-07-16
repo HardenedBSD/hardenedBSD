@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-
-.include <bsd.init.mk>
-
-=======
->>>>>>> internal/freebsd/current/main
 CONFS=	openssl.cnf
 CONFSDIR=	/etc/ssl
 PROG=	openssl
