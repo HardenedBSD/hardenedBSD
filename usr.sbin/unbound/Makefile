@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 
 SUBDIR=	daemon anchor checkconf control host
+=======
+SUBDIR=	daemon anchor checkconf control
+>>>>>>> internal/freebsd/current/main
 SUBDIR+= setup
 SUBDIR_PARALLEL=
 

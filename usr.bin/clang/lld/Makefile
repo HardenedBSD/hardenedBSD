@@ -1,4 +1,3 @@
-
 .include <src.opts.mk>
 
 MK_CFI=		no

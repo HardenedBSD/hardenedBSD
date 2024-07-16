@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 
 .include <src.opts.mk>
 
+=======
+>>>>>>> internal/freebsd/current/main
 PACKAGE=runtime
 PROG=	ldconfig
 SRCS=	elfhints.c ldconfig.c

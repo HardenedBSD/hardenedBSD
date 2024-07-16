@@ -1,4 +1,3 @@
-
 .include <bsd.init.mk>
 
 NOCFI=		yes

@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 
 SHLIBDIR?=      /lib
 
+=======
+>>>>>>> internal/freebsd/current/main
 PACKAGE=lib${LIB}
 
 .include <src.opts.mk>
