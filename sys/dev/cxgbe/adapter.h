@@ -324,10 +324,10 @@ struct port_info {
 	uint8_t  port_type;
 	uint8_t  mod_type;
 	uint8_t  port_id;
-	uint8_t  tx_chan;
+	uint8_t  tx_chan;	/* tx TP c-channel */
+	uint8_t  rx_chan;	/* rx TP c-channel */
 	uint8_t  mps_bg_map;	/* rx MPS buffer group bitmap */
 	uint8_t  rx_e_chan_map;	/* rx TP e-channel bitmap */
-	uint8_t  rx_c_chan;	/* rx TP c-channel */
 
 	struct link_config link_cfg;
 	struct ifmedia media;
@@ -475,6 +475,7 @@ struct sge_eq {
 	unsigned int abs_id;	/* absolute SGE id for the eq */
 	uint8_t type;		/* EQ_CTRL/EQ_ETH/EQ_OFLD */
 	uint8_t doorbells;
+	uint8_t port_id;	/* port_id of the port associated with the eq */
 	uint8_t tx_chan;	/* tx channel used by the eq */
 	struct mtx eq_lock;
 
@@ -930,7 +931,7 @@ struct adapter {
 	int nrawf;
 	u_int vlan_id;
 
-	struct taskqueue *tq[MAX_NCHAN];	/* General purpose taskqueues */
+	struct taskqueue *tq[MAX_NPORTS];	/* General purpose taskqueues */
 	struct port_info *port[MAX_NPORTS];
 	uint8_t chan_map[MAX_NCHAN];		/* channel -> port */
 
