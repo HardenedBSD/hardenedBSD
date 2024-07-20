@@ -482,6 +482,20 @@ nvme_qpair_complete_tracker(struct nvme_tracker *tr,
 	mtx_unlock(&qpair->lock);
 }
 
+static uint32_t
+nvme_qpair_make_status(uint32_t sct, uint32_t sc, uint32_t dnr)
+{
+	uint32_t status = 0;
+
+	status |= NVMEF(NVME_STATUS_SCT, sct);
+	status |= NVMEF(NVME_STATUS_SC, sc);
+	status |= NVMEF(NVME_STATUS_DNR, dnr);
+	/* M=0 : this is artificial so no data in error log page */
+	/* CRD=0 : this is artificial and no delayed retry support anyway */
+	/* P=0 : phase not checked */
+	return (status);
+}
+
 static void
 nvme_qpair_manual_complete_tracker(
     struct nvme_tracker *tr, uint32_t sct, uint32_t sc, uint32_t dnr,
@@ -496,30 +510,24 @@ nvme_qpair_manual_complete_tracker(
 
 	cpl.sqid = qpair->id;
 	cpl.cid = tr->cid;
-	cpl.status |= NVMEF(NVME_STATUS_SCT, sct);
-	cpl.status |= NVMEF(NVME_STATUS_SC, sc);
-	cpl.status |= NVMEF(NVME_STATUS_DNR, dnr);
-	/* M=0 : this is artificial so no data in error log page */
-	/* CRD=0 : this is artificial and no delayed retry support anyway */
-	/* P=0 : phase not checked */
+	cpl.status = nvme_qpair_make_status(sct, sc, dnr);
 	nvme_qpair_complete_tracker(tr, &cpl, print_on_error);
 }
 
-void
+static void
 nvme_qpair_manual_complete_request(struct nvme_qpair *qpair,
-    struct nvme_request *req, uint32_t sct, uint32_t sc)
+    struct nvme_request *req, uint32_t sct, uint32_t sc, uint32_t dnr,
+    error_print_t print_on_error)
 {
 	struct nvme_completion	cpl;
 	bool			error;
 
 	memset(&cpl, 0, sizeof(cpl));
 	cpl.sqid = qpair->id;
-	cpl.status |= NVMEF(NVME_STATUS_SCT, sct);
-	cpl.status |= NVMEF(NVME_STATUS_SC, sc);
-
+	cpl.status = nvme_qpair_make_status(sct, sc, dnr);
 	error = nvme_completion_is_error(&cpl);
 
-	if (error) {
+	if (error && print_on_error == ERROR_PRINT_ALL) {
 		nvme_qpair_print_command(qpair, &req->cmd);
 		nvme_qpair_print_completion(qpair, &cpl);
 	}
@@ -1267,41 +1275,32 @@ _nvme_qpair_submit_request(struct nvme_qpair *qpair, struct nvme_request *req)
 	tr = TAILQ_FIRST(&qpair->free_tr);
 	req->qpair = qpair;
 
-	if (tr == NULL || qpair->recovery_state != RECOVERY_NONE) {
-		/*
-		 * No tracker is available, or the qpair is disabled due to an
-		 * in-progress controller-level reset. If we lose the race with
-		 * recovery_state, then we may add an extra request to the queue
-		 * which will be resubmitted later.  We only set recovery_state
-		 * to NONE with qpair->lock also held, so if we observe that the
-		 * state is not NONE, we know it can't transition to NONE below
-		 * when we've submitted the request to hardware.
-		 *
-		 * Also, as part of the failure process, we set recovery_state
-		 * to RECOVERY_WAITING, so we check here to see if we've failed
-		 * the controller. We set it before we call the qpair_fail
-		 * functions, which take out the lock lock before messing with
-		 * queued_req. Since we hold that lock, we know it's safe to
-		 * either fail directly, or queue the failure should is_failed
-		 * be stale. If we lose the race reading is_failed, then
-		 * nvme_qpair_fail will fail the queued request.
-		 */
+	/*
+	 * The controller has failed, so fail the request. Note, that this races
+	 * the recovery / timeout code. Since we hold the qpair lock, we know
+	 * it's safe to fail directly. is_failed is set when we fail the controller.
+	 * It is only ever reset in the ioctl reset controller path, which is safe
+	 * to race (for failed controllers, we make no guarantees about bringing
+	 * it out of failed state relative to other commands).
+	 */
+	if (qpair->ctrlr->is_failed) {
+		nvme_qpair_manual_complete_request(qpair, req,
+		    NVME_SCT_GENERIC, NVME_SC_ABORTED_BY_REQUEST, 1,
+		    ERROR_PRINT_NONE);
+		return;
+	}
 
-		if (qpair->ctrlr->is_failed) {
-			/*
-			 * The controller has failed, so fail the request.
-			 */
-			nvme_qpair_manual_complete_request(qpair, req,
-			    NVME_SCT_GENERIC, NVME_SC_ABORTED_BY_REQUEST);
-		} else {
-			/*
-			 * Put the request on the qpair's request queue to be
-			 *  processed when a tracker frees up via a command
-			 *  completion or when the controller reset is
-			 *  completed.
-			 */
-			STAILQ_INSERT_TAIL(&qpair->queued_req, req, stailq);
-		}
+	/*
+	 * No tracker is available, or the qpair is disabled due to an
+	 * in-progress controller-level reset. If we lose the race with
+	 * recovery_state, then we may add an extra request to the queue which
+	 * will be resubmitted later.  We only set recovery_state to NONE with
+	 * qpair->lock also held, so if we observe that the state is not NONE,
+	 * we know it won't transition back to NONE without retrying queued
+	 * request.
+	 */
+	if (tr == NULL || qpair->recovery_state != RECOVERY_NONE) {
+		STAILQ_INSERT_TAIL(&qpair->queued_req, req, stailq);
 		return;
 	}
 
@@ -1522,7 +1521,7 @@ nvme_qpair_fail(struct nvme_qpair *qpair)
 		STAILQ_REMOVE_HEAD(&qpair->queued_req, stailq);
 		mtx_unlock(&qpair->lock);
 		nvme_qpair_manual_complete_request(qpair, req, NVME_SCT_GENERIC,
-		    NVME_SC_ABORTED_BY_REQUEST);
+		    NVME_SC_ABORTED_BY_REQUEST, 1, ERROR_PRINT_ALL);
 		mtx_lock(&qpair->lock);
 	}
 
