@@ -342,13 +342,12 @@ error:
 }
 
 struct class *
-class_create(struct module *owner, const char *name)
+lkpi_class_create(const char *name)
 {
 	struct class *class;
 	int error;
 
 	class = kzalloc(sizeof(*class), M_WAITOK);
-	class->owner = owner;
 	class->name = name;
 	class->class_release = linux_class_kfree;
 	error = class_register(class);
@@ -2613,6 +2612,36 @@ device_can_wakeup(struct device *dev)
 	 */
 	pr_debug("%s:%d: not enabled; see comment.\n", __func__, __LINE__);
 	return (false);
+}
+
+static void
+devm_device_group_remove(struct device *dev, void *p)
+{
+	const struct attribute_group **dr = p;
+	const struct attribute_group *group = *dr;
+
+	sysfs_remove_group(&dev->kobj, group);
+}
+
+int
+lkpi_devm_device_add_group(struct device *dev,
+    const struct attribute_group *group)
+{
+	const struct attribute_group **dr;
+	int ret;
+
+	dr = devres_alloc(devm_device_group_remove, sizeof(*dr), GFP_KERNEL);
+	if (dr == NULL)
+		return (-ENOMEM);
+
+	ret = sysfs_create_group(&dev->kobj, group);
+	if (ret == 0) {
+		*dr = group;
+		devres_add(dev, dr);
+	} else
+		devres_free(dr);
+
+	return (ret);
 }
 
 #if defined(__i386__) || defined(__amd64__)
