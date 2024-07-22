@@ -60,13 +60,6 @@ device		al_udma			# Universal DMA
 # Qualcomm Snapdragon drivers
 device		qcom_gcc		# Global Clock Controller
 
-# VirtIO support
-device		virtio
-device		virtio_pci
-device		virtio_mmio
-device		virtio_blk
-device		vtnet
-
 # Google Virtual NIC
 device		gve		# Google Virtual NIC (gVNIC) driver
 
@@ -100,11 +93,6 @@ device		ice_ddp		# Intel 800 Series DDP Package
 
 # Etherswitch devices
 device		e6000sw		# Marvell mv88e6085 based switches
-
-# NVM Express (NVMe) support
-device		nvme		# base NVMe driver
-options 	NVME_USE_NVD=0	# prefer the cam(4) based nda(4) driver
-device		nvd		# expose NVMe namespaces as disks, depends on nvme
 
 # MMC/SD/SDIO Card slot support
 device		sdhci_xenon		# Marvell Xenon SD/MMC controller
