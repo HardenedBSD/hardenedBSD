@@ -146,11 +146,13 @@ struct tid_info {
 	u_int stids_in_use;
 	u_int nstids_free_head;	/* # of available stids at the beginning */
 	struct stid_head stids;
+	bool stid_tab_stopped;
 
 	struct mtx atid_lock __aligned(CACHE_LINE_SIZE);
 	union aopen_entry *atid_tab;
 	union aopen_entry *afree;
 	u_int atids_in_use;
+	bool atid_alloc_stopped;
 
 	/* High priority filters and normal filters share the lock and cv. */
 	struct mtx ftid_lock __aligned(CACHE_LINE_SIZE);
@@ -212,6 +214,7 @@ struct uld_info {
 	int (*uld_activate)(struct adapter *);
 	int (*uld_deactivate)(struct adapter *);
 	int (*uld_stop)(struct adapter *);
+	int (*uld_restart)(struct adapter *);
 };
 
 struct tom_tunables {
