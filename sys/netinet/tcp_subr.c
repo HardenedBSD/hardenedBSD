@@ -359,6 +359,7 @@ static struct tcp_function_block tcp_def_funcblk = {
 	.tfb_tcp_fb_init = tcp_default_fb_init,
 	.tfb_tcp_fb_fini = tcp_default_fb_fini,
 	.tfb_switch_failed = tcp_default_switch_failed,
+	.tfb_flags = TCP_FUNC_DEFAULT_OK,
 };
 
 static int tcp_fb_cnt = 0;
@@ -674,6 +675,10 @@ sysctl_net_inet_default_tcp_functions(SYSCTL_HANDLER_ARGS)
 	if ((blk == NULL) ||
 	    (blk->tfb_flags & TCP_FUNC_BEING_REMOVED)) {
 		error = ENOENT;
+		goto done;
+	}
+	if ((blk->tfb_flags & TCP_FUNC_DEFAULT_OK) == 0) {
+		error = EINVAL;
 		goto done;
 	}
 	V_tcp_func_set_ptr = blk;
@@ -2180,9 +2185,11 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
  * Create a new TCP control block, making an empty reassembly queue and hooking
  * it to the argument protocol control block.  The `inp' parameter must have
  * come from the zone allocator set up by tcpcbstor declaration.
+ * The caller can provide a pointer to a tcpcb of the listener to inherit the
+ * TCP function block from the listener.
  */
 struct tcpcb *
-tcp_newtcpcb(struct inpcb *inp)
+tcp_newtcpcb(struct inpcb *inp, struct tcpcb *listening_tcb)
 {
 	struct tcpcb *tp = intotcpcb(inp);
 #ifdef INET6
@@ -2200,8 +2207,21 @@ tcp_newtcpcb(struct inpcb *inp)
 	tp->t_ccv.type = IPPROTO_TCP;
 	tp->t_ccv.ccvc.tcp = tp;
 	rw_rlock(&tcp_function_lock);
-	tp->t_fb = V_tcp_func_set_ptr;
+	if (listening_tcb != NULL) {
+		INP_LOCK_ASSERT(tptoinpcb(listening_tcb));
+		KASSERT(listening_tcb->t_fb != NULL,
+		    ("tcp_newtcpcb: listening_tcb->t_fb is NULL"));
+		if (listening_tcb->t_fb->tfb_flags & TCP_FUNC_BEING_REMOVED) {
+			rw_runlock(&tcp_function_lock);
+			return (NULL);
+		}
+		tp->t_fb = listening_tcb->t_fb;
+	} else {
+		tp->t_fb = V_tcp_func_set_ptr;
+	}
 	refcount_acquire(&tp->t_fb->tfb_refcnt);
+	KASSERT((tp->t_fb->tfb_flags & TCP_FUNC_BEING_REMOVED) == 0,
+	    ("tcp_newtcpcb: using TFB being removed"));
 	rw_runlock(&tcp_function_lock);
 	/*
 	 * Use the current system default CC algorithm.
