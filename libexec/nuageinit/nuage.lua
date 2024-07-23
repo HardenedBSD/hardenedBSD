@@ -112,7 +112,7 @@ local function adduser(pwd)
 		postcmd = " -H 0 "
 	elseif pwd.plain_text_passwd then
 		precmd = "echo "..pwd.plain_text_passwd .. "| "
-		postcmd = " -H 0 "
+		postcmd = " -h 0 "
 	end
 	cmd = precmd .. "pw "
 	if root then
@@ -205,9 +205,11 @@ local function addsshkey(homedir, key)
 	f:write(key .. "\n")
 	f:close()
 	if chownak then
+		os.execute("chmod 0600 " .. ak_path)
 		pu.chown(ak_path, dirattrs.uid, dirattrs.gid)
 	end
 	if chowndotssh then
+		os.execute("chmod 0700 " .. dotssh_path)
 		pu.chown(dotssh_path, dirattrs.uid, dirattrs.gid)
 	end
 end
