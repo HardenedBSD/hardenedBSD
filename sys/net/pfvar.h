@@ -2125,8 +2125,10 @@ struct pf_idhash {
 };
 
 extern u_long		pf_ioctl_maxcount;
-extern u_long		pf_hashmask;
-extern u_long		pf_srchashmask;
+VNET_DECLARE(u_long, pf_hashmask);
+#define V_pf_hashmask	VNET(pf_hashmask)
+VNET_DECLARE(u_long, pf_srchashmask);
+#define V_pf_srchashmask	VNET(pf_srchashmask)
 #define	PF_HASHSIZ	(131072)
 #define	PF_SRCHASHSIZ	(PF_HASHSIZ/4)
 VNET_DECLARE(struct pf_keyhash *, pf_keyhash);
@@ -2136,7 +2138,7 @@ VNET_DECLARE(struct pf_idhash *, pf_idhash);
 VNET_DECLARE(struct pf_srchash *, pf_srchash);
 #define	V_pf_srchash	VNET(pf_srchash)
 
-#define PF_IDHASH(s)	(be64toh((s)->id) % (pf_hashmask + 1))
+#define PF_IDHASH(s)	(be64toh((s)->id) % (V_pf_hashmask + 1))
 
 VNET_DECLARE(void *, pf_swi_cookie);
 #define V_pf_swi_cookie	VNET(pf_swi_cookie)
@@ -2525,6 +2527,9 @@ int			 pf_ioctl_set_timeout(int, int, int *);
 int			 pf_ioctl_get_limit(int, unsigned int *);
 int			 pf_ioctl_set_limit(int, unsigned int, unsigned int *);
 int			 pf_ioctl_begin_addrs(uint32_t *);
+int			 pf_ioctl_add_addr(struct pfioc_pooladdr *);
+int			 pf_ioctl_get_addrs(struct pfioc_pooladdr *);
+int			 pf_ioctl_get_addr(struct pfioc_pooladdr *);
 
 void			 pf_krule_free(struct pf_krule *);
 void			 pf_krule_clear_counters(struct pf_krule *);

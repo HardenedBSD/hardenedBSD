@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 
 .include <bsd.init.mk>
 
+=======
+>>>>>>> internal/hardened/current/master
 ZFSTOP=	${SRCTOP}/sys/contrib/openzfs
 
 .PATH: ${ZFSTOP}/man/man4

@@ -1,4 +1,3 @@
-
 PACKAGE=	pkg-bootstrap
 
 PROG=	pkg

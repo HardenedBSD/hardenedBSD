@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 
 .include <bsd.init.mk>
 
+=======
+>>>>>>> internal/hardened/current/master
 PROG=	jevents
 SRCS=	jevents.c jsmn.c json.c
 CFLAGS+= -Wno-cast-qual

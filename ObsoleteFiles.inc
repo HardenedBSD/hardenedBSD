@@ -51,6 +51,17 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20240726: deprecate contigfree(9)
+OLD_FILES+=usr/share/man/man9/contigfree.9.gz
+
+# 20240721: retire vm_page_alloc_freelist
+OLD_FILES+=usr/share/man/man9/vm_page_alloc_freelist.9.gz
+OLD_FILES+=usr/share/man/man9/vm_page_alloc_freelist_domain.9.gz
+
+# 20240716: retire mergemaster
+OLD_FILES+=usr/sbin/mergemaster
+OLD_FILES+=usr/share/man/man8/mergemaster.8.gz
+
 # 20240527: csh: Remove hardlink /.cshrc
 OLD_FILES+=.cshrc
 

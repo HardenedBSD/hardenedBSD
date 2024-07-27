@@ -989,8 +989,9 @@ typedef struct {
 #define	AT_FXRNG	33	/* Pointer to root RNG seed version. */
 #define	AT_KPRELOAD	34	/* Base of vdso, preloaded by rtld */
 #define	AT_PAXFLAGS 	35
+#define	AT_CHERI_STATS	36	/* Reserved */
 
-#define	AT_COUNT	36	/* Count of defined aux entry types. */
+#define	AT_COUNT	37	/* Count of defined aux entry types. */
 
 /*
  * Relocation types.

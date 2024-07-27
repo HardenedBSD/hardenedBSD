@@ -1,6 +1,3 @@
-
-.include <bsd.init.mk>
-
 CONFS=	openssl.cnf
 CONFSDIR=	/etc/ssl
 PROG=	openssl

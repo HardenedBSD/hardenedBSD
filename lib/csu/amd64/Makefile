@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 
 .include <src.opts.mk>
 
+=======
+>>>>>>> internal/hardened/current/master
 .PATH: ${.CURDIR:H}/common
 
 CFLAGS+=	-I${.CURDIR}

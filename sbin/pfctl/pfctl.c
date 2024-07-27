@@ -964,19 +964,14 @@ pfctl_get_pool(int dev, struct pfctl_pool *pool, u_int32_t nr,
 	u_int32_t pnr, mpnr;
 
 	memset(&pp, 0, sizeof(pp));
-	memcpy(pp.anchor, anchorname, sizeof(pp.anchor));
-	pp.r_action = r_action;
-	pp.r_num = nr;
-	pp.ticket = ticket;
-	if (ioctl(dev, DIOCGETADDRS, &pp)) {
+	if (pfctl_get_addrs(pfh, ticket, nr, r_action, anchorname, &mpnr) != 0) {
 		warn("DIOCGETADDRS");
 		return (-1);
 	}
-	mpnr = pp.nr;
+
 	TAILQ_INIT(&pool->list);
 	for (pnr = 0; pnr < mpnr; ++pnr) {
-		pp.nr = pnr;
-		if (ioctl(dev, DIOCGETADDR, &pp)) {
+		if (pfctl_get_addr(pfh, ticket, nr, r_action, anchorname, pnr, &pp) != 0) {
 			warn("DIOCGETADDR");
 			return (-1);
 		}
@@ -1727,7 +1722,7 @@ pfctl_add_pool(struct pfctl *pf, struct pfctl_pool *p, sa_family_t af)
 	TAILQ_FOREACH(pa, &p->list, entries) {
 		memcpy(&pf->paddr.addr, pa, sizeof(struct pf_pooladdr));
 		if ((pf->opts & PF_OPT_NOACTION) == 0) {
-			if (ioctl(pf->dev, DIOCADDADDR, &pf->paddr))
+			if (pfctl_add_addr(pf->h, &pf->paddr) != 0)
 				err(1, "DIOCADDADDR");
 		}
 	}

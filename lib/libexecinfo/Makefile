@@ -1,4 +1,3 @@
-
 SHLIBDIR?=      /lib
 
 PACKAGE=lib${LIB}

@@ -1,4 +1,3 @@
-
 PROG=	cap_mkdb
 
 NOCFI=	yes
