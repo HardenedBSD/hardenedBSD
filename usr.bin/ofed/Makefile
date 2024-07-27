@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 .include <src.opts.mk>
->>>>>>> internal/hardened/current/master
 
 SUBDIR= \
 	libibverbs \
