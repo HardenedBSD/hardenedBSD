@@ -217,8 +217,6 @@ db_ps_proc(struct proc *p)
 	state[1] = '\0';
 
 	/* Additional process state flags. */
-	if (!(p->p_flag & P_INMEM))
-		strlcat(state, "W", sizeof(state));
 	if (p->p_flag & P_TRACED)
 		strlcat(state, "X", sizeof(state));
 	if (p->p_flag & P_WEXIT && p->p_state != PRS_ZOMBIE)
@@ -292,8 +290,6 @@ dumpthread(volatile struct proc *p, volatile struct thread *td, int all)
 				else
 					strlcat(state, "D", sizeof(state));
 			}
-			if (TD_IS_SWAPPED(td))
-				strlcat(state, "W", sizeof(state));
 			if (TD_AWAITING_INTR(td))
 				strlcat(state, "I", sizeof(state));
 			if (TD_IS_SUSPENDED(td))
@@ -396,12 +392,6 @@ DB_SHOW_COMMAND(thread, db_show_thread)
 			if (comma)
 				db_printf(", ");
 			db_printf("SUSPENDED");
-			comma = true;
-		}
-		if (TD_IS_SWAPPED(td)) {
-			if (comma)
-				db_printf(", ");
-			db_printf("SWAPPED");
 			comma = true;
 		}
 		if (TD_ON_LOCK(td)) {
