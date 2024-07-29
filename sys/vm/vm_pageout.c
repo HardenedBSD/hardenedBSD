@@ -1765,22 +1765,10 @@ vm_pageout_inactive(struct vm_domain *vmd, int shortage, int *addl_shortage)
 	}
 
 	/*
-	 * Wakeup the swapout daemon if we didn't free the targeted number of
-	 * pages.
-	 */
-	if (page_shortage > 0)
-		vm_swapout_run();
-
-	/*
 	 * If the inactive queue scan fails repeatedly to meet its
 	 * target, kill the largest process.
 	 */
 	vm_pageout_mightbe_oom(vmd, page_shortage, starting_page_shortage);
-
-	/*
-	 * Reclaim pages by swapping out idle processes, if configured to do so.
-	 */
-	vm_swapout_run_idle();
 
 	/*
 	 * See the description of addl_page_shortage above.
@@ -1972,8 +1960,7 @@ vm_pageout_oom(int shortage)
 			if (!TD_ON_RUNQ(td) &&
 			    !TD_IS_RUNNING(td) &&
 			    !TD_IS_SLEEPING(td) &&
-			    !TD_IS_SUSPENDED(td) &&
-			    !TD_IS_SWAPPED(td)) {
+			    !TD_IS_SUSPENDED(td)) {
 				thread_unlock(td);
 				breakout = true;
 				break;
@@ -1992,7 +1979,7 @@ vm_pageout_oom(int shortage)
 			PROC_UNLOCK(p);
 			continue;
 		}
-		_PHOLD_LITE(p);
+		_PHOLD(p);
 		PROC_UNLOCK(p);
 		sx_sunlock(&allproc_lock);
 		if (!vm_map_trylock_read(&vm->vm_map)) {

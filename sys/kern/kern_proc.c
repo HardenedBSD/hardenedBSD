@@ -1140,20 +1140,15 @@ fill_kinfo_proc_only(struct proc *p, struct kinfo_proc *kp)
 
 		kp->ki_size = vm->vm_map.size;
 		kp->ki_rssize = vmspace_resident_count(vm); /*XXX*/
-		FOREACH_THREAD_IN_PROC(p, td0) {
-			if (!TD_IS_SWAPPED(td0))
-				kp->ki_rssize += td0->td_kstack_pages;
-		}
+		FOREACH_THREAD_IN_PROC(p, td0)
+			kp->ki_rssize += td0->td_kstack_pages;
 		kp->ki_swrss = vm->vm_swrss;
 		kp->ki_tsize = vm->vm_tsize;
 		kp->ki_dsize = vm->vm_dsize;
 		kp->ki_ssize = vm->vm_ssize;
 	} else if (p->p_state == PRS_ZOMBIE)
 		kp->ki_stat = SZOMB;
-	if (kp->ki_flag & P_INMEM)
-		kp->ki_sflag = PS_INMEM;
-	else
-		kp->ki_sflag = 0;
+	kp->ki_sflag = PS_INMEM;
 	/* Calculate legacy swtime as seconds since 'swtick'. */
 	kp->ki_swtime = (ticks - p->p_swtick) / hz;
 	kp->ki_pid = p->p_pid;
@@ -2869,9 +2864,7 @@ sysctl_kern_proc_kstack(SYSCTL_HANDLER_ARGS)
 		    sizeof(kkstp->kkst_trace), SBUF_FIXEDLEN);
 		thread_lock(td);
 		kkstp->kkst_tid = td->td_tid;
-		if (TD_IS_SWAPPED(td))
-			kkstp->kkst_state = KKST_STATE_SWAPPED;
-		else if (stack_save_td(st, td) == 0)
+		if (stack_save_td(st, td) == 0)
 			kkstp->kkst_state = KKST_STATE_STACKOK;
 		else
 			kkstp->kkst_state = KKST_STATE_RUNNING;
