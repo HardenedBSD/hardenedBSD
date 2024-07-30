@@ -163,6 +163,7 @@ SYSCTL_PROC(_vm, OID_AUTO, page_blacklist, CTLTYPE_STRING | CTLFLAG_RD |
 static uma_zone_t fakepg_zone;
 
 static void vm_page_alloc_check(vm_page_t m);
+static vm_page_t vm_page_alloc_nofree_domain(int domain, int req);
 static bool _vm_page_busy_sleep(vm_object_t obj, vm_page_t m,
     vm_pindex_t pindex, const char *wmesg, int allocflags, bool locked);
 static void vm_page_clear_dirty_mask(vm_page_t m, vm_page_bits_t pagebits);
@@ -2082,7 +2083,8 @@ vm_page_alloc_domain_after(vm_object_t object, vm_pindex_t pindex, int domain,
 #define	VPA_FLAGS	(VM_ALLOC_CLASS_MASK | VM_ALLOC_WAITFAIL |	\
 			 VM_ALLOC_NOWAIT | VM_ALLOC_NOBUSY |		\
 			 VM_ALLOC_SBUSY | VM_ALLOC_WIRED |		\
-			 VM_ALLOC_NODUMP | VM_ALLOC_ZERO | VM_ALLOC_COUNT_MASK)
+			 VM_ALLOC_NODUMP | VM_ALLOC_ZERO |		\
+			 VM_ALLOC_NOFREE | VM_ALLOC_COUNT_MASK)
 	KASSERT((req & ~VPA_FLAGS) == 0,
 	    ("invalid request %#x", req));
 	KASSERT(((req & (VM_ALLOC_NOBUSY | VM_ALLOC_SBUSY)) !=
@@ -2098,6 +2100,11 @@ vm_page_alloc_domain_after(vm_object_t object, vm_pindex_t pindex, int domain,
 	if (!vm_pager_can_alloc_page(object, pindex))
 		return (NULL);
 again:
+	if (__predict_false((req & VM_ALLOC_NOFREE) != 0)) {
+		m = vm_page_alloc_nofree_domain(domain, req);
+		if (m != NULL)
+			goto found;
+	}
 #if VM_NRESERVLEVEL > 0
 	/*
 	 * Can we allocate the page from a reservation?
@@ -2154,6 +2161,8 @@ found:
 	flags |= m->flags & PG_ZERO;
 	if ((req & VM_ALLOC_NODUMP) != 0)
 		flags |= PG_NODUMP;
+	if ((req & VM_ALLOC_NOFREE) != 0)
+		flags |= PG_NOFREE;
 	m->flags = flags;
 	m->a.flags = 0;
 	m->oflags = (object->flags & OBJ_UNMANAGED) != 0 ? VPO_UNMANAGED : 0;
@@ -2418,13 +2427,21 @@ vm_page_alloc_noobj_domain(int domain, int req)
 #define	VPAN_FLAGS	(VM_ALLOC_CLASS_MASK | VM_ALLOC_WAITFAIL |      \
 			 VM_ALLOC_NOWAIT | VM_ALLOC_WAITOK |		\
 			 VM_ALLOC_NOBUSY | VM_ALLOC_WIRED |		\
-			 VM_ALLOC_NODUMP | VM_ALLOC_ZERO | VM_ALLOC_COUNT_MASK)
+			 VM_ALLOC_NODUMP | VM_ALLOC_ZERO |		\
+			 VM_ALLOC_NOFREE | VM_ALLOC_COUNT_MASK)
 	KASSERT((req & ~VPAN_FLAGS) == 0,
 	    ("invalid request %#x", req));
 
-	flags = (req & VM_ALLOC_NODUMP) != 0 ? PG_NODUMP : 0;
+	flags = ((req & VM_ALLOC_NODUMP) != 0 ? PG_NODUMP : 0) |
+	    ((req & VM_ALLOC_NOFREE) != 0 ? PG_NOFREE : 0);
 	vmd = VM_DOMAIN(domain);
 again:
+	if (__predict_false((req & VM_ALLOC_NOFREE) != 0)) {
+		m = vm_page_alloc_nofree_domain(domain, req);
+		if (m != NULL)
+			goto found;
+	}
+
 	if (vmd->vmd_pgcache[VM_FREEPOOL_DIRECT].zone != NULL) {
 		m = uma_zalloc(vmd->vmd_pgcache[VM_FREEPOOL_DIRECT].zone,
 		    M_NOWAIT | M_NOVM);
@@ -2471,6 +2488,56 @@ found:
 
 	if ((req & VM_ALLOC_ZERO) != 0 && (m->flags & PG_ZERO) == 0)
 		pmap_zero_page(m);
+
+	return (m);
+}
+
+#if VM_NRESERVLEVEL > 1
+#define	VM_NOFREE_IMPORT_ORDER	(VM_LEVEL_1_ORDER + VM_LEVEL_0_ORDER)
+#elif VM_NRESERVLEVEL > 0
+#define	VM_NOFREE_IMPORT_ORDER	VM_LEVEL_0_ORDER
+#else
+#define	VM_NOFREE_IMPORT_ORDER	8
+#endif
+
+/*
+ * Allocate a single NOFREE page.
+ *
+ * This routine hands out NOFREE pages from higher-order
+ * physical memory blocks in order to reduce memory fragmentation.
+ * When a NOFREE for a given domain chunk is used up,
+ * the routine will try to fetch a new one from the freelists
+ * and discard the old one.
+ */
+static vm_page_t
+vm_page_alloc_nofree_domain(int domain, int req)
+{
+	vm_page_t m;
+	struct vm_domain *vmd;
+	struct vm_nofreeq *nqp;
+
+	KASSERT((req & VM_ALLOC_NOFREE) != 0, ("invalid request %#x", req));
+
+	vmd = VM_DOMAIN(domain);
+	nqp = &vmd->vmd_nofreeq;
+	vm_domain_free_lock(vmd);
+	if (nqp->offs >= (1 << VM_NOFREE_IMPORT_ORDER) || nqp->ma == NULL) {
+		if (!vm_domain_allocate(vmd, req,
+		    1 << VM_NOFREE_IMPORT_ORDER)) {
+			vm_domain_free_unlock(vmd);
+			return (NULL);
+		}
+		nqp->ma = vm_phys_alloc_pages(domain, VM_FREEPOOL_DEFAULT,
+		    VM_NOFREE_IMPORT_ORDER);
+		if (nqp->ma == NULL) {
+			vm_domain_freecnt_inc(vmd, 1 << VM_NOFREE_IMPORT_ORDER);
+			vm_domain_free_unlock(vmd);
+			return (NULL);
+		}
+		nqp->offs = 0;
+	}
+	m = &nqp->ma[nqp->offs++];
+	vm_domain_free_unlock(vmd);
 
 	return (m);
 }
@@ -3937,6 +4004,8 @@ vm_page_free_prep(vm_page_t m)
 			    m, i, (uintmax_t)*p));
 	}
 #endif
+	KASSERT((m->flags & PG_NOFREE) == 0,
+	    ("%s: attempting to free a PG_NOFREE page", __func__));
 	if ((m->oflags & VPO_UNMANAGED) == 0) {
 		KASSERT(!pmap_page_is_mapped(m),
 		    ("vm_page_free_prep: freeing mapped page %p", m));
