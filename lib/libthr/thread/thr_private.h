@@ -1101,6 +1101,7 @@ int _thr_mutex_unlock(pthread_mutex_t *);
 int __Tthr_mutex_lock(pthread_mutex_t *);
 int __Tthr_mutex_trylock(pthread_mutex_t *);
 int _Tthr_sigqueue(pthread_t pthread, int sig, const union sigval value);
+void _thr_resolve_machdep(void);
 
 __END_DECLS
 __NULLABILITY_PRAGMA_POP
