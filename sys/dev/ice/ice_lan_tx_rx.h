@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/*  Copyright (c) 2023, Intel Corporation
+/*  Copyright (c) 2024, Intel Corporation
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -189,7 +189,6 @@ struct ice_fltr_desc {
 
 #define ICE_FXD_FLTR_QW1_FDID_PRI_S	25
 #define ICE_FXD_FLTR_QW1_FDID_PRI_M	(0x7ULL << ICE_FXD_FLTR_QW1_FDID_PRI_S)
-#define ICE_FXD_FLTR_QW1_FDID_PRI_ZERO	0x0ULL
 #define ICE_FXD_FLTR_QW1_FDID_PRI_ONE	0x1ULL
 #define ICE_FXD_FLTR_QW1_FDID_PRI_THREE	0x3ULL
 

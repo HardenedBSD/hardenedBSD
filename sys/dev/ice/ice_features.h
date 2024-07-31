@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/*  Copyright (c) 2023, Intel Corporation
+/*  Copyright (c) 2024, Intel Corporation
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -69,6 +69,8 @@ enum feat_list {
 	ICE_FEATURE_HAS_PBA,
 	ICE_FEATURE_DCB,
 	ICE_FEATURE_TX_BALANCE,
+	ICE_FEATURE_DUAL_NAC,
+	ICE_FEATURE_TEMP_SENSOR,
 	/* Must be last entry */
 	ICE_FEATURE_COUNT
 };
@@ -87,7 +89,6 @@ enum feat_list {
 static inline void
 ice_disable_unsupported_features(ice_bitmap_t __unused *bitmap)
 {
-	ice_clear_bit(ICE_FEATURE_SRIOV, bitmap);
 #ifndef DEV_NETMAP
 	ice_clear_bit(ICE_FEATURE_NETMAP, bitmap);
 #endif

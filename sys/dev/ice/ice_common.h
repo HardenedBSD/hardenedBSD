@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/*  Copyright (c) 2023, Intel Corporation
+/*  Copyright (c) 2024, Intel Corporation
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -88,10 +88,10 @@ enum ice_status ice_get_caps(struct ice_hw *hw);
 void ice_set_safe_mode_caps(struct ice_hw *hw);
 
 enum ice_status
-ice_aq_get_internal_data(struct ice_hw *hw, u8 cluster_id, u16 table_id,
+ice_aq_get_internal_data(struct ice_hw *hw, u16 cluster_id, u16 table_id,
 			 u32 start, void *buf, u16 buf_size, u16 *ret_buf_size,
-			 u16 *ret_next_table, u32 *ret_next_index,
-			 struct ice_sq_cd *cd);
+			 u16 *ret_next_cluster, u16 *ret_next_table,
+			 u32 *ret_next_index, struct ice_sq_cd *cd);
 
 enum ice_status ice_set_mac_type(struct ice_hw *hw);
 
@@ -128,6 +128,7 @@ ice_write_tx_drbell_q_ctx(struct ice_hw *hw,
 			  struct ice_tx_drbell_q_ctx *tx_drbell_q_ctx,
 			  u32 tx_drbell_q_index);
 
+int ice_lut_size_to_type(int lut_size);
 enum ice_status
 ice_aq_get_rss_lut(struct ice_hw *hw, struct ice_aq_get_set_rss_lut_params *get_params);
 enum ice_status
@@ -206,7 +207,6 @@ enum ice_status
 ice_get_link_default_override(struct ice_link_default_override_tlv *ldo,
 			      struct ice_port_info *pi);
 bool ice_is_phy_caps_an_enabled(struct ice_aqc_get_phy_caps_data *caps);
-
 enum ice_fc_mode ice_caps_to_fc_mode(u8 caps);
 enum ice_fec_mode ice_caps_to_fec_mode(u8 caps, u8 fec_options);
 enum ice_status
@@ -296,6 +296,10 @@ enum ice_status ice_replay_vsi(struct ice_hw *hw, u16 vsi_handle);
 void ice_replay_post(struct ice_hw *hw);
 struct ice_q_ctx *
 ice_get_lan_q_ctx(struct ice_hw *hw, u16 vsi_handle, u8 tc, u16 q_handle);
+enum ice_status
+ice_aq_get_sensor_reading(struct ice_hw *hw, u8 sensor, u8 format,
+			  struct ice_aqc_get_sensor_reading_resp *data,
+			  struct ice_sq_cd *cd);
 void
 ice_stat_update40(struct ice_hw *hw, u32 reg, bool prev_stat_loaded,
 		  u64 *prev_stat, u64 *cur_stat);
@@ -348,7 +352,7 @@ ice_aq_read_i2c(struct ice_hw *hw, struct ice_aqc_link_topo_addr topo_addr,
 		struct ice_sq_cd *cd);
 enum ice_status
 ice_aq_write_i2c(struct ice_hw *hw, struct ice_aqc_link_topo_addr topo_addr,
-		 u16 bus_addr, __le16 addr, u8 params, u8 *data,
+		 u16 bus_addr, __le16 addr, u8 params, const u8 *data,
 		 struct ice_sq_cd *cd);
 enum ice_status
 ice_aq_set_health_status_config(struct ice_hw *hw, u8 event_source,

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/*  Copyright (c) 2023, Intel Corporation
+/*  Copyright (c) 2024, Intel Corporation
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -502,3 +502,4 @@ ice_fwlog_event_dump(struct ice_hw *hw, struct ice_aq_desc *desc, void *buf)
 
 	ice_info_fwlog(hw, 32, 1, (u8 *)buf, LE16_TO_CPU(desc->datalen));
 }
+

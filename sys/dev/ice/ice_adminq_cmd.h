@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/*  Copyright (c) 2023, Intel Corporation
+/*  Copyright (c) 2024, Intel Corporation
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -152,6 +152,7 @@ struct ice_aqc_list_caps_elem {
 #define ICE_AQC_CAPS_WOL_PROXY				0x0008
 #define ICE_AQC_CAPS_SRIOV				0x0012
 #define ICE_AQC_CAPS_VF					0x0013
+#define ICE_AQC_CAPS_VMDQ				0x0014
 #define ICE_AQC_CAPS_802_1QBG				0x0015
 #define ICE_AQC_CAPS_802_1BR				0x0016
 #define ICE_AQC_CAPS_VSI				0x0017
@@ -168,6 +169,7 @@ struct ice_aqc_list_caps_elem {
 #define ICE_AQC_CAPS_LED				0x0061
 #define ICE_AQC_CAPS_SDP				0x0062
 #define ICE_AQC_CAPS_WR_CSR_PROT			0x0064
+#define ICE_AQC_CAPS_SENSOR_READING			0x0067
 #define ICE_AQC_CAPS_LOGI_TO_PHYSI_PORT_MAP		0x0073
 #define ICE_AQC_CAPS_SKU				0x0074
 #define ICE_AQC_CAPS_PORT_MAP				0x0075
@@ -180,8 +182,11 @@ struct ice_aqc_list_caps_elem {
 #define ICE_AQC_CAPS_EXT_TOPO_DEV_IMG3			0x0084
 #define ICE_AQC_CAPS_TX_SCHED_TOPO_COMP_MODE		0x0085
 #define ICE_AQC_CAPS_NAC_TOPOLOGY			0x0087
-#define ICE_AQC_CAPS_DYN_FLATTENING			0x0090
+#define ICE_AQC_CAPS_DYN_FLATTENING			0x008A
+#define ICE_AQC_CAPS_OROM_RECOVERY_UPDATE		0x0090
 #define ICE_AQC_CAPS_ROCEV2_LAG				0x0092
+#define ICE_AQC_BIT_ROCEV2_LAG				0x01
+#define ICE_AQC_BIT_SRIOV_LAG				0x02
 
 	u8 major_ver;
 	u8 minor_ver;
@@ -356,6 +361,8 @@ struct ice_aqc_set_port_params {
 #define ICE_AQC_RES_TYPE_FLAG_SHARED			BIT(7)
 #define ICE_AQC_RES_TYPE_FLAG_SCAN_BOTTOM		BIT(12)
 #define ICE_AQC_RES_TYPE_FLAG_IGNORE_INDEX		BIT(13)
+#define ICE_AQC_RES_TYPE_FLAG_SUBSCRIBE_SHARED		BIT(14)
+#define ICE_AQC_RES_TYPE_FLAG_SUBSCRIBE_CTL		BIT(15)
 
 #define ICE_AQC_RES_TYPE_FLAG_DEDICATED			0x00
 
@@ -793,12 +800,30 @@ struct ice_aqc_sw_rules {
 	__le32 addr_low;
 };
 
+/* Add switch rule response:
+ * Content of return buffer is same as the input buffer. The status field and
+ * LUT index are updated as part of the response
+ */
+struct ice_aqc_sw_rules_elem_hdr {
+	__le16 type; /* Switch rule type, one of T_... */
+#define ICE_AQC_SW_RULES_T_LKUP_RX		0x0
+#define ICE_AQC_SW_RULES_T_LKUP_TX		0x1
+#define ICE_AQC_SW_RULES_T_LG_ACT		0x2
+#define ICE_AQC_SW_RULES_T_VSI_LIST_SET		0x3
+#define ICE_AQC_SW_RULES_T_VSI_LIST_CLEAR	0x4
+#define ICE_AQC_SW_RULES_T_PRUNE_LIST_SET	0x5
+#define ICE_AQC_SW_RULES_T_PRUNE_LIST_CLEAR	0x6
+	__le16 status;
+};
+
 /* Add/Update/Get/Remove lookup Rx/Tx command/response entry
  * This structures describes the lookup rules and associated actions. "index"
  * is returned as part of a response to a successful Add command, and can be
  * used to identify the rule for Update/Get/Remove commands.
  */
 struct ice_sw_rule_lkup_rx_tx {
+	struct ice_aqc_sw_rules_elem_hdr hdr;
+
 	__le16 recipe_id;
 #define ICE_SW_RECIPE_LOGICAL_PORT_FWD		10
 	/* Source port for LOOKUP_RX and source VSI in case of LOOKUP_TX */
@@ -877,14 +902,17 @@ struct ice_sw_rule_lkup_rx_tx {
 	 * lookup-type
 	 */
 	__le16 hdr_len;
-	u8 hdr[STRUCT_HACK_VAR_LEN];
+	u8 hdr_data[STRUCT_HACK_VAR_LEN];
 };
 
+#pragma pack(1)
 /* Add/Update/Remove large action command/response entry
  * "index" is returned as part of a response to a successful Add command, and
  * can be used to identify the action for Update/Get/Remove commands.
  */
 struct ice_sw_rule_lg_act {
+	struct ice_aqc_sw_rules_elem_hdr hdr;
+
 	__le16 index; /* Index in large action table */
 	__le16 size;
 	/* Max number of large actions */
@@ -939,48 +967,28 @@ struct ice_sw_rule_lg_act {
 #define ICE_LG_ACT_STAT_COUNT_M		(0x7F << ICE_LG_ACT_STAT_COUNT_S)
 	__le32 act[STRUCT_HACK_VAR_LEN]; /* array of size for actions */
 };
+#pragma pack()
 
+#pragma pack(1)
 /* Add/Update/Remove VSI list command/response entry
  * "index" is returned as part of a response to a successful Add command, and
  * can be used to identify the VSI list for Update/Get/Remove commands.
  */
 struct ice_sw_rule_vsi_list {
+	struct ice_aqc_sw_rules_elem_hdr hdr;
+
 	__le16 index; /* Index of VSI/Prune list */
 	__le16 number_vsi;
 	__le16 vsi[STRUCT_HACK_VAR_LEN]; /* Array of number_vsi VSI numbers */
 };
+#pragma pack()
 
 #pragma pack(1)
 /* Query VSI list command/response entry */
 struct ice_sw_rule_vsi_list_query {
 	__le16 index;
-	ice_declare_bitmap(vsi_list, ICE_MAX_VSI);
+	u8 vsi_list[DIVIDE_AND_ROUND_UP(ICE_MAX_VSI, BITS_PER_BYTE)];
 };
-#pragma pack()
-
-#pragma pack(1)
-/* Add switch rule response:
- * Content of return buffer is same as the input buffer. The status field and
- * LUT index are updated as part of the response
- */
-struct ice_aqc_sw_rules_elem {
-	__le16 type; /* Switch rule type, one of T_... */
-#define ICE_AQC_SW_RULES_T_LKUP_RX		0x0
-#define ICE_AQC_SW_RULES_T_LKUP_TX		0x1
-#define ICE_AQC_SW_RULES_T_LG_ACT		0x2
-#define ICE_AQC_SW_RULES_T_VSI_LIST_SET		0x3
-#define ICE_AQC_SW_RULES_T_VSI_LIST_CLEAR	0x4
-#define ICE_AQC_SW_RULES_T_PRUNE_LIST_SET	0x5
-#define ICE_AQC_SW_RULES_T_PRUNE_LIST_CLEAR	0x6
-	__le16 status;
-	union {
-		struct ice_sw_rule_lkup_rx_tx lkup_tx_rx;
-		struct ice_sw_rule_lg_act lg_act;
-		struct ice_sw_rule_vsi_list vsi_list;
-		struct ice_sw_rule_vsi_list_query vsi_list_query;
-	} pdata;
-};
-
 #pragma pack()
 
 /* PFC Ignore (direct 0x0301)
@@ -994,8 +1002,8 @@ struct ice_aqc_pfc_ignore {
 	u8	reserved[14];
 };
 
-/* Set PFC Mode (direct 0x0303)
- * Query PFC Mode (direct 0x0302)
+/* Query PFC Mode (direct 0x0302)
+ * Set PFC Mode (direct 0x0303)
  */
 struct ice_aqc_set_query_pfc_mode {
 	u8	pfc_mode;
@@ -1098,9 +1106,9 @@ struct ice_aqc_txsched_elem {
 	u8 generic;
 #define ICE_AQC_ELEM_GENERIC_MODE_M		0x1
 #define ICE_AQC_ELEM_GENERIC_PRIO_S		0x1
-#define ICE_AQC_ELEM_GENERIC_PRIO_M	(0x7 << ICE_AQC_ELEM_GENERIC_PRIO_S)
+#define ICE_AQC_ELEM_GENERIC_PRIO_M		(0x7 << ICE_AQC_ELEM_GENERIC_PRIO_S)
 #define ICE_AQC_ELEM_GENERIC_SP_S		0x4
-#define ICE_AQC_ELEM_GENERIC_SP_M	(0x1 << ICE_AQC_ELEM_GENERIC_SP_S)
+#define ICE_AQC_ELEM_GENERIC_SP_M		(0x1 << ICE_AQC_ELEM_GENERIC_SP_S)
 #define ICE_AQC_ELEM_GENERIC_ADJUST_VAL_S	0x5
 #define ICE_AQC_ELEM_GENERIC_ADJUST_VAL_M	\
 	(0x3 << ICE_AQC_ELEM_GENERIC_ADJUST_VAL_S)
@@ -1673,6 +1681,32 @@ struct ice_aqc_set_mac_lb {
 	u8 reserved[15];
 };
 
+/* Get sensor reading (direct 0x0632) */
+struct ice_aqc_get_sensor_reading {
+	u8 sensor;
+#define ICE_AQC_INT_TEMP_SENSOR		0x0
+	u8 format;
+#define ICE_AQC_INT_TEMP_FORMAT		0x0
+	u8 reserved[6];
+	__le32 addr_high;
+	__le32 addr_low;
+};
+
+/* Get sensor reading response (direct 0x0632) */
+struct ice_aqc_get_sensor_reading_resp {
+	union {
+		u8 raw[8];
+		/* Output data for sensor 0x00, format 0x00 */
+		struct {
+			s8 temp;
+			u8 temp_warning_threshold;
+			u8 temp_critical_threshold;
+			u8 temp_fatal_threshold;
+			u8 reserved[4];
+		} s0f0;
+	} data;
+};
+
 /* DNL Get Status command (indirect 0x0680)
  * Structure used for the response, the command uses the generic
  * ice_aqc_generic struct to pass a buffer address to the FW.
@@ -2169,6 +2203,14 @@ struct ice_aqc_nvm {
 
 #define ICE_AQC_NVM_MINSREV_MOD_ID		0x130
 #define ICE_AQC_NVM_TX_TOPO_MOD_ID		0x14B
+#define ICE_AQC_NVM_CMPO_MOD_ID			0x153
+
+/* Cage Max Power override NVM module */
+struct ice_aqc_nvm_cmpo {
+	__le16 length;
+#define ICE_AQC_NVM_CMPO_ENABLE	BIT(8)
+	__le16 cages_cfg[8];
+};
 
 /* Used for reading and writing MinSRev using 0x0701 and 0x0703. Note that the
  * type field is excluded from the section when reading and writing from
@@ -2476,6 +2518,21 @@ struct ice_aqc_get_set_rss_keys {
 	u8 extended_hash_key[ICE_AQC_GET_SET_RSS_KEY_DATA_HASH_KEY_SIZE];
 };
 
+enum ice_lut_type {
+	ICE_LUT_VSI = 0,
+	ICE_LUT_PF = 1,
+	ICE_LUT_GLOBAL = 2,
+	ICE_LUT_TYPE_MASK = 3,
+	ICE_LUT_PF_SMALL = 5, /* yields ICE_LUT_PF when &= ICE_LUT_TYPE_MASK */
+};
+
+enum ice_lut_size {
+	ICE_LUT_VSI_SIZE = 64,
+	ICE_LUT_PF_SMALL_SIZE = 128,
+	ICE_LUT_GLOBAL_SIZE = 512,
+	ICE_LUT_PF_SIZE = 2048,
+};
+
 /* Get/Set RSS LUT (indirect 0x0B05/0x0B03) */
 struct ice_aqc_get_set_rss_lut {
 #define ICE_AQC_GSET_RSS_LUT_VSI_VALID	BIT(15)
@@ -2484,21 +2541,13 @@ struct ice_aqc_get_set_rss_lut {
 	__le16 vsi_id;
 #define ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_S	0
 #define ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_M	\
-				(0x3 << ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_S)
-
-#define ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_VSI	 0
-#define ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_PF	 1
-#define ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_GLOBAL	 2
+	(ICE_LUT_TYPE_MASK << ICE_AQC_GSET_RSS_LUT_TABLE_TYPE_S)
 
 #define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_S	 2
 #define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_M	 \
-				(0x3 << ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_S)
+	(ICE_LUT_TYPE_MASK << ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_S)
 
-#define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_128	 128
-#define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_128_FLAG 0
-#define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_512	 512
 #define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_512_FLAG 1
-#define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_2K	 2048
 #define ICE_AQC_GSET_RSS_LUT_TABLE_SIZE_2K_FLAG	 2
 
 #define ICE_AQC_GSET_RSS_LUT_GLOBAL_IDX_S	 4
@@ -2686,7 +2735,7 @@ struct ice_aqc_move_rdma_qset_buffer {
 };
 
 /* Download Package (indirect 0x0C40) */
-/* Also used for Update Package (indirect 0x0C42 and 0x0C41) */
+/* Also used for Update Package (indirect 0x0C41 and 0x0C42) */
 struct ice_aqc_download_pkg {
 	u8 flags;
 #define ICE_AQC_DOWNLOAD_PKG_LAST_BUF	0x01
@@ -2762,7 +2811,7 @@ struct ice_aqc_event_lan_overflow {
 
 /* Debug Dump Internal Data (indirect 0xFF08) */
 struct ice_aqc_debug_dump_internals {
-	u8 cluster_id;
+	__le16 cluster_id; /* Expresses next cluster ID in response */
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_SW			0
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_TXSCHED		2
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_PROFILES		3
@@ -2775,7 +2824,7 @@ struct ice_aqc_debug_dump_internals {
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_L2P			8
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_QUEUE_MNG		9
 #define ICE_AQC_DBG_DUMP_CLUSTER_ID_FULL_CSR_SPACE	21
-	u8 reserved;
+#define ICE_AQC_DBG_DUMP_CLUSTER_ID_MNG_TRANSACTIONS	22
 	__le16 table_id; /* Used only for non-memory clusters */
 	__le32 idx; /* In table entries for tables, in bytes for memory */
 	__le32 addr_high;
@@ -2989,6 +3038,8 @@ struct ice_aq_desc {
 		struct ice_aqc_get_phy_caps get_phy;
 		struct ice_aqc_set_phy_cfg set_phy;
 		struct ice_aqc_restart_an restart_an;
+		struct ice_aqc_get_sensor_reading get_sensor_reading;
+		struct ice_aqc_get_sensor_reading_resp get_sensor_reading_resp;
 		struct ice_aqc_dnl_get_status get_status;
 		struct ice_aqc_dnl_run_command dnl_run;
 		struct ice_aqc_dnl_call_command dnl_call;
@@ -3239,6 +3290,7 @@ enum ice_adminq_opc {
 	ice_aqc_opc_get_link_status			= 0x0607,
 	ice_aqc_opc_set_event_mask			= 0x0613,
 	ice_aqc_opc_set_mac_lb				= 0x0620,
+	ice_aqc_opc_get_sensor_reading			= 0x0632,
 	ice_aqc_opc_dnl_get_status			= 0x0680,
 	ice_aqc_opc_dnl_run				= 0x0681,
 	ice_aqc_opc_dnl_call				= 0x0682,
