@@ -68,6 +68,8 @@ FILES=	\
 	meta.stage.mk \
 	meta.subdir.mk \
 	meta.sys.mk \
+	meta2deps.py \
+	meta2deps.sh \
 	${SRCTOP}/contrib/bmake/mk/posix.mk \
 	stage-install.sh \
 	sys.mk \
