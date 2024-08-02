@@ -1100,6 +1100,12 @@ int _thr_mutex_destroy(pthread_mutex_t *);
 int _thr_mutex_unlock(pthread_mutex_t *);
 int __Tthr_mutex_lock(pthread_mutex_t *);
 int __Tthr_mutex_trylock(pthread_mutex_t *);
+<<<<<<< HEAD
+=======
+bool __thr_get_main_stack_base(char **base);
+bool __thr_get_main_stack_lim(size_t *lim);
+void _thr_resolve_machdep(void);
+>>>>>>> internal/freebsd/13-stable/main
 
 __END_DECLS
 __NULLABILITY_PRAGMA_POP
