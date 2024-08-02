@@ -1056,6 +1056,7 @@ MAN+=	\
 	uslcom.4 \
 	uvisor.4 \
 	uvscom.4 \
+	veriexec.4 \
 	zyd.4
 
 MLINKS+=otus.4 if_otus.4
