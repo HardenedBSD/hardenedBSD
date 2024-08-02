@@ -1,17 +1,16 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2020 Vladimir Kondratyev <wulf@FreeBSD.org>
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions
+ * are met:
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -26,24 +25,16 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_ACPI_H_
-#define _LINUXKPI_LINUX_ACPI_H_
+#ifndef _LINUXKPI_LINUX_NODEMASK_H_
+#define	_LINUXKPI_LINUX_NODEMASK_H_
 
-#include <linux/device.h>
-#include <linux/uuid.h>
+#include <linux/kernel.h>	/* pr_debug */
 
-#if defined(__aarch64__) || defined(__amd64__) || defined(__i386__)
+static inline int
+num_possible_nodes(void)
+{
+	pr_debug("%s: TODO\n", __func__);
+	return (1);
+}
 
-#include <acpi/acpi.h>
-#include <acpi/acpi_bus.h>
-
-#define	ACPI_HANDLE(dev)	\
-    ((dev)->bsddev != NULL ? bsd_acpi_get_handle((dev)->bsddev) : NULL)
-#define	acpi_device_handle(dev)	\
-    ((dev) != NULL ? bsd_acpi_get_handle(dev) : NULL)
-static inline void acpi_dev_put(struct acpi_device *adev) {}
-#define	acpi_handle_debug(handle, fmt, ...)
-
-#endif
-
-#endif /* _LINUXKPI_LINUX_ACPI_H_ */
+#endif /* _LINUXKPI_LINUX_NODEMASK_H_ */

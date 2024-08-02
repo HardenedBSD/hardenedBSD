@@ -35,9 +35,11 @@
 #include <linux/gfp.h>
 #include <linux/kernel.h>
 #include <linux/mm_types.h>
+#include <linux/mmzone.h>
 #include <linux/pfn.h>
 #include <linux/list.h>
 #include <linux/mmap_lock.h>
+#include <linux/overflow.h>
 #include <linux/shrinker.h>
 #include <linux/page.h>
 
@@ -54,6 +56,8 @@ CTASSERT((VM_PROT_ALL & -(1 << 8)) == 0);
 #define	VM_READ			VM_PROT_READ
 #define	VM_WRITE		VM_PROT_WRITE
 #define	VM_EXEC			VM_PROT_EXECUTE
+
+#define	VM_ACCESS_FLAGS		(VM_READ | VM_WRITE | VM_EXEC)
 
 #define	VM_PFNINTERNAL		(1 << 8)	/* FreeBSD private flag to vm_insert_pfn() */
 #define	VM_MIXEDMAP		(1 << 9)
@@ -175,6 +179,14 @@ get_order(unsigned long size)
 	return (order);
 }
 
+/*
+ * Resolve a page into a virtual address:
+ *
+ * NOTE: This function only works for pages allocated by the kernel.
+ */
+void *linux_page_address(struct page *);
+#define	page_address(page) linux_page_address(page)
+
 static inline void *
 lowmem_page_address(struct page *page)
 {
@@ -267,14 +279,27 @@ extern long
 get_user_pages(unsigned long start, unsigned long nr_pages,
     unsigned int gup_flags, struct page **,
     struct vm_area_struct **);
+#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60500
+#define	get_user_pages(start, nr_pages, gup_flags, pages)	\
+	get_user_pages(start, nr_pages, gup_flags, pages, NULL)
+#endif
 
+#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60500
+static inline long
+pin_user_pages(unsigned long start, unsigned long nr_pages,
+    unsigned int gup_flags, struct page **pages)
+{
+	return (get_user_pages(start, nr_pages, gup_flags, pages));
+}
+#else
 static inline long
 pin_user_pages(unsigned long start, unsigned long nr_pages,
     unsigned int gup_flags, struct page **pages,
     struct vm_area_struct **vmas)
 {
-	return get_user_pages(start, nr_pages, gup_flags, pages, vmas);
+	return (get_user_pages(start, nr_pages, gup_flags, pages, vmas));
 }
+#endif
 
 extern int
 __get_user_pages_fast(unsigned long start, int nr_pages, int write,
@@ -319,6 +344,18 @@ static inline pgprot_t
 vm_get_page_prot(unsigned long vm_flags)
 {
 	return (vm_flags & VM_PROT_ALL);
+}
+
+static inline void
+vm_flags_set(struct vm_area_struct *vma, unsigned long flags)
+{
+	vma->vm_flags |= flags;
+}
+
+static inline void
+vm_flags_clear(struct vm_area_struct *vma, unsigned long flags)
+{
+	vma->vm_flags &= ~flags;
 }
 
 static inline struct page *
@@ -366,5 +403,11 @@ might_alloc(gfp_t gfp_mask __unused)
 }
 
 #define	is_cow_mapping(flags)	(false)
+
+static inline bool
+want_init_on_free(void)
+{
+	return (false);
+}
 
 #endif					/* _LINUXKPI_LINUX_MM_H_ */

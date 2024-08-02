@@ -89,6 +89,10 @@
 
 #define	__printf(a,b)			__printflike(a,b)
 
+#define __diag_push()
+#define __diag_pop()
+#define __diag_ignore_all(...)
+
 #define	barrier()			__asm__ __volatile__("": : :"memory")
 
 #define	lower_32_bits(n)		((u32)(n))
@@ -120,5 +124,8 @@
 #define	__must_be_array(a)	__same_type(a, &(a)[0])
 
 #define	sizeof_field(_s, _m)	sizeof(((_s *)0)->_m)
+
+#define is_signed_type(t)	((t)-1 < (t)1)
+#define is_unsigned_type(t)	((t)-1 > (t)1)
 
 #endif	/* _LINUXKPI_LINUX_COMPILER_H_ */

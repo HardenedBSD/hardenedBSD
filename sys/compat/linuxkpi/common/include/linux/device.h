@@ -45,6 +45,7 @@
 #include <linux/backlight.h>
 #include <linux/pm.h>
 #include <linux/idr.h>
+#include <linux/overflow.h>
 #include <linux/ratelimit.h>	/* via linux/dev_printk.h */
 #include <linux/fwnode.h>
 #include <asm/atomic.h>
@@ -341,6 +342,9 @@ put_device(struct device *dev)
 }
 
 struct class *class_create(struct module *owner, const char *name);
+#if defined(LINUXKPI_VERSION) && LINUXKPI_VERSION >= 60400
+#define	class_create(name)	class_create(NULL, name)
+#endif
 
 static inline int
 class_register(struct class *class)
@@ -695,5 +699,9 @@ int lkpi_devm_add_action(struct device *dev, void (*action)(void *), void *data)
 int lkpi_devm_add_action_or_reset(struct device *dev, void (*action)(void *), void *data);
 #define	devm_add_action_or_reset(dev, action, data)	\
 	lkpi_devm_add_action_or_reset(dev, action, data)
+
+int lkpi_devm_device_add_group(struct device *dev, const struct attribute_group *group);
+#define	devm_device_add_group(dev, group)	\
+	lkpi_devm_device_add_group(dev, group)
 
 #endif	/* _LINUXKPI_LINUX_DEVICE_H_ */

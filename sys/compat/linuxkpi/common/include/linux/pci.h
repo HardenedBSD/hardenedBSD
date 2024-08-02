@@ -94,6 +94,7 @@ MODULE_PNP_INFO("U32:vendor;U32:device;V32:subvendor;V32:subdevice",	\
 #define PCI_SLOT(devfn)		(((devfn) >> 3) & 0x1f)
 #define PCI_FUNC(devfn)		((devfn) & 0x07)
 #define	PCI_BUS_NUM(devfn)	(((devfn) >> 8) & 0xff)
+#define	PCI_DEVID(bus, devfn)	((((uint16_t)(bus)) << 8) | (devfn))
 
 #define PCI_VDEVICE(_vendor, _device)					\
 	    .vendor = PCI_VENDOR_ID_##_vendor, .device = (_device),	\
@@ -361,6 +362,8 @@ bool pci_device_is_present(struct pci_dev *pdev);
 
 int linuxkpi_pcim_enable_device(struct pci_dev *pdev);
 void __iomem **linuxkpi_pcim_iomap_table(struct pci_dev *pdev);
+void *linuxkpi_pci_iomap_range(struct pci_dev *pdev, int mmio_bar,
+    unsigned long mmio_off, unsigned long mmio_size);
 void *linuxkpi_pci_iomap(struct pci_dev *pdev, int mmio_bar, int mmio_size);
 void linuxkpi_pci_iounmap(struct pci_dev *pdev, void *res);
 int linuxkpi_pcim_iomap_regions(struct pci_dev *pdev, uint32_t mask,
@@ -384,6 +387,12 @@ dev_is_pci(struct device *dev)
 {
 
 	return (device_get_devclass(dev->bsddev) == devclass_find("pci"));
+}
+
+static inline uint16_t
+pci_dev_id(struct pci_dev *pdev)
+{
+	return (PCI_DEVID(pdev->bus->number, pdev->devfn));
 }
 
 static inline int
@@ -767,6 +776,8 @@ static inline void pci_disable_sriov(struct pci_dev *dev)
 {
 }
 
+#define	pci_iomap_range(pdev, mmio_bar, mmio_off, mmio_size) \
+	linuxkpi_pci_iomap_range(pdev, mmio_bar, mmio_off, mmio_size)
 #define	pci_iomap(pdev, mmio_bar, mmio_size) \
 	linuxkpi_pci_iomap(pdev, mmio_bar, mmio_size)
 #define	pci_iounmap(pdev, res)	linuxkpi_pci_iounmap(pdev, res)
@@ -1259,6 +1270,29 @@ pci_dev_present(const struct pci_device_id *cur)
 		cur++;
 	}
 	return (0);
+}
+
+static inline const struct pci_device_id *
+pci_match_id(const struct pci_device_id *ids, struct pci_dev *pdev)
+{
+	if (ids == NULL)
+		return (NULL);
+
+	for (;
+	     ids->vendor != 0 || ids->subvendor != 0 || ids->class_mask != 0;
+	     ids++)
+		if ((ids->vendor == PCI_ANY_ID ||
+		     ids->vendor == pdev->vendor) &&
+		    (ids->device == PCI_ANY_ID ||
+		     ids->device == pdev->device) &&
+		    (ids->subvendor == PCI_ANY_ID ||
+		     ids->subvendor == pdev->subsystem_vendor) &&
+		    (ids->subdevice == PCI_ANY_ID ||
+		     ids->subdevice == pdev->subsystem_device) &&
+		    ((ids->class ^ pdev->class) & ids->class_mask) == 0)
+			return (ids);
+
+	return (NULL);
 }
 
 struct pci_dev *lkpi_pci_get_domain_bus_and_slot(int domain,

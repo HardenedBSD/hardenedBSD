@@ -1,17 +1,16 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2020 Vladimir Kondratyev <wulf@FreeBSD.org>
+ * Copyright (c) 2023 Serenity Cyber Security, LLC.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * modification, are permitted provided that the following conditions
+ * are met:
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -26,24 +25,23 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LINUXKPI_LINUX_ACPI_H_
-#define _LINUXKPI_LINUX_ACPI_H_
+#ifndef _LINUXKPI_LINUX_LIMITS_H
+#define	_LINUXKPI_LINUX_LIMITS_H
 
-#include <linux/device.h>
-#include <linux/uuid.h>
+#include <sys/types.h>
+#include <sys/stdint.h>
 
-#if defined(__aarch64__) || defined(__amd64__) || defined(__i386__)
-
-#include <acpi/acpi.h>
-#include <acpi/acpi_bus.h>
-
-#define	ACPI_HANDLE(dev)	\
-    ((dev)->bsddev != NULL ? bsd_acpi_get_handle((dev)->bsddev) : NULL)
-#define	acpi_device_handle(dev)	\
-    ((dev) != NULL ? bsd_acpi_get_handle(dev) : NULL)
-static inline void acpi_dev_put(struct acpi_device *adev) {}
-#define	acpi_handle_debug(handle, fmt, ...)
+#define	U8_MAX		UINT8_MAX
+#define	S8_MAX		INT8_MAX
+#define	S8_MIN		INT8_MIN
+#define	U16_MAX		UINT16_MAX
+#define	S16_MAX		INT16_MAX
+#define	S16_MIN		INT16_MIN
+#define	U32_MAX		UINT32_MAX
+#define	S32_MAX		INT32_MAX
+#define	S32_MIN		INT32_MIN
+#define	U64_MAX		UINT64_MAX
+#define	S64_MAX		INT64_MAX
+#define	S64_MIN		INT64_MIN
 
 #endif
-
-#endif /* _LINUXKPI_LINUX_ACPI_H_ */
