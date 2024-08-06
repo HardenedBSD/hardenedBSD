@@ -319,7 +319,7 @@ sys_statfs(struct thread *td, struct statfs_args *uap)
 	struct statfs *sfp;
 	int error;
 
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_statfs(td, uap->path, UIO_USERSPACE, sfp);
 	if (error == 0)
 		error = copyout(sfp, uap->buf, sizeof(struct statfs));
@@ -360,7 +360,7 @@ sys_fstatfs(struct thread *td, struct fstatfs_args *uap)
 	struct statfs *sfp;
 	int error;
 
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_fstatfs(td, uap->fd, sfp);
 	if (error == 0)
 		error = copyout(sfp, uap->buf, sizeof(struct statfs));
@@ -548,7 +548,7 @@ restart:
 		}
 		if (priv_check_cred_vfs_generation(td->td_ucred)) {
 			sptmp = malloc(sizeof(struct statfs), M_STATFS,
-			    M_WAITOK);
+			    M_WAITOK | M_ZERO);
 			*sptmp = *sp;
 			sptmp->f_fsid.val[0] = sptmp->f_fsid.val[1] = 0;
 			prison_enforce_statfs(td->td_ucred, mp, sptmp);
@@ -757,7 +757,7 @@ freebsd11_statfs(struct thread *td, struct freebsd11_statfs_args *uap)
 	struct statfs *sfp;
 	int error;
 
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_statfs(td, uap->path, UIO_USERSPACE, sfp);
 	if (error == 0) {
 		freebsd11_cvtstatfs(sfp, &osb);
@@ -777,7 +777,7 @@ freebsd11_fstatfs(struct thread *td, struct freebsd11_fstatfs_args *uap)
 	struct statfs *sfp;
 	int error;
 
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_fstatfs(td, uap->fd, sfp);
 	if (error == 0) {
 		freebsd11_cvtstatfs(sfp, &osb);
@@ -841,7 +841,7 @@ freebsd11_fhstatfs(struct thread *td, struct freebsd11_fhstatfs_args *uap)
 	error = copyin(uap->u_fhp, &fh, sizeof(fhandle_t));
 	if (error)
 		return (error);
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_fhstatfs(td, fh, sfp);
 	if (error == 0) {
 		freebsd11_cvtstatfs(sfp, &osb);
@@ -4010,7 +4010,7 @@ freebsd11_kern_getdirentries(struct thread *td, int fd, char *ubuf, u_int count,
 	/* XXX arbitrary sanity limit on `count'. */
 	count = min(count, 64 * 1024);
 
-	dirbuf = malloc(count, M_TEMP, M_WAITOK);
+	dirbuf = malloc(count, M_TEMP, M_WAITOK | M_ZERO);
 
 	error = kern_getdirentries(td, fd, dirbuf, count, &base, &resid,
 	    UIO_SYSSPACE);
@@ -4735,7 +4735,7 @@ sys_fhstatfs(struct thread *td, struct fhstatfs_args *uap)
 	error = copyin(uap->u_fhp, &fh, sizeof(fhandle_t));
 	if (error != 0)
 		return (error);
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
+	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
 	error = kern_fhstatfs(td, fh, sfp);
 	if (error == 0)
 		error = copyout(sfp, uap->buf, sizeof(*sfp));
@@ -4798,7 +4798,7 @@ kern_posix_fadvise(struct thread *td, int fd, off_t offset, off_t len,
 	case POSIX_FADV_SEQUENTIAL:
 	case POSIX_FADV_RANDOM:
 	case POSIX_FADV_NOREUSE:
-		new = malloc(sizeof(*fa), M_FADVISE, M_WAITOK);
+		new = malloc(sizeof(*fa), M_FADVISE, M_WAITOK | M_ZERO);
 		break;
 	case POSIX_FADV_NORMAL:
 	case POSIX_FADV_WILLNEED:
