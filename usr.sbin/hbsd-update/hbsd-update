@@ -481,8 +481,8 @@ validate_file() {
 		return 1
 	fi
 
-	expected_hash=$(${OPENSSL} rsautl \
-	    -verify \
+	expected_hash=$(${OPENSSL} pkeyutl \
+	    -verifyrecover \
 	    -in ${tmpdir}/${file}.sig \
 	    -pubin \
 	    -inkey ${tmpdir}/pubkey.rsa.pem)
