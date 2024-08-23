@@ -466,10 +466,15 @@ SYSCTL_PROC(_kern, KERN_SECURELVL, securelevel,
 
 #ifdef INCLUDE_CONFIG_FILE
 /* Actual kernel configuration options. */
-extern char kernconfstring[];
+extern const char kernconfstring[];
 
+<<<<<<< HEAD
 SYSCTL_STRING(_kern, OID_AUTO, conftxt, CTLFLAG_RD | CTLFLAG_ROOTONLY,
     kernconfstring, 0, "Kernel configuration file");
+=======
+SYSCTL_CONST_STRING(_kern, OID_AUTO, conftxt, CTLFLAG_RD,
+    kernconfstring, "Kernel configuration file");
+>>>>>>> internal/freebsd/current/main
 #endif
 
 static int
