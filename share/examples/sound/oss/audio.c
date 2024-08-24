@@ -2,6 +2,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2021 Goran Mekić
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * Portions of this software were developed by Christos Margiolis
+ * <christos@FreeBSD.org> under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +30,14 @@
  */
 
 #include <sys/soundcard.h>
+
+#include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 
 #ifndef SAMPLE_SIZE
 #define SAMPLE_SIZE 16
@@ -55,8 +60,6 @@ int	format = AFMT_S32_NE;		/* Not a real value, just silencing
 					 * compiler errors */
 #endif
 
-
-
 /*
  * Minimal configuration for OSS
  * For real world applications, this structure will probably contain many
@@ -77,20 +80,16 @@ typedef struct config {
 	audio_buf_info buffer_info;
 } config_t;
 
-
 /*
- * Error state is indicated by value=-1 in which case application exits
- * with error
+ * Error state is indicated by value=-1 in which case application exits with
+ * error
  */
 static inline void
 check_error(const int value, const char *message)
 {
-	if (value == -1) {
-		fprintf(stderr, "OSS error: %s %s\n", message, strerror(errno));
-		exit(1);
-	}
+	if (value == -1)
+		err(1, "OSS error: %s\n", message);
 }
-
 
 
 /* Calculate frag by giving it minimal size of buffer */
@@ -99,52 +98,51 @@ size2frag(int x)
 {
 	int frag = 0;
 
-	while ((1 << frag) < x) {
+	while ((1 << frag) < x)
 		++frag;
-	}
-	return frag;
-}
 
+	return (frag);
+}
 
 /*
  * Split input buffer into channels. Input buffer is in interleaved format
- * which means if we have 2 channels (L and R), this is what the buffer of
- * 8 samples would contain: L,R,L,R,L,R,L,R. The result are two channels
+ * which means if we have 2 channels (L and R), this is what the buffer of 8
+ * samples would contain: L,R,L,R,L,R,L,R. The result are two channels
  * containing: L,L,L,L and R,R,R,R.
  */
-void
+static void
 oss_split(config_t *config, sample_t *input, sample_t *output)
 {
-	int channel;
-	int index;
+	int channel, index, i;
 
-	for (int i = 0; i < config->sample_count; ++i) {
+	for (i = 0; i < config->sample_count; ++i) {
 		channel = i % config->channels;
 		index = i / config->channels;
 		output[channel * index] = input[i];
 	}
 }
 
-
 /*
  * Convert channels into interleaved format and place it in output
  * buffer
  */
-void
+static void
 oss_merge(config_t *config, sample_t *input, sample_t *output)
 {
-	for (int channel = 0; channel < config->channels; ++channel) {
-		for (int index = 0; index < config->chsamples; ++index) {
-			output[index * config->channels + channel] = input[channel * index];
+	int channel, index;
+
+	for (channel = 0; channel < config->channels; ++channel) {
+		for (index = 0; index < config->chsamples; ++index) {
+			output[index * config->channels + channel] =
+			    input[channel * index];
 		}
 	}
 }
 
-void
+static void
 oss_init(config_t *config)
 {
-	int error;
-	int tmp;
+	int error, tmp, min_frag;
 
 	/* Open the device for read and write */
 	config->fd = open(config->device, O_RDWR);
@@ -158,19 +156,19 @@ oss_init(config_t *config)
 	printf("max_channels: %d\n", config->audio_info.max_channels);
 	printf("latency: %d\n", config->audio_info.latency);
 	printf("handle: %s\n", config->audio_info.handle);
-	if (config->audio_info.min_rate > config->sample_rate || config->sample_rate > config->audio_info.max_rate) {
-		fprintf(stderr, "%s doesn't support chosen ", config->device);
-		fprintf(stderr, "samplerate of %dHz!\n", config->sample_rate);
-		exit(1);
+	if (config->audio_info.min_rate > config->sample_rate ||
+	    config->sample_rate > config->audio_info.max_rate) {
+		errx(1, "%s doesn't support chosen samplerate of %dHz!\n",
+		    config->device, config->sample_rate);
 	}
-	if (config->channels < 1) {
+	if (config->channels < 1)
 		config->channels = config->audio_info.max_channels;
-	}
 
 	/*
-         * If device is going to be used in mmap mode, disable all format
-         * conversions. Official OSS documentation states error code should not be
-         * checked. http://manuals.opensound.com/developer/mmap_test.c.html#LOC10
+	 * If device is going to be used in mmap mode, disable all format
+	 * conversions. Official OSS documentation states error code should not
+	 * be checked.
+	 * http://manuals.opensound.com/developer/mmap_test.c.html#LOC10
          */
 	if (config->mmap) {
 		tmp = 0;
@@ -178,16 +176,16 @@ oss_init(config_t *config)
 	}
 
 	/*
-         * Set number of channels. If number of channels is chosen to the value
-         * near the one wanted, save it in config
+	 * Set number of channels. If number of channels is chosen to the value
+	 * near the one wanted, save it in config
          */
 	tmp = config->channels;
 	error = ioctl(config->fd, SNDCTL_DSP_CHANNELS, &tmp);
 	check_error(error, "SNDCTL_DSP_CHANNELS");
-	if (tmp != config->channels) {	/* or check if tmp is close enough? */
-		fprintf(stderr, "%s doesn't support chosen ", config->device);
-		fprintf(stderr, "channel count of %d", config->channels);
-		fprintf(stderr, ", set to %d!\n", tmp);
+	/* Or check if tmp is close enough? */
+	if (tmp != config->channels) {
+		errx(1, "%s doesn't support chosen channel count of %d set "
+		    "to %d!\n", config->device, config->channels, tmp);
 	}
 	config->channels = tmp;
 
@@ -196,8 +194,8 @@ oss_init(config_t *config)
 	error = ioctl(config->fd, SNDCTL_DSP_SETFMT, &tmp);
 	check_error(error, "SNDCTL_DSP_SETFMT");
 	if (tmp != config->format) {
-		fprintf(stderr, "%s doesn't support chosen sample format!\n", config->device);
-		exit(1);
+		errx(1, "%s doesn't support chosen sample format!\n",
+		    config->device);
 	}
 
 	/* Most common values for samplerate (in kHz): 44.1, 48, 88.2, 96 */
@@ -208,40 +206,33 @@ oss_init(config_t *config)
 	/* Get and check device capabilities */
 	error = ioctl(config->fd, SNDCTL_DSP_GETCAPS, &(config->audio_info.caps));
 	check_error(error, "SNDCTL_DSP_GETCAPS");
-	if (!(config->audio_info.caps & PCM_CAP_DUPLEX)) {
-		fprintf(stderr, "Device doesn't support full duplex!\n");
-		exit(1);
-	}
+	if (!(config->audio_info.caps & PCM_CAP_DUPLEX))
+		errx(1, "Device doesn't support full duplex!\n");
+
 	if (config->mmap) {
-		if (!(config->audio_info.caps & PCM_CAP_TRIGGER)) {
-			fprintf(stderr, "Device doesn't support triggering!\n");
-			exit(1);
-		}
-		if (!(config->audio_info.caps & PCM_CAP_MMAP)) {
-			fprintf(stderr, "Device doesn't support mmap mode!\n");
-			exit(1);
-		}
+		if (!(config->audio_info.caps & PCM_CAP_TRIGGER))
+			errx(1, "Device doesn't support triggering!\n");
+		if (!(config->audio_info.caps & PCM_CAP_MMAP))
+			errx(1, "Device doesn't support mmap mode!\n");
 	}
 
 	/*
-         * If desired frag is smaller than minimum, based on number of channels
-         * and format (size in bits: 8, 16, 24, 32), set that as frag. Buffer size
-         * is 2^frag, but the real size of the buffer will be read when the
-         * configuration of the device is successful
+	 * If desired frag is smaller than minimum, based on number of channels
+	 * and format (size in bits: 8, 16, 24, 32), set that as frag. Buffer
+	 * size is 2^frag, but the real size of the buffer will be read when
+	 * the configuration of the device is successful
          */
-	int min_frag = size2frag(config->sample_size * config->channels);
+	min_frag = size2frag(config->sample_size * config->channels);
 
-	if (config->frag < min_frag) {
+	if (config->frag < min_frag)
 		config->frag = min_frag;
-	}
 
 	/*
-         * Allocate buffer in fragments. Total buffer will be split in number
-         * of fragments (2 by default)
+	 * Allocate buffer in fragments. Total buffer will be split in number
+	 * of fragments (2 by default)
          */
-	if (config->buffer_info.fragments < 0) {
+	if (config->buffer_info.fragments < 0)
 		config->buffer_info.fragments = 2;
-	}
 	tmp = ((config->buffer_info.fragments) << 16) | config->frag;
 	error = ioctl(config->fd, SNDCTL_DSP_SETFRAGMENT, &tmp);
 	check_error(error, "SNDCTL_DSP_SETFRAGMENT");
@@ -250,13 +241,70 @@ oss_init(config_t *config)
 	error = ioctl(config->fd, SNDCTL_DSP_GETOSPACE, &(config->buffer_info));
 	check_error(error, "SNDCTL_DSP_GETOSPACE");
 	if (config->buffer_info.bytes < 1) {
-		fprintf(
-		    stderr,
-		    "OSS buffer error: buffer size can not be %d\n",
-		    config->buffer_info.bytes
-		    );
-		exit(1);
+		errx(1, "OSS buffer error: buffer size can not be %d\n",
+		    config->buffer_info.bytes);
 	}
 	config->sample_count = config->buffer_info.bytes / config->sample_size;
 	config->chsamples = config->sample_count / config->channels;
+}
+
+int
+main(int argc, char *argv[])
+{
+	int ret, bytes;
+	int8_t *ibuf, *obuf;
+	config_t config = {
+		.device = "/dev/dsp",
+		.channels = -1,
+		.format = format,
+		.frag = -1,
+		.sample_rate = 48000,
+		.sample_size = sizeof(sample_t),
+		.buffer_info.fragments = -1,
+		.mmap = 0,
+	};
+
+	/* Initialize device */
+	oss_init(&config);
+
+	/*
+	 * Allocate input and output buffers so that their size match frag_size
+	 */
+	bytes = config.buffer_info.bytes;
+	ibuf = malloc(bytes);
+	obuf = malloc(bytes);
+	sample_t *channels = malloc(bytes);
+
+	printf("bytes: %d, fragments: %d, fragsize: %d, fragstotal: %d, "
+	    "samples: %d\n",
+	    bytes, config.buffer_info.fragments,
+	    config.buffer_info.fragsize, config.buffer_info.fragstotal,
+	    config.sample_count);
+
+	/* Minimal engine: read input and copy it to the output */
+	for (;;) {
+		ret = read(config.fd, ibuf, bytes);
+		if (ret < bytes) {
+			fprintf(stderr, "Requested %d bytes, but read %d!\n",
+			    bytes, ret);
+			break;
+		}
+		oss_split(&config, (sample_t *)ibuf, channels);
+		/* All processing will happen here */
+		oss_merge(&config, channels, (sample_t *)obuf);
+		ret = write(config.fd, obuf, bytes);
+		if (ret < bytes) {
+			fprintf(stderr, "Requested %d bytes, but wrote %d!\n",
+			    bytes, ret);
+			break;
+		}
+	}
+
+	/* Cleanup */
+	free(channels);
+	free(obuf);
+	free(ibuf);
+	close(config.fd);
+
+	return (0);
 }
