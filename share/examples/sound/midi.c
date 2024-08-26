@@ -2,6 +2,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2022 Goran Mekić
+ * Copyright (c) 2024 The FreeBSD Foundation
+ *
+ * Portions of this software were developed by Christos Margiolis
+ * <christos@FreeBSD.org> under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,39 +29,61 @@
  * SUCH DAMAGE.
  */
 
-#include <stdlib.h>
-#include <stdio.h>
+#include <err.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
-#define CMD_MASK 0xF0
-#define NOTE_ON 0x90
-#define NOTE_OFF 0x80
-#define CHANNEL_MASK 0xF
-#define CONTROLER_ON 0xB0
+#define CMD_MASK	0xF0
+#define CHANNEL_MASK	0x0F
+#define NOTE_ON		0x90
+#define NOTE_OFF	0x80
+#define CTL_CHANGE	0xB0
 
-typedef struct midi_event {
-	unsigned char type;
-	unsigned char channel;
-	union {
-		unsigned char note;
-		unsigned controller;
-	};
-	union {
-		unsigned char velocity;
-		unsigned char value;
-	};
-} midi_event_t;
-
-typedef struct midi_config {
-	char   *device;
-	int	fd;
-} midi_config_t;
-
-void
-oss_midi_init(midi_config_t *config)
+int
+main(int argc, char *argv[])
 {
-	if ((config->fd = open(config->device, O_RDWR)) == -1) {
-		perror("Error opening MIDI device");
-		exit(1);
+	int fd;
+	unsigned char raw, type, channel, b1, b2;
+
+	if ((fd = open("/dev/umidi0.0", O_RDWR)) < 0)
+		err(1, "Error opening MIDI device");
+
+	for (;;) {
+		if (read(fd, &raw, sizeof(raw)) < sizeof(raw))
+			err(1, "Error reading command byte");
+		if (!(raw & 0x80))
+			continue;
+
+		type = raw & CMD_MASK;
+		channel = raw & CHANNEL_MASK;
+
+		if (read(fd, &b1, sizeof(b1)) < sizeof(b1))
+			err(1, "Error reading byte 1");
+		if (read(fd, &b2, sizeof(b2)) < sizeof(b2))
+			err(1, "Error reading byte 2");
+
+		switch (type) {
+		case NOTE_ON:
+			printf("Channel %d, note on %d, velocity %d\n",
+			    channel, b1, b2);
+			break;
+		case NOTE_OFF:
+			printf("Channel %d, note off %d, velocity %d\n",
+			    channel, b1, b2);
+			break;
+		case CTL_CHANGE:
+			printf("Channel %d, controller change %d, value %d\n",
+			    channel, b1, b2);
+			break;
+		default:
+			printf("Unknown event type %d\n", type);
+			break;
+		}
 	}
+	
+	close(fd);
+
+	return (0);
 }
