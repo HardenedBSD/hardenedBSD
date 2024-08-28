@@ -66,7 +66,7 @@
  * trylocks are same as normal locks but do not drain.
  */
 
-static int rangelock_cheat = 0;
+static int rangelock_cheat = 1;
 SYSCTL_INT(_debug, OID_AUTO, rangelock_cheat, CTLFLAG_RWTUN,
     &rangelock_cheat, 0,
     "");
@@ -82,13 +82,31 @@ SYSCTL_INT(_debug, OID_AUTO, rangelock_cheat, CTLFLAG_RWTUN,
 #define	RL_RET_CHEAT_RLOCKED	0x1100
 #define	RL_RET_CHEAT_WLOCKED	0x2200
 
+static void
+rangelock_cheat_drain(struct rangelock *lock)
+{
+	uintptr_t v;
+
+	DROP_GIANT();
+	for (;;) {
+		v = atomic_load_ptr(&lock->head);
+		if ((v & RL_CHEAT_DRAINING) == 0)
+			break;
+		sleepq_add(&lock->head, NULL, "ranged1", 0, 0);
+		sleepq_wait(&lock->head, PRI_USER);
+		sleepq_lock(&lock->head);
+	}
+	sleepq_release(&lock->head);
+	PICKUP_GIANT();
+}
+
 static bool
 rangelock_cheat_lock(struct rangelock *lock, int locktype, bool trylock,
     void **cookie)
 {
 	uintptr_t v, x;
 
-	v = (uintptr_t)atomic_load_ptr(&lock->head);
+	v = atomic_load_ptr(&lock->head);
 	if ((v & RL_CHEAT_CHEATING) == 0)
 		return (false);
 	if ((v & RL_CHEAT_DRAINING) != 0) {
@@ -99,17 +117,7 @@ drain:
 		}
 		sleepq_lock(&lock->head);
 drain1:
-		DROP_GIANT();
-		for (;;) {
-			v = (uintptr_t)atomic_load_ptr(&lock->head);
-			if ((v & RL_CHEAT_DRAINING) == 0)
-				break;
-			sleepq_add(&lock->head, NULL, "ranged1", 0, 0);
-			sleepq_wait(&lock->head, PRI_USER);
-			sleepq_lock(&lock->head);
-		}
-		sleepq_release(&lock->head);
-		PICKUP_GIANT();
+		rangelock_cheat_drain(lock);
 		return (false);
 	}
 
@@ -182,7 +190,7 @@ rangelock_cheat_unlock(struct rangelock *lock, void *cookie)
 {
 	uintptr_t v, x;
 
-	v = (uintptr_t)atomic_load_ptr(&lock->head);
+	v = atomic_load_ptr(&lock->head);
 	if ((v & RL_CHEAT_CHEATING) == 0)
 		return (false);
 
@@ -251,7 +259,7 @@ rangelock_cheat_destroy(struct rangelock *lock)
 {
 	uintptr_t v;
 
-	v = (uintptr_t)atomic_load_ptr(&lock->head);
+	v = atomic_load_ptr(&lock->head);
 	if ((v & RL_CHEAT_CHEATING) == 0)
 		return (false);
 	MPASS(v == RL_CHEAT_CHEATING);
@@ -742,6 +750,47 @@ void *
 rangelock_trywlock(struct rangelock *lock, vm_ooffset_t start, vm_ooffset_t end)
 {
 	return (rangelock_lock_int(lock, true, start, end, RL_LOCK_WRITE));
+}
+
+/*
+ * If the caller asserts that it can obtain the range locks on the
+ * same lock simultaneously, switch to the non-cheat mode.  Cheat mode
+ * cannot handle it, hanging in drain or trylock retries.
+ */
+void
+rangelock_may_recurse(struct rangelock *lock)
+{
+	uintptr_t v, x;
+
+	v = atomic_load_ptr(&lock->head);
+	if ((v & RL_CHEAT_CHEATING) == 0)
+		return;
+
+	sleepq_lock(&lock->head);
+	for (;;) {
+		if ((v & RL_CHEAT_CHEATING) == 0) {
+			sleepq_release(&lock->head);
+			return;
+		}
+
+		/* Cheating and locked, drain. */
+		if ((v & RL_CHEAT_WLOCKED) != 0 ||
+		    (v & ~RL_CHEAT_MASK) >= RL_CHEAT_READER) {
+			x = v | RL_CHEAT_DRAINING;
+			if (atomic_fcmpset_ptr(&lock->head, &v, x) != 0) {
+				rangelock_cheat_drain(lock);
+				return;
+			}
+			continue;
+		}
+
+		/* Cheating and unlocked, clear RL_CHEAT_CHEATING. */
+		x = 0;
+		if (atomic_fcmpset_ptr(&lock->head, &v, x) != 0) {
+			sleepq_release(&lock->head);
+			return;
+		}
+	}
 }
 
 #ifdef INVARIANT_SUPPORT
