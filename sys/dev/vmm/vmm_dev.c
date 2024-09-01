@@ -13,9 +13,9 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mman.h>
-#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/sx.h>
 #include <sys/sysctl.h>
 #include <sys/ucred.h>
 #include <sys/uio.h>
@@ -58,13 +58,12 @@ struct vmmdev_softc {
 	SLIST_HEAD(, devmem_softc) devmem;
 	int		flags;
 };
-#define	VSC_LINKED		0x01
 
 static SLIST_HEAD(, vmmdev_softc) head;
 
 static unsigned pr_allow_flag;
-static struct mtx vmmdev_mtx;
-MTX_SYSINIT(vmmdev_mtx, &vmmdev_mtx, "vmm device mutex", MTX_DEF);
+static struct sx vmmdev_mtx;
+SX_SYSINIT(vmmdev_mtx, &vmmdev_mtx, "vmm device mutex");
 
 static MALLOC_DEFINE(M_VMMDEV, "vmmdev", "vmmdev");
 
@@ -156,7 +155,7 @@ vmmdev_lookup(const char *name, struct ucred *cred)
 {
 	struct vmmdev_softc *sc;
 
-	mtx_assert(&vmmdev_mtx, MA_OWNED);
+	sx_assert(&vmmdev_mtx, SA_XLOCKED);
 
 	SLIST_FOREACH(sc, &head, link) {
 		if (strcmp(name, vm_name(sc->vm)) == 0)
@@ -185,10 +184,6 @@ vmmdev_rw(struct cdev *cdev, struct uio *uio, int flags)
 	vm_paddr_t gpa, maxaddr;
 	void *hpa, *cookie;
 	struct vmmdev_softc *sc;
-
-	error = vmm_priv_check(curthread->td_ucred);
-	if (error)
-		return (error);
 
 	sc = vmmdev_lookup2(cdev);
 	if (sc == NULL)
@@ -327,6 +322,32 @@ vm_set_register_set(struct vcpu *vcpu, unsigned int count, int *regnum,
 	return (error);
 }
 
+static int
+vmmdev_open(struct cdev *dev, int flags, int fmt, struct thread *td)
+{
+	struct vmmdev_softc *sc;
+	int error;
+
+	sc = vmmdev_lookup2(dev);
+	KASSERT(sc != NULL, ("%s: device not found", __func__));
+
+	/*
+	 * A user can only access VMs that they themselves have created.
+	 */
+	if (td->td_ucred != sc->ucred)
+		return (EPERM);
+
+	/*
+	 * A jail without vmm access shouldn't be able to access vmm device
+	 * files at all, but check here just to be thorough.
+	 */
+	error = vmm_priv_check(td->td_ucred);
+	if (error != 0)
+		return (error);
+
+	return (0);
+}
+
 static const struct vmmdev_ioctl vmmdev_ioctls[] = {
 	VMMDEV_IOCTL(VM_GET_REGISTER, VMMDEV_IOCTL_LOCK_ONE_VCPU),
 	VMMDEV_IOCTL(VM_SET_REGISTER, VMMDEV_IOCTL_LOCK_ONE_VCPU),
@@ -374,10 +395,6 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	struct vcpu *vcpu;
 	const struct vmmdev_ioctl *ioctl;
 	int error, vcpuid;
-
-	error = vmm_priv_check(td->td_ucred);
-	if (error)
-		return (error);
 
 	sc = vmmdev_lookup2(cdev);
 	if (sc == NULL)
@@ -681,10 +698,6 @@ vmmdev_mmap_single(struct cdev *cdev, vm_ooffset_t *offset, vm_size_t mapsize,
 	int error, found, segid;
 	bool sysmem;
 
-	error = vmm_priv_check(curthread->td_ucred);
-	if (error)
-		return (error);
-
 	first = *offset;
 	last = first + mapsize;
 	if ((nprot & PROT_EXEC) || first < 0 || first >= last)
@@ -736,6 +749,8 @@ vmmdev_destroy(struct vmmdev_softc *sc)
 	struct devmem_softc *dsc;
 	int error __diagused;
 
+	KASSERT(sc->cdev == NULL, ("%s: cdev not free", __func__));
+
 	/*
 	 * Destroy all cdevs:
 	 *
@@ -745,7 +760,6 @@ vmmdev_destroy(struct vmmdev_softc *sc)
 	 */
 	SLIST_FOREACH(dsc, &sc->devmem, link) {
 		KASSERT(dsc->cdev != NULL, ("devmem cdev already destroyed"));
-		destroy_dev(dsc->cdev);
 		devmem_destroy(dsc);
 	}
 
@@ -761,21 +775,15 @@ vmmdev_destroy(struct vmmdev_softc *sc)
 		free(dsc, M_VMMDEV);
 	}
 
-	if (sc->cdev != NULL)
-		destroy_dev(sc->cdev);
-
 	if (sc->vm != NULL)
 		vm_destroy(sc->vm);
 
 	if (sc->ucred != NULL)
 		crfree(sc->ucred);
 
-	if ((sc->flags & VSC_LINKED) != 0) {
-		mtx_lock(&vmmdev_mtx);
-		SLIST_REMOVE(&head, sc, vmmdev_softc, link);
-		mtx_unlock(&vmmdev_mtx);
-	}
-
+	sx_xlock(&vmmdev_mtx);
+	SLIST_REMOVE(&head, sc, vmmdev_softc, link);
+	sx_xunlock(&vmmdev_mtx);
 	free(sc, M_VMMDEV);
 }
 
@@ -785,10 +793,10 @@ vmmdev_lookup_and_destroy(const char *name, struct ucred *cred)
 	struct cdev *cdev;
 	struct vmmdev_softc *sc;
 
-	mtx_lock(&vmmdev_mtx);
+	sx_xlock(&vmmdev_mtx);
 	sc = vmmdev_lookup(name, cred);
 	if (sc == NULL || sc->cdev == NULL) {
-		mtx_unlock(&vmmdev_mtx);
+		sx_xunlock(&vmmdev_mtx);
 		return (EINVAL);
 	}
 
@@ -798,7 +806,7 @@ vmmdev_lookup_and_destroy(const char *name, struct ucred *cred)
 	 */
 	cdev = sc->cdev;
 	sc->cdev = NULL;
-	mtx_unlock(&vmmdev_mtx);
+	sx_xunlock(&vmmdev_mtx);
 
 	destroy_dev(cdev);
 	vmmdev_destroy(sc);
@@ -833,6 +841,7 @@ SYSCTL_PROC(_hw_vmm, OID_AUTO, destroy,
 static struct cdevsw vmmdevsw = {
 	.d_name		= "vmmdev",
 	.d_version	= D_VERSION,
+	.d_open		= vmmdev_open,
 	.d_ioctl	= vmmdev_ioctl,
 	.d_mmap_single	= vmmdev_mmap_single,
 	.d_read		= vmmdev_rw,
@@ -854,50 +863,43 @@ vmmdev_alloc(struct vm *vm, struct ucred *cred)
 static int
 vmmdev_create(const char *name, struct ucred *cred)
 {
+	struct make_dev_args mda;
 	struct cdev *cdev;
-	struct vmmdev_softc *sc, *sc2;
+	struct vmmdev_softc *sc;
 	struct vm *vm;
 	int error;
 
-	mtx_lock(&vmmdev_mtx);
+	sx_xlock(&vmmdev_mtx);
 	sc = vmmdev_lookup(name, cred);
-	mtx_unlock(&vmmdev_mtx);
-	if (sc != NULL)
+	if (sc != NULL) {
+		sx_xunlock(&vmmdev_mtx);
 		return (EEXIST);
+	}
 
 	error = vm_create(name, &vm);
-	if (error != 0)
-		return (error);
-
-	sc = vmmdev_alloc(vm, cred);
-
-	/*
-	 * Lookup the name again just in case somebody sneaked in when we
-	 * dropped the lock.
-	 */
-	mtx_lock(&vmmdev_mtx);
-	sc2 = vmmdev_lookup(name, cred);
-	if (sc2 != NULL) {
-		mtx_unlock(&vmmdev_mtx);
-		vmmdev_destroy(sc);
-		return (EEXIST);
-	}
-	sc->flags |= VSC_LINKED;
-	SLIST_INSERT_HEAD(&head, sc, link);
-	mtx_unlock(&vmmdev_mtx);
-
-	error = make_dev_p(MAKEDEV_CHECKNAME, &cdev, &vmmdevsw, sc->ucred,
-	    UID_ROOT, GID_WHEEL, 0600, "vmm/%s", name);
 	if (error != 0) {
+		sx_xunlock(&vmmdev_mtx);
+		return (error);
+	}
+	sc = vmmdev_alloc(vm, cred);
+	SLIST_INSERT_HEAD(&head, sc, link);
+
+	make_dev_args_init(&mda);
+	mda.mda_devsw = &vmmdevsw;
+	mda.mda_cr = sc->ucred;
+	mda.mda_uid = UID_ROOT;
+	mda.mda_gid = GID_WHEEL;
+	mda.mda_mode = 0600;
+	mda.mda_si_drv1 = sc;
+	mda.mda_flags = MAKEDEV_CHECKNAME | MAKEDEV_WAITOK;
+	error = make_dev_s(&mda, &cdev, "vmm/%s", name);
+	if (error != 0) {
+		sx_xunlock(&vmmdev_mtx);
 		vmmdev_destroy(sc);
 		return (error);
 	}
-
-	mtx_lock(&vmmdev_mtx);
 	sc->cdev = cdev;
-	sc->cdev->si_drv1 = sc;
-	mtx_unlock(&vmmdev_mtx);
-
+	sx_xunlock(&vmmdev_mtx);
 	return (0);
 }
 
@@ -990,39 +992,37 @@ static struct cdevsw devmemsw = {
 static int
 devmem_create_cdev(struct vmmdev_softc *sc, int segid, char *devname)
 {
+	struct make_dev_args mda;
 	struct devmem_softc *dsc;
-	struct cdev *cdev;
-	const char *vmname;
 	int error;
 
-	vmname = vm_name(sc->vm);
-
-	error = make_dev_p(MAKEDEV_CHECKNAME, &cdev, &devmemsw, sc->ucred,
-	    UID_ROOT, GID_WHEEL, 0600, "vmm.io/%s.%s", vmname, devname);
-	if (error)
-		return (error);
+	sx_xlock(&vmmdev_mtx);
 
 	dsc = malloc(sizeof(struct devmem_softc), M_VMMDEV, M_WAITOK | M_ZERO);
-
-	mtx_lock(&vmmdev_mtx);
-	if (sc->cdev == NULL) {
-		/* virtual machine is being created or destroyed */
-		mtx_unlock(&vmmdev_mtx);
-		free(dsc, M_VMMDEV);
-		destroy_dev_sched_cb(cdev, NULL, 0);
-		return (ENODEV);
-	}
-
 	dsc->segid = segid;
 	dsc->name = devname;
-	dsc->cdev = cdev;
 	dsc->sc = sc;
 	SLIST_INSERT_HEAD(&sc->devmem, dsc, link);
-	mtx_unlock(&vmmdev_mtx);
 
-	/* The 'cdev' is ready for use after 'si_drv1' is initialized */
-	cdev->si_drv1 = dsc;
-	return (0);
+	make_dev_args_init(&mda);
+	mda.mda_devsw = &devmemsw;
+	mda.mda_cr = sc->ucred;
+	mda.mda_uid = UID_ROOT;
+	mda.mda_gid = GID_WHEEL;
+	mda.mda_mode = 0600;
+	mda.mda_si_drv1 = dsc;
+	mda.mda_flags = MAKEDEV_CHECKNAME | MAKEDEV_WAITOK;
+	error = make_dev_s(&mda, &dsc->cdev, "vmm.io/%s.%s", vm_name(sc->vm),
+	    devname);
+	if (error != 0) {
+		SLIST_REMOVE(&sc->devmem, dsc, devmem_softc, link);
+		free(dsc->name, M_VMMDEV);
+		free(dsc, M_VMMDEV);
+	}
+
+	sx_xunlock(&vmmdev_mtx);
+
+	return (error);
 }
 
 static void
@@ -1030,7 +1030,7 @@ devmem_destroy(void *arg)
 {
 	struct devmem_softc *dsc = arg;
 
-	KASSERT(dsc->cdev, ("%s: devmem cdev already destroyed", __func__));
+	destroy_dev(dsc->cdev);
 	dsc->cdev = NULL;
 	dsc->sc = NULL;
 }
