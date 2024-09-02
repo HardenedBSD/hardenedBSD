@@ -147,8 +147,30 @@ kva_alloc(vm_size_t size)
 	vm_offset_t addr;
 
 	size = round_page(size);
-	if (vmem_alloc(kernel_arena, size, M_BESTFIT | M_NOWAIT, &addr))
+	if (vmem_xalloc(kernel_arena, size, 0, 0, 0, VMEM_ADDR_MIN,
+	    VMEM_ADDR_MAX, M_BESTFIT | M_NOWAIT, &addr))
 		return (0);
+
+	return (addr);
+}
+
+/*
+ *	kva_alloc_aligned:
+ *
+ *	Allocate a virtual address range as in kva_alloc where the base
+ *	address is aligned to align.
+ */
+vm_offset_t
+kva_alloc_aligned(vm_size_t size, vm_size_t align)
+{
+	vm_offset_t addr;
+
+	TSENTER();
+	size = round_page(size);
+	if (vmem_xalloc(kernel_arena, size, align, 0, 0, VMEM_ADDR_MIN,
+	    VMEM_ADDR_MAX, M_BESTFIT | M_NOWAIT, &addr))
+		return (0);
+	TSEXIT();
 
 	return (addr);
 }
@@ -167,7 +189,7 @@ kva_free(vm_offset_t addr, vm_size_t size)
 {
 
 	size = round_page(size);
-	vmem_free(kernel_arena, addr, size);
+	vmem_xfree(kernel_arena, addr, size);
 }
 
 static vm_page_t
