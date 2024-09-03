@@ -133,11 +133,7 @@ main() {
 		echo 'deps: {' >> ${uclfile}
 		for dep in ${pkgdeps}; do
 			cat <<EOF >> ${uclfile}
-<<<<<<< HEAD
-	%PKG_NAME_PREFIX%-${dep}: {
-=======
 	${PKG_NAME_PREFIX}-${dep}: {
->>>>>>> origin/freebsd/14-stable/main
 		origin: "base",
 		version: "${PKG_VERSION}"
 	}
