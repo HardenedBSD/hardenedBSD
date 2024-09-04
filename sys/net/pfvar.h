@@ -359,8 +359,8 @@ struct pfi_dynaddr {
 		mtx_unlock(_s->lock);					\
 	} while (0)
 #else
-#define	PF_STATE_LOCK(s)	mtx_lock(s->lock)
-#define	PF_STATE_UNLOCK(s)	mtx_unlock(s->lock)
+#define	PF_STATE_LOCK(s)	mtx_lock((s)->lock)
+#define	PF_STATE_UNLOCK(s)	mtx_unlock((s)->lock)
 #endif
 
 #ifdef INVARIANTS
@@ -2516,8 +2516,8 @@ struct pf_krule		*pf_get_translation(struct pf_pdesc *, struct mbuf *,
 			    struct pf_addr *, struct pf_addr *,
 			    uint16_t, uint16_t, struct pf_kanchor_stackframe *);
 
-struct pf_state_key	*pf_state_key_setup(struct pf_pdesc *, struct pf_addr *,
-			    struct pf_addr *, u_int16_t, u_int16_t);
+struct pf_state_key	*pf_state_key_setup(struct pf_pdesc *, struct mbuf *, int,
+			    struct pf_addr *, struct pf_addr *, u_int16_t, u_int16_t);
 struct pf_state_key	*pf_state_key_clone(const struct pf_state_key *);
 void			 pf_rule_to_actions(struct pf_krule *,
 			    struct pf_rule_actions *);
