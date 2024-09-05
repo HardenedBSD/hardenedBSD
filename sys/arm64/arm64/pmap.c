@@ -186,8 +186,8 @@
 #else
 #define	ATTR_KERN_GP		0
 #endif
-#define	PMAP_SAN_PTE_BITS	(ATTR_DEFAULT | ATTR_S1_XN | ATTR_KERN_GP | \
-	ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | ATTR_S1_AP(ATTR_S1_AP_RW))
+#define	PMAP_SAN_PTE_BITS	(ATTR_AF | ATTR_S1_XN | pmap_sh_attr | \
+  ATTR_KERN_GP | ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | ATTR_S1_AP(ATTR_S1_AP_RW))
 
 struct pmap_large_md_page {
 	struct rwlock   pv_lock;
@@ -355,6 +355,8 @@ static u_int physmap_idx;
 
 static SYSCTL_NODE(_vm, OID_AUTO, pmap, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "VM/pmap parameters");
+
+pt_entry_t pmap_sh_attr __read_mostly = ATTR_SH(ATTR_SH_IS);
 
 #if PAGE_SIZE == PAGE_SIZE_4K
 #define	L1_BLOCKS_SUPPORTED	1
@@ -1151,7 +1153,7 @@ pmap_bootstrap_l2_block(struct pmap_bootstrap_state *state, int i)
 		MPASS((state->pa & L2_OFFSET) == 0);
 		MPASS(state->l2[l2_slot] == 0);
 		pmap_store(&state->l2[l2_slot], PHYS_TO_PTE(state->pa) |
-		    ATTR_DEFAULT | ATTR_S1_XN | ATTR_KERN_GP |
+		    ATTR_AF | pmap_sh_attr | ATTR_S1_XN | ATTR_KERN_GP |
 		    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | contig | L2_BLOCK);
 	}
 	MPASS(state->va == (state->pa - dmap_phys_base + DMAP_MIN_ADDRESS));
@@ -1201,7 +1203,7 @@ pmap_bootstrap_l3_page(struct pmap_bootstrap_state *state, int i)
 		MPASS((state->pa & L3_OFFSET) == 0);
 		MPASS(state->l3[l3_slot] == 0);
 		pmap_store(&state->l3[l3_slot], PHYS_TO_PTE(state->pa) |
-		    ATTR_DEFAULT | ATTR_S1_XN | ATTR_KERN_GP |
+		    ATTR_AF | pmap_sh_attr | ATTR_S1_XN | ATTR_KERN_GP |
 		    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | contig | L3_PAGE);
 	}
 	MPASS(state->va == (state->pa - dmap_phys_base + DMAP_MIN_ADDRESS));
@@ -1243,7 +1245,8 @@ pmap_bootstrap_dmap(void)
 				MPASS((bs_state.pa & L1_OFFSET) == 0);
 				pmap_store(
 				    &bs_state.l1[pmap_l1_index(bs_state.va)],
-				    PHYS_TO_PTE(bs_state.pa) | ATTR_DEFAULT |
+				    PHYS_TO_PTE(bs_state.pa) | ATTR_AF |
+				    pmap_sh_attr |
 				    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) |
 				    ATTR_S1_XN | ATTR_KERN_GP | L1_BLOCK);
 			}
@@ -2112,8 +2115,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 	KASSERT((size & PAGE_MASK) == 0,
 	    ("pmap_kenter: Mapping is not page-sized"));
 
-	attr = ATTR_DEFAULT | ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_S1_XN |
-	    ATTR_KERN_GP | ATTR_S1_IDX(mode);
+	attr = ATTR_AF | pmap_sh_attr | ATTR_S1_AP(ATTR_S1_AP_RW) |
+	    ATTR_S1_XN | ATTR_KERN_GP | ATTR_S1_IDX(mode);
 	old_l3e = 0;
 	va = sva;
 	while (size != 0) {
@@ -2327,7 +2330,8 @@ pmap_qenter(vm_offset_t sva, vm_page_t *ma, int count)
 		    ("pmap_qenter: Invalid level %d", lvl));
 
 		m = ma[i];
-		attr = ATTR_DEFAULT | ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_S1_XN |
+		attr = ATTR_AF | pmap_sh_attr |
+		    ATTR_S1_AP(ATTR_S1_AP_RW) | ATTR_S1_XN |
 		    ATTR_KERN_GP | ATTR_S1_IDX(m->md.pv_memattr) | L3_PAGE;
 		pte = pmap_l2_to_l3(pde, va);
 		old_l3e |= pmap_load_store(pte, VM_PAGE_TO_PTE(m) | attr);
@@ -5123,7 +5127,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	if ((m->oflags & VPO_UNMANAGED) == 0)
 		VM_PAGE_OBJECT_BUSY_ASSERT(m);
 	pa = VM_PAGE_TO_PHYS(m);
-	new_l3 = (pt_entry_t)(PHYS_TO_PTE(pa) | ATTR_DEFAULT | L3_PAGE);
+	new_l3 = (pt_entry_t)(PHYS_TO_PTE(pa) | ATTR_AF | pmap_sh_attr |
+	    L3_PAGE);
 	new_l3 |= pmap_pte_memattr(pmap, m->md.pv_memattr);
 	new_l3 |= pmap_pte_prot(pmap, prot);
 	if ((flags & PMAP_ENTER_WIRED) != 0)
@@ -5466,13 +5471,13 @@ pmap_enter_l2_rx(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
 
-	new_l2 = (pd_entry_t)(VM_PAGE_TO_PTE(m) | ATTR_DEFAULT |
+	new_l2 = (pd_entry_t)(VM_PAGE_TO_PTE(m) | pmap_sh_attr |
 	    ATTR_S1_IDX(m->md.pv_memattr) | ATTR_S1_AP(ATTR_S1_AP_RO) |
 	    L2_BLOCK);
-	if ((m->oflags & VPO_UNMANAGED) == 0) {
+	if ((m->oflags & VPO_UNMANAGED) == 0)
 		new_l2 |= ATTR_SW_MANAGED;
-		new_l2 &= ~ATTR_AF;
-	}
+	else
+		new_l2 |= ATTR_AF;
 	if ((prot & VM_PROT_EXECUTE) == 0 ||
 	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
 		new_l2 |= ATTR_S1_XN;
@@ -5695,13 +5700,13 @@ pmap_enter_l3c_rx(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_page_t *ml3p,
 	KASSERT(ADDR_IS_CANONICAL(va),
 	    ("%s: Address not in canonical form: %lx", __func__, va));
 
-	l3e = VM_PAGE_TO_PTE(m) | ATTR_DEFAULT |
+	l3e = VM_PAGE_TO_PTE(m) | pmap_sh_attr |
 	    ATTR_S1_IDX(m->md.pv_memattr) | ATTR_S1_AP(ATTR_S1_AP_RO) |
 	    ATTR_CONTIGUOUS | L3_PAGE;
-	if ((m->oflags & VPO_UNMANAGED) == 0) {
+	if ((m->oflags & VPO_UNMANAGED) == 0)
 		l3e |= ATTR_SW_MANAGED;
-		l3e &= ~ATTR_AF;
-	}
+	else
+		l3e |= ATTR_AF;
 	if ((prot & VM_PROT_EXECUTE) == 0 ||
 	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
 		l3e |= ATTR_S1_XN;
@@ -6092,8 +6097,8 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	pmap_resident_count_inc(pmap, 1);
 
 	pa = VM_PAGE_TO_PHYS(m);
-	l3_val = PHYS_TO_PTE(pa) | ATTR_DEFAULT | ATTR_S1_IDX(m->md.pv_memattr) |
-	    ATTR_S1_AP(ATTR_S1_AP_RO) | L3_PAGE;
+	l3_val = PHYS_TO_PTE(pa) | pmap_sh_attr |
+	    ATTR_S1_IDX(m->md.pv_memattr) | ATTR_S1_AP(ATTR_S1_AP_RO) | L3_PAGE;
 	l3_val |= pmap_pte_bti(pmap, va);
 	if ((prot & VM_PROT_EXECUTE) == 0 ||
 	    m->md.pv_memattr == VM_MEMATTR_DEVICE)
@@ -6108,10 +6113,10 @@ pmap_enter_quick_locked(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	/*
 	 * Now validate mapping with RO protection
 	 */
-	if ((m->oflags & VPO_UNMANAGED) == 0) {
+	if ((m->oflags & VPO_UNMANAGED) == 0)
 		l3_val |= ATTR_SW_MANAGED;
-		l3_val &= ~ATTR_AF;
-	}
+	else
+		l3_val |= ATTR_AF;
 
 	/* Sync icache before the mapping is stored to PTE */
 	if ((prot & VM_PROT_EXECUTE) && pmap != kernel_pmap &&
@@ -7742,9 +7747,9 @@ pmap_mapbios(vm_paddr_t pa, vm_size_t size)
 			/* Insert L2_BLOCK */
 			l2 = pmap_l1_to_l2(pde, va);
 			old_l2e |= pmap_load_store(l2,
-			    PHYS_TO_PTE(pa) | ATTR_DEFAULT | ATTR_S1_XN |
-			    ATTR_KERN_GP | ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) |
-			    L2_BLOCK);
+			    PHYS_TO_PTE(pa) | ATTR_AF | pmap_sh_attr |
+			    ATTR_S1_XN | ATTR_KERN_GP |
+			    ATTR_S1_IDX(VM_MEMATTR_WRITE_BACK) | L2_BLOCK);
 
 			va += L2_SIZE;
 			pa += L2_SIZE;
