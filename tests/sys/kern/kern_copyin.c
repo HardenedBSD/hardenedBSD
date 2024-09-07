@@ -2,7 +2,6 @@
  * Copyright (c) 2016 Oliver Pinter <op@hardenedbsd.org>
  * Copyright (c) 2015 The FreeBSD Foundation
  * Copyright (c) 2015, 2020 The FreeBSD Foundation
- * All rights reserved.
  *
  * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
  * under sponsorship from the FreeBSD Foundation.
