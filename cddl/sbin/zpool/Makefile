@@ -24,6 +24,7 @@ MAN= \
 	zpool-create.8 \
 	zpool-destroy.8 \
 	zpool-detach.8 \
+	zpool-ddtprune.8 \
 	zpool-events.8 \
 	zpool-export.8 \
 	zpool-features.7 \
@@ -68,6 +69,7 @@ CFLAGS+= \
 	-I${ZFSTOP}/include \
 	-I${ZFSTOP}/lib/libspl/include \
 	-I${ZFSTOP}/lib/libspl/include/os/freebsd \
+	-I${SRCTOP}/sys/contrib/openzfs/lib/libzpool/include \
 	-I${SRCTOP}/sys \
 	-I${SRCTOP}/cddl/compat/opensolaris/include \
 	-I${ZFSTOP}/cmd/zpool \
