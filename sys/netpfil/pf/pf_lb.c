@@ -52,6 +52,13 @@
 #include <net/pfvar.h>
 #include <net/if_pflog.h>
 
+/*
+ * Limit the amount of work we do to find a free source port for redirects that
+ * introduce a state conflict.
+ */
+#define	V_pf_rdr_srcport_rewrite_tries	VNET(pf_rdr_srcport_rewrite_tries)
+VNET_DEFINE_STATIC(int, pf_rdr_srcport_rewrite_tries) = 16;
+
 #define DPFPRINTF(n, x)	if (V_pf_status.debug >= (n)) printf x
 
 static void		 pf_hash(struct pf_addr *, struct pf_addr *,
@@ -435,7 +442,7 @@ pf_map_addr(sa_family_t af, struct pf_krule *r, struct pf_addr *saddr,
     struct pf_addr *naddr, struct pfi_kkif **nkif, struct pf_addr *init_addr,
     struct pf_ksrc_node **sn)
 {
-	u_short			 reason = 0;
+	u_short			 reason = PFRES_MATCH;
 	struct pf_kpool		*rpool = &r->rpool;
 	struct pf_addr		*raddr = NULL, *rmask = NULL;
 	struct pf_srchash	*sh = NULL;
@@ -822,6 +829,7 @@ pf_get_translation(struct pf_pdesc *pd, struct mbuf *m, int off,
 		break;
 	case PF_RDR: {
 		struct pf_state_key_cmp key;
+		int tries;
 		uint16_t cut, low, high, nport;
 
 		reason = pf_map_addr(pd->af, r, saddr, naddr, NULL, NULL, sn);
@@ -873,11 +881,15 @@ pf_get_translation(struct pf_pdesc *pd, struct mbuf *m, int off,
 		if (!pf_find_state_all_exists(&key, PF_OUT))
 			break;
 
+		tries = 0;
+
 		low = 50001;	/* XXX-MJ PF_NAT_PROXY_PORT_LOW/HIGH */
 		high = 65535;
 		cut = arc4random() % (1 + high - low) + low;
 		for (uint32_t tmp = cut;
-		    tmp <= high && tmp <= UINT16_MAX; tmp++) {
+		    tmp <= high && tmp <= UINT16_MAX &&
+		    tries < V_pf_rdr_srcport_rewrite_tries;
+		    tmp++, tries++) {
 			key.port[0] = htons(tmp);
 			if (!pf_find_state_all_exists(&key, PF_OUT)) {
 				/* Update the source port. */
@@ -885,7 +897,9 @@ pf_get_translation(struct pf_pdesc *pd, struct mbuf *m, int off,
 				goto out;
 			}
 		}
-		for (uint32_t tmp = cut - 1; tmp >= low; tmp--) {
+		for (uint32_t tmp = cut - 1;
+		    tmp >= low && tries < V_pf_rdr_srcport_rewrite_tries;
+		    tmp--, tries++) {
 			key.port[0] = htons(tmp);
 			if (!pf_find_state_all_exists(&key, PF_OUT)) {
 				/* Update the source port. */
@@ -894,10 +908,15 @@ pf_get_translation(struct pf_pdesc *pd, struct mbuf *m, int off,
 			}
 		}
 
+		/*
+		 * We failed to find a match.  Push on ahead anyway, let
+		 * pf_state_insert() be the arbiter of whether the state
+		 * conflict is tolerable.  In particular, with TCP connections
+		 * the state may be reused if the TCP state is terminal.
+		 */
 		DPFPRINTF(PF_DEBUG_MISC,
 		    ("pf: RDR source port allocation failed\n"));
-		reason = PFRES_MAPFAILED;
-		goto notrans;
+		break;
 
 out:
 		DPFPRINTF(PF_DEBUG_MISC,
