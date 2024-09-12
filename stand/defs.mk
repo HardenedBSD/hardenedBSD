@@ -66,7 +66,7 @@ BINDIR?=	/boot
 # LUAPATH is where we search for and install lua scripts.
 LUAPATH?=	/boot/lua
 FLUASRC?=	${SRCTOP}/libexec/flua
-FLUALIB?=	${SRCTOP}/lib/flua
+FLUALIB?=	${SRCTOP}/libexec/flua
 
 MK_SAFESTACK=	no
 MK_CFI=		no
