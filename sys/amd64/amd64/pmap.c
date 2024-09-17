@@ -2269,6 +2269,7 @@ pmap_bootstrap_la57(void *arg __unused)
 	ssdtosyssd(&gdt_segs[GPROC0_SEL],
 	    (struct system_segment_descriptor *)&__pcpu[0].pc_gdt[GPROC0_SEL]);
 	ltr(GSEL(GPROC0_SEL, SEL_KPL));
+	lidt(&r_idt);
 
 	if (bootverbose)
 		printf("LA57 trampoline returned, CR4 %#lx\n", rcr4());
@@ -4380,15 +4381,13 @@ pmap_pinit_pml5(vm_page_t pml5pg)
 	 * entering all existing kernel mappings into level 5 table.
 	 */
 	pm_pml5[pmap_pml5e_index(UPT_MAX_ADDRESS)] = KPML4phys | X86_PG_V |
-	    X86_PG_RW | X86_PG_A | X86_PG_M | pg_g |
-	    pmap_cache_bits(kernel_pmap, VM_MEMATTR_DEFAULT, false);
+	    X86_PG_RW | X86_PG_A | X86_PG_M;
 
 	/* 
 	 * Install self-referential address mapping entry.
 	 */
 	pm_pml5[PML5PML5I] = VM_PAGE_TO_PHYS(pml5pg) |
-	    X86_PG_RW | X86_PG_V | X86_PG_M | X86_PG_A |
-	    pmap_cache_bits(kernel_pmap, VM_MEMATTR_DEFAULT, false);
+	    X86_PG_RW | X86_PG_V | X86_PG_M | X86_PG_A;
 }
 
 static void
@@ -4417,8 +4416,7 @@ pmap_pinit_pml5_pti(vm_page_t pml5pgu)
 	 */
 	pm_pml5u[pmap_pml5e_index(UPT_MAX_ADDRESS)] =
 	    pmap_kextract((vm_offset_t)pti_pml4) |
-	    X86_PG_V | X86_PG_RW | X86_PG_A | X86_PG_M | pg_g |
-	    pmap_cache_bits(kernel_pmap, VM_MEMATTR_DEFAULT, false);
+	    X86_PG_V | X86_PG_RW | X86_PG_A | X86_PG_M;
 }
 
 /* Allocate a page table page and do related bookkeeping */
