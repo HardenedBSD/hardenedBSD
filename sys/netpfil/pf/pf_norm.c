@@ -1199,7 +1199,7 @@ pf_normalize_ip(struct mbuf **m0, struct pfi_kkif *kif, u_short *reason,
 	REASON_SET(reason, PFRES_FRAG);
  drop:
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET, PF_DROP, *reason, r, NULL, NULL, pd, 1);
+		PFLOG_PACKET(kif, m, PF_DROP, *reason, r, NULL, NULL, pd, 1);
 
 	return (PF_DROP);
 }
@@ -1372,13 +1372,13 @@ again:
  shortpkt:
 	REASON_SET(reason, PFRES_SHORT);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET6, PF_DROP, *reason, r, NULL, NULL, pd, 1);
+		PFLOG_PACKET(kif, m, PF_DROP, *reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 
  drop:
 	REASON_SET(reason, PFRES_NORM);
 	if (r != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET6, PF_DROP, *reason, r, NULL, NULL, pd, 1);
+		PFLOG_PACKET(kif, m, PF_DROP, *reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 }
 #endif /* INET6 */
@@ -1504,7 +1504,7 @@ pf_normalize_tcp(struct pfi_kkif *kif, struct mbuf *m, int ipoff,
  tcp_drop:
 	REASON_SET(&reason, PFRES_NORM);
 	if (rm != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET, PF_DROP, reason, r, NULL, NULL, pd, 1);
+		PFLOG_PACKET(kif, m, PF_DROP, reason, r, NULL, NULL, pd, 1);
 	return (PF_DROP);
 }
 
@@ -2066,8 +2066,8 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd)
 	return (0);
 }
 
-static int
-pf_scan_sctp(struct mbuf *m, int ipoff, int off, struct pf_pdesc *pd,
+int
+pf_scan_sctp(struct mbuf *m, int off, struct pf_pdesc *pd,
     struct pfi_kkif *kif)
 {
 	struct sctp_chunkhdr ch = { };
@@ -2203,11 +2203,6 @@ pf_normalize_sctp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
 
 	PF_RULES_RASSERT();
 
-	/* Unconditionally scan the SCTP packet, because we need to look for
-	 * things like shutdown and asconf chunks. */
-	if (pf_scan_sctp(m, ipoff, off, pd, kif) != PF_PASS)
-		goto sctp_drop;
-
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
 	/* Check if there any scrub rules. Lack of scrub rules means enforced
 	 * packet normalization operation just like in OpenBSD. */
@@ -2266,7 +2261,7 @@ pf_normalize_sctp(int dir, struct pfi_kkif *kif, struct mbuf *m, int ipoff,
 sctp_drop:
 	REASON_SET(&reason, PFRES_NORM);
 	if (rm != NULL && r->log)
-		PFLOG_PACKET(kif, m, AF_INET, PF_DROP, reason, r, NULL, NULL, pd,
+		PFLOG_PACKET(kif, m, PF_DROP, reason, r, NULL, NULL, pd,
 		    1);
 
 	return (PF_DROP);
@@ -2274,9 +2269,8 @@ sctp_drop:
 
 #ifdef INET
 void
-pf_scrub_ip(struct mbuf **m0, struct pf_pdesc *pd)
+pf_scrub_ip(struct mbuf *m, struct pf_pdesc *pd)
 {
-	struct mbuf		*m = *m0;
 	struct ip		*h = mtod(m, struct ip *);
 
 	/* Clear IP_DF if no-df was requested */
@@ -2318,9 +2312,8 @@ pf_scrub_ip(struct mbuf **m0, struct pf_pdesc *pd)
 
 #ifdef INET6
 void
-pf_scrub_ip6(struct mbuf **m0, struct pf_pdesc *pd)
+pf_scrub_ip6(struct mbuf *m, struct pf_pdesc *pd)
 {
-	struct mbuf		*m = *m0;
 	struct ip6_hdr		*h = mtod(m, struct ip6_hdr *);
 
 	/* Enforce a minimum ttl, may cause endless packet loops */

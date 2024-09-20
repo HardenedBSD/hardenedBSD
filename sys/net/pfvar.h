@@ -1228,6 +1228,7 @@ typedef void		pfsync_clear_states_t(u_int32_t, const char *);
 typedef int		pfsync_defer_t(struct pf_kstate *, struct mbuf *);
 typedef void		pfsync_detach_ifnet_t(struct ifnet *);
 typedef void		pflow_export_state_t(const struct pf_kstate *);
+typedef bool		pf_addr_filter_func_t(const sa_family_t, const struct pf_addr *);
 
 VNET_DECLARE(pfsync_state_import_t *, pfsync_state_import_ptr);
 #define V_pfsync_state_import_ptr	VNET(pfsync_state_import_ptr)
@@ -1253,7 +1254,7 @@ void			pf_state_export(struct pf_state_export *,
 /* pflog */
 struct pf_kruleset;
 struct pf_pdesc;
-typedef int pflog_packet_t(struct pfi_kkif *, struct mbuf *, sa_family_t,
+typedef int pflog_packet_t(struct pfi_kkif *, struct mbuf *,
     uint8_t, u_int8_t, struct pf_krule *, struct pf_krule *, struct pf_kruleset *,
     struct pf_pdesc *, int);
 extern pflog_packet_t		*pflog_packet_ptr;
@@ -1610,6 +1611,7 @@ struct pf_pdesc {
 	struct pf_rule_actions	act;
 
 	u_int32_t	 p_len;		/* total length of payload */
+	u_int32_t	 rh_cnt;	/* Route header count */
 
 	u_int16_t	*ip_sum;
 	u_int16_t	*proto_sum;
@@ -2350,8 +2352,15 @@ VNET_DECLARE(struct pf_krule,		 pf_default_rule);
 extern void			 pf_addrcpy(struct pf_addr *, struct pf_addr *,
 				    sa_family_t);
 void				pf_free_rule(struct pf_krule *);
+int				pf_setup_pdesc(sa_family_t, int,
+				    struct pf_pdesc *, struct mbuf *,
+				    u_short *, u_short *, struct pfi_kkif *,
+				    struct pf_krule **, struct pf_krule **,
+				    struct pf_kruleset **, int *, int *,
+				    struct pf_rule_actions *);
 
 int	pf_test_eth(int, int, struct ifnet *, struct mbuf **, struct inpcb *);
+int	pf_scan_sctp(struct mbuf *, int, struct pf_pdesc *, struct pfi_kkif *);
 #ifdef INET
 int	pf_test(int, int, struct ifnet *, struct mbuf **, struct inpcb *,
 	    struct pf_rule_actions *);
@@ -2421,7 +2430,8 @@ void	pfr_cleanup(void);
 int	pfr_match_addr(struct pfr_ktable *, struct pf_addr *, sa_family_t);
 void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *, sa_family_t,
 	    u_int64_t, int, int, int);
-int	pfr_pool_get(struct pfr_ktable *, int *, struct pf_addr *, sa_family_t);
+int	pfr_pool_get(struct pfr_ktable *, int *, struct pf_addr *, sa_family_t,
+	    pf_addr_filter_func_t);
 void	pfr_dynaddr_update(struct pfr_ktable *, struct pfi_dynaddr *);
 struct pfr_ktable *
 	pfr_attach_table(struct pf_kruleset *, char *);
@@ -2633,10 +2643,10 @@ void			 pf_rule_to_actions(struct pf_krule *,
 int			 pf_normalize_mss(struct mbuf *m, int off,
 			    struct pf_pdesc *pd);
 #ifdef INET
-void	pf_scrub_ip(struct mbuf **, struct pf_pdesc *);
+void	pf_scrub_ip(struct mbuf *, struct pf_pdesc *);
 #endif	/* INET */
 #ifdef INET6
-void	pf_scrub_ip6(struct mbuf **, struct pf_pdesc *);
+void	pf_scrub_ip6(struct mbuf *, struct pf_pdesc *);
 #endif	/* INET6 */
 
 struct pfi_kkif		*pf_kkif_create(int);
