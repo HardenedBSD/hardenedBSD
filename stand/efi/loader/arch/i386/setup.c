@@ -1,13 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2009 David Schultz <das@FreeBSD.org>
- * All rights reserved.
- *
- * Copyright (c) 2011 The FreeBSD Foundation
- *
- * Portions of this software were developed by David Chisnall
- * under sponsorship from the FreeBSD Foundation.
+ * Copyright (c) 2024 Ahmad Khalifa <ahmadkhalifa570@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -18,10 +12,10 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -31,40 +25,27 @@
  * SUCH DAMAGE.
  */
 
-#include "namespace.h"
-#include <errno.h>
-#include <limits.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include "un-namespace.h"
+#include <sys/types.h>
 
-#include "local.h"
-#include "xlocale_private.h"
+#include <efi.h>
+#include <efilib.h>
 
-int
-vdprintf(int fd, const char * __restrict fmt, va_list ap)
-{
-	FILE f = FAKE_FILE;
-	unsigned char buf[BUFSIZ];
-	int serrno = errno;
-	int ret;
+#include <machine/specialreg.h>
 
-	if (fd > SHRT_MAX) {
-		errno = EMFILE;
-		return (EOF);
+/*
+ * Check for long mode then call efi_main
+ */
+EFI_STATUS
+setup(EFI_HANDLE IH, EFI_SYSTEM_TABLE *ST) {
+	u_int edx;
+
+	asm("cpuid" : "=d"(edx) : "a"(0x80000001) : "ebx", "ecx");
+	if ((edx & AMDID_LM) == 0) {
+		ST->ConOut->OutputString(ST->ConOut, (CHAR16 *)
+		    L"This CPU doesn't support long mode.\r\n"
+		    L"Unable to proceed.\r\n");
+		ST->BootServices->Exit(IH, EFI_UNSUPPORTED, 0, NULL);
 	}
 
-	f._p = buf;
-	f._w = sizeof(buf);
-	f._flags = __SWR;
-	f._file = fd;
-	f._cookie = &f;
-	f._write = __swrite;
-	f._bf._base = buf;
-	f._bf._size = sizeof(buf);
-
-	if ((ret = __vfprintf(&f, __get_locale(), serrno, fmt, ap)) < 0)
-		return (ret);
-
-	return (__fflush(&f) ? EOF : ret);
+	return (efi_main(IH, ST));
 }
