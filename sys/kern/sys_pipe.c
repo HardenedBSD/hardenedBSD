@@ -592,10 +592,10 @@ retry:
 	}
 
 	vm_map_lock(pipe_map);
-	if (priv_check(curthread, PRIV_PIPEBUF) != 0 &&
-	    (vm_map_max(pipe_map) - vm_map_min(pipe_map)) *
-	    (100 - pipebuf_reserv) / 100 < pipe_map->size + size) {
+	if (priv_check(curthread, PRIV_PIPEBUF) != 0 && maxpipekva / 100 *
+	    (100 - pipebuf_reserv) < amountpipekva + size) {
 		vm_map_unlock(pipe_map);
+		chgpipecnt(cpipe->pipe_pair->pp_owner->cr_ruidinfo, -size, 0);
 		if (cpipe->pipe_buffer.buffer == NULL &&
 		    size > SMALL_PIPE_SIZE) {
 			size = SMALL_PIPE_SIZE;
