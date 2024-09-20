@@ -1488,7 +1488,7 @@ struct ixgbe_dmac_config {
 #define IXGBE_PSRTYPE_RQPL_SHIFT	29
 
 /* CTRL Bit Masks */
-#define IXGBE_CTRL_GIO_DIS	0x00000004 /* Global IO Master Disable bit */
+#define IXGBE_CTRL_GIO_DIS	0x00000004 /* Global IO Primary Disable bit */
 #define IXGBE_CTRL_LNK_RST	0x00000008 /* Link Reset. Resets everything. */
 #define IXGBE_CTRL_RST		0x04000000 /* Reset (SW) */
 #define IXGBE_CTRL_RST_MASK	(IXGBE_CTRL_LNK_RST | IXGBE_CTRL_RST)
@@ -2136,7 +2136,7 @@ enum {
 /* STATUS Bit Masks */
 #define IXGBE_STATUS_LAN_ID		0x0000000C /* LAN ID */
 #define IXGBE_STATUS_LAN_ID_SHIFT	2 /* LAN ID Shift*/
-#define IXGBE_STATUS_GIO		0x00080000 /* GIO Master Ena Status */
+#define IXGBE_STATUS_GIO		0x00080000 /* GIO Primary Ena Status */
 
 #define IXGBE_STATUS_LAN_ID_0	0x00000000 /* LAN ID 0 */
 #define IXGBE_STATUS_LAN_ID_1	0x00000004 /* LAN ID 1 */
@@ -2546,8 +2546,8 @@ enum {
 #define IXGBE_PCIDEVCTRL2_4_8s		0xd
 #define IXGBE_PCIDEVCTRL2_17_34s	0xe
 
-/* Number of 100 microseconds we wait for PCI Express master disable */
-#define IXGBE_PCI_MASTER_DISABLE_TIMEOUT	800
+/* Number of 100 microseconds we wait for PCI Express primary disable */
+#define IXGBE_PCI_PRIMARY_DISABLE_TIMEOUT	800
 
 /* Check whether address is multicast. This is little-endian specific check.*/
 #define IXGBE_IS_MULTICAST(Address) \
@@ -3105,6 +3105,7 @@ enum ixgbe_fdir_pballoc_type {
 #define FW_SHADOW_RAM_DUMP_LEN		0
 #define FW_DEFAULT_CHECKSUM		0xFF /* checksum always 0xFF */
 #define FW_NVM_DATA_OFFSET		3
+#define FW_ANVM_DATA_OFFSET		3
 #define FW_MAX_READ_BUFFER_SIZE		1024
 #define FW_DISABLE_RXEN_CMD		0xDE
 #define FW_DISABLE_RXEN_LEN		0x1
@@ -3175,6 +3176,8 @@ enum ixgbe_fdir_pballoc_type {
 #define FW_PHY_INFO_SPEED_MASK		0xFFFu
 #define FW_PHY_INFO_ID_HI_MASK		0xFFFF0000u
 #define FW_PHY_INFO_ID_LO_MASK		0x0000FFFFu
+
+#define IXGBE_SR_IMMEDIATE_VALUES_PTR	0x4E
 
 /* Host Interface Command Structures */
 
@@ -3479,6 +3482,8 @@ typedef u64 ixgbe_physical_layer;
 #define IXGBE_PHYSICAL_LAYER_1000BASE_SX	0x04000
 #define IXGBE_PHYSICAL_LAYER_10BASE_T		0x08000
 #define IXGBE_PHYSICAL_LAYER_2500BASE_KX	0x10000
+#define IXGBE_PHYSICAL_LAYER_2500BASE_T		0x20000
+#define IXGBE_PHYSICAL_LAYER_5000BASE_T		0x40000
 
 /* Flow Control Data Sheet defined values
  * Calculation and defines taken from 802.1bb Annex O
@@ -4178,35 +4183,6 @@ struct ixgbe_phy_info {
 
 #include "ixgbe_mbx.h"
 
-struct ixgbe_mbx_operations {
-	void (*init_params)(struct ixgbe_hw *hw);
-	s32  (*read)(struct ixgbe_hw *, u32 *, u16,  u16);
-	s32  (*write)(struct ixgbe_hw *, u32 *, u16, u16);
-	s32  (*read_posted)(struct ixgbe_hw *, u32 *, u16,  u16);
-	s32  (*write_posted)(struct ixgbe_hw *, u32 *, u16, u16);
-	s32  (*check_for_msg)(struct ixgbe_hw *, u16);
-	s32  (*check_for_ack)(struct ixgbe_hw *, u16);
-	s32  (*check_for_rst)(struct ixgbe_hw *, u16);
-};
-
-struct ixgbe_mbx_stats {
-	u32 msgs_tx;
-	u32 msgs_rx;
-
-	u32 acks;
-	u32 reqs;
-	u32 rsts;
-};
-
-struct ixgbe_mbx_info {
-	struct ixgbe_mbx_operations ops;
-	struct ixgbe_mbx_stats stats;
-	u32 timeout;
-	u32 usec_delay;
-	u32 v2p_mailbox;
-	u16 size;
-};
-
 struct ixgbe_hw {
 	u8 IOMEM *hw_addr;
 	void *back;
@@ -4230,6 +4206,7 @@ struct ixgbe_hw {
 	bool allow_unsupported_sfp;
 	bool wol_enabled;
 	bool need_crosstalk_fix;
+	u32 fw_rst_cnt;
 };
 
 #define ixgbe_call_func(hw, func, params, error) \
@@ -4249,7 +4226,7 @@ struct ixgbe_hw {
 #define IXGBE_ERR_ADAPTER_STOPPED		-9
 #define IXGBE_ERR_INVALID_MAC_ADDR		-10
 #define IXGBE_ERR_DEVICE_NOT_SUPPORTED		-11
-#define IXGBE_ERR_MASTER_REQUESTS_PENDING	-12
+#define IXGBE_ERR_PRIMARY_REQUESTS_PENDING	-12
 #define IXGBE_ERR_INVALID_LINK_SETTINGS		-13
 #define IXGBE_ERR_AUTONEG_NOT_COMPLETE		-14
 #define IXGBE_ERR_RESET_FAILED			-15
@@ -4277,6 +4254,9 @@ struct ixgbe_hw {
 #define IXGBE_ERR_FDIR_CMD_INCOMPLETE		-38
 #define IXGBE_ERR_FW_RESP_INVALID		-39
 #define IXGBE_ERR_TOKEN_RETRY			-40
+#define IXGBE_ERR_MBX				-41
+#define IXGBE_ERR_MBX_NOMSG			-42
+#define IXGBE_ERR_TIMEOUT			-43
 
 #define IXGBE_NOT_IMPLEMENTED			0x7FFFFFFF
 
