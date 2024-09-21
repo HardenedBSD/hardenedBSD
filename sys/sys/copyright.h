@@ -46,5 +46,10 @@
 #define COPYRIGHT_UCB \
 	"Copyright (c) 1979, 1980, 1983, 1986, 1988, 1989, 1991, 1992, 1993, 1994\n\tThe Regents of the University of California. All rights reserved.\n"
 
+<<<<<<< HEAD
 char copyright[] = COPYRIGHT_Vendor COPYRIGHT_HardenedBSD COPYRIGHT_FreeBSD COPYRIGHT_UCB;
 char trademark[] = TRADEMARK_Foundation;
+=======
+const char copyright[] = COPYRIGHT_Vendor COPYRIGHT_FreeBSD COPYRIGHT_UCB;
+const char trademark[] = TRADEMARK_Foundation;
+>>>>>>> internal/freebsd/13-stable/main

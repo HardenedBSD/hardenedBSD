@@ -1138,10 +1138,10 @@ SYSCTL_DECL(_security);
 SYSCTL_DECL(_security_bsd);
 SYSCTL_DECL(_hardening);
 
-extern char	machine[];
-extern char	osrelease[];
-extern char	ostype[];
-extern char	kern_ident[];
+extern const char	machine[];
+extern const char	osrelease[];
+extern const char	ostype[];
+extern const char	kern_ident[];
 
 /* Dynamic oid handling */
 struct sysctl_oid *sysctl_add_oid(struct sysctl_ctx_list *clist,
