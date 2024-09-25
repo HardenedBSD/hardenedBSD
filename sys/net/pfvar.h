@@ -2405,7 +2405,7 @@ int	pf_match_port(u_int8_t, u_int16_t, u_int16_t, u_int16_t);
 
 void	pf_normalize_init(void);
 void	pf_normalize_cleanup(void);
-int	pf_normalize_tcp(struct pfi_kkif *, struct mbuf *, int, int, void *,
+int	pf_normalize_tcp(struct pfi_kkif *, struct mbuf *, int, int,
 	    struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_kstate *);
 int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
@@ -2416,7 +2416,7 @@ int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 int	pf_normalize_sctp_init(struct mbuf *, int, struct pf_pdesc *,
 	    struct pf_state_peer *, struct pf_state_peer *);
 int	pf_normalize_sctp(int, struct pfi_kkif *, struct mbuf *, int,
-	    int, void *, struct pf_pdesc *);
+	    int, struct pf_pdesc *);
 u_int32_t
 	pf_state_expires(const struct pf_kstate *);
 void	pf_purge_expired_fragments(void);
@@ -2642,12 +2642,9 @@ void			 pf_rule_to_actions(struct pf_krule *,
 			    struct pf_rule_actions *);
 int			 pf_normalize_mss(struct mbuf *m, int off,
 			    struct pf_pdesc *pd);
-#ifdef INET
-void	pf_scrub_ip(struct mbuf *, struct pf_pdesc *);
-#endif	/* INET */
-#ifdef INET6
-void	pf_scrub_ip6(struct mbuf *, struct pf_pdesc *);
-#endif	/* INET6 */
+#if defined(INET) || defined(INET6)
+void	pf_scrub(struct mbuf *, struct pf_pdesc *);
+#endif
 
 struct pfi_kkif		*pf_kkif_create(int);
 void			 pf_kkif_free(struct pfi_kkif *);
