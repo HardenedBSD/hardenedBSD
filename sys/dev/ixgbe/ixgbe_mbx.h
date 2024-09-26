@@ -60,22 +60,22 @@
 #define IXGBE_PFMAILBOX_PFU	0x00000008 /* PF owns the mailbox buffer */
 #define IXGBE_PFMAILBOX_RVFU	0x00000010 /* Reset VFU - used when VF stuck */
 
-#define IXGBE_MBVFICR_VFREQ_MASK	0x0000FFFF /* bits for VF messages */
-#define IXGBE_MBVFICR_VFREQ_VF1		0x00000001 /* bit for VF 1 message */
-#define IXGBE_MBVFICR_VFACK_MASK	0xFFFF0000 /* bits for VF acks */
-#define IXGBE_MBVFICR_VFACK_VF1		0x00010000 /* bit for VF 1 ack */
+#define IXGBE_PFMBICR_VFREQ_MASK	0x0000FFFF /* bits for VF messages */
+#define IXGBE_PFMBICR_VFREQ_VF1		0x00000001 /* bit for VF 1 message */
+#define IXGBE_PFMBICR_VFACK_MASK	0xFFFF0000 /* bits for VF acks */
+#define IXGBE_PFMBICR_VFACK_VF1		0x00010000 /* bit for VF 1 ack */
 
 
 /* If it's a IXGBE_VF_* msg then it originates in the VF and is sent to the
  * PF.  The reverse is true if it is IXGBE_PF_*.
- * Message ACK's are the value or'd with 0xF0000000
+ * Message results are the value or'd with 0xF0000000
  */
-#define IXGBE_VT_MSGTYPE_ACK	0x80000000 /* Messages below or'd with
-					    * this are the ACK */
-#define IXGBE_VT_MSGTYPE_NACK	0x40000000 /* Messages below or'd with
-					    * this are the NACK */
-#define IXGBE_VT_MSGTYPE_CTS	0x20000000 /* Indicates that VF is still
-					    * clear to send requests */
+#define IXGBE_VT_MSGTYPE_SUCCESS	0x80000000 /* Messages or'd with this
+						    * have succeeded */
+#define IXGBE_VT_MSGTYPE_FAILURE	0x40000000 /* Messages or'd with this
+						    * have failed */
+#define IXGBE_VT_MSGTYPE_CTS		0x20000000 /* Indicates that VF is still
+						    * clear to send requests */
 #define IXGBE_VT_MSGINFO_SHIFT	16
 /* bits 23:16 are used for extra info for certain messages */
 #define IXGBE_VT_MSGINFO_MASK	(0xFF << IXGBE_VT_MSGINFO_SHIFT)
