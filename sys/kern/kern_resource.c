@@ -40,6 +40,7 @@
 #include <sys/systm.h>
 #include <sys/sysproto.h>
 #include <sys/file.h>
+#include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -63,6 +64,7 @@
 #include <vm/vm_param.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
+#include <vm/vm_extern.h>
 
 static MALLOC_DEFINE(M_PLIMIT, "plimit", "plimit structures");
 static MALLOC_DEFINE(M_UIDINFO, "uidinfo", "uidinfo structures");
@@ -809,6 +811,119 @@ sys_getrlimit(struct thread *td, struct getrlimit_args *uap)
 		return (EINVAL);
 	lim_rlimit(td, uap->which, &rlim);
 	error = copyout(&rlim, uap->rlp, sizeof(struct rlimit));
+	return (error);
+}
+
+static int
+getrlimitusage_one(struct proc *p, u_int which, int flags, rlim_t *res)
+{
+	struct thread *td;
+	struct uidinfo *ui;
+	struct vmspace *vm;
+	uid_t uid;
+	int error;
+
+	error = 0;
+	PROC_LOCK(p);
+	uid = (flags & GETRLIMITUSAGE_EUID) == 0 ? p->p_ucred->cr_ruid :
+	    p->p_ucred->cr_uid;
+	PROC_UNLOCK(p);
+
+	ui = uifind(uid);
+	vm = vmspace_acquire_ref(p);
+
+	switch (which) {
+	case RLIMIT_CPU:
+		PROC_LOCK(p);
+		PROC_STATLOCK(p);
+		FOREACH_THREAD_IN_PROC(p, td)
+			ruxagg(p, td);
+		*res = p->p_rux.rux_runtime;
+		PROC_STATUNLOCK(p);
+		PROC_UNLOCK(p);
+		*res /= cpu_tickrate();
+		break;
+	case RLIMIT_FSIZE:
+		error = ENXIO;
+		break;
+	case RLIMIT_DATA:
+		if (vm == NULL)
+			error = ENXIO;
+		else
+			*res = vm->vm_dsize * PAGE_SIZE;
+		break;
+	case RLIMIT_STACK:
+		if (vm == NULL)
+			error = ENXIO;
+		else
+			*res = vm->vm_ssize * PAGE_SIZE;
+		break;
+	case RLIMIT_CORE:
+		error = ENXIO;
+		break;
+	case RLIMIT_RSS:
+		if (vm == NULL)
+			error = ENXIO;
+		else
+			*res = vmspace_resident_count(vm) * PAGE_SIZE;
+		break;
+	case RLIMIT_MEMLOCK:
+		if (vm == NULL)
+			error = ENXIO;
+		else
+			*res = pmap_wired_count(vmspace_pmap(vm)) * PAGE_SIZE;
+		break;
+	case RLIMIT_NPROC:
+		*res = ui->ui_proccnt;
+		break;
+	case RLIMIT_NOFILE:
+		*res = proc_nfiles(p);
+		break;
+	case RLIMIT_SBSIZE:
+		*res = ui->ui_sbsize;
+		break;
+	case RLIMIT_VMEM:
+		if (vm == NULL)
+			error = ENXIO;
+		else
+			*res = vm->vm_map.size;
+		break;
+	case RLIMIT_NPTS:
+		*res = ui->ui_ptscnt;
+		break;
+	case RLIMIT_SWAP:
+		*res = ui->ui_vmsize;
+		break;
+	case RLIMIT_KQUEUES:
+		*res = ui->ui_kqcnt;
+		break;
+	case RLIMIT_UMTXP:
+		*res = ui->ui_umtxcnt;
+		break;
+	case RLIMIT_PIPEBUF:
+		*res = ui->ui_pipecnt;
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	vmspace_free(vm);
+	uifree(ui);
+	return (error);
+}
+
+int
+sys_getrlimitusage(struct thread *td, struct getrlimitusage_args *uap)
+{
+	rlim_t res;
+	int error;
+
+	if ((uap->flags & ~(GETRLIMITUSAGE_EUID)) != 0)
+		return (EINVAL);
+	error = getrlimitusage_one(curproc, uap->which, uap->flags, &res);
+	if (error == 0)
+		error = copyout(&res, uap->res, sizeof(res));
 	return (error);
 }
 
@@ -1634,3 +1749,53 @@ chgpipecnt(struct uidinfo *uip, int diff, rlim_t max)
 
 	return (chglimit(uip, &uip->ui_pipecnt, diff, max, "pipecnt"));
 }
+
+static int
+sysctl_kern_proc_rlimit_usage(SYSCTL_HANDLER_ARGS)
+{
+	rlim_t resval[RLIM_NLIMITS];
+	struct proc *p;
+	size_t len;
+	int error, *name, i;
+
+	name = (int *)arg1;
+	if ((u_int)arg2 != 1 && (u_int)arg2 != 2)
+		return (EINVAL);
+	if (req->newptr != NULL)
+		return (EINVAL);
+
+	error = pget((pid_t)name[0], PGET_WANTREAD, &p);
+	if (error != 0)
+		return (error);
+
+	if ((u_int)arg2 == 1) {
+		len = sizeof(resval);
+		memset(resval, 0, sizeof(resval));
+		for (i = 0; i < RLIM_NLIMITS; i++) {
+			error = getrlimitusage_one(p, (unsigned)i, 0,
+			    &resval[i]);
+			if (error == ENXIO) {
+				resval[i] = -1;
+				error = 0;
+			} else if (error != 0) {
+				break;
+			}
+		}
+	} else {
+		len = sizeof(resval[0]);
+		error = getrlimitusage_one(p, (unsigned)name[1], 0,
+		    &resval[0]);
+		if (error == ENXIO) {
+			resval[0] = -1;
+			error = 0;
+		}
+	}
+	if (error == 0)
+		error = SYSCTL_OUT(req, resval, len);
+	PRELE(p);
+	return (error);
+}
+static SYSCTL_NODE(_kern_proc, KERN_PROC_RLIMIT_USAGE, rlimit_usage,
+    CTLFLAG_RD | CTLFLAG_ANYBODY | CTLFLAG_MPSAFE,
+    sysctl_kern_proc_rlimit_usage,
+    "Process limited resources usage info");
