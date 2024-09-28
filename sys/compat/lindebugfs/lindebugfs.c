@@ -156,8 +156,6 @@ debugfs_fill(PFS_FILL_ARGS)
 
 	if (d->dm_fops->release)
 		d->dm_fops->release(&vn, &lf);
-	else
-		single_release(&vn, &lf);
 
 	if (rc < 0) {
 #ifdef INVARIANTS
