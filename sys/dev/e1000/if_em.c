@@ -831,16 +831,16 @@ em_if_attach_pre(if_ctx_t ctx)
 	child = SYSCTL_CHILDREN(device_get_sysctl_tree(dev));
 
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "nvm",
-	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, sc, 0,
+	    CTLTYPE_INT | CTLFLAG_RW, sc, 0,
 	    em_sysctl_nvm_info, "I", "NVM Information");
 
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "fw_version",
-	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_NEEDGIANT, sc, 0,
+	    CTLTYPE_STRING | CTLFLAG_RD, sc, 0,
 	    em_sysctl_print_fw_version, "A",
 	    "Prints FW/NVM Versions");
 
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "debug",
-	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, sc, 0,
+	    CTLTYPE_INT | CTLFLAG_RW, sc, 0,
 	    em_sysctl_debug_info, "I", "Debug Information");
 
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "fc",
@@ -4433,11 +4433,11 @@ em_add_hw_stats(struct e1000_softc *sc)
 			CTLFLAG_RD, &sc->watchdog_events,
 			"Watchdog timeouts");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "device_control",
-	    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+	    CTLTYPE_UINT | CTLFLAG_RD,
 	    sc, E1000_CTRL, em_sysctl_reg_handler, "IU",
 	    "Device Control Register");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "rx_control",
-	    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+	    CTLTYPE_UINT | CTLFLAG_RD,
 	    sc, E1000_RCTL, em_sysctl_reg_handler, "IU",
 	    "Receiver Control Register");
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "fc_high_water",
@@ -4455,11 +4455,11 @@ em_add_hw_stats(struct e1000_softc *sc)
 		queue_list = SYSCTL_CHILDREN(queue_node);
 
 		SYSCTL_ADD_PROC(ctx, queue_list, OID_AUTO, "txd_head",
-		    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT, sc,
+		    CTLTYPE_UINT | CTLFLAG_RD, sc,
 		    E1000_TDH(txr->me), em_sysctl_reg_handler, "IU",
 		    "Transmit Descriptor Head");
 		SYSCTL_ADD_PROC(ctx, queue_list, OID_AUTO, "txd_tail",
-		    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT, sc,
+		    CTLTYPE_UINT | CTLFLAG_RD, sc,
 		    E1000_TDT(txr->me), em_sysctl_reg_handler, "IU",
 		    "Transmit Descriptor Tail");
 		SYSCTL_ADD_ULONG(ctx, queue_list, OID_AUTO, "tx_irq",
@@ -4475,11 +4475,11 @@ em_add_hw_stats(struct e1000_softc *sc)
 		queue_list = SYSCTL_CHILDREN(queue_node);
 
 		SYSCTL_ADD_PROC(ctx, queue_list, OID_AUTO, "rxd_head",
-		    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT, sc,
+		    CTLTYPE_UINT | CTLFLAG_RD, sc,
 		    E1000_RDH(rxr->me), em_sysctl_reg_handler, "IU",
 		    "Receive Descriptor Head");
 		SYSCTL_ADD_PROC(ctx, queue_list, OID_AUTO, "rxd_tail",
-		    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT, sc,
+		    CTLTYPE_UINT | CTLFLAG_RD, sc,
 		    E1000_RDT(rxr->me), em_sysctl_reg_handler, "IU",
 		    "Receive Descriptor Tail");
 		SYSCTL_ADD_ULONG(ctx, queue_list, OID_AUTO, "rx_irq",
