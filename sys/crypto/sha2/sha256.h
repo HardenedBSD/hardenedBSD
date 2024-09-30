@@ -73,13 +73,6 @@ __BEGIN_DECLS
 #define SHA256_Data		_libmd_SHA256_Data
 #endif
 
-#ifndef SHA256_Transform
-#define SHA256_Transform	_libmd_SHA256_Transform
-#endif
-#ifndef SHA256_version
-#define SHA256_version		_libmd_SHA256_version
-#endif
-
 void	SHA256_Init(SHA256_CTX *);
 void	SHA256_Update(SHA256_CTX *, const void *, size_t);
 void	SHA256_Final(unsigned char [__min_size(SHA256_DIGEST_LENGTH)],
