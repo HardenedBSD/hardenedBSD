@@ -1,4 +1,4 @@
-/* MDDRIVER.C - test driver for MD2, MD4 and MD5 */
+/* RIPEMD160DRIVER.C - test driver for RIPEMD160 */
 
 /* Copyright (C) 1990-2, RSA Data Security, Inc. Created 1990. All rights
  * reserved.
@@ -17,49 +17,31 @@
 #include <time.h>
 #include <string.h>
 
-/* The following makes MD default to MD5 if it has not already been defined
- * with C compiler flags. */
-#ifndef MD
-#define MD 5
-#endif
-
-#if MD == 2
-#include "md2.h"
-#define MDData MD2Data
-#endif
-#if MD == 4
-#include "md4.h"
-#define MDData MD4Data
-#endif
-#if MD == 5
-#include "md5.h"
-#define MDData MD5Data
-#endif
+#include "ripemd.h"
 
 /* Digests a string and prints the result. */
-static void 
-MDString(char *string)
+static void
+RIPEMD160String(const char *string)
 {
-	char buf[33];
+	char buf[2*20 + 1];
 
-	printf("MD%d (\"%s\") = %s\n",
-	       MD, string, MDData(string, strlen(string), buf));
+	printf("RIPEMD160 (\"%s\") = %s\n",
+	       string, RIPEMD160_Data(string, strlen(string), buf));
 }
 
 /* Digests a reference suite of strings and prints the results. */
 int
 main(void)
 {
-	printf("MD%d test suite:\n", MD);
+	printf("RIPEMD160 test suite:\n");
 
-	MDString("");
-	MDString("a");
-	MDString("abc");
-	MDString("message digest");
-	MDString("abcdefghijklmnopqrstuvwxyz");
-	MDString("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	RIPEMD160String("");
+	RIPEMD160String("abc");
+	RIPEMD160String("message digest");
+	RIPEMD160String("abcdefghijklmnopqrstuvwxyz");
+	RIPEMD160String("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		"abcdefghijklmnopqrstuvwxyz0123456789");
-	MDString("1234567890123456789012345678901234567890"
+	RIPEMD160String("1234567890123456789012345678901234567890"
 		"1234567890123456789012345678901234567890");
 
 	return 0;
