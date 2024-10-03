@@ -354,6 +354,7 @@ static void	em_enable_vectors_82574(if_ctx_t);
 
 static int	em_set_flowcntl(SYSCTL_HANDLER_ARGS);
 static int	em_sysctl_eee(SYSCTL_HANDLER_ARGS);
+static int	igb_sysctl_dmac(SYSCTL_HANDLER_ARGS);
 static void	em_if_led_func(if_ctx_t, int);
 
 static int	em_get_regs(SYSCTL_HANDLER_ARGS);
@@ -857,6 +858,12 @@ em_if_attach_pre(if_ctx_t ctx)
 	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, sc, 0,
 	    em_get_rs, "I", "Dump RS indexes");
 
+	if (hw->mac.type >= e1000_i350) {
+		SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "dmac",
+		    CTLTYPE_INT | CTLFLAG_RW, sc, 0,
+		    igb_sysctl_dmac, "I", "DMA Coalesce");
+	}
+
 	scctx->isc_tx_nsegments = EM_MAX_SCATTER;
 	scctx->isc_nrxqsets_max = scctx->isc_ntxqsets_max = em_set_num_queues(ctx);
 	if (bootverbose)
@@ -1096,7 +1103,10 @@ em_if_attach_pre(if_ctx_t ctx)
 			      " due to SOL/IDER session.\n");
 
 	/* Sysctl for setting Energy Efficient Ethernet */
-	hw->dev_spec.ich8lan.eee_disable = eee_setting;
+	if (hw->mac.type < igb_mac_min)
+		hw->dev_spec.ich8lan.eee_disable = eee_setting;
+	else
+		hw->dev_spec._82575.eee_disable = eee_setting;
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "eee_control",
 	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, sc, 0,
 	    em_sysctl_eee, "I", "Disable Energy Efficient Ethernet");
@@ -4306,6 +4316,10 @@ em_update_stats_counters(struct e1000_softc *sc)
 	sc->stats.roc += E1000_READ_REG(&sc->hw, E1000_ROC);
 	sc->stats.rjc += E1000_READ_REG(&sc->hw, E1000_RJC);
 
+	sc->stats.mgprc += E1000_READ_REG(&sc->hw, E1000_MGTPRC);
+	sc->stats.mgpdc += E1000_READ_REG(&sc->hw, E1000_MGTPDC);
+	sc->stats.mgptc += E1000_READ_REG(&sc->hw, E1000_MGTPTC);
+
 	sc->stats.tor += E1000_READ_REG(&sc->hw, E1000_TORH);
 	sc->stats.tot += E1000_READ_REG(&sc->hw, E1000_TOTH);
 
@@ -4522,6 +4536,9 @@ em_add_hw_stats(struct e1000_softc *sc)
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "missed_packets",
 			CTLFLAG_RD, &sc->stats.mpc,
 			"Missed Packets");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "recv_length_errors",
+			CTLFLAG_RD, &sc->stats.rlec,
+			"Receive Length Errors");
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "recv_no_buff",
 			CTLFLAG_RD, &sc->stats.rnbc,
 			"Receive No Buffers");
@@ -4562,6 +4579,18 @@ em_add_hw_stats(struct e1000_softc *sc)
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "xoff_txd",
 			CTLFLAG_RD, &sc->stats.xofftxc,
 			"XOFF Transmitted");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "unsupported_fc_recvd",
+			CTLFLAG_RD, &sc->stats.fcruc,
+			"Unsupported Flow Control Received");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "mgmt_pkts_recvd",
+			CTLFLAG_RD, &sc->stats.mgprc,
+			"Management Packets Received");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "mgmt_pkts_drop",
+			CTLFLAG_RD, &sc->stats.mgpdc,
+			"Management Packets Dropped");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "mgmt_pkts_txd",
+			CTLFLAG_RD, &sc->stats.mgptc,
+			"Management Packets Transmitted");
 
 	/* Packet Reception Stats */
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "total_pkts_recvd",
@@ -4954,6 +4983,55 @@ em_set_flowcntl(SYSCTL_HANDLER_ARGS)
 }
 
 /*
+ * Manage DMA Coalesce:
+ * Control values:
+ * 	0/1 - off/on
+ *	Legal timer values are:
+ *	250,500,1000-10000 in thousands
+ */
+static int
+igb_sysctl_dmac(SYSCTL_HANDLER_ARGS)
+{
+	struct e1000_softc *sc = (struct e1000_softc *) arg1;
+	int error;
+
+	error = sysctl_handle_int(oidp, &sc->dmac, 0, req);
+
+	if ((error) || (req->newptr == NULL))
+		return (error);
+
+	switch (sc->dmac) {
+		case 0:
+			/* Disabling */
+			break;
+		case 1: /* Just enable and use default */
+			sc->dmac = 1000;
+			break;
+		case 250:
+		case 500:
+		case 1000:
+		case 2000:
+		case 3000:
+		case 4000:
+		case 5000:
+		case 6000:
+		case 7000:
+		case 8000:
+		case 9000:
+		case 10000:
+			/* Legal values - allow */
+			break;
+		default:
+			/* Do nothing, illegal value */
+			sc->dmac = 0;
+			return (EINVAL);
+	}
+	/* Reinit the interface */
+	em_if_init(sc->ctx);
+	return (error);
+}
+
+/*
  * Manage Energy Efficient Ethernet:
  * Control values:
  *     0/1 - enabled/disabled
@@ -4964,11 +5042,17 @@ em_sysctl_eee(SYSCTL_HANDLER_ARGS)
 	struct e1000_softc *sc = (struct e1000_softc *) arg1;
 	int error, value;
 
-	value = sc->hw.dev_spec.ich8lan.eee_disable;
+	if (sc->hw.mac.type < igb_mac_min)
+		value = sc->hw.dev_spec.ich8lan.eee_disable;
+	else
+		value = sc->hw.dev_spec._82575.eee_disable;
 	error = sysctl_handle_int(oidp, &value, 0, req);
 	if (error || req->newptr == NULL)
 		return (error);
-	sc->hw.dev_spec.ich8lan.eee_disable = (value != 0);
+	if (sc->hw.mac.type < igb_mac_min)
+		sc->hw.dev_spec.ich8lan.eee_disable = (value != 0);
+	else
+		sc->hw.dev_spec._82575.eee_disable = (value != 0);
 	em_if_init(sc->ctx);
 
 	return (0);
