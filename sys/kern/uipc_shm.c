@@ -946,15 +946,20 @@ shm_alloc(struct ucred *ucred, mode_t mode, bool largepage)
 	shmfd->shm_gid = ucred->cr_gid;
 	shmfd->shm_mode = mode;
 	if (largepage) {
-		shmfd->shm_object = phys_pager_allocate(NULL,
+		obj = shmfd->shm_object = phys_pager_allocate(NULL,
 		    &shm_largepage_phys_ops, NULL, shmfd->shm_size,
 		    VM_PROT_DEFAULT, 0, ucred);
+		VM_OBJECT_WLOCK(shmfd->shm_object);
+		obj->un_pager.phys.phys_priv = shmfd;
+		vm_object_set_flag(obj, OBJ_POSIXSHM);
+		VM_OBJECT_WUNLOCK(shmfd->shm_object);
 		shmfd->shm_lp_alloc_policy = SHM_LARGEPAGE_ALLOC_DEFAULT;
 	} else {
 		obj = vm_pager_allocate(shmfd_pager_type, NULL,
 		    shmfd->shm_size, VM_PROT_DEFAULT, 0, ucred);
 		VM_OBJECT_WLOCK(obj);
 		obj->un_pager.swp.swp_priv = shmfd;
+		vm_object_set_flag(obj, OBJ_POSIXSHM);
 		VM_OBJECT_WUNLOCK(obj);
 		shmfd->shm_object = obj;
 	}
@@ -994,11 +999,12 @@ shm_drop(struct shmfd *shmfd)
 		rangelock_destroy(&shmfd->shm_rl);
 		mtx_destroy(&shmfd->shm_mtx);
 		obj = shmfd->shm_object;
-		if (!shm_largepage(shmfd)) {
-			VM_OBJECT_WLOCK(obj);
+		VM_OBJECT_WLOCK(obj);
+		if (shm_largepage(shmfd))
+			obj->un_pager.phys.phys_priv = NULL;
+		else
 			obj->un_pager.swp.swp_priv = NULL;
-			VM_OBJECT_WUNLOCK(obj);
-		}
+		VM_OBJECT_WUNLOCK(obj);
 		vm_object_deallocate(obj);
 		free(shmfd, M_SHMFD);
 	}
@@ -2219,4 +2225,35 @@ sys_shm_open2(struct thread *td, struct shm_open2_args *uap)
 
 	return (kern_shm_open2(td, uap->path, uap->flags, uap->mode,
 	    uap->shmflags, NULL, uap->name));
+}
+
+int
+shm_get_path(struct vm_object *obj, char *path, size_t sz)
+{
+	struct shmfd *shmfd;
+	int error;
+
+	error = 0;
+	shmfd = NULL;
+	sx_slock(&shm_dict_lock);
+	VM_OBJECT_RLOCK(obj);
+	if ((obj->flags & OBJ_POSIXSHM) == 0) {
+		error = EINVAL;
+	} else {
+		if (obj->type == shmfd_pager_type)
+			shmfd = obj->un_pager.swp.swp_priv;
+		else if (obj->type == OBJT_PHYS)
+			shmfd = obj->un_pager.phys.phys_priv;
+		if (shmfd == NULL) {
+			error = ENXIO;
+		} else {
+			strlcpy(path, shmfd->shm_path == NULL ? "anon" :
+			    shmfd->shm_path, sz);
+		}
+	}
+	if (error != 0)
+		path[0] = '\0';
+	VM_OBJECT_RUNLOCK(obj);
+	sx_sunlock(&shm_dict_lock);
+	return (error);
 }

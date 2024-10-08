@@ -518,6 +518,7 @@ struct kinfo_lockf {
 #define	KVME_FLAG_GROWS_DOWN	0x00000020
 #define	KVME_FLAG_USER_WIRED	0x00000040
 #define	KVME_FLAG_SYSVSHM	0x00000080
+#define	KVME_FLAG_POSIXSHM	0x00000100
 
 #if defined(__amd64__)
 #define	KINFO_OVMENTRY_SIZE	1168
@@ -581,6 +582,7 @@ struct kinfo_vmentry {
 #define	kve_obj		kve_type_spec._kve_obj
 
 #define	KVMO_FLAG_SYSVSHM	0x0001
+#define	KVMO_FLAG_POSIXSHM	0x0002
 
 /*
  * The "vm.objects" sysctl provides a list of all VM objects in the system
