@@ -41,7 +41,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ef.h"
+#include "kldelf.h"
 
 #define	MAXSEGS 16
 struct ef_file {
@@ -89,6 +89,7 @@ static struct elf_file_ops ef_file_ops = {
 	.seg_read_string	= ef_seg_read_string,
 	.symaddr		= ef_symaddr,
 	.lookup_set		= ef_lookup_set,
+	.lookup_symbol		= ef_lookup_symbol,
 };
 
 static void
