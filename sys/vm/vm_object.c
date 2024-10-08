@@ -2601,6 +2601,11 @@ vm_object_list_handler(struct sysctl_req *req, bool swap_only)
 			kvo->kvo_vn_fileid = key;
 			kvo->kvo_vn_fsid_freebsd11 = seq;
 		}
+		if ((obj->flags & OBJ_POSIXSHM) != 0) {
+			kvo->kvo_flags |= KVMO_FLAG_POSIXSHM;
+			shm_get_path(obj, kvo->kvo_path,
+			    sizeof(kvo->kvo_path));
+		}
 		if (vp != NULL) {
 			vn_fullpath(vp, &fullpath, &freepath);
 			vn_lock(vp, LK_SHARED | LK_RETRY);
@@ -2611,10 +2616,9 @@ vm_object_list_handler(struct sysctl_req *req, bool swap_only)
 								/* truncate */
 			}
 			vput(vp);
+			strlcpy(kvo->kvo_path, fullpath, sizeof(kvo->kvo_path));
+			free(freepath, M_TEMP);
 		}
-
-		strlcpy(kvo->kvo_path, fullpath, sizeof(kvo->kvo_path));
-		free(freepath, M_TEMP);
 
 		/* Pack record size down */
 		kvo->kvo_structsize = offsetof(struct kinfo_vmobject, kvo_path)

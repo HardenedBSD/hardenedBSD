@@ -2721,6 +2721,11 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 				kve->kve_vn_fileid = key;
 				kve->kve_vn_fsid_freebsd11 = seq;
 			}
+			if ((lobj->flags & OBJ_POSIXSHM) != 0) {
+				kve->kve_flags |= KVME_FLAG_POSIXSHM;
+				shm_get_path(lobj, kve->kve_path,
+				    sizeof(kve->kve_path));
+			}
 			if (vp != NULL) {
 				vn_fullpath(vp, &fullpath, &freepath);
 				kve->kve_vn_type = vntype_to_kinfo(vp->v_type);
@@ -2740,6 +2745,9 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 					kve->kve_status = KF_ATTR_VALID;
 				}
 				vput(vp);
+				strlcpy(kve->kve_path, fullpath, sizeof(
+				    kve->kve_path));
+				free(freepath, M_TEMP);
 			}
 		} else {
 			kve->kve_type = guard ? KVME_TYPE_GUARD :
@@ -2747,10 +2755,6 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 			kve->kve_ref_count = 0;
 			kve->kve_shadow_count = 0;
 		}
-
-		strlcpy(kve->kve_path, fullpath, sizeof(kve->kve_path));
-		if (freepath != NULL)
-			free(freepath, M_TEMP);
 
 		/* Pack record size down */
 		if ((flags & KERN_VMMAP_PACK_KINFO) != 0)
