@@ -43,7 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "kldelf.h"
+#include "ef.h"
 
 typedef struct {
 	GElf_Addr	addr;
@@ -109,7 +109,6 @@ static struct elf_file_ops ef_obj_file_ops = {
 	.seg_read_string	= ef_obj_seg_read_string,
 	.symaddr		= ef_obj_symaddr,
 	.lookup_set		= ef_obj_lookup_set,
-	.lookup_symbol		= ef_obj_lookup_symbol,
 };
 
 static GElf_Off
@@ -345,20 +344,20 @@ ef_obj_open(struct elf_file *efile, int verbose)
 	if ((ef->nprogtab != 0 && ef->progtab == NULL) ||
 	    (ef->nrel != 0 && ef->reltab == NULL) ||
 	    (ef->nrela != 0 && ef->relatab == NULL)) {
-		warnx("malloc failed");
+		printf("malloc failed\n");
 		error = ENOMEM;
 		goto out;
 	}
 
 	if (elf_read_symbols(efile, symtabindex, &ef->ddbsymcnt,
 	    &ef->ddbsymtab) != 0) {
-		warnx("elf_read_symbols failed");
+		printf("elf_read_symbols failed\n");
 		goto out;
 	}
 
 	if (elf_read_string_table(efile, &shdr[symstrindex], &ef->ddbstrcnt,
 	    &ef->ddbstrtab) != 0) {
-		warnx("elf_read_string_table failed");
+		printf("elf_read_string_table failed\n");
 		goto out;
 	}
 
@@ -367,7 +366,7 @@ ef_obj_open(struct elf_file *efile, int verbose)
 	    shdr[hdr->e_shstrndx].sh_type == SHT_STRTAB) {
 		if (elf_read_string_table(efile, &shdr[hdr->e_shstrndx],
 		    &ef->shstrcnt, &ef->shstrtab) != 0) {
-			warnx("elf_read_string_table failed");
+			printf("elf_read_string_table failed\n");
 			goto out;
 		}
 	}
@@ -413,7 +412,7 @@ ef_obj_open(struct elf_file *efile, int verbose)
 			ef->reltab[rl].sec = shdr[i].sh_info;
 			if (elf_read_rel(efile, i, &ef->reltab[rl].nrel,
 			    &ef->reltab[rl].rel) != 0) {
-				warnx("elf_read_rel failed");
+				printf("elf_read_rel failed\n");
 				goto out;
 			}
 			rl++;
@@ -422,7 +421,7 @@ ef_obj_open(struct elf_file *efile, int verbose)
 			ef->relatab[ra].sec = shdr[i].sh_info;
 			if (elf_read_rela(efile, i, &ef->relatab[ra].nrela,
 			    &ef->relatab[ra].rela) != 0) {
-				warnx("elf_read_rela failed");
+				printf("elf_read_rela failed\n");
 				goto out;
 			}
 			ra++;
