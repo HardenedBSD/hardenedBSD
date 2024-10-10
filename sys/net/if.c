@@ -277,8 +277,8 @@ static void	do_link_state_change(void *, int);
 static int	if_getgroup(struct ifgroupreq *, struct ifnet *);
 static int	if_getgroupmembers(struct ifgroupreq *);
 static void	if_delgroups(struct ifnet *);
-static void	if_attach_internal(struct ifnet *, int, struct if_clone *);
-static int	if_detach_internal(struct ifnet *, int, struct if_clone **);
+static void	if_attach_internal(struct ifnet *, bool);
+static int	if_detach_internal(struct ifnet *, bool);
 static void	if_siocaddmulti(void *, int);
 static void	if_link_ifnet(struct ifnet *);
 static bool	if_unlink_ifnet(struct ifnet *, bool);
@@ -323,13 +323,6 @@ struct sx ifnet_detach_sxlock;
 SX_SYSINIT_FLAGS(ifnet_detach, &ifnet_detach_sxlock, "ifnet_detach_sx",
     SX_RECURSE);
 
-/*
- * The allocation of network interfaces is a rather non-atomic affair; we
- * need to select an index before we are ready to expose the interface for
- * use, so will use this pointer value to indicate reservation.
- */
-#define	IFNET_HOLD	(void *)(uintptr_t)(-1)
-
 #ifdef VIMAGE
 #define	VNET_IS_SHUTTING_DOWN(_vnet)					\
     ((_vnet)->vnet_shutdown && (_vnet)->vnet_state < SI_SUB_VNET_DONE)
@@ -345,13 +338,11 @@ MALLOC_DEFINE(M_IFMADDR, "ether_multi", "link-level multicast address");
 struct ifnet *
 ifnet_byindex(u_short idx)
 {
-	struct ifnet *ifp;
 
 	if (__predict_false(idx > V_if_index))
 		return (NULL);
 
-	ifp = *(struct ifnet * const volatile *)(V_ifindex_table + idx);
-	return (__predict_false(ifp == IFNET_HOLD) ? NULL : ifp);
+	return (V_ifindex_table[idx]);
 }
 
 struct ifnet *
@@ -414,6 +405,7 @@ static void
 ifnet_setbyindex(u_short idx, struct ifnet *ifp)
 {
 
+	ifp->if_index = idx;
 	V_ifindex_table[idx] = ifp;
 }
 
@@ -602,18 +594,6 @@ if_alloc_domain(u_char type, int numa_domain)
 	else
 		ifp = malloc_domainset(sizeof(struct ifnet), M_IFNET,
 		    DOMAINSET_PREF(numa_domain), M_WAITOK | M_ZERO);
- restart:
-	IFNET_WLOCK();
-	idx = ifindex_alloc(&old);
-	if (__predict_false(idx == USHRT_MAX)) {
-		IFNET_WUNLOCK();
-		epoch_wait_preempt(net_epoch_preempt);
-		free(old, M_IFNET);
-		goto restart;
-	}
-	ifnet_setbyindex(idx, IFNET_HOLD);
-	IFNET_WUNLOCK();
-	ifp->if_index = idx;
 	ifp->if_type = type;
 	ifp->if_alloctype = type;
 	ifp->if_numa_domain = numa_domain;
@@ -644,7 +624,19 @@ if_alloc_domain(u_char type, int numa_domain)
 		ifp->if_counters[i] = counter_u64_alloc(M_WAITOK);
 	ifp->if_get_counter = if_get_counter_default;
 	ifp->if_pcp = IFNET_PCP_NONE;
-	ifnet_setbyindex(ifp->if_index, ifp);
+
+restart:
+	IFNET_WLOCK();
+	idx = ifindex_alloc(&old);
+	if (__predict_false(idx == USHRT_MAX)) {
+		IFNET_WUNLOCK();
+		epoch_wait_preempt(net_epoch_preempt);
+		free(old, M_IFNET);
+		goto restart;
+	}
+	ifnet_setbyindex(idx, ifp);
+	IFNET_WUNLOCK();
+
 	return (ifp);
 }
 
@@ -805,7 +797,7 @@ void
 if_attach(struct ifnet *ifp)
 {
 
-	if_attach_internal(ifp, 0, NULL);
+	if_attach_internal(ifp, false);
 }
 
 /*
@@ -860,7 +852,7 @@ if_hw_tsomax_update(if_t ifp, struct ifnet_hw_tsomax *pmax)
 }
 
 static void
-if_attach_internal(struct ifnet *ifp, int vmove, struct if_clone *ifc)
+if_attach_internal(struct ifnet *ifp, bool vmove)
 {
 	unsigned socksize, ifasize;
 	int namelen, masklen;
@@ -879,9 +871,11 @@ if_attach_internal(struct ifnet *ifp, int vmove, struct if_clone *ifc)
 
 	if_addgroup(ifp, IFG_ALL);
 
-	/* Restore group membership for cloned interfaces. */
-	if (vmove && ifc != NULL)
-		if_clone_addgroup(ifp, ifc);
+#ifdef VIMAGE
+	/* Restore group membership for cloned interface. */
+	if (vmove)
+		if_clone_restoregroup(ifp);
+#endif
 
 	getmicrotime(&ifp->if_lastchange);
 	ifp->if_epoch = time_uptime;
@@ -1126,7 +1120,7 @@ if_detach(struct ifnet *ifp)
 	found = if_unlink_ifnet(ifp, false);
 	if (found) {
 		sx_xlock(&ifnet_detach_sxlock);
-		if_detach_internal(ifp, 0, NULL);
+		if_detach_internal(ifp, false);
 		sx_xunlock(&ifnet_detach_sxlock);
 	}
 	CURVNET_RESTORE();
@@ -1143,7 +1137,7 @@ if_detach(struct ifnet *ifp)
  * the cloned interfaces are destoyed as first thing of teardown.
  */
 static int
-if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
+if_detach_internal(struct ifnet *ifp, bool vmove)
 {
 	struct ifaddr *ifa;
 	int i;
@@ -1177,15 +1171,6 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 
 	taskqueue_drain(taskqueue_swi, &ifp->if_linktask);
 	taskqueue_drain(taskqueue_swi, &ifp->if_addmultitask);
-
-	/*
-	 * Check if this is a cloned interface or not. Must do even if
-	 * shutting down as a if_vmove_reclaim() would move the ifp and
-	 * the if_clone_addgroup() will have a corrupted string overwise
-	 * from a gibberish pointer.
-	 */
-	if (vmove && ifcp != NULL)
-		*ifcp = if_clone_findifc(ifp);
 
 	if_down(ifp);
 
@@ -1301,7 +1286,6 @@ finish_vnet_shutdown:
 static int
 if_vmove(struct ifnet *ifp, struct vnet *new_vnet)
 {
-	struct if_clone *ifc;
 	void *old;
 	int rc;
 
@@ -1310,7 +1294,7 @@ if_vmove(struct ifnet *ifp, struct vnet *new_vnet)
 	 * mark as dead etc. so that the ifnet can be reattached later.
 	 * If we cannot find it, we lost the race to someone else.
 	 */
-	rc = if_detach_internal(ifp, 1, &ifc);
+	rc = if_detach_internal(ifp, true);
 	if (rc != 0)
 		return (rc);
 
@@ -1348,7 +1332,7 @@ if_vmove(struct ifnet *ifp, struct vnet *new_vnet)
 	ifnet_setbyindex(ifp->if_index, ifp);
 	IFNET_WUNLOCK();
 
-	if_attach_internal(ifp, 1, ifc);
+	if_attach_internal(ifp, true);
 
 	CURVNET_RESTORE();
 	return (0);
@@ -4401,12 +4385,6 @@ struct ifaddr *
 if_getifaddr(if_t ifp)
 {
 	return ((struct ifnet *)ifp)->if_addr;
-}
-
-int
-if_getamcount(if_t ifp)
-{
-	return ((struct ifnet *)ifp)->if_amcount;
 }
 
 int
