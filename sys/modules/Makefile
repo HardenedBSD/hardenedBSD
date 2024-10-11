@@ -346,6 +346,7 @@ SUBDIR=	\
 	${_rockchip} \
 	rtsx \
 	${_rtw88} \
+	${_rtw89} \
 	rtwn \
 	rtwn_pci \
 	rtwn_usb \
@@ -570,6 +571,7 @@ _iwlwifi=	iwlwifi
 _iwlwififw=	iwlwififw
 .endif
 _rtw88=		rtw88
+_rtw89=		rtw89
 _vmware=	vmware
 .endif
 
