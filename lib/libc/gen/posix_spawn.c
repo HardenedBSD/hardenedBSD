@@ -246,7 +246,7 @@ static int
 _posix_spawn_thr(void *data)
 {
 	struct posix_spawn_args *psa;
-	char * const *envp;
+	char *fake_envp[1] = {NULL};
 
 	psa = data;
 	if (psa->sa != NULL) {
@@ -259,11 +259,13 @@ _posix_spawn_thr(void *data)
 		if (psa->error)
 			_exit(127);
 	}
-	envp = psa->envp != NULL ? psa->envp : environ;
+	if (psa->envp == NULL) {
+		psa->envp = fake_envp;
+	}
 	if (psa->use_env_path)
-		execvpe(psa->path, psa->argv, envp);
+		execvpe(psa->path, psa->argv, psa->envp);
 	else
-		_execve(psa->path, psa->argv, envp);
+		_execve(psa->path, psa->argv, psa->envp);
 	psa->error = errno;
 
 	/* This is called in such a way that it must not exit. */
