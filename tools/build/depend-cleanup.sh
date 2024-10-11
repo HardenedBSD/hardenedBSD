@@ -193,3 +193,9 @@ fi
 
 # 20240910  e2df9bb44109
 clean_dep   cddl/lib/libzpool abd_os c "linux/zfs/abd_os\.c"
+
+# 20241007
+clean_dep   cddl/lib/libzpool zfs_debug c "linux/zfs/zfs_debug\.c"
+
+# 20241011
+clean_dep   cddl/lib/libzpool arc_os c "linux/zfs/arc_os\.c"
