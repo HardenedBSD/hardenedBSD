@@ -256,9 +256,6 @@ ttydev_leave(struct tty *tp)
 	ttyoutq_free(&tp->t_outq);
 	tp->t_outlow = 0;
 
-	knlist_clear(&tp->t_inpoll.si_note, 1);
-	knlist_clear(&tp->t_outpoll.si_note, 1);
-
 	if (!tty_gone(tp))
 		ttydevsw_close(tp);
 
@@ -372,7 +369,7 @@ done:	tp->t_flags &= ~TF_OPENCLOSE;
 
 static int
 ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
-    struct thread *td __unused)
+    struct thread *td)
 {
 	struct tty *tp = dev->si_drv1;
 
@@ -395,8 +392,11 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 	}
 
 	/* If revoking, flush output now to avoid draining it later. */
-	if (fflag & FREVOKE)
+	if ((fflag & FREVOKE) != 0) {
 		tty_flush(tp, FWRITE);
+		knlist_delete(&tp->t_inpoll.si_note, td, 1);
+		knlist_delete(&tp->t_outpoll.si_note, td, 1);
+	}
 
 	tp->t_flags &= ~TF_EXCLUDE;
 
@@ -1129,6 +1129,8 @@ tty_dealloc(void *arg)
 	ttyoutq_free(&tp->t_outq);
 	seldrain(&tp->t_inpoll);
 	seldrain(&tp->t_outpoll);
+	knlist_clear(&tp->t_inpoll.si_note, 0);
+	knlist_clear(&tp->t_outpoll.si_note, 0);
 	knlist_destroy(&tp->t_inpoll.si_note);
 	knlist_destroy(&tp->t_outpoll.si_note);
 
