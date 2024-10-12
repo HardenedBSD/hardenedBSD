@@ -1347,7 +1347,7 @@ exec_copyin_args(struct image_args *args, const char *fname,
 	int error;
 
 	bzero(args, sizeof(*args));
-	if (argv == NULL)
+	if (argv == NULL || envv == NULL)
 		return (EFAULT);
 
 	/*

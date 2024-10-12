@@ -1261,12 +1261,12 @@ acpi_handle_tcpa(ACPI_TABLE_HEADER *sdp)
 static void acpi_handle_tpm2(ACPI_TABLE_HEADER *sdp)
 {
 	ACPI_TABLE_TPM2 *tpm2;
-
+	
 	printf (BEGIN_COMMENT);
 	acpi_print_sdt(sdp);
 	tpm2 = (ACPI_TABLE_TPM2 *) sdp;
 	printf ("\t\tControlArea=%jx\n", tpm2->ControlAddress);
-	printf ("\t\tStartMethod=%x\n", tpm2->StartMethod);
+	printf ("\t\tStartMethod=%x\n", tpm2->StartMethod);	
 	printf (END_COMMENT);
 }
 
@@ -1353,26 +1353,6 @@ static const char *spcr_terminal_type(int type)
 	return (term_names[type]);
 }
 
-/*
- * Serial Port Console Redirection version 3 and 4 are too new to have proper
- * definitions in ACPI headers, so provide them.
- */
-#pragma pack(1)
-struct SPCR_3
-{
-	ACPI_TABLE_SPCR spcr2;
-	UINT32		UARTClockFrequency;
-};
-
-struct SPCR_4
-{
-	struct SPCR_3	spcr3;
-	UINT32		PreciseBaudRate;
-	UINT16		NamespaceStringLength;
-	UINT16		NamespaceStringOffset;
-};
-#pragma pack()
-
 static void acpi_handle_spcr(ACPI_TABLE_HEADER *sdp)
 {
 	ACPI_TABLE_SPCR *spcr;
@@ -1405,26 +1385,23 @@ static void acpi_handle_spcr(ACPI_TABLE_HEADER *sdp)
 	printf ("\tPciFlags=%d\n", spcr->PciFlags);
 	printf ("\tPciSegment=%d\n", spcr->PciSegment);
 
-	/* Rev 3 added UARTClockFrequency */
+	/* Rev 3 added UartClkFrequency */
 	if (sdp->Revision >= 3) {
-		struct SPCR_3 *spcr3 = (struct SPCR_3 *)sdp;
-
-		printf("\tUARTClockFrequency=%jd",
-		    (uintmax_t)spcr3->UARTClockFrequency);
+		printf("\tLanguage=%d\n", spcr->Language);
+		printf("\tUartClkFreq=%jd",
+		    (uintmax_t)spcr->UartClkFreq);
 	}
 
-	/* Rev 4 added PreciseBaudRate and Namespace* */
+	/* Rev 4 added PreciseBaudrate and NameSpace* */
 	if (sdp->Revision >= 4) {
-		struct SPCR_4 *spcr4 = (struct SPCR_4 *)sdp;
-
-		printf("\tPreciseBaudRate=%jd",
-		    (uintmax_t)spcr4->PreciseBaudRate);
-		if (spcr4->NamespaceStringLength > 0 &&
-		    spcr4->NamespaceStringOffset >= sizeof(*spcr4) &&
-		    sdp->Length >= spcr4->NamespaceStringOffset +
-		        spcr4->NamespaceStringLength) {
-			printf ("\tNamespaceString='%s'\n",
-			    (char *)sdp + spcr4->NamespaceStringOffset);
+		printf("\tPreciseBaudrate=%jd",
+		    (uintmax_t)spcr->PreciseBaudrate);
+		if (spcr->NameSpaceStringLength > 0 &&
+		    spcr->NameSpaceStringOffset >= sizeof(*spcr) &&
+		    sdp->Length >= spcr->NameSpaceStringOffset +
+		        spcr->NameSpaceStringLength) {
+			printf ("\tNameSpaceString='%s'\n",
+			    (char *)sdp + spcr->NameSpaceStringOffset);
 		}
 	}
 

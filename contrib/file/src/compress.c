@@ -103,6 +103,8 @@ int tty = -1;
 #define DPRINTF(...)
 #endif
 
+extern char * const environ[];
+
 #ifdef ZLIBSUPPORT
 /*
  * The following python code is not really used because ZLIBSUPPORT is only
@@ -1111,7 +1113,7 @@ uncompressbuf(int fd, size_t bytes_max, size_t method, int nofork,
 
 	DPRINTF("Executing %s\n", compr[method].argv[0]);
 	status = posix_spawnp(&pid, compr[method].argv[0], &fa, NULL,
-	    args, NULL);
+	    args, environ);
 
 	posix_spawn_file_actions_destroy(&fa);
 
