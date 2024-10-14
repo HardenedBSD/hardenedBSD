@@ -4,10 +4,10 @@
 # -----------------------------------------------------------------------------
 #
 # int_curr_symbol (last character always SPACE)
-NOK 
+ZAR 
 #
 # currency_symbol
-kr
+R
 #
 # mon_decimal_point
 ,
@@ -22,7 +22,7 @@ kr
 
 #
 # negative_sign
-−
+-
 #
 # int_frac_digits
 2
@@ -34,17 +34,17 @@ kr
 1
 #
 # p_sep_by_space
-1
+0
 #
 # n_cs_precedes
 1
 #
 # n_sep_by_space
-2
+0
 #
 # p_sign_posn
 1
 #
 # n_sign_posn
-4
+1
 # EOF
