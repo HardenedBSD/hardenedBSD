@@ -40,10 +40,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bitstring.h>
+#include <sys/conf.h>
 #include <sys/elf.h>
 #include <sys/eventhandler.h>
 #include <sys/exec.h>
 #include <sys/fcntl.h>
+#include <sys/ipc.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
 #include <sys/limits.h>
@@ -62,6 +64,7 @@
 #include <sys/sbuf.h>
 #include <sys/sysent.h>
 #include <sys/sched.h>
+#include <sys/shm.h>
 #include <sys/smp.h>
 #include <sys/stack.h>
 #include <sys/stat.h>
@@ -2613,9 +2616,13 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 	struct ucred *cred;
 	struct vnode *vp;
 	struct vmspace *vm;
+	struct cdev *cdev;
+	struct cdevsw *csw;
 	vm_offset_t addr;
 	unsigned int last_timestamp;
-	int error;
+	int error, ref;
+	key_t key;
+	unsigned short seq;
 	bool guard, super;
 
 	PROC_LOCK_ASSERT(p, MA_OWNED);
@@ -2675,6 +2682,12 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 			kve->kve_protection |= KVME_PROT_WRITE;
 		if (entry->protection & VM_PROT_EXECUTE)
 			kve->kve_protection |= KVME_PROT_EXEC;
+		if (entry->max_protection & VM_PROT_READ)
+			kve->kve_protection |= KVME_MAX_PROT_READ;
+		if (entry->max_protection & VM_PROT_WRITE)
+			kve->kve_protection |= KVME_MAX_PROT_WRITE;
+		if (entry->max_protection & VM_PROT_EXECUTE)
+			kve->kve_protection |= KVME_MAX_PROT_EXEC;
 
 		if (entry->eflags & MAP_ENTRY_COW)
 			kve->kve_flags |= KVME_FLAG_COW;
@@ -2705,7 +2718,31 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 
 			kve->kve_ref_count = obj->ref_count;
 			kve->kve_shadow_count = obj->shadow_count;
+			if (obj->type == OBJT_DEVICE ||
+			    obj->type == OBJT_MGTDEVICE) {
+				cdev = obj->un_pager.devp.dev;
+				if (cdev != NULL) {
+					csw = dev_refthread(cdev, &ref);
+					if (csw != NULL) {
+						strlcpy(kve->kve_path,
+						    cdev->si_name, sizeof(
+						    kve->kve_path));
+						dev_relthread(cdev, ref);
+					}
+				}
+			}
 			VM_OBJECT_RUNLOCK(obj);
+			if ((lobj->flags & OBJ_SYSVSHM) != 0) {
+				kve->kve_flags |= KVME_FLAG_SYSVSHM;
+				shmobjinfo(lobj, &key, &seq);
+				kve->kve_vn_fileid = key;
+				kve->kve_vn_fsid_freebsd11 = seq;
+			}
+			if ((lobj->flags & OBJ_POSIXSHM) != 0) {
+				kve->kve_flags |= KVME_FLAG_POSIXSHM;
+				shm_get_path(lobj, kve->kve_path,
+				    sizeof(kve->kve_path));
+			}
 			if (vp != NULL) {
 				vn_fullpath(vp, &fullpath, &freepath);
 				kve->kve_vn_type = vntype_to_kinfo(vp->v_type);
@@ -2725,6 +2762,9 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 					kve->kve_status = KF_ATTR_VALID;
 				}
 				vput(vp);
+				strlcpy(kve->kve_path, fullpath, sizeof(
+				    kve->kve_path));
+				free(freepath, M_TEMP);
 			}
 		} else {
 			kve->kve_type = guard ? KVME_TYPE_GUARD :
@@ -2732,10 +2772,6 @@ kern_proc_vmmap_out(struct proc *p, struct sbuf *sb, ssize_t maxlen, int flags)
 			kve->kve_ref_count = 0;
 			kve->kve_shadow_count = 0;
 		}
-
-		strlcpy(kve->kve_path, fullpath, sizeof(kve->kve_path));
-		if (freepath != NULL)
-			free(freepath, M_TEMP);
 
 		/* Pack record size down */
 		if ((flags & KERN_VMMAP_PACK_KINFO) != 0)
