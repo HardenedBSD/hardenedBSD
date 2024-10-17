@@ -341,6 +341,7 @@ SUBDIR=	\
 	rtsx \
 	${_rtw88} \
 	${_rtw88fw} \
+	${_rtw89} \
 	rtwn \
 	rtwn_pci \
 	rtwn_usb \
@@ -569,6 +570,7 @@ _rtw88=		rtw88
 .if ${MK_SOURCELESS_UCODE} != "no"
 _rtw88fw=	rtw88fw
 .endif
+_rtw89=		rtw89
 _vmware=	vmware
 .endif
 
