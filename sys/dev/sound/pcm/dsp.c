@@ -170,17 +170,17 @@ static const struct {
 	char *sep;
 	char *alias;
 } dsp_cdevs[] = {
-	{ SND_DEV_DSP,         "dsp",    ".", NULL },
-	{ SND_DEV_DSPHW_PLAY,  "dsp",   ".p", NULL },
-	{ SND_DEV_DSPHW_VPLAY, "dsp",  ".vp", NULL },
-	{ SND_DEV_DSPHW_REC,   "dsp",   ".r", NULL },
-	{ SND_DEV_DSPHW_VREC,  "dsp",  ".vr", NULL },
+	{ SND_DEV_DSP,         "dsp",	".",			NULL },
+	{ SND_DEV_DSPHW_PLAY,  "dsp",   ".play.",		NULL },
+	{ SND_DEV_DSPHW_VPLAY, "dsp",	".virtual_play.",	NULL },
+	{ SND_DEV_DSPHW_REC,   "dsp",   ".record.",		NULL },
+	{ SND_DEV_DSPHW_VREC,  "dsp",	".virtual_record.",	NULL },
 	/* Low priority, OSSv4 aliases. */
-	{ SND_DEV_DSP,      "dsp_ac3",   ".", "dsp" },
-	{ SND_DEV_DSP,     "dsp_mmap",   ".", "dsp" },
-	{ SND_DEV_DSP,  "dsp_multich",   ".", "dsp" },
-	{ SND_DEV_DSP, "dsp_spdifout",   ".", "dsp" },
-	{ SND_DEV_DSP,  "dsp_spdifin",   ".", "dsp" },
+	{ SND_DEV_DSP,      "dsp_ac3",   ".",			"dsp" },
+	{ SND_DEV_DSP,     "dsp_mmap",   ".",			"dsp" },
+	{ SND_DEV_DSP,  "dsp_multich",   ".",			"dsp" },
+	{ SND_DEV_DSP, "dsp_spdifout",   ".",			"dsp" },
+	{ SND_DEV_DSP,  "dsp_spdifin",   ".",			"dsp" },
 };
 
 static void
@@ -2479,7 +2479,7 @@ dsp_oss_syncgroup(struct pcm_channel *wrch, struct pcm_channel *rdch, oss_syncgr
 	 * syncgroup.
 	 */
 	if (group->id == 0) {
-		sg = (struct pcmchan_syncgroup *)malloc(sizeof(*sg), M_DEVBUF, M_NOWAIT);
+		sg = malloc(sizeof(*sg), M_DEVBUF, M_NOWAIT);
 		if (sg != NULL) {
 			SLIST_INIT(&sg->members);
 			sg->id = alloc_unr(pcmsg_unrhdr);
@@ -2506,7 +2506,7 @@ dsp_oss_syncgroup(struct pcm_channel *wrch, struct pcm_channel *rdch, oss_syncgr
 	 * insert into syncgroup.
 	 */
 	if (group->mode & PCM_ENABLE_INPUT) {
-		smrd = (struct pcmchan_syncmember *)malloc(sizeof(*smrd), M_DEVBUF, M_NOWAIT);
+		smrd = malloc(sizeof(*smrd), M_DEVBUF, M_NOWAIT);
 		if (smrd == NULL) {
 			ret = ENOMEM;
 			goto out;
@@ -2522,7 +2522,7 @@ dsp_oss_syncgroup(struct pcm_channel *wrch, struct pcm_channel *rdch, oss_syncgr
 	}
 
 	if (group->mode & PCM_ENABLE_OUTPUT) {
-		smwr = (struct pcmchan_syncmember *)malloc(sizeof(*smwr), M_DEVBUF, M_NOWAIT);
+		smwr = malloc(sizeof(*smwr), M_DEVBUF, M_NOWAIT);
 		if (smwr == NULL) {
 			ret = ENOMEM;
 			goto out;
