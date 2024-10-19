@@ -1,9 +1,6 @@
 /*-
  * Copyright (c) 2019 Leandro Lupori
- * Copyright (c) 2021 The FreeBSD Foundation
- *
- * Portions of this software were developed by Andrew Turner
- * under sponsorship from the FreeBSD Foundation.
+ * Copyright (c) 2024 Jessica Clarke <jrtc27@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,26 +21,35 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
+static unsigned long elf_hwcap;
 
 static void
-ifunc_init(const Elf_Auxinfo *aux __unused)
+ifunc_init(const Elf_Auxinfo *aux)
 {
+	/* Digest the auxiliary vector. */
+	for (; aux->a_type != AT_NULL; aux++) {
+		switch (aux->a_type) {
+		case AT_HWCAP:
+			elf_hwcap = (uint32_t)aux->a_un.a_val;
+			break;
+		}
+	}
 }
 
 static void
 crt1_handle_rela(const Elf_Rela *r)
 {
 	typedef Elf_Addr (*ifunc_resolver_t)(
-	    uint64_t, uint64_t, uint64_t, uint64_t,
-	    uint64_t, uint64_t, uint64_t, uint64_t);
+	    unsigned long, unsigned long, unsigned long, unsigned long,
+	    unsigned long, unsigned long, unsigned long, unsigned long);
 	Elf_Addr *ptr, *where, target;
 
 	switch (ELF_R_TYPE(r->r_info)) {
-	case R_AARCH64_IRELATIVE:
+	case R_RISCV_IRELATIVE:
 		ptr = (Elf_Addr *)r->r_addend;
 		where = (Elf_Addr *)r->r_offset;
-		target = ((ifunc_resolver_t)ptr)(0, 0, 0, 0, 0, 0, 0, 0);
+		target = ((ifunc_resolver_t)ptr)(elf_hwcap,
+		    0, 0, 0, 0, 0, 0, 0);
 		*where = target;
 		break;
 	}
