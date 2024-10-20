@@ -979,12 +979,10 @@ _free(void *addr, struct malloc_type *mtp, bool dozero)
 
 #ifdef PAX_HARDENING
 #ifdef PAX_HARDEN_KMALLOC
-	zfree(addr, mtp);
-	return;
+	dozero = true;
 #else
 	if (kmalloc_zero) {
-		zfree(addr, mtp);
-		return;
+		dozero = true;
 	}
 #endif
 #endif
