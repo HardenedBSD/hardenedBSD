@@ -146,9 +146,7 @@ ENTRY(cpu_switch)
 	mov	x21, x2
 
 #ifdef VFP
-	/* Load the pcb address */
-	mov	x1, x4
-	bl	vfp_save_state
+	bl	vfp_save_state_switch
 	mov	x0, x20
 #else
 	mov	x0, x1
@@ -267,15 +265,11 @@ ENTRY(savectx)
 	mrs	x6, tpidr_el0
 	stp	x5, x6, [x0, #PCB_SP]
 
-	/* Store the VFP registers */
 #ifdef VFP
-	mov	x28, lr
-	mov	x1, x0			/* move pcb to the correct register */
-	mov	x0, xzr			/* td = NULL */
-	bl	vfp_save_state
-	mov	lr, x28
-#endif
-
+	/* Store the VFP registers */
+	b	vfp_save_state_savectx
+#else
 	ret
+#endif
 END(savectx)
 
