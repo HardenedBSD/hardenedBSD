@@ -82,6 +82,7 @@ __DEFAULT_YES_OPTIONS = \
     CLANG \
     CLANG_BOOTSTRAP \
     CPP \
+    CPP_HARDENING \
     CROSS_COMPILER \
     CRYPT \
     CUSE \

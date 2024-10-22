@@ -119,6 +119,11 @@ LDFLAGS+=	-fsanitize=cfi -fvisibility=hidden -flto ${CFI_OVERRIDE}
 .endif
 .endif
 
+.if defined(MK_CPP_HARDENING) && ${MK_CPP_HARDENING} != "no"
+CPP_HARDENING_FLAG?=	_LIBCPP_HARDENING_MODE_EXTENSIVE
+CXXFLAGS+=	-D_LIBCPP_HARDENING_MODE=${CPP_HARDENING_FLAG}
+.endif
+
 .if defined(MK_RETPOLINE) && ${MK_RETPOLINE} != "no"
 CFLAGS+=	-mretpoline
 CXXFLAGS+=	-mretpoline
