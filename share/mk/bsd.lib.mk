@@ -161,6 +161,11 @@ LDFLAGS+=	-flto
 CFLAGS+=	-mspeculative-load-hardening
 .endif
 
+.if defined(MK_CPP_HARDENING) && ${MK_CPP_HARDENING} != "no"
+CPP_HARDENING_FLAG?=	_LIBCPP_HARDENING_MODE_EXTENSIVE
+CXXFLAGS+=	-D_LIBCPP_HARDENING_MODE=${CPP_HARDENING_FLAG}
+.endif
+
 PO_FLAG=-pg
 
 .c.po:
