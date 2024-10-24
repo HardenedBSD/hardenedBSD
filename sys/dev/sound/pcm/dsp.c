@@ -164,25 +164,6 @@ dsp_unlock_chans(struct dsp_cdevpriv *priv, uint32_t prio)
 #define DSP_F_READ(x)		((x) & FREAD)
 #define DSP_F_WRITE(x)		((x) & FWRITE)
 
-static const struct {
-	int type;
-	char *name;
-	char *sep;
-	char *alias;
-} dsp_cdevs[] = {
-	{ SND_DEV_DSP,         "dsp",	".",			NULL },
-	{ SND_DEV_DSPHW_PLAY,  "dsp",   ".play.",		NULL },
-	{ SND_DEV_DSPHW_VPLAY, "dsp",	".virtual_play.",	NULL },
-	{ SND_DEV_DSPHW_REC,   "dsp",   ".record.",		NULL },
-	{ SND_DEV_DSPHW_VREC,  "dsp",	".virtual_record.",	NULL },
-	/* Low priority, OSSv4 aliases. */
-	{ SND_DEV_DSP,      "dsp_ac3",   ".",			"dsp" },
-	{ SND_DEV_DSP,     "dsp_mmap",   ".",			"dsp" },
-	{ SND_DEV_DSP,  "dsp_multich",   ".",			"dsp" },
-	{ SND_DEV_DSP, "dsp_spdifout",   ".",			"dsp" },
-	{ SND_DEV_DSP,  "dsp_spdifin",   ".",			"dsp" },
-};
-
 static void
 dsp_close(void *data)
 {
@@ -196,7 +177,7 @@ dsp_close(void *data)
 
 	d = priv->sc;
 	/* At this point pcm_unregister() will destroy all channels anyway. */
-	if (PCM_DETACHING(d))
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d))
 		goto skip;
 
 	PCM_GIANT_ENTER(d);
@@ -301,7 +282,7 @@ dsp_open(struct cdev *i_dev, int flags, int mode, struct thread *td)
 		return (ENODEV);
 
 	d = i_dev->si_drv1;
-	if (PCM_DETACHING(d) || !PCM_REGISTERED(d))
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d))
 		return (EBADF);
 
 	priv = malloc(sizeof(*priv), M_DEVBUF, M_WAITOK | M_ZERO);
@@ -485,7 +466,7 @@ dsp_io_ops(struct dsp_cdevpriv *priv, struct uio *buf)
 	    ("%s(): io train wreck!", __func__));
 
 	d = priv->sc;
-	if (PCM_DETACHING(d) || !DSP_REGISTERED(d))
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d))
 		return (EBADF);
 
 	PCM_GIANT_ENTER(d);
@@ -704,7 +685,7 @@ dsp_ioctl(struct cdev *i_dev, u_long cmd, caddr_t arg, int mode,
 		return (err);
 
 	d = priv->sc;
-	if (PCM_DETACHING(d) || !DSP_REGISTERED(d))
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d))
 		return (EBADF);
 
 	PCM_GIANT_ENTER(d);
@@ -1823,7 +1804,7 @@ dsp_poll(struct cdev *i_dev, int events, struct thread *td)
 	if ((err = devfs_get_cdevpriv((void **)&priv)) != 0)
 		return (err);
 	d = priv->sc;
-	if (PCM_DETACHING(d) || !DSP_REGISTERED(d)) {
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d)) {
 		/* XXX many clients don't understand POLLNVAL */
 		return (events & (POLLHUP | POLLPRI | POLLIN |
 		    POLLRDNORM | POLLOUT | POLLWRNORM));
@@ -1891,7 +1872,7 @@ dsp_mmap_single(struct cdev *i_dev, vm_ooffset_t *offset,
 	if ((err = devfs_get_cdevpriv((void **)&priv)) != 0)
 		return (err);
 	d = priv->sc;
-	if (PCM_DETACHING(d) || !DSP_REGISTERED(d))
+	if (!DSP_REGISTERED(d) || PCM_DETACHING(d))
 		return (EINVAL);
 
 	PCM_GIANT_ENTER(d);
@@ -1927,6 +1908,14 @@ dsp_mmap_single(struct cdev *i_dev, vm_ooffset_t *offset,
 	return (0);
 }
 
+static const char *dsp_aliases[] = {
+	"dsp_ac3",
+	"dsp_mmap",
+	"dsp_multich",
+	"dsp_spdifout",
+	"dsp_spdifin",
+};
+
 static void
 dsp_clone(void *arg, struct ucred *cred, char *name, int namelen,
     struct cdev **dev)
@@ -1938,9 +1927,8 @@ dsp_clone(void *arg, struct ucred *cred, char *name, int namelen,
 		return;
 	if (strcmp(name, "dsp") == 0 && dsp_basename_clone)
 		goto found;
-	for (i = 0; i < nitems(dsp_cdevs); i++) {
-		if (dsp_cdevs[i].alias != NULL &&
-		    strcmp(name, dsp_cdevs[i].name) == 0)
+	for (i = 0; i < nitems(dsp_aliases); i++) {
+		if (strcmp(name, dsp_aliases[i]) == 0)
 			goto found;
 	}
 	return;
@@ -1953,7 +1941,7 @@ found:
 	 * have returned already, meaning it will have set snd_unit to -1, and
 	 * thus devclass_get_softc() will return NULL here.
 	 */
-	if (d != NULL && PCM_REGISTERED(d) && d->dsp_dev != NULL) {
+	if (DSP_REGISTERED(d)) {
 		*dev = d->dsp_dev;
 		dev_ref(*dev);
 	}
@@ -1979,26 +1967,6 @@ dsp_sysuninit(void *p)
 
 SYSINIT(dsp_sysinit, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, dsp_sysinit, NULL);
 SYSUNINIT(dsp_sysuninit, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, dsp_sysuninit, NULL);
-
-char *
-dsp_unit2name(char *buf, size_t len, struct pcm_channel *ch)
-{
-	size_t i;
-
-	KASSERT(buf != NULL && len != 0,
-	    ("bogus buf=%p len=%ju", buf, (uintmax_t)len));
-
-	for (i = 0; i < nitems(dsp_cdevs); i++) {
-		if (ch->type != dsp_cdevs[i].type || dsp_cdevs[i].alias != NULL)
-			continue;
-		snprintf(buf, len, "%s%d%s%d",
-		    dsp_cdevs[i].name, device_get_unit(ch->dev),
-		    dsp_cdevs[i].sep, ch->unit);
-		return (buf);
-	}
-
-	return (NULL);
-}
 
 static void
 dsp_oss_audioinfo_unavail(oss_audioinfo *ai, int unit)
@@ -2219,7 +2187,6 @@ dsp_oss_engineinfo(struct cdev *i_dev, oss_audioinfo *ai)
 	struct snddev_info *d;
 	uint32_t fmts;
 	int i, nchan, *rates, minch, maxch, unit;
-	char *devname, buf[CHN_NAMELEN];
 
 	/*
 	 * If probing the device that received the ioctl, make sure it's a
@@ -2230,9 +2197,7 @@ dsp_oss_engineinfo(struct cdev *i_dev, oss_audioinfo *ai)
 		return (EINVAL);
 
 	ch = NULL;
-	devname = NULL;
 	nchan = 0;
-	bzero(buf, sizeof(buf));
 
 	/*
 	 * Search for the requested audio device (channel).  Start by
@@ -2253,147 +2218,142 @@ dsp_oss_engineinfo(struct cdev *i_dev, oss_audioinfo *ai)
 		CHN_FOREACH(ch, d, channels.pcm) {
 			CHN_UNLOCKASSERT(ch);
 			CHN_LOCK(ch);
-			if (ai->dev == -1) {
-				if (devfs_foreach_cdevpriv(i_dev,
-				    dsp_oss_engineinfo_cb, ch) != 0) {
-					devname = dsp_unit2name(buf,
-					    sizeof(buf), ch);
-				}
-			} else if (ai->dev == nchan)
-				devname = dsp_unit2name(buf, sizeof(buf), ch);
-			if (devname != NULL)
+			if ((ai->dev == -1 && devfs_foreach_cdevpriv(
+			    i_dev, dsp_oss_engineinfo_cb, ch) != 0) ||
+			    ai->dev == nchan)
 				break;
 			CHN_UNLOCK(ch);
 			++nchan;
 		}
 
-		if (devname != NULL) {
-			/*
-			 * At this point, the following synchronization stuff
-			 * has happened:
-			 * - a specific PCM device is locked.
-			 * - a specific audio channel has been locked, so be
-			 *   sure to unlock when exiting;
-			 */
-
-			caps = chn_getcaps(ch);
-
-			/*
-			 * With all handles collected, zero out the user's
-			 * container and begin filling in its fields.
-			 */
-			bzero((void *)ai, sizeof(oss_audioinfo));
-
-			ai->dev = nchan;
-			strlcpy(ai->name, ch->name,  sizeof(ai->name));
-
-			if ((ch->flags & CHN_F_BUSY) == 0)
-				ai->busy = 0;
-			else
-				ai->busy = (ch->direction == PCMDIR_PLAY) ? OPEN_WRITE : OPEN_READ;
-
-			ai->pid = ch->pid;
-			strlcpy(ai->cmd, ch->comm, sizeof(ai->cmd));
-
-			/*
-			 * These flags stolen from SNDCTL_DSP_GETCAPS handler.
-			 * Note, however, that a single channel operates in
-			 * only one direction, so PCM_CAP_DUPLEX is out.
-			 */
-			/**
-			 * @todo @c SNDCTL_AUDIOINFO::caps - Make drivers keep
-			 *       these in pcmchan::caps?
-			 */
-			ai->caps = PCM_CAP_REALTIME | PCM_CAP_MMAP | PCM_CAP_TRIGGER |
-			    ((ch->flags & CHN_F_VIRTUAL) ? PCM_CAP_VIRTUAL : 0) |
-			    ((ch->direction == PCMDIR_PLAY) ? PCM_CAP_OUTPUT : PCM_CAP_INPUT);
-
-			/*
-			 * Collect formats supported @b natively by the
-			 * device.  Also determine min/max channels.
-			 */
-			minch = INT_MAX;
-			maxch = 0;
-			fmts = 0;
-			for (i = 0; caps->fmtlist[i]; i++) {
-				fmts |= AFMT_ENCODING(caps->fmtlist[i]);
-				minch = min(AFMT_CHANNEL(caps->fmtlist[i]), minch);
-				maxch = max(AFMT_CHANNEL(caps->fmtlist[i]), maxch);
-			}
-
-			if (ch->direction == PCMDIR_PLAY)
-				ai->oformats = fmts;
-			else
-				ai->iformats = fmts;
-
-			/**
-			 * @note
-			 * @c magic - OSSv4 docs: "Reserved for internal use
-			 *    by OSS."
-			 *
-			 * @par
-			 * @c card_number - OSSv4 docs: "Number of the sound
-			 *    card where this device belongs or -1 if this
-			 *    information is not available.  Applications
-			 *    should normally not use this field for any
-			 *    purpose."
-			 */
-			ai->card_number = unit;
-			/**
-			 * @todo @c song_name - depends first on
-			 *          SNDCTL_[GS]ETSONG @todo @c label - depends
-			 *          on SNDCTL_[GS]ETLABEL
-			 * @todo @c port_number - routing information?
-			 */
-			ai->port_number = unit;
-			ai->mixer_dev = (d->mixer_dev != NULL) ? unit : -1;
-			/**
-			 * @note
-			 * @c legacy_device - OSSv4 docs:  "Obsolete."
-			 */
-			ai->legacy_device = unit;
-			snprintf(ai->devnode, sizeof(ai->devnode), "/dev/dsp%d", unit);
-			ai->enabled = device_is_attached(d->dev) ? 1 : 0;
-			/**
-			 * @note
-			 * @c flags - OSSv4 docs: "Reserved for future use."
-			 *
-			 * @note
-			 * @c binding - OSSv4 docs: "Reserved for future use."
-			 *
-			 * @todo @c handle - haven't decided how to generate
-			 *       this yet; bus, vendor, device IDs?
-			 */
-
-			if ((ch->flags & CHN_F_EXCLUSIVE) ||
-			    (pcm_getflags(d->dev) & SD_F_BITPERFECT)) {
-				ai->min_rate = caps->minspeed;
-				ai->max_rate = caps->maxspeed;
-			} else {
-				ai->min_rate = feeder_rate_min;
-				ai->max_rate = feeder_rate_max;
-			}
-
-			ai->min_channels = minch;
-			ai->max_channels = maxch;
-
-			ai->nrates = chn_getrates(ch, &rates);
-			if (ai->nrates > OSS_MAX_SAMPLE_RATES)
-				ai->nrates = OSS_MAX_SAMPLE_RATES;
-
-			for (i = 0; i < ai->nrates; i++)
-				ai->rates[i] = rates[i];
-			
-			ai->next_play_engine = 0;
-			ai->next_rec_engine = 0;
-
-			CHN_UNLOCK(ch);
+		if (ch == NULL) {
+			PCM_UNLOCK(d);
+			continue;
 		}
 
+		/*
+		 * At this point, the following synchronization stuff
+		 * has happened:
+		 * - a specific PCM device is locked.
+		 * - a specific audio channel has been locked, so be
+		 *   sure to unlock when exiting;
+		 */
+
+		caps = chn_getcaps(ch);
+
+		/*
+		 * With all handles collected, zero out the user's
+		 * container and begin filling in its fields.
+		 */
+		bzero((void *)ai, sizeof(oss_audioinfo));
+
+		ai->dev = nchan;
+		strlcpy(ai->name, ch->name,  sizeof(ai->name));
+
+		if ((ch->flags & CHN_F_BUSY) == 0)
+			ai->busy = 0;
+		else
+			ai->busy = (ch->direction == PCMDIR_PLAY) ? OPEN_WRITE : OPEN_READ;
+
+		ai->pid = ch->pid;
+		strlcpy(ai->cmd, ch->comm, sizeof(ai->cmd));
+
+		/*
+		 * These flags stolen from SNDCTL_DSP_GETCAPS handler.
+		 * Note, however, that a single channel operates in
+		 * only one direction, so PCM_CAP_DUPLEX is out.
+		 */
+		/**
+		 * @todo @c SNDCTL_AUDIOINFO::caps - Make drivers keep
+		 *       these in pcmchan::caps?
+		 */
+		ai->caps = PCM_CAP_REALTIME | PCM_CAP_MMAP | PCM_CAP_TRIGGER |
+		    ((ch->flags & CHN_F_VIRTUAL) ? PCM_CAP_VIRTUAL : 0) |
+		    ((ch->direction == PCMDIR_PLAY) ? PCM_CAP_OUTPUT : PCM_CAP_INPUT);
+
+		/*
+		 * Collect formats supported @b natively by the
+		 * device.  Also determine min/max channels.
+		 */
+		minch = INT_MAX;
+		maxch = 0;
+		fmts = 0;
+		for (i = 0; caps->fmtlist[i]; i++) {
+			fmts |= AFMT_ENCODING(caps->fmtlist[i]);
+			minch = min(AFMT_CHANNEL(caps->fmtlist[i]), minch);
+			maxch = max(AFMT_CHANNEL(caps->fmtlist[i]), maxch);
+		}
+
+		if (ch->direction == PCMDIR_PLAY)
+			ai->oformats = fmts;
+		else
+			ai->iformats = fmts;
+
+		/**
+		 * @note
+		 * @c magic - OSSv4 docs: "Reserved for internal use
+		 *    by OSS."
+		 *
+		 * @par
+		 * @c card_number - OSSv4 docs: "Number of the sound
+		 *    card where this device belongs or -1 if this
+		 *    information is not available.  Applications
+		 *    should normally not use this field for any
+		 *    purpose."
+		 */
+		ai->card_number = unit;
+		/**
+		 * @todo @c song_name - depends first on
+		 *          SNDCTL_[GS]ETSONG @todo @c label - depends
+		 *          on SNDCTL_[GS]ETLABEL
+		 * @todo @c port_number - routing information?
+		 */
+		ai->port_number = unit;
+		ai->mixer_dev = (d->mixer_dev != NULL) ? unit : -1;
+		/**
+		 * @note
+		 * @c legacy_device - OSSv4 docs:  "Obsolete."
+		 */
+		ai->legacy_device = unit;
+		snprintf(ai->devnode, sizeof(ai->devnode), "/dev/dsp%d", unit);
+		ai->enabled = device_is_attached(d->dev) ? 1 : 0;
+		/**
+		 * @note
+		 * @c flags - OSSv4 docs: "Reserved for future use."
+		 *
+		 * @note
+		 * @c binding - OSSv4 docs: "Reserved for future use."
+		 *
+		 * @todo @c handle - haven't decided how to generate
+		 *       this yet; bus, vendor, device IDs?
+		 */
+
+		if ((ch->flags & CHN_F_EXCLUSIVE) ||
+		    (pcm_getflags(d->dev) & SD_F_BITPERFECT)) {
+			ai->min_rate = caps->minspeed;
+			ai->max_rate = caps->maxspeed;
+		} else {
+			ai->min_rate = feeder_rate_min;
+			ai->max_rate = feeder_rate_max;
+		}
+
+		ai->min_channels = minch;
+		ai->max_channels = maxch;
+
+		ai->nrates = chn_getrates(ch, &rates);
+		if (ai->nrates > OSS_MAX_SAMPLE_RATES)
+			ai->nrates = OSS_MAX_SAMPLE_RATES;
+
+		for (i = 0; i < ai->nrates; i++)
+			ai->rates[i] = rates[i];
+
+		ai->next_play_engine = 0;
+		ai->next_rec_engine = 0;
+
+		CHN_UNLOCK(ch);
 		PCM_UNLOCK(d);
 
-		if (devname != NULL)
-			return (0);
+		return (0);
 	}
 
 	/* Exhausted the search -- nothing is locked, so return. */
