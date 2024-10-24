@@ -35,11 +35,15 @@
 #ifndef	_MACHINE_INTR_MACHDEP_H_
 #define	_MACHINE_INTR_MACHDEP_H_
 
+enum root_type {
+	INTR_ROOT_IRQ = 0,
+
+	INTR_ROOT_COUNT	/* MUST BE LAST */
+};
+
 #ifndef	NIRQ
 #define	NIRQ			1024
 #endif
-
-#include <sys/intr.h>
 
 enum {
 	IRQ_SOFTWARE_USER,
