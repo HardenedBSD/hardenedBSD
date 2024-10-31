@@ -151,6 +151,7 @@
 #include <net/vnet.h>
 
 #include <security/mac/mac_framework.h>
+#include <security/mac/mac_internal.h>
 
 #include <vm/uma.h>
 
@@ -935,6 +936,10 @@ solisten_proto(struct socket *so, int backlog)
 	sbsnd_flags = so->so_snd.sb_flags;
 	sbrcv_timeo = so->so_rcv.sb_timeo;
 	sbsnd_timeo = so->so_snd.sb_timeo;
+
+#ifdef MAC
+	mac_socketpeer_label_free(so->so_peerlabel);
+#endif
 
 	sbdestroy(&so->so_snd, so);
 	sbdestroy(&so->so_rcv, so);
@@ -3326,23 +3331,31 @@ integer:
 			goto integer;
 
 		case SO_SNDBUF:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_sbsnd_hiwat :
 			    so->so_snd.sb_hiwat;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_RCVBUF:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_sbrcv_hiwat :
 			    so->so_rcv.sb_hiwat;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_SNDLOWAT:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_sbsnd_lowat :
 			    so->so_snd.sb_lowat;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_RCVLOWAT:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_sbrcv_lowat :
 			    so->so_rcv.sb_lowat;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_SNDTIMEO:
@@ -3399,15 +3412,21 @@ integer:
 			break;
 
 		case SO_LISTENQLIMIT:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_qlimit : 0;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_LISTENQLEN:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_qlen : 0;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_LISTENINCQLEN:
+			SOCK_LOCK(so);
 			optval = SOLISTENING(so) ? so->sol_incqlen : 0;
+			SOCK_UNLOCK(so);
 			goto integer;
 
 		case SO_TS_CLOCK:
