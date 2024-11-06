@@ -48,8 +48,6 @@
 
 devclass_t pcm_devclass;
 
-int pcm_veto_load = 1;
-
 int snd_unit = -1;
 
 static int snd_unit_auto = -1;
@@ -275,52 +273,6 @@ pcm_best_unit(int old)
 	return (best);
 }
 
-int
-pcm_setstatus(device_t dev, char *str)
-{
-	struct snddev_info *d = device_get_softc(dev);
-
-	/* should only be called once */
-	if (d->flags & SD_F_REGISTERED)
-		return (EINVAL);
-
-	PCM_BUSYASSERT(d);
-
-	if (d->playcount == 0 || d->reccount == 0)
-		d->flags |= SD_F_SIMPLEX;
-
-	if (d->playcount > 0 || d->reccount > 0)
-		d->flags |= SD_F_AUTOVCHAN;
-
-	vchan_setmaxauto(d, snd_maxautovchans);
-
-	strlcpy(d->status, str, SND_STATUSLEN);
-
-	PCM_LOCK(d);
-
-	/* Done, we're ready.. */
-	d->flags |= SD_F_REGISTERED;
-
-	PCM_RELEASE(d);
-
-	PCM_UNLOCK(d);
-
-	/*
-	 * Create all sysctls once SD_F_REGISTERED is set else
-	 * tunable sysctls won't work:
-	 */
-	pcm_sysinit(dev);
-
-	if (snd_unit_auto < 0)
-		snd_unit_auto = (snd_unit < 0) ? 1 : 0;
-	if (snd_unit < 0 || snd_unit_auto > 1)
-		snd_unit = device_get_unit(dev);
-	else if (snd_unit_auto == 1)
-		snd_unit = pcm_best_unit(snd_unit);
-
-	return (0);
-}
-
 uint32_t
 pcm_getflags(device_t dev)
 {
@@ -435,6 +387,15 @@ pcm_sysinit(device_t dev)
 
 	mode = pcm_mode_init(d);
 
+	sysctl_ctx_init(&d->play_sysctl_ctx);
+	d->play_sysctl_tree = SYSCTL_ADD_NODE(&d->play_sysctl_ctx,
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "play",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "playback channels node");
+	sysctl_ctx_init(&d->rec_sysctl_ctx);
+	d->rec_sysctl_tree = SYSCTL_ADD_NODE(&d->rec_sysctl_ctx,
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "rec",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "recording channels node");
+
 	/* XXX: a user should be able to set this with a control tool, the
 	   sysadmin then needs min+max sysctls for this */
 	SYSCTL_ADD_UINT(device_get_sysctl_ctx(dev),
@@ -456,17 +417,15 @@ pcm_sysinit(device_t dev)
 		feeder_eq_initsys(dev);
 }
 
-int
-pcm_register(device_t dev, void *devinfo, int numplay, int numrec)
+/*
+ * Basic initialization so that drivers can use pcm_addchan() before
+ * pcm_register().
+ */
+void
+pcm_init(device_t dev, void *devinfo)
 {
 	struct snddev_info *d;
 	int i;
-
-	if (pcm_veto_load) {
-		device_printf(dev, "disabled due to an error while initialising: %d\n", pcm_veto_load);
-
-		return EINVAL;
-	}
 
 	d = device_get_softc(dev);
 	d->dev = dev;
@@ -500,24 +459,51 @@ pcm_register(device_t dev, void *devinfo, int numplay, int numrec)
 	CHN_INIT(d, channels.pcm);
 	CHN_INIT(d, channels.pcm.busy);
 	CHN_INIT(d, channels.pcm.opened);
+}
 
-	/* XXX This is incorrect, but lets play along for now. */
-	if ((numplay == 0 || numrec == 0) && numplay != numrec)
+int
+pcm_register(device_t dev, char *str)
+{
+	struct snddev_info *d = device_get_softc(dev);
+
+	/* should only be called once */
+	if (d->flags & SD_F_REGISTERED)
+		return (EINVAL);
+
+	PCM_BUSYASSERT(d);
+
+	if (d->playcount == 0 || d->reccount == 0)
 		d->flags |= SD_F_SIMPLEX;
 
-	sysctl_ctx_init(&d->play_sysctl_ctx);
-	d->play_sysctl_tree = SYSCTL_ADD_NODE(&d->play_sysctl_ctx,
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "play",
-	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "playback channels node");
-	sysctl_ctx_init(&d->rec_sysctl_ctx);
-	d->rec_sysctl_tree = SYSCTL_ADD_NODE(&d->rec_sysctl_ctx,
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "rec",
-	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "recording channels node");
-
-	if (numplay > 0 || numrec > 0)
+	if (d->playcount > 0 || d->reccount > 0)
 		d->flags |= SD_F_AUTOVCHAN;
 
+	vchan_setmaxauto(d, snd_maxautovchans);
+
+	strlcpy(d->status, str, SND_STATUSLEN);
 	sndstat_register(dev, d->status);
+
+	PCM_LOCK(d);
+
+	/* Done, we're ready.. */
+	d->flags |= SD_F_REGISTERED;
+
+	PCM_RELEASE(d);
+
+	PCM_UNLOCK(d);
+
+	/*
+	 * Create all sysctls once SD_F_REGISTERED is set else
+	 * tunable sysctls won't work:
+	 */
+	pcm_sysinit(dev);
+
+	if (snd_unit_auto < 0)
+		snd_unit_auto = (snd_unit < 0) ? 1 : 0;
+	if (snd_unit < 0 || snd_unit_auto > 1)
+		snd_unit = device_get_unit(dev);
+	else if (snd_unit_auto == 1)
+		snd_unit = pcm_best_unit(snd_unit);
 
 	return (dsp_make_dev(dev));
 }
