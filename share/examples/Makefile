@@ -23,6 +23,7 @@ LDIRS=	BSD_daemon \
 	libvgl \
 	mdoc \
 	netgraph \
+	oci \
 	perfmon \
 	ppi \
 	ppp \
@@ -201,6 +202,11 @@ SE_NETGRAPH= \
 	udp.tunnel \
 	virtual.chain \
 	virtual.lan \
+
+SE_DIRS+=	oci
+SE_OCI= \
+	README \
+	Containerfile.pkg
 
 SE_DIRS+=	perfmon
 SE_PERFMON= \
