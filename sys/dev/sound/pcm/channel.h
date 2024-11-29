@@ -354,7 +354,7 @@ enum {
 #define CHN_F_RUNNING		0x00000004  /* dma is running */
 #define CHN_F_TRIGGERED		0x00000008
 #define CHN_F_NOTRIGGER		0x00000010
-#define CHN_F_SLEEPING		0x00000020
+/* unused			0x00000020 */
 
 #define CHN_F_NBIO              0x00000040  /* do non-blocking i/o */
 #define CHN_F_MMAP		0x00000080  /* has been mmap()ed */
@@ -362,7 +362,7 @@ enum {
 #define CHN_F_BUSY              0x00000100  /* has been opened 	*/
 #define CHN_F_DIRTY		0x00000200  /* need re-config */
 #define CHN_F_DEAD		0x00000400  /* too many errors, dead, mdk */
-#define CHN_F_SILENCE		0x00000800  /* silence, nil, null, yada */
+/* unused			0x00000800 */
 
 #define	CHN_F_HAS_SIZE		0x00001000  /* user set block size */
 #define CHN_F_HAS_VCHAN		0x00002000  /* vchan master */
@@ -381,14 +381,14 @@ enum {
 				"\002ABORTING"				\
 				"\003RUNNING"				\
 				"\004TRIGGERED"				\
+				/* \006 */				\
 				"\005NOTRIGGER"				\
-				"\006SLEEPING"				\
 				"\007NBIO"				\
 				"\010MMAP"				\
 				"\011BUSY"				\
 				"\012DIRTY"				\
 				"\013DEAD"				\
-				"\014SILENCE"				\
+				/* \014 */				\
 				"\015HAS_SIZE"				\
 				"\016HAS_VCHAN"				\
 				"\017VCHAN_PASSTHROUGH"			\
