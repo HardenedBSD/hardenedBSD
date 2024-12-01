@@ -1522,11 +1522,14 @@ device_delete_child(device_t dev, device_t child)
 
 	PDEBUG(("%s from %s", DEVICENAME(child), DEVICENAME(dev)));
 
-	/* detach parent before deleting children, if any */
+	/*
+	 * Detach child.  Ideally this cleans up any grandchild
+	 * devices.
+	 */
 	if ((error = device_detach(child)) != 0)
 		return (error);
 
-	/* remove children second */
+	/* Delete any grandchildren left after detach. */
 	while ((grandchild = TAILQ_FIRST(&child->children)) != NULL) {
 		error = device_delete_child(child, grandchild);
 		if (error)
@@ -2576,7 +2579,13 @@ device_attach(device_t dev)
 	int error;
 
 	if (resource_disabled(dev->driver->name, dev->unit)) {
+		/*
+		 * Mostly detach the device, but leave it attached to
+		 * the devclass to reserve the name and unit.
+		 */
 		device_disable(dev);
+		(void)device_set_driver(dev, NULL);
+		dev->state = DS_NOTPRESENT;
 		if (bootverbose)
 			 device_printf(dev, "disabled via hints entry\n");
 		return (ENXIO);
@@ -2594,6 +2603,7 @@ device_attach(device_t dev)
 	if ((error = DEVICE_ATTACH(dev)) != 0) {
 		printf("device_attach: %s%d attach returned %d\n",
 		    dev->driver->name, dev->unit, error);
+		BUS_CHILD_DETACHED(dev->parent, dev);
 		if (disable_failed_devs) {
 			/*
 			 * When the user has asked to disable failed devices, we
@@ -3460,9 +3470,6 @@ bus_generic_detach(device_t dev)
 {
 	device_t child;
 	int error;
-
-	if (dev->state != DS_ATTACHED)
-		return (EBUSY);
 
 	/*
 	 * Detach children in the reverse order.
@@ -5719,17 +5726,20 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		 * attach the device rather than doing a full probe.
 		 */
 		device_enable(dev);
-		if (device_is_alive(dev)) {
+		if (dev->devclass != NULL) {
 			/*
 			 * If the device was disabled via a hint, clear
 			 * the hint.
 			 */
-			if (resource_disabled(dev->driver->name, dev->unit))
-				resource_unset_value(dev->driver->name,
+			if (resource_disabled(dev->devclass->name, dev->unit))
+				resource_unset_value(dev->devclass->name,
 				    dev->unit, "disabled");
-			error = device_attach(dev);
-		} else
-			error = device_probe_and_attach(dev);
+
+			/* Allow any drivers to rebid. */
+			if (!(dev->flags & DF_FIXEDCLASS))
+				devclass_delete_device(dev->devclass, dev);
+		}
+		error = device_probe_and_attach(dev);
 		break;
 	case DEV_DISABLE:
 		if (!device_is_enabled(dev)) {
