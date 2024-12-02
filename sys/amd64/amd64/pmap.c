@@ -4083,7 +4083,19 @@ pmap_qremove(vm_offset_t sva, int count)
 
 	va = sva;
 	while (count-- > 0) {
+		/*
+		 * pmap_enter() calls within the kernel virtual
+		 * address space happen on virtual addresses from
+		 * subarenas that import superpage-sized and -aligned
+		 * address ranges.  So, the virtual address that we
+		 * allocate to use with pmap_qenter() can't be close
+		 * enough to one of those pmap_enter() calls for it to
+		 * be caught up in a promotion.
+		 */
 		KASSERT(va >= VM_MIN_KERNEL_ADDRESS, ("usermode va %lx", va));
+		KASSERT((*vtopde(va) & X86_PG_PS) == 0,
+		    ("pmap_qremove on promoted va %#lx", va));
+
 		pmap_kremove(va);
 		va += PAGE_SIZE;
 	}
@@ -10498,8 +10510,7 @@ pmap_map_io_transient(vm_page_t page[], vm_offset_t vaddr[], int count,
 {
 	vm_paddr_t paddr;
 	bool needs_mapping;
-	pt_entry_t *pte;
-	int cache_bits, error __unused, i;
+	int error __unused, i;
 
 	/*
 	 * Allocate any KVA space that we need, this is done in a separate
@@ -10544,11 +10555,8 @@ pmap_map_io_transient(vm_page_t page[], vm_offset_t vaddr[], int count,
 				 */
 				pmap_qenter(vaddr[i], &page[i], 1);
 			} else {
-				pte = vtopte(vaddr[i]);
-				cache_bits = pmap_cache_bits(kernel_pmap,
-				    page[i]->md.pat_mode, false);
-				pte_store(pte, paddr | X86_PG_RW | X86_PG_V |
-				    cache_bits);
+				pmap_kenter_attr(vaddr[i], paddr,
+				    page[i]->md.pat_mode);
 				pmap_invlpg(kernel_pmap, vaddr[i]);
 			}
 		}
