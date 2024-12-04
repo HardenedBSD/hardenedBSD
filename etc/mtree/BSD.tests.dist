@@ -515,6 +515,10 @@
         ..
         auditpipe
         ..
+        cam
+            ctl
+            ..
+        ..
         capsicum
         ..
         cddl
@@ -763,10 +767,6 @@
         ..
         compat32
         ..
-        cam
-            ctl
-            ..
-        ..
         devrandom
         ..
         dtrace
@@ -904,6 +904,8 @@
             ..
         ..
         posixshm
+        ..
+        sound
         ..
         sys
         ..
