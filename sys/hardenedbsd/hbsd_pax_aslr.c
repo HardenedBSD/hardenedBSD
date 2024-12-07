@@ -94,7 +94,7 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_DELTA_STACK_LSB */
 
 #ifndef PAX_ASLR_DELTA_THR_STACK_LSB
-#define	PAX_ASLR_DELTA_THR_STACK_LSB	3
+#define	PAX_ASLR_DELTA_THR_STACK_LSB	PAGE_SHIFT
 #endif /* PAX_ASLR_DELTA_THR_STACK_LSB */
 
 #ifndef PAX_ASLR_DELTA_STACK_WITH_GAP_LSB
@@ -133,7 +133,7 @@ __FBSDID("$FreeBSD$");
 #endif /* PAX_ASLR_DELTA_STACK_DEF_LEN */
 
 #ifndef PAX_ASLR_DELTA_THR_STACK_DEF_LEN
-#define	PAX_ASLR_DELTA_THR_STACK_DEF_LEN	42
+#define	PAX_ASLR_DELTA_THR_STACK_DEF_LEN	30
 #endif /* PAX_ASLR_DELTA_THR_STACK_DEF_LEN */
 
 #ifndef PAX_ASLR_DELTA_EXEC_DEF_LEN
@@ -401,6 +401,11 @@ pax_aslr_init_vmspace(struct proc *p)
 	    PAX_ASLR_DELTA_EXEC_LSB,
 	    pax_aslr_exec_len);
 
+	arc4rand(&rand_buf, sizeof(rand_buf), 0);
+	vm->vm_aslr_delta_thr_stack = PAX_ASLR_DELTA(rand_buf,
+	    PAX_ASLR_DELTA_THR_STACK_LSB,
+	    pax_aslr_thr_stack_len);
+
 	try = 3;
 try_again:
 	/*
@@ -415,12 +420,6 @@ try_again:
 	    PAX_ASLR_DELTA_STACK_WITH_GAP_LSB,
 	    pax_aslr_stack_len);
 	vm->vm_aslr_delta_stack = ALIGN(vm->vm_aslr_delta_stack);
-
-	arc4rand(&rand_buf, sizeof(rand_buf), 0);
-	vm->vm_aslr_delta_thr_stack = PAX_ASLR_DELTA(rand_buf,
-	    PAX_ASLR_DELTA_THR_STACK_LSB,
-	    pax_aslr_thr_stack_len);
-	vm->vm_aslr_delta_thr_stack = ALIGN(vm->vm_aslr_delta_thr_stack);
 
 	arc4rand(&rand_buf, sizeof(rand_buf), 0);
 	rand_buf = PAX_ASLR_DELTA(rand_buf,
@@ -694,8 +693,7 @@ pax_aslr_thr_stack(struct proc *p, vm_offset_t *addr)
 	 * This should page aligned.
 	 */
 	random = p->p_vmspace->vm_aslr_delta_thr_stack;
-	random &= (-1UL << PAX_ASLR_DELTA_THR_STACK_LSB);
-	*addr -= random;
+	*addr += random;
 }
 
 void
