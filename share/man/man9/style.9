@@ -22,9 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	From: @(#)style	1.14 (Berkeley) 4/28/95
-.\"
-.Dd April 26, 2024
+.Dd December 13, 2024
 .Dt STYLE 9
 .Os
 .Sh NAME
@@ -46,8 +44,6 @@ is silent on an issue.
 .Bd -literal
 /*
  * Style guide for FreeBSD.  Based on the CSRG's KNF (Kernel Normal Form).
- *
- *	@(#)style	1.14 (Berkeley) 4/28/95
  */
 
 /*
@@ -56,11 +52,17 @@ is silent on an issue.
 
 /* Most single-line comments look like this. */
 
+// Although they may look like this.
+
 /*
  * Multi-line comments look like this.  Make them real sentences.  Fill
  * them so they look like real paragraphs.
  */
 .Ed
+C++ comments may be used in C and C++ code.
+Single-line comments should be consistently either C or C++ within a file.
+Multi-line comments should also be consistently either C or C++, but may differ
+from single-line comments.
 .Pp
 The copyright header should be a multi-line comment, with the first
 line of the comment having a dash after the star like so:
@@ -111,12 +113,6 @@ lines should only be added when making substantial changes to the file,
 not for trivial changes.
 .Pp
 After any copyright and license comment, there is a blank line.
-Include
-.Li $\&FreeBSD$
-or
-.Li __FBSDID("$\&FreeBSD$");
-only if you are certain the new code will be merged to stable/12.
-The tag will be removed from legacy code in the future.
 Non-C/C++ source files follow the example above, while C/C++ source files
 follow the one below.
 Version control system ID tags should only exist once in a file
@@ -140,7 +136,6 @@ and FreeBSD git hash with full path name if the file was derived
 from another FreeBSD file and include relevant copyright info
 from the original file.
 .Bd -literal
-/* From: @(#)style	1.14 (Berkeley) 4/28/95 */
 .Ed
 .Pp
 Leave one blank line before the header files.
@@ -148,11 +143,6 @@ Leave one blank line before the header files.
 Kernel include files
 .Pa ( sys/*.h )
 come first.
-If
-.In sys/cdefs.h
-is needed for
-.Fn __FBSDID ,
-include it first.
 If either
 .In sys/types.h
 or
@@ -828,19 +818,15 @@ vaf(const char *fmt, ...)
 static void
 usage(void)
 {
-	/* Optional blank line goes here. */
 .Ed
 .Pp
-Optionally, insert a blank line at the beginning of functions with no local
-variables.
+Functions should have local variable declarations first, followed by one
+blank line, followed by the first statement.
+If no local variables are declared, the first line should be a statement.
 Older versions of this
 .Nm
-document required the blank line convention, so it is widely used in existing
-code.
-.Pp
-Do not insert a blank line at the beginning of functions with local variables.
-Instead, these should have local variable declarations first, followed by one
-blank line, followed by the first statement.
+document required a blank line before code.
+Such lines should be removed when signficant changes are made to the code.
 .Pp
 Use
 .Xr printf 3 ,
@@ -924,6 +910,22 @@ New code should use
 .Fn _Static_assert
 instead of the older
 .Fn CTASSERT .
+.Pp
+.Fn __predict_true
+and
+.Fn __predict_false
+should only be used in frequently executed code when it makes the code
+measurably faster.
+It is wasteful to make predictions for infrequently run code, like subsystem
+initialization.
+When using branch prediction hints, atypical error conditions should use
+.Fn __predict_false
+(document the exceptions).
+Operations that almost always succeed use
+.Fn __predict_true .
+Only use the annotation for the entire if statement, rather than individual clauses.
+Do not add these annotations without empirical evidence of the likelihood of the
+branch.
 .Sh FILES
 .Bl -tag -width indent
 .It Pa /usr/src/tools/build/checkstyle9.pl
@@ -949,11 +951,11 @@ indentation rules.
 .Xr style.mdoc 5 ,
 .Xr style.lua 9
 .Sh HISTORY
-This manual page is largely based on the
+This manual page was originally based on the
 .Pa src/admin/style/style
 file from the
 .Bx 4.4 Lite2
-release, with occasional updates to reflect the current practice and
+release, with frequent updates to reflect the current practice and
 desire of the
 .Fx
 project.
