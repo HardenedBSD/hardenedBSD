@@ -68,6 +68,7 @@ FLUALIB?=	${SRCTOP}/lib/flua
 
 MK_SAFESTACK=	no
 MK_CFI=		no
+MK_ZERO_REGS=	no
 
 LIBSA=		${BOOTOBJ}/libsa/libsa.a
 .if ${MACHINE} == "i386"

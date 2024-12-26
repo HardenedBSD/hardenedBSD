@@ -129,6 +129,13 @@ LDFLAGS+=	-Wl,-z,now
 CFLAGS+=	-mspeculative-load-hardening
 .endif
 
+.if defined(MK_ZERO_REGS) && ${MK_ZERO_REGS} != "no"
+ZERO_REG_TYPE?=	all
+ZERO_REG_FLAG?=	-fzero-call-used-regs=${ZERO_REG_TYPE}
+CFLAGS+=	${ZERO_REG_FLAG}
+CXXFLAGS+=	${ZERO_REG_FLAG}
+.endif
+
 #
 # clang currently defaults to dynamic TLS for mips64 binaries
 .if ${MACHINE_ARCH:Mmips64*} && ${COMPILER_TYPE} == "clang"
