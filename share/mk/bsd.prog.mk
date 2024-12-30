@@ -130,7 +130,7 @@ CFLAGS+=	-mspeculative-load-hardening
 .endif
 
 .if defined(MK_ZERO_REGS) && ${MK_ZERO_REGS} != "no"
-ZERO_REG_TYPE?=	all
+ZERO_REG_TYPE?=	used
 ZERO_REG_FLAG?=	-fzero-call-used-regs=${ZERO_REG_TYPE}
 CFLAGS+=	${ZERO_REG_FLAG}
 CXXFLAGS+=	${ZERO_REG_FLAG}
