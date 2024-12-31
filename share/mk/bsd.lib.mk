@@ -269,7 +269,7 @@ _STATICLIB_SUFFIX=	_real
 _LIBS=		lib${LIB_PRIVATE}${LIB}${_STATICLIB_SUFFIX}.a
 
 lib${LIB_PRIVATE}${LIB}${_STATICLIB_SUFFIX}.a: ${OBJS} ${STATICOBJS}
-	@${ECHO} building static ${LIB} library
+	@${ECHO} Building static ${LIB} library
 	@rm -f ${.TARGET}
 	${AR} ${ARFLAGS} ${.TARGET} ${OBJS} ${STATICOBJS} ${ARADD}
 .endif
@@ -335,7 +335,7 @@ CLEANFILES+=	${SHLIB_LINK}
 .endif
 
 ${SHLIB_NAME_FULL}: ${SOBJS}
-	@${ECHO} building shared library ${SHLIB_NAME}
+	@${ECHO} Building shared library ${SHLIB_NAME}
 	@rm -f ${SHLIB_NAME} ${SHLIB_LINK}
 .if defined(SHLIB_LINK) && !commands(${SHLIB_LINK:R}.ld) && ${MK_DEBUG_FILES} == "no"
 	# Note: This uses ln instead of ${INSTALL_LIBSYMLINK} since we are in OBJDIR
@@ -366,7 +366,7 @@ ${SHLIB_NAME}.debug: ${SHLIB_NAME_FULL}
 _LIBS+=		lib${LIB_PRIVATE}${LIB}_pic.a
 
 lib${LIB_PRIVATE}${LIB}_pic.a: ${SOBJS}
-	@${ECHO} building special pic ${LIB} library
+	@${ECHO} Building special pic ${LIB} library
 	@rm -f ${.TARGET}
 	${AR} ${ARFLAGS} ${.TARGET} ${SOBJS} ${ARADD}
 .endif
@@ -378,13 +378,29 @@ CLEANFILES+=	${NOSSPSOBJS}
 _LIBS+=		lib${LIB_PRIVATE}${LIB}_nossp_pic.a
 
 lib${LIB_PRIVATE}${LIB}_nossp_pic.a: ${NOSSPSOBJS}
-	@${ECHO} building special nossp pic ${LIB} library
+	@${ECHO} Building special nossp pic ${LIB} library
 	@rm -f ${.TARGET}
 	${AR} ${ARFLAGS} ${.TARGET} ${NOSSPSOBJS} ${ARADD}
 .endif
 
 .endif # !defined(INTERNALLIB)
 
+<<<<<<< HEAD
+=======
+.if defined(INTERNALLIB) && ${MK_PIE} != "no" && defined(LIB) && !empty(LIB)
+PIEOBJS+=	${OBJS:.o=.pieo}
+DEPENDOBJS+=	${PIEOBJS}
+CLEANFILES+=	${PIEOBJS}
+
+_LIBS+=		lib${LIB_PRIVATE}${LIB}_pie.a
+
+lib${LIB_PRIVATE}${LIB}_pie.a: ${PIEOBJS}
+	@${ECHO} Building pie ${LIB} library
+	@rm -f ${.TARGET}
+	${AR} ${ARFLAGS} ${.TARGET} ${PIEOBJS} ${ARADD}
+.endif
+
+>>>>>>> origin/freebsd/14-stable/main
 .if defined(_SKIP_BUILD)
 all:
 .else
