@@ -127,12 +127,6 @@ int __elfN(nxstack) =
 #else
 	0;
 #endif
-<<<<<<< HEAD
-=======
-SYSCTL_INT(__CONCAT(_kern_elf, __ELF_WORD_SIZE), OID_AUTO,
-    nxstack, CTLFLAG_RW, &__elfN(nxstack), 0,
-    __XSTRING(__CONCAT(ELF, __ELF_WORD_SIZE)) ": support PT_GNU_STACK for non-executable stack control");
->>>>>>> origin/freebsd/14-stable/main
 
 #if defined(__amd64__)
 static int __elfN(vdso) = 1;
