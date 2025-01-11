@@ -35,6 +35,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <assert.h>
 #include <dirent.h>
 #include <err.h>
 #include <errno.h>
@@ -49,25 +50,34 @@
 #include <string.h>
 #include <ucl.h>
 
-#include <openssl/err.h>
-#include <openssl/ssl.h>
+#include "pkg.h"
 
 #include "dns_utils.h"
 #include "config.h"
 #include "hash.h"
 
-struct sig_cert {
-	char *name;
-	unsigned char *sig;
-	int siglen;
-	unsigned char *cert;
-	int certlen;
-	bool trusted;
-};
+#define	PKGSIGN_MARKER	"$PKGSIGN:"
 
-struct pubkey {
-	unsigned char *sig;
-	int siglen;
+static const struct pkgsign_impl {
+	const char			*pi_name;
+	const struct pkgsign_ops	*pi_ops;
+} pkgsign_builtins[] = {
+	{
+		.pi_name = "rsa",
+		.pi_ops = &pkgsign_rsa,
+	},
+	{
+		.pi_name = "ecc",
+		.pi_ops = &pkgsign_ecc,
+	},
+	{
+		.pi_name = "ecdsa",
+		.pi_ops = &pkgsign_ecc,
+	},
+	{
+		.pi_name = "eddsa",
+		.pi_ops = &pkgsign_ecc,
+	},
 };
 
 typedef enum {
@@ -91,6 +101,72 @@ static const char *bootstrap_names []  = {
 STAILQ_HEAD(fingerprint_list, fingerprint);
 
 static int debug;
+
+static int
+pkgsign_new(const char *name, struct pkgsign_ctx **ctx)
+{
+	const struct pkgsign_impl *impl;
+	const struct pkgsign_ops *ops;
+	struct pkgsign_ctx *nctx;
+	size_t ctx_size;
+	int ret;
+
+	assert(*ctx == NULL);
+	ops = NULL;
+	for (size_t i = 0; i < nitems(pkgsign_builtins); i++) {
+		impl = &pkgsign_builtins[i];
+
+		if (strcmp(name, impl->pi_name) == 0) {
+			ops = impl->pi_ops;
+			break;
+		}
+	}
+
+	if (ops == NULL)
+		return (ENOENT);
+
+	ctx_size = ops->pkgsign_ctx_size;
+	if (ctx_size == 0)
+		ctx_size = sizeof(*nctx);
+	assert(ctx_size >= sizeof(*nctx));
+
+	nctx = calloc(1, ctx_size);
+	if (nctx == NULL)
+		err(EXIT_FAILURE, "calloc");
+	nctx->impl = impl;
+
+	ret = 0;
+	if (ops->pkgsign_new != NULL)
+		ret = (*ops->pkgsign_new)(name, nctx);
+
+	if (ret != 0) {
+		free(nctx);
+		return (ret);
+	}
+
+	*ctx = nctx;
+	return (0);
+}
+
+static bool
+pkgsign_verify_cert(const struct pkgsign_ctx *ctx, int fd, const char *sigfile,
+    const unsigned char *key, int keylen, unsigned char *sig, int siglen)
+{
+
+	return ((*ctx->impl->pi_ops->pkgsign_verify_cert)(ctx, fd, sigfile,
+	    key, keylen, sig, siglen));
+}
+
+static bool
+pkgsign_verify_data(const struct pkgsign_ctx *ctx, const char *data,
+    size_t datasz, const char *sigfile, const unsigned char *key, int keylen,
+    unsigned char *sig, int siglen)
+{
+
+	return ((*ctx->impl->pi_ops->pkgsign_verify_data)(ctx, data, datasz,
+	    sigfile, key, keylen, sig, siglen));
+}
+
 
 static int
 extract_pkg_static(int fd, char *p, int sz)
@@ -401,150 +477,83 @@ load_fingerprints(const char *path, int *count)
 	return (fingerprints);
 }
 
-static EVP_PKEY *
-load_public_key_file(const char *file)
+char *
+pkg_read_fd(int fd, size_t *osz)
 {
-	EVP_PKEY *pkey;
-	BIO *bp;
-	char errbuf[1024];
+	char *obuf;
+	char buf[4096];
+	FILE *fp;
+	ssize_t r;
 
-	bp = BIO_new_file(file, "r");
-	if (!bp)
-		errx(EXIT_FAILURE, "Unable to read %s", file);
+	obuf = NULL;
+	*osz = 0;
+	fp = open_memstream(&obuf, osz);
+	if (fp == NULL)
+		err(EXIT_FAILURE, "open_memstream()");
 
-	if ((pkey = PEM_read_bio_PUBKEY(bp, NULL, NULL, NULL)) == NULL)
-		warnx("ici: %s", ERR_error_string(ERR_get_error(), errbuf));
+	while ((r = read(fd, buf, sizeof(buf))) >0) {
+		fwrite(buf, 1, r, fp);
+	}
 
-	BIO_free(bp);
+	if (ferror(fp))
+		errx(EXIT_FAILURE, "reading file");
 
-	return (pkey);
+	fclose(fp);
+
+	return (obuf);
 }
 
-static EVP_PKEY *
-load_public_key_buf(const unsigned char *cert, int certlen)
+/*
+ * Returns a copy of the signature type stored on the heap, and advances *bufp
+ * past the type.
+ */
+static char *
+parse_sigtype(char **bufp, size_t *bufszp)
 {
-	EVP_PKEY *pkey;
-	BIO *bp;
-	char errbuf[1024];
+	char *buf = *bufp;
+	char *endp;
+	char *sigtype;
+	size_t bufsz = *bufszp;
 
-	bp = BIO_new_mem_buf(__DECONST(void *, cert), certlen);
+	if (bufsz <= sizeof(PKGSIGN_MARKER) - 1 ||
+	    strncmp(buf, PKGSIGN_MARKER, sizeof(PKGSIGN_MARKER) - 1) != 0)
+		goto dflt;
 
-	if ((pkey = PEM_read_bio_PUBKEY(bp, NULL, NULL, NULL)) == NULL)
-		warnx("%s", ERR_error_string(ERR_get_error(), errbuf));
+	buf += sizeof(PKGSIGN_MARKER) - 1;
+	endp = strchr(buf, '$');
+	if (endp == NULL)
+		goto dflt;
 
-	BIO_free(bp);
+	sigtype = strndup(buf, endp - buf);
+	*bufp = endp + 1;
+	*bufszp -= *bufp - buf;
 
-	return (pkey);
-}
-
-static bool
-rsa_verify_cert(int fd, const char *sigfile, const unsigned char *key,
-    int keylen, unsigned char *sig, int siglen)
-{
-	EVP_MD_CTX *mdctx;
-	EVP_PKEY *pkey;
-	char *sha256;
-	char errbuf[1024];
-	bool ret;
-
-	sha256 = NULL;
-	pkey = NULL;
-	mdctx = NULL;
-	ret = false;
-
-	SSL_load_error_strings();
-
-	/* Compute SHA256 of the package. */
-	if (lseek(fd, 0, 0) == -1) {
-		warn("lseek");
-		goto cleanup;
-	}
-	if ((sha256 = sha256_fd(fd)) == NULL) {
-		warnx("Error creating SHA256 hash for package");
-		goto cleanup;
-	}
-
-	if (sigfile != NULL) {
-		if ((pkey = load_public_key_file(sigfile)) == NULL) {
-			warnx("Error reading public key");
-			goto cleanup;
-		}
-	} else {
-		if ((pkey = load_public_key_buf(key, keylen)) == NULL) {
-			warnx("Error reading public key");
-			goto cleanup;
-		}
-	}
-
-	/* Verify signature of the SHA256(pkg) is valid. */
-	if ((mdctx = EVP_MD_CTX_create()) == NULL) {
-		warnx("%s", ERR_error_string(ERR_get_error(), errbuf));
-		goto error;
-	}
-
-	if (EVP_DigestVerifyInit(mdctx, NULL, EVP_sha256(), NULL, pkey) != 1) {
-		warnx("%s", ERR_error_string(ERR_get_error(), errbuf));
-		goto error;
-	}
-	if (EVP_DigestVerifyUpdate(mdctx, sha256, strlen(sha256)) != 1) {
-		warnx("%s", ERR_error_string(ERR_get_error(), errbuf));
-		goto error;
-	}
-
-	if (EVP_DigestVerifyFinal(mdctx, sig, siglen) != 1) {
-		warnx("%s", ERR_error_string(ERR_get_error(), errbuf));
-		goto error;
-	}
-
-	ret = true;
-	printf("done\n");
-	goto cleanup;
-
-error:
-	printf("failed\n");
-
-cleanup:
-	free(sha256);
-	if (pkey)
-		EVP_PKEY_free(pkey);
-	if (mdctx)
-		EVP_MD_CTX_destroy(mdctx);
-	ERR_free_strings();
-
-	return (ret);
+	return (sigtype);
+dflt:
+	return (strdup("rsa"));
 }
 
 static struct pubkey *
 read_pubkey(int fd)
 {
 	struct pubkey *pk;
-	char *sigb;
+	char *osigb, *sigb, *sigtype;
 	size_t sigsz;
-	FILE *sig;
-	char buf[4096];
-	int r;
 
 	if (lseek(fd, 0, 0) == -1) {
 		warn("lseek");
 		return (NULL);
 	}
 
-	sigsz = 0;
-	sigb = NULL;
-	sig = open_memstream(&sigb, &sigsz);
-	if (sig == NULL)
-		err(EXIT_FAILURE, "open_memstream()");
+	osigb = sigb = pkg_read_fd(fd, &sigsz);
+	sigtype = parse_sigtype(&sigb, &sigsz);
 
-	while ((r = read(fd, buf, sizeof(buf))) >0) {
-		fwrite(buf, 1, r, sig);
-	}
-
-	fclose(sig);
 	pk = calloc(1, sizeof(struct pubkey));
 	pk->siglen = sigsz;
 	pk->sig = calloc(1, pk->siglen);
 	memcpy(pk->sig, sigb, pk->siglen);
-	free(sigb);
+	pk->sigtype = sigtype;
+	free(osigb);
 
 	return (pk);
 }
@@ -553,17 +562,18 @@ static struct sig_cert *
 parse_cert(int fd) {
 	int my_fd;
 	struct sig_cert *sc;
-	FILE *fp, *sigfp, *certfp, *tmpfp;
+	FILE *fp, *sigfp, *certfp, *tmpfp, *typefp;
 	char *line;
-	char *sig, *cert;
-	size_t linecap, sigsz, certsz;
+	char *sig, *cert, *type;
+	size_t linecap, sigsz, certsz, typesz;
 	ssize_t linelen;
+	bool end_seen;
 
 	sc = NULL;
 	line = NULL;
 	linecap = 0;
-	sig = cert = NULL;
-	sigfp = certfp = tmpfp = NULL;
+	sig = cert = type = NULL;
+	sigfp = certfp = tmpfp = typefp = NULL;
 
 	if (lseek(fd, 0, 0) == -1) {
 		warn("lseek");
@@ -582,22 +592,30 @@ parse_cert(int fd) {
 		return (NULL);
 	}
 
-	sigsz = certsz = 0;
+	sigsz = certsz = typesz = 0;
 	sigfp = open_memstream(&sig, &sigsz);
 	if (sigfp == NULL)
 		err(EXIT_FAILURE, "open_memstream()");
 	certfp = open_memstream(&cert, &certsz);
 	if (certfp == NULL)
 		err(EXIT_FAILURE, "open_memstream()");
+	typefp = open_memstream(&type, &typesz);
+	if (typefp == NULL)
+		err(EXIT_FAILURE, "open_memstream()");
 
+	end_seen = false;
 	while ((linelen = getline(&line, &linecap, fp)) > 0) {
 		if (strcmp(line, "SIGNATURE\n") == 0) {
 			tmpfp = sigfp;
+			continue;
+		} else if (strcmp(line, "TYPE\n") == 0) {
+			tmpfp = typefp;
 			continue;
 		} else if (strcmp(line, "CERT\n") == 0) {
 			tmpfp = certfp;
 			continue;
 		} else if (strcmp(line, "END\n") == 0) {
+			end_seen = true;
 			break;
 		}
 		if (tmpfp != NULL)
@@ -607,11 +625,28 @@ parse_cert(int fd) {
 	fclose(fp);
 	fclose(sigfp);
 	fclose(certfp);
+	fclose(typefp);
 
 	sc = calloc(1, sizeof(struct sig_cert));
 	sc->siglen = sigsz -1; /* Trim out unrelated trailing newline */
 	sc->sig = sig;
 
+	if (typesz == 0) {
+		sc->type = strdup("rsa");
+		free(type);
+	} else {
+		assert(type[typesz - 1] == '\n');
+		type[typesz - 1] = '\0';
+		sc->type = type;
+	}
+
+	/*
+	 * cert could be DER-encoded rather than PEM, so strip off any trailing
+	 * END marker if we ran over it.
+	 */
+	if (!end_seen && certsz > 4 &&
+	    strcmp(&cert[certsz - 4], "END\n") == 0)
+		certsz -= 4;
 	sc->certlen = certsz;
 	sc->cert = cert;
 
@@ -623,10 +658,15 @@ verify_pubsignature(int fd_pkg, int fd_sig)
 {
 	struct pubkey *pk;
 	const char *pubkey;
+	char *data;
+	struct pkgsign_ctx *sctx;
+	size_t datasz;
 	bool ret;
 
 	pk = NULL;
 	pubkey = NULL;
+	sctx = NULL;
+	data = NULL;
 	ret = false;
 	if (config_string(PUBKEY, &pubkey) != 0) {
 		warnx("No CONFIG_PUBKEY defined");
@@ -638,9 +678,34 @@ verify_pubsignature(int fd_pkg, int fd_sig)
 		goto cleanup;
 	}
 
+	if (lseek(fd_pkg, 0, SEEK_SET) == -1) {
+		warn("lseek");
+		goto cleanup;
+	}
+
+	if (strcmp(pk->sigtype, "rsa") == 0) {
+		/* Future types shouldn't do this. */
+		if ((data = sha256_fd(fd_pkg)) == NULL) {
+			warnx("Error creating SHA256 hash for package");
+			goto cleanup;
+		}
+
+		datasz = strlen(data);
+	} else {
+		if ((data = pkg_read_fd(fd_pkg, &datasz)) == NULL) {
+			warnx("Failed to read package data");
+			goto cleanup;
+		}
+	}
+
+	if (pkgsign_new(pk->sigtype, &sctx) != 0) {
+		warnx("Failed to fetch '%s' signer", pk->sigtype);
+		goto cleanup;
+	}
+
 	/* Verify the signature. */
 	printf("Verifying signature with public key %s... ", pubkey);
-	if (rsa_verify_cert(fd_pkg, pubkey, NULL, 0, pk->sig,
+	if (pkgsign_verify_data(sctx, data, datasz, pubkey, NULL, 0, pk->sig,
 	    pk->siglen) == false) {
 		fprintf(stderr, "Signature is not valid\n");
 		goto cleanup;
@@ -649,6 +714,7 @@ verify_pubsignature(int fd_pkg, int fd_sig)
 	ret = true;
 
 cleanup:
+	free(data);
 	if (pk) {
 		free(pk->sig);
 		free(pk);
@@ -663,6 +729,7 @@ verify_signature(int fd_pkg, int fd_sig)
 	struct fingerprint_list *trusted, *revoked;
 	struct fingerprint *fingerprint;
 	struct sig_cert *sc;
+	struct pkgsign_ctx *sctx;
 	bool ret;
 	int trusted_count, revoked_count;
 	const char *fingerprints;
@@ -671,6 +738,7 @@ verify_signature(int fd_pkg, int fd_sig)
 
 	hash = NULL;
 	sc = NULL;
+	sctx = NULL;
 	trusted = revoked = NULL;
 	ret = false;
 
@@ -734,10 +802,15 @@ verify_signature(int fd_pkg, int fd_sig)
 		goto cleanup;
 	}
 
+	if (pkgsign_new(sc->type, &sctx) != 0) {
+		fprintf(stderr, "Failed to fetch 'rsa' signer\n");
+		goto cleanup;
+	}
+
 	/* Verify the signature. */
 	printf("Verifying signature with trusted certificate %s... ", sc->name);
-	if (rsa_verify_cert(fd_pkg, NULL, sc->cert, sc->certlen, sc->sig,
-	    sc->siglen) == false) {
+	if (pkgsign_verify_cert(sctx, fd_pkg, NULL, sc->cert, sc->certlen,
+	    sc->sig, sc->siglen) == false) {
 		fprintf(stderr, "Signature is not valid\n");
 		goto cleanup;
 	}
