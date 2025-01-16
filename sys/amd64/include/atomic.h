@@ -304,7 +304,7 @@ __storeload_barrier(void)
 
 #define	ATOMIC_LOAD(TYPE)					\
 static __inline u_##TYPE					\
-atomic_load_acq_##TYPE(volatile u_##TYPE *p)			\
+atomic_load_acq_##TYPE(const volatile u_##TYPE *p)		\
 {								\
 	u_##TYPE res;						\
 								\
@@ -385,7 +385,6 @@ ATOMIC_LOADSTORE(long);
 #undef ATOMIC_LOAD
 #undef ATOMIC_STORE
 #undef ATOMIC_LOADSTORE
-#ifndef WANT_FUNCTIONS
 
 /* Read the current value and store a new value in the destination. */
 static __inline u_int
@@ -591,8 +590,6 @@ atomic_swap_long(volatile u_long *p, u_long v)
 #define	atomic_readandclear_ptr	atomic_readandclear_long
 #define	atomic_testandset_ptr	atomic_testandset_long
 #define	atomic_testandclear_ptr	atomic_testandclear_long
-
-#endif /* !WANT_FUNCTIONS */
 
 #endif /* !SAN_NEEDS_INTERCEPTORS || SAN_RUNTIME */
 
