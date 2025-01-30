@@ -132,6 +132,13 @@ SDT_PROBE_DEFINE2(pf, sctp, multihome, add, "uint32_t",
     "struct pf_sctp_source *");
 SDT_PROBE_DEFINE3(pf, sctp, multihome, remove, "uint32_t",
     "struct pf_kstate *", "struct pf_sctp_source *");
+SDT_PROBE_DEFINE4(pf, sctp, multihome_scan, entry, "int",
+    "int", "struct pf_pdesc *", "int");
+SDT_PROBE_DEFINE2(pf, sctp, multihome_scan, param, "uint16_t", "uint16_t");
+SDT_PROBE_DEFINE2(pf, sctp, multihome_scan, ipv4, "struct in_addr *",
+    "int");
+SDT_PROBE_DEFINE2(pf, sctp, multihome_scan, ipv6, "struct in_addr6 *",
+    "int");
 
 SDT_PROBE_DEFINE3(pf, eth, test_rule, entry, "int", "struct ifnet *",
     "struct mbuf *");
@@ -427,8 +434,23 @@ enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_LINK };
 			return (PF_PASS);				\
 	} while (0)
 
-#define	BOUND_IFACE(r, k) \
-	((r)->rule_flag & PFRULE_IFBOUND) ? (k) : V_pfi_all
+static struct pfi_kkif *
+BOUND_IFACE(struct pf_krule *rule, struct pfi_kkif *k, struct pf_pdesc *pd)
+{
+	/* Floating unless otherwise specified. */
+	if (! (rule->rule_flag & PFRULE_IFBOUND))
+		return (V_pfi_all);
+
+	/*
+	 * If this state is created based on another state (e.g. SCTP
+	 * multihome) always set it floating initially. We can't know for sure
+	 * what interface the actual traffic for this state will come in on.
+	 */
+	if (pd->related_rule)
+		return (V_pfi_all);
+
+	return (k);
+}
 
 #define	STATE_INC_COUNTERS(s)						\
 	do {								\
@@ -4888,6 +4910,10 @@ pf_test_rule(struct pf_krule **rm, struct pf_kstate **sm, struct pfi_kkif *kif,
 	}
 
 	while (r != NULL) {
+		if (pd->related_rule) {
+			*rm = pd->related_rule;
+			break;
+		}
 		pf_counter_u64_add(&r->evaluations, 1);
 		if (pfi_kkif_match(r->kif, kif) == r->ifnot)
 			r = r->skip[PF_SKIP_IFP].ptr;
@@ -5250,7 +5276,7 @@ pf_create_state(struct pf_krule *r, struct pf_krule *nr, struct pf_krule *a,
 		    __func__, nr, sk, nk));
 
 	/* Swap sk/nk for PF_OUT. */
-	if (pf_state_insert(BOUND_IFACE(r, kif), kif,
+	if (pf_state_insert(BOUND_IFACE(r, kif, pd), kif,
 	    (pd->dir == PF_IN) ? sk : nk,
 	    (pd->dir == PF_IN) ? nk : sk, s)) {
 		REASON_SET(&reason, PFRES_STATEINS);
@@ -6193,6 +6219,13 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 		return (PF_DROP);
 	}
 
+	if (src->scrub != NULL) {
+		if (src->scrub->pfss_v_tag == 0) {
+			src->scrub->pfss_v_tag = pd->hdr.sctp.v_tag;
+		} else  if (src->scrub->pfss_v_tag != pd->hdr.sctp.v_tag)
+			return (PF_DROP);
+	}
+
 	/* Track state. */
 	if (pd->sctp_flags & PFDESC_SCTP_INIT) {
 		if (src->state < SCTP_COOKIE_WAIT) {
@@ -6205,6 +6238,15 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 		if (dst->scrub->pfss_v_tag == 0)
 			dst->scrub->pfss_v_tag = pd->sctp_initiate_tag;
 	}
+
+	/*
+	 * Bind to the correct interface if we're if-bound. For multihomed
+	 * extra associations we don't know which interface that will be until
+	 * here, so we've inserted the state on V_pf_all. Fix that now.
+	 */
+	if ((*state)->kif == V_pfi_all &&
+	    (*state)->rule.ptr->rule_flag & PFRULE_IFBOUND)
+		(*state)->kif = kif;
 
 	if (pd->sctp_flags & (PFDESC_SCTP_COOKIE | PFDESC_SCTP_HEARTBEAT_ACK)) {
 		if (src->state < SCTP_ESTABLISHED) {
@@ -6222,13 +6264,6 @@ pf_test_state_sctp(struct pf_kstate **state, struct pfi_kkif *kif,
 	if (pd->sctp_flags & (PFDESC_SCTP_SHUTDOWN_COMPLETE)) {
 		pf_set_protostate(*state, psrc, SCTP_CLOSED);
 		(*state)->timeout = PFTM_SCTP_CLOSED;
-	}
-
-	if (src->scrub != NULL) {
-		if (src->scrub->pfss_v_tag == 0) {
-			src->scrub->pfss_v_tag = pd->hdr.sctp.v_tag;
-		} else  if (src->scrub->pfss_v_tag != pd->hdr.sctp.v_tag)
-			return (PF_DROP);
 	}
 
 	(*state)->expire = time_uptime;
@@ -6409,6 +6444,9 @@ again:
 			j->pd.sctp_flags |= PFDESC_SCTP_ADD_IP;
 			PF_RULES_RLOCK();
 			sm = NULL;
+			if (s->rule.ptr->rule_flag & PFRULE_ALLOW_RELATED) {
+				j->pd.related_rule = s->rule.ptr;
+			}
 			ret = pf_test_rule(&r, &sm, kif,
 			    j->m, off, &j->pd, &ra, &rs, NULL);
 			PF_RULES_RUNLOCK();
@@ -6533,6 +6571,8 @@ pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
 	int			 off = 0;
 	struct pf_sctp_multihome_job	*job;
 
+	SDT_PROBE4(pf, sctp, multihome_scan, entry, start, len, pd, op);
+
 	while (off < len) {
 		struct sctp_paramhdr h;
 
@@ -6543,6 +6583,9 @@ pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
 		/* Parameters are at least 4 bytes. */
 		if (ntohs(h.param_length) < 4)
 			return (PF_DROP);
+
+		SDT_PROBE2(pf, sctp, multihome_scan, param, ntohs(h.param_type),
+		    ntohs(h.param_length));
 
 		switch (ntohs(h.param_type)) {
 		case  SCTP_IPV4_ADDRESS: {
@@ -6572,6 +6615,8 @@ pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
 			job = malloc(sizeof(*job), M_PFTEMP, M_NOWAIT | M_ZERO);
 			if (! job)
 				return (PF_DROP);
+
+			SDT_PROBE2(pf, sctp, multihome_scan, ipv4, &t, op);
 
 			memcpy(&job->pd, pd, sizeof(*pd));
 
@@ -6605,6 +6650,8 @@ pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
 			job = malloc(sizeof(*job), M_PFTEMP, M_NOWAIT | M_ZERO);
 			if (! job)
 				return (PF_DROP);
+
+			SDT_PROBE2(pf, sctp, multihome_scan, ipv6, &t, op);
 
 			memcpy(&job->pd, pd, sizeof(*pd));
 			memcpy(&job->src, &t, sizeof(t));
@@ -6656,6 +6703,7 @@ pf_multihome_scan(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
 
 	return (PF_PASS);
 }
+
 int
 pf_multihome_scan_init(struct mbuf *m, int start, int len, struct pf_pdesc *pd,
     struct pfi_kkif *kif)
