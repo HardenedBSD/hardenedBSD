@@ -2092,10 +2092,20 @@ bpf_setif(struct bpf_d *d, struct ifreq *ifr)
 	BPF_LOCK_ASSERT();
 
 	theywant = ifunit(ifr->ifr_name);
-	if (theywant == NULL || theywant->if_bpf == NULL)
+	if (theywant == NULL)
+		return (ENXIO);
+	/*
+	 * Look through attached interfaces for the named one.
+	 */
+	CK_LIST_FOREACH(bp, &bpf_iflist, bif_next) {
+		if (bp->bif_ifp == theywant &&
+		    bp->bif_bpf == &theywant->if_bpf)
+			break;
+	}
+	if (bp == NULL)
 		return (ENXIO);
 
-	bp = theywant->if_bpf;
+	MPASS(bp == theywant->if_bpf);
 	/*
 	 * At this point, we expect the buffer is already allocated.  If not,
 	 * return an error.
@@ -2838,6 +2848,33 @@ bpf_get_bp_params(struct bpf_if *bp, u_int *bif_dlt, u_int *bif_hdrlen)
 		*bif_hdrlen = bp->bif_hdrlen;
 
 	return (0);
+}
+
+/*
+ * Detach descriptors on interface's vmove event.
+ */
+void
+bpf_ifdetach(struct ifnet *ifp)
+{
+	struct bpf_if *bp;
+	struct bpf_d *d;
+
+	BPF_LOCK();
+	CK_LIST_FOREACH(bp, &bpf_iflist, bif_next) {
+		if (bp->bif_ifp != ifp)
+			continue;
+
+		/* Detach common descriptors */
+		while ((d = CK_LIST_FIRST(&bp->bif_dlist)) != NULL) {
+			bpf_detachd_locked(d, true);
+		}
+
+		/* Detach writer-only descriptors */
+		while ((d = CK_LIST_FIRST(&bp->bif_wlist)) != NULL) {
+			bpf_detachd_locked(d, true);
+		}
+	}
+	BPF_UNLOCK();
 }
 #endif
 
