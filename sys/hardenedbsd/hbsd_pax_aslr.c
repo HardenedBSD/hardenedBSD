@@ -302,12 +302,17 @@ SYSCTL_HBSD_2STATE(elf_pie_only_global,
 #endif /* PAX_SYSCTLS */
 
 #ifdef PAX_JAIL_SUPPORT
+SYSCTL_DECL(_security_jail_param_hardening);
 SYSCTL_DECL(_security_jail_param_hardening_pax);
 
 SYSCTL_JAIL_PARAM_SUBNODE(hardening_pax, aslr, "ASLR");
 SYSCTL_JAIL_PARAM(_hardening_pax_aslr, status,
     CTLTYPE_INT | CTLFLAG_RD, "I",
     "ASLR status");
+
+SYSCTL_JAIL_PARAM(_hardening, elf_pie_only,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Only permit execution of ELF PIE applications");
 #ifdef COMPAT_FREEBSD32
 SYSCTL_JAIL_PARAM_SUBNODE(hardening_pax_aslr, compat, "ASLR (compat)");
 SYSCTL_JAIL_PARAM(_hardening_pax_aslr_compat, status,
