@@ -97,6 +97,7 @@ static int __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp);
 static bool __elfN(freebsd_trans_osrel)(const Elf_Note *note,
     int32_t *osrel);
 static bool kfreebsd_trans_osrel(const Elf_Note *note, int32_t *osrel);
+static bool can_exec_nonpie(struct proc *p);
 static bool __elfN(check_note)(struct image_params *imgp,
     Elf_Brandnote *checknote, int32_t *osrel, bool *has_fctl0,
     uint32_t *fctl0);
@@ -198,6 +199,24 @@ kfreebsd_trans_osrel(const Elf_Note *note, int32_t *osrel)
 	*osrel = desc[1] * 100000 + desc[2] * 1000 + desc[3];
 
 	return (true);
+}
+
+static bool
+can_exec_nonpie(struct proc *p)
+{
+	struct prison *pr;
+
+	if (p == NULL) {
+		return (false);
+	}
+
+	if (p->p_pid == 1) {
+		return (true);
+	}
+
+	pr = p->p_ucred->cr_prison;
+
+	return (pr->pr_hbsd.hardening.elf_pie_only == 0);
 }
 
 int
@@ -1161,6 +1180,13 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	vn_lock(imgp->vp, LK_SHARED | LK_RETRY);
 	if (error != 0)
 		goto ret;
+
+#ifdef PAX_ASLR
+	if (hdr->e_type != ET_DYN && !can_exec_nonpie(imgp->proc)) {
+		error = EPERM;
+		goto ret;
+	}
+#endif
 
 	error = __elfN(load_sections)(imgp, hdr, phdr, imgp->et_dyn_addr, NULL);
 	if (error != 0)

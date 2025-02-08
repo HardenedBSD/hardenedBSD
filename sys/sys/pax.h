@@ -69,6 +69,7 @@ struct hbsd_features {
 		pax_state_t	 prohibit_ptrace_syscall;
 		pax_state_t	 harden_tty;
 		pax_state_t	 harden_shm;
+		pax_state_t	 elf_pie_only;
 	} hardening;
 	struct hbsd_log {
 		pax_state_t	log;		/* (p) Per-jail logging status */
