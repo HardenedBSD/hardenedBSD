@@ -42,6 +42,7 @@
 
 #include "opt_capsicum.h"
 #include "opt_ktrace.h"
+#include "opt_pax.h"
 #include <sys/capsicum.h>
 #include <sys/ktr.h>
 #include <sys/vmmeter.h>
@@ -50,6 +51,8 @@
 #include <sys/ktrace.h>
 #endif
 #include <security/audit/audit.h>
+
+#include <sys/pax.h>
 
 static inline void
 syscallenter(struct thread *td)
@@ -228,6 +231,9 @@ syscallret(struct thread *td)
 	    td->td_errno == ECAPMODE)) {
 		if ((trap_enotcap ||
 		    (p->p_flag2 & P2_TRAPCAP) != 0) && IN_CAPABILITY_MODE(td)) {
+#ifdef PAX_SEGVGUARD
+			pax_segvguard_segfault(td, p->p_comm);
+#endif
 			ksiginfo_init_trap(&ksi);
 			ksi.ksi_signo = SIGTRAP;
 			ksi.ksi_errno = td->td_errno;
