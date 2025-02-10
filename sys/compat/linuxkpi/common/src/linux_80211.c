@@ -1270,20 +1270,20 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	} else {
 		error = lkpi_80211_mo_add_chanctx(hw, chanctx_conf);
 		if (error == 0 || error == EOPNOTSUPP) {
-			vif->bss_conf.chandef.chan = chanctx_conf->def.chan;
-			vif->bss_conf.chandef.width = chanctx_conf->def.width;
-			vif->bss_conf.chandef.center_freq1 =
+			vif->bss_conf.chanreq.oper.chan = chanctx_conf->def.chan;
+			vif->bss_conf.chanreq.oper.width = chanctx_conf->def.width;
+			vif->bss_conf.chanreq.oper.center_freq1 =
 			    chanctx_conf->def.center_freq1;
 #ifdef LKPI_80211_HT
-			if (vif->bss_conf.chandef.width == NL80211_CHAN_WIDTH_40) {
+			if (vif->bss_conf.chanreq.oper.width == NL80211_CHAN_WIDTH_40) {
 				/* Note: it is 10 not 20. */
 				if (IEEE80211_IS_CHAN_HT40U(ni->ni_chan))
-					vif->bss_conf.chandef.center_freq1 += 10;
+					vif->bss_conf.chanreq.oper.center_freq1 += 10;
 				else if (IEEE80211_IS_CHAN_HT40D(ni->ni_chan))
-					vif->bss_conf.chandef.center_freq1 -= 10;
+					vif->bss_conf.chanreq.oper.center_freq1 -= 10;
 			}
 #endif
-			vif->bss_conf.chandef.center_freq2 =
+			vif->bss_conf.chanreq.oper.center_freq2 =
 			    chanctx_conf->def.center_freq2;
 		} else {
 			ic_printf(vap->iv_ic, "%s:%d: mo_add_chanctx "
@@ -2841,7 +2841,7 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	lvif->lvif_ifllevent = EVENTHANDLER_REGISTER(iflladdr_event,
 	    lkpi_vif_iflladdr, vif, EVENTHANDLER_PRI_ANY);
 	vif->bss_conf.link_id = 0;	/* Non-MLO operation. */
-	vif->bss_conf.chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
+	vif->bss_conf.chanreq.oper.width = NL80211_CHAN_WIDTH_20_NOHT;
 	vif->bss_conf.use_short_preamble = false;	/* vap->iv_flags IEEE80211_F_SHPREAMBLE */
 	vif->bss_conf.use_short_slot = false;		/* vap->iv_flags IEEE80211_F_SHSLOT */
 	vif->bss_conf.qos = false;
@@ -3027,7 +3027,7 @@ lkpi_ic_vap_delete(struct ieee80211vap *vap)
 	lkpi_80211_mo_remove_interface(hw, vif);
 
 	/* Single VAP, so we can do this here. */
-	lkpi_80211_mo_stop(hw);
+	lkpi_80211_mo_stop(hw, false);			/* XXX SUSPEND */
 
 	mtx_destroy(&lvif->mtx);
 	free(lvif, M_80211_VAP);
@@ -3084,7 +3084,7 @@ lkpi_ic_parent(struct ieee80211com *ic)
 			start_all = true;
 	} else {
 #ifdef HW_START_STOP
-		lkpi_80211_mo_stop(hw);
+		lkpi_80211_mo_stop(hw, false);		/* XXX SUSPEND */
 #endif
 	}
 	LKPI_80211_LHW_UNLOCK(lhw);
@@ -4552,6 +4552,8 @@ lkpi_ic_getradiocaps(struct ieee80211com *ic, int maxchan,
 			ic->ic_flags_ext |= IEEE80211_FEXT_VHT;
 			ic->ic_vht_cap.vht_cap_info =
 			    hw->wiphy->bands[NL80211_BAND_5GHZ]->vht_cap.cap;
+			ic->ic_vht_cap.supp_mcs =
+			    hw->wiphy->bands[NL80211_BAND_5GHZ]->vht_cap.vht_mcs;
 
 			setbit(bands, IEEE80211_MODE_VHT_5GHZ);
 			chan_flags |= NET80211_CBW_FLAG_VHT80;
@@ -5334,13 +5336,13 @@ linuxkpi_ieee80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb,
 
 	/* Implement a dump_rxcb() !!! */
 	if (linuxkpi_debug_80211 & D80211_TRACE_RX)
-		printf("TRACE-RX: %s: RXCB: %ju %ju %u, %#0x, %u, %#0x, %#0x, "
+		printf("TRACE-RX: %s: RXCB: %ju %ju %u, %b, %u, %#0x, %#0x, "
 		    "%u band %u, %u { %d %d %d %d }, %d, %#x %#x %#x %#x %u %u %u\n",
 			__func__,
 			(uintmax_t)rx_status->boottime_ns,
 			(uintmax_t)rx_status->mactime,
 			rx_status->device_timestamp,
-			rx_status->flag,
+			rx_status->flag, IEEE80211_RX_STATUS_FLAGS_BITS,
 			rx_status->freq,
 			rx_status->bw,
 			rx_status->encoding,

@@ -710,6 +710,8 @@ ieee80211_vap_attach(struct ieee80211vap *vap, ifm_change_cb_t media_change,
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT80);
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT160);
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT80P80);
+	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_STBC_TX);
+	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_STBC_RX);
 	IEEE80211_UNLOCK(ic);
 
 	return 1;
@@ -767,6 +769,8 @@ ieee80211_vap_detach(struct ieee80211vap *vap)
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT80);
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT160);
 	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_USEVHT80P80);
+	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_STBC_TX);
+	ieee80211_syncflag_vht_locked(ic, IEEE80211_FVHT_STBC_RX);
 
 	/* NB: this handles the bpfdetach done below */
 	ieee80211_syncflag_ext_locked(ic, IEEE80211_FEXT_BPF);
@@ -1158,12 +1162,14 @@ struct vht_chan_range vht80_chan_ranges[] = {
 	{ 5570, 5650 },
 	{ 5650, 5730 },
 	{ 5735, 5815 },
+	{ 5815, 5895 },
 	{ 0, 0 }
 };
 
 struct vht_chan_range vht160_chan_ranges[] = {
 	{ 5170, 5330 },
 	{ 5490, 5650 },
+	{ 5735, 5895 },
 	{ 0, 0 }
 };
 

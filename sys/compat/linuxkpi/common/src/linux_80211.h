@@ -78,9 +78,10 @@
     if (linuxkpi_debug_80211 & D80211_IMPROVE_TXQ)			\
 	printf("%s:%d: XXX LKPI80211 IMPROVE_TXQ\n", __func__, __LINE__)
 
-#define	IMPROVE_HT(...)							\
+#define	IMPROVE_HT(fmt, ...)						\
     if (linuxkpi_debug_80211 & D80211_TRACE_MODE_HT)			\
-	printf("%s:%d: XXX LKPI80211 IMPROVE_HT\n", __func__, __LINE__)
+	printf("%s:%d: XXX LKPI80211 IMPROVE_HT " fmt "\n",		\
+	    __func__, __LINE__, ##__VA_ARGS__);
 
 #define	MTAG_ABI_LKPI80211	1707696513	/* LinuxKPI 802.11 KBI */
 
@@ -392,7 +393,7 @@ struct lkpi_wiphy {
     mtx_assert(&(_ltxq)->ltxq_mtx, MA_NOTOWNED)
 
 int lkpi_80211_mo_start(struct ieee80211_hw *);
-void lkpi_80211_mo_stop(struct ieee80211_hw *);
+void lkpi_80211_mo_stop(struct ieee80211_hw *, bool);
 int lkpi_80211_mo_get_antenna(struct ieee80211_hw *, u32 *, u32 *);
 int lkpi_80211_mo_set_frag_threshold(struct ieee80211_hw *, uint32_t);
 int lkpi_80211_mo_set_rts_threshold(struct ieee80211_hw *, uint32_t);

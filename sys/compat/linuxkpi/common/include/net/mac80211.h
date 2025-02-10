@@ -297,7 +297,7 @@ struct ieee80211_bss_conf {
 	uint8_t					transmitter_bssid[ETH_ALEN];
 	struct ieee80211_ftm_responder_params	*ftmr_params;
 	struct ieee80211_p2p_noa_attr		p2p_noa_attr;
-	struct cfg80211_chan_def		chandef;
+	struct ieee80211_chanreq		chanreq;
 	__be32					arp_addr_list[1];	/* XXX TODO */
 	struct ieee80211_rate			*beacon_rate;
 	struct {
@@ -625,6 +625,17 @@ enum ieee80211_rx_status_flags {
 	RX_FLAG_FAILED_PLCP_CRC		= BIT(31),
 };
 
+#define	IEEE80211_RX_STATUS_FLAGS_BITS					\
+	"\20\1ALLOW_SAME_PN\2AMPDU_DETAILS\3AMPDU_EOF_BIT\4AMPDU_EOF_BIT_KNOWN" \
+	"\5DECRYPTED\6DUP_VALIDATED\7FAILED_FCS_CRC\10ICV_STRIPPED" \
+	"\11MACTIME_PLCP_START\12MACTIME_START\13MIC_STRIPPED" \
+	"\14MMIC_ERROR\15MMIC_STRIPPED\16NO_PSDU\17PN_VALIDATED" \
+	"\20RADIOTAP_HE\21RADIOTAP_HE_MU\22RADIOTAP_LSIG\23RADIOTAP_VENDOR_DATA" \
+	"\24NO_SIGNAL_VAL\25IV_STRIPPED\26AMPDU_IS_LAST\27AMPDU_LAST_KNOWN" \
+	"\30AMSDU_MORE\31MACTIME_END\32ONLY_MONITOR\33SKIP_MONITOR" \
+	"\348023\35RADIOTAP_TLV_AT_END\36MACTIME\37MACTIME_IS_RTAP_TS64" \
+	"\40FAILED_PLCP_CRC"
+
 enum mac80211_rx_encoding {
 	RX_ENC_LEGACY		= 0,
 	RX_ENC_HT,
@@ -726,6 +737,7 @@ struct ieee80211_sta_agg {
 };
 
 struct ieee80211_link_sta {
+	struct ieee80211_sta			*sta;
 	uint8_t					addr[ETH_ALEN];
 	uint8_t					link_id;
 	uint32_t				supp_rates[NUM_NL80211_BANDS];
@@ -796,7 +808,9 @@ enum ieee80211_vif_driver_flags {
 	IEEE80211_VIF_BEACON_FILTER		= BIT(0),
 	IEEE80211_VIF_SUPPORTS_CQM_RSSI		= BIT(1),
 	IEEE80211_VIF_SUPPORTS_UAPSD		= BIT(2),
+#if defined(LINUXKPI_VERSION) && (LINUXKPI_VERSION < 60600)	/* v6.6 */
 	IEEE80211_VIF_DISABLE_SMPS_OVERRIDE	= BIT(3),	/* Renamed to IEEE80211_VIF_EML_ACTIVE. */
+#endif
 	IEEE80211_VIF_EML_ACTIVE		= BIT(4),
 	IEEE80211_VIF_IGNORE_OFDMA_WIDER_BW	= BIT(5),
 };
@@ -970,7 +984,7 @@ enum ieee80211_offload_flags {
 struct ieee80211_ops {
 	/* TODO FIXME */
 	int  (*start)(struct ieee80211_hw *);
-	void (*stop)(struct ieee80211_hw *);
+	void (*stop)(struct ieee80211_hw *, bool);
 
 	int  (*config)(struct ieee80211_hw *, u32);
 	void (*reconfig_complete)(struct ieee80211_hw *, enum ieee80211_reconfig_type);
@@ -993,7 +1007,7 @@ struct ieee80211_ops {
 
 	void (*mgd_prepare_tx)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_prep_tx_info *);
 	void (*mgd_complete_tx)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_prep_tx_info *);
-	void (*mgd_protect_tdls_discover)(struct ieee80211_hw *, struct ieee80211_vif *);
+	void (*mgd_protect_tdls_discover)(struct ieee80211_hw *, struct ieee80211_vif *, unsigned int);
 
 	void (*flush)(struct ieee80211_hw *, struct ieee80211_vif *, u32, bool);
 	void (*flush_sta)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_sta *);
@@ -1024,10 +1038,10 @@ struct ieee80211_ops {
 	bool (*can_aggregate_in_amsdu)(struct ieee80211_hw *, struct sk_buff *, struct sk_buff *);
 
 	int  (*pre_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_channel_switch *);
-	int  (*post_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *);
+	int  (*post_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_bss_conf *);
 	void (*channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_channel_switch *);
 	void (*channel_switch_beacon)(struct ieee80211_hw *, struct ieee80211_vif *, struct cfg80211_chan_def *);
-	void (*abort_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *);
+	void (*abort_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_bss_conf *);
 	void (*channel_switch_rx_beacon)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_channel_switch *);
 	int  (*tdls_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_sta *, u8, struct cfg80211_chan_def *, struct sk_buff *, u32);
 	void (*tdls_cancel_channel_switch)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_sta *);
@@ -1108,6 +1122,9 @@ struct ieee80211_ops {
 
 /* #ifdef CONFIG_MAC80211_DEBUGFS */	/* Do not change depending on compile-time option. */
 	void (*sta_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_sta *, struct dentry *);
+	void (*vif_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *);
+	void (*link_sta_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_link_sta *, struct dentry *);
+	void (*link_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_bss_conf *, struct dentry *);
 /* #endif */
 };
 
@@ -1561,7 +1578,7 @@ ieee80211_beacon_loss(struct ieee80211_vif *vif)
 }
 
 static __inline void
-ieee80211_chswitch_done(struct ieee80211_vif *vif, bool t)
+ieee80211_chswitch_done(struct ieee80211_vif *vif, bool t, uint32_t link_id)
 {
 	TODO();
 }
@@ -1587,12 +1604,12 @@ ieee80211_csa_update_counter(struct ieee80211_vif *vif)
 }
 
 static __inline void
-ieee80211_csa_finish(struct ieee80211_vif *vif)
+ieee80211_csa_finish(struct ieee80211_vif *vif, uint32_t link_id)
 {
 	TODO();
 }
 
-static __inline enum nl80211_iftype
+static inline enum nl80211_iftype
 ieee80211_vif_type_p2p(struct ieee80211_vif *vif)
 {
 
@@ -2111,7 +2128,7 @@ ieee80211_queue_work(struct ieee80211_hw *hw, struct work_struct *w)
 }
 
 static __inline void
-ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
+ieee80211_tx_status_skb(struct ieee80211_hw *hw, struct sk_buff *skb)
 {
 	linuxkpi_ieee80211_tx_status(hw, skb);
 }
@@ -2169,15 +2186,6 @@ ieee80211_txq_get_depth(struct ieee80211_txq *txq, unsigned long *frame_cnt,
 	linuxkpi_ieee80211_txq_get_depth(txq, frame_cnt, byte_cnt);
 }
 
-static __inline int
-rate_lowest_index(struct ieee80211_supported_band *band,
-    struct ieee80211_sta *sta)
-{
-	IMPROVE();
-	return (0);
-}
-
-
 static __inline void
 SET_IEEE80211_PERM_ADDR	(struct ieee80211_hw *hw, uint8_t *addr)
 {
@@ -2225,7 +2233,7 @@ ieee80211_beacon_set_cntdwn(struct ieee80211_vif *vif, u8 counter)
 }
 
 static __inline int
-ieee80211_beacon_update_cntdwn(struct ieee80211_vif *vif)
+ieee80211_beacon_update_cntdwn(struct ieee80211_vif *vif, uint32_t link_id)
 {
 	TODO();
 	return (-1);
@@ -2240,7 +2248,7 @@ ieee80211_get_vht_max_nss(struct ieee80211_vht_cap *vht_cap, uint32_t chanwidth,
 }
 
 static __inline bool
-ieee80211_beacon_cntdwn_is_complete(struct ieee80211_vif *vif)
+ieee80211_beacon_cntdwn_is_complete(struct ieee80211_vif *vif, uint32_t link_id)
 {
 	TODO();
 	return (true);
@@ -2256,14 +2264,6 @@ static __inline void
 ieee80211_channel_switch_disconnect(struct ieee80211_vif *vif, bool _x)
 {
 	TODO();
-}
-
-static __inline const struct ieee80211_sta_he_cap *
-ieee80211_get_he_iftype_cap(const struct ieee80211_supported_band *band,
-    enum nl80211_iftype type)
-{
-	TODO();
-        return (NULL);
 }
 
 static __inline void
@@ -2414,20 +2414,24 @@ ieee80211_vif_is_mld(const struct ieee80211_vif *vif)
 	return (vif->valid_links != 0);
 }
 
-static __inline const struct ieee80211_sta_he_cap *
+static inline const struct ieee80211_sta_he_cap *
 ieee80211_get_he_iftype_cap_vif(const struct ieee80211_supported_band *band,
     struct ieee80211_vif *vif)
 {
-	TODO();
-	return (NULL);
+	enum nl80211_iftype iftype;
+
+	iftype = ieee80211_vif_type_p2p(vif);
+	return (ieee80211_get_he_iftype_cap(band, iftype));
 }
 
-static __inline const struct ieee80211_sta_eht_cap *
+static inline const struct ieee80211_sta_eht_cap *
 ieee80211_get_eht_iftype_cap_vif(const struct ieee80211_supported_band *band,
     struct ieee80211_vif *vif)
 {
-	TODO();
-	return (NULL);
+	enum nl80211_iftype iftype;
+
+	iftype = ieee80211_vif_type_p2p(vif);
+	return (ieee80211_get_eht_iftype_cap(band, iftype));
 }
 
 static inline uint32_t
