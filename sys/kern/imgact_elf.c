@@ -1183,7 +1183,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 
 #ifdef PAX_ASLR
 	if (hdr->e_type != ET_DYN && !can_exec_nonpie(imgp->proc)) {
-		error = EPERM;
+		error = ENOEXEC;
 		goto ret;
 	}
 #endif
