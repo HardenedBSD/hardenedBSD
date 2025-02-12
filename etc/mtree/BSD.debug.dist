@@ -39,6 +39,12 @@
                 ..
                 i18n
                 ..
+                libxo
+                    encoder
+                    ..
+                ..
+                ossl-modules
+                ..
             ..
             libexec
                 bsdinstall
