@@ -95,9 +95,9 @@ struct pf_fragment {
 	RB_ENTRY(pf_fragment) fr_entry;
 	TAILQ_ENTRY(pf_fragment) frag_next;
 	uint32_t	fr_timeout;
+	TAILQ_HEAD(pf_fragq, pf_frent) fr_queue;
 	uint16_t	fr_maxlen;	/* maximum length of single fragment */
 	u_int16_t	fr_holes;	/* number of holes in the queue */
-	TAILQ_HEAD(pf_fragq, pf_frent) fr_queue;
 };
 
 struct pf_fragment_tag {
@@ -547,7 +547,6 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	struct pf_frent		*after, *next, *prev;
 	struct pf_fragment	*frag;
 	uint16_t		total;
-	int			old_index, new_index;
 
 	PF_FRAG_ASSERT();
 
@@ -593,9 +592,9 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 		memset(frag->fr_firstoff, 0, sizeof(frag->fr_firstoff));
 		memset(frag->fr_entries, 0, sizeof(frag->fr_entries));
 		frag->fr_timeout = time_uptime;
+		TAILQ_INIT(&frag->fr_queue);
 		frag->fr_maxlen = frent->fe_len;
 		frag->fr_holes = 1;
-		TAILQ_INIT(&frag->fr_queue);
 
 		RB_INSERT(pf_frag_tree, &V_pf_frag_tree, frag);
 		TAILQ_INSERT_HEAD(&V_pf_fragqueue, frag, frag_next);
@@ -642,10 +641,15 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	if (prev != NULL && prev->fe_off + prev->fe_len > frent->fe_off) {
 		uint16_t precut;
 
+		if (frag->fr_af == AF_INET6)
+			goto free_fragment;
+
 		precut = prev->fe_off + prev->fe_len - frent->fe_off;
-		if (precut >= frent->fe_len)
-			goto bad_fragment;
-		DPFPRINTF(("overlap -%d\n", precut));
+		if (precut >= frent->fe_len) {
+			DPFPRINTF(("new frag overlapped\n"));
+			goto drop_fragment;
+		}
+		DPFPRINTF(("frag head overlap %d\n", precut));
 		m_adj(frent->fe_m, precut);
 		frent->fe_off += precut;
 		frent->fe_len -= precut;
@@ -656,37 +660,26 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 		uint16_t aftercut;
 
 		aftercut = frent->fe_off + frent->fe_len - after->fe_off;
-		DPFPRINTF(("adjust overlap %d\n", aftercut));
 		if (aftercut < after->fe_len) {
+			DPFPRINTF(("frag tail overlap %d", aftercut));
 			m_adj(after->fe_m, aftercut);
-			old_index = pf_frent_index(after);
+			/* Fragment may switch queue as fe_off changes */
+			pf_frent_remove(frag, after);
 			after->fe_off += aftercut;
 			after->fe_len -= aftercut;
-			new_index = pf_frent_index(after);
-			if (old_index != new_index) {
-				DPFPRINTF(("frag index %d, new %d",
-				    old_index, new_index));
-				/* Fragment switched queue as fe_off changed */
-				after->fe_off -= aftercut;
-				after->fe_len += aftercut;
-				/* Remove restored fragment from old queue */
-				pf_frent_remove(frag, after);
-				after->fe_off += aftercut;
-				after->fe_len -= aftercut;
-				/* Insert into correct queue */
-				if (pf_frent_insert(frag, after, prev)) {
-					DPFPRINTF(
-					    ("fragment requeue limit exceeded"));
-					m_freem(after->fe_m);
-					uma_zfree(V_pf_frent_z, after);
-					/* There is not way to recover */
-					goto bad_fragment;
-				}
+			/* Insert into correct queue */
+			if (pf_frent_insert(frag, after, prev)) {
+				DPFPRINTF(("fragment requeue limit exceeded"));
+				m_freem(after->fe_m);
+				uma_zfree(V_pf_frent_z, after);
+				/* There is not way to recover */
+				goto free_fragment;
 			}
 			break;
 		}
 
 		/* This fragment is completely overlapped, lose it. */
+		DPFPRINTF(("old frag overlapped\n"));
 		next = TAILQ_NEXT(after, fr_next);
 		pf_frent_remove(frag, after);
 		m_freem(after->fe_m);
@@ -700,6 +693,16 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	}
 
 	return (frag);
+
+free_fragment:
+	/*
+	 * RFC 5722, Errata 3089:  When reassembling an IPv6 datagram, if one
+	 * or more its constituent fragments is determined to be an overlapping
+	 * fragment, the entire datagram (and any constituent fragments) MUST
+	 * be silently discarded.
+	 */
+	DPFPRINTF(("flush overlapping fragments\n"));
+	pf_free_fragment(frag);
 
 bad_fragment:
 	REASON_SET(reason, PFRES_FRAG);
