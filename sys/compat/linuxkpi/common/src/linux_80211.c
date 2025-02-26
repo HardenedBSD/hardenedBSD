@@ -550,10 +550,30 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 			continue;
 
 		for (i = 0; i < supband->n_bitrates; i++) {
-
-			IMPROVE("Further supband->bitrates[i]* checks?");
-			/* or should we get them from the ni? */
-			sta->deflink.supp_rates[band] |= BIT(i);
+			switch (band) {
+			case NL80211_BAND_2GHZ:
+				switch (supband->bitrates[i].bitrate) {
+				case 240:	/* 11g only */
+				case 120:	/* 11g only */
+				case 110:
+				case 60:	/* 11g only */
+				case 55:
+				case 20:
+				case 10:
+					sta->deflink.supp_rates[band] |= BIT(i);
+					break;
+				}
+				break;
+			case NL80211_BAND_5GHZ:
+				switch (supband->bitrates[i].bitrate) {
+				case 240:
+				case 120:
+				case 60:
+					sta->deflink.supp_rates[band] |= BIT(i);
+					break;
+				}
+				break;
+			}
 		}
 	}
 
@@ -4118,7 +4138,7 @@ lkpi_ic_set_channel(struct ieee80211com *ic)
 	hw = LHW_TO_HW(lhw);
 	cfg80211_chandef_create(&hw->conf.chandef, chan,
 #ifdef LKPI_80211_HT
-	    (ic->ic_htcaps & IEEE80211_HTC_HT) ? 0 :
+	    (ic->ic_flags_ht & IEEE80211_FHT_HT) ? NL80211_CHAN_HT20 :
 #endif
 	    NL80211_CHAN_NO_HT);
 
@@ -5004,6 +5024,7 @@ lkpi_ic_ampdu_rx_stop(struct ieee80211_node *ni, struct ieee80211_rx_ampdu *rap)
 	struct ieee80211_ampdu_params params = { };
 	int error;
 	uint8_t tid;
+	bool ic_locked;
 
 	ic = ni->ni_ic;
 	lhw = ic->ic_softc;
@@ -5041,11 +5062,14 @@ lkpi_ic_ampdu_rx_stop(struct ieee80211_node *ni, struct ieee80211_rx_ampdu *rap)
 	params.tid = tid;
 	params.amsdu = false;
 
-	// IEEE80211_UNLOCK(ic);
+	ic_locked = IEEE80211_IS_LOCKED(ic);
+	if (ic_locked)
+		IEEE80211_UNLOCK(ic);
 	LKPI_80211_LHW_LOCK(lhw);
 	error = lkpi_80211_mo_ampdu_action(hw, vif, &params);
 	LKPI_80211_LHW_UNLOCK(lhw);
-	// IEEE80211_LOCK(ic);
+	if (ic_locked)
+		IEEE80211_LOCK(ic);
 	if (error != 0)
 		ic_printf(ic, "%s: mo_ampdu_action returned %d. ni %p rap %p\n",
 		    __func__, error, ni, rap);
@@ -5589,7 +5613,7 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 
 			cfg80211_chandef_create(&hw->conf.chandef, &channels[i],
 #ifdef LKPI_80211_HT
-			    (ic->ic_htcaps & IEEE80211_HTC_HT) ? 0 :
+			    (ic->ic_flags_ht & IEEE80211_FHT_HT) ? NL80211_CHAN_HT20 :
 #endif
 			    NL80211_CHAN_NO_HT);
 			break;
@@ -5630,7 +5654,7 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 		lhw->scan_ie_len += sizeof(struct ieee80211_ie_htcap);
 #endif
 #if defined(LKPI_80211_VHT)
-	if ((ic->ic_flags_ext & IEEE80211_FEXT_VHT) != 0)
+	if (IEEE80211_CONF_VHT(ic))
 		lhw->scan_ie_len += 2 + sizeof(struct ieee80211_vht_cap);
 #endif
 
