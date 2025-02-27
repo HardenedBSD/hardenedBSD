@@ -3402,6 +3402,22 @@ bus_generic_add_child(device_t dev, u_int order, const char *name, int unit)
 int
 bus_generic_probe(device_t dev)
 {
+	bus_identify_children(dev);
+	return (0);
+}
+
+/**
+ * @brief Ask drivers to add child devices of the given device.
+ *
+ * This function allows drivers for child devices of a bus to identify
+ * child devices and add them as children of the given device.  NB:
+ * The driver for @param dev must implement the BUS_ADD_CHILD method.
+ *
+ * @param dev		the parent device
+ */
+void
+bus_identify_children(device_t dev)
+{
 	devclass_t dc = dev->devclass;
 	driverlink_t dl;
 
@@ -3419,8 +3435,6 @@ bus_generic_probe(device_t dev)
 			continue;
 		DEVICE_IDENTIFY(dl->driver, dev);
 	}
-
-	return (0);
 }
 
 /**
@@ -3433,13 +3447,28 @@ bus_generic_probe(device_t dev)
 int
 bus_generic_attach(device_t dev)
 {
+	bus_attach_children(dev);
+	return (0);
+}
+
+/**
+ * @brief Probe and attach all children of the given device
+ *
+ * This function attempts to attach a device driver to each unattached
+ * child of the given device using device_probe_and_attach().  If an
+ * individual child fails to attach this function continues attaching
+ * other children.
+ *
+ * @param dev		the parent device
+ */
+void
+bus_attach_children(device_t dev)
+{
 	device_t child;
 
 	TAILQ_FOREACH(child, &dev->children, link) {
 		device_probe_and_attach(child);
 	}
-
-	return (0);
 }
 
 /**
@@ -3453,7 +3482,7 @@ int
 bus_delayed_attach_children(device_t dev)
 {
 	/* Probe and attach the bus children when interrupts are available */
-	config_intrhook_oneshot((ich_func_t)bus_generic_attach, dev);
+	config_intrhook_oneshot((ich_func_t)bus_attach_children, dev);
 
 	return (0);
 }
@@ -3467,6 +3496,32 @@ bus_delayed_attach_children(device_t dev)
  */
 int
 bus_generic_detach(device_t dev)
+{
+	int error;
+
+	error = bus_detach_children(dev);
+	if (error != 0)
+		return (error);
+
+	return (0);
+}
+
+/**
+ * @brief Detach drivers from all children of a device
+ *
+ * This function attempts to detach a device driver from each attached
+ * child of the given device using device_detach().  If an individual
+ * child fails to detach this function stops and returns an error.
+ * NB: Children that were successfully detached are not re-attached if
+ * an error occurs.
+ *
+ * @param dev		the parent device
+ *
+ * @retval 0		success
+ * @retval non-zero	a device would not detach
+ */
+int
+bus_detach_children(device_t dev)
 {
 	device_t child;
 	int error;
@@ -4305,6 +4360,7 @@ bus_generic_rman_alloc_resource(device_t dev, device_t child, int type,
 	if (r == NULL)
 		return (NULL);
 	rman_set_rid(r, *rid);
+	rman_set_type(r, type);
 
 	if (flags & RF_ACTIVE) {
 		if (bus_activate_resource(child, type, *rid, r) != 0) {
@@ -4377,12 +4433,12 @@ bus_generic_rman_activate_resource(device_t dev, device_t child, int type,
     int rid, struct resource *r)
 {
 	struct resource_map map;
-#ifdef INVARIANTS_XXX
+#ifdef INVARIANTS
 	struct rman *rm;
 #endif
 	int error;
 
-#ifdef INVARIANTS_XXX
+#ifdef INVARIANTS
 	rm = BUS_GET_RMAN(dev, type, rman_get_flags(r));
 	KASSERT(rman_is_region_manager(r, rm),
 	    ("%s: rman %p doesn't match for resource %p", __func__, rm, r));
@@ -4425,12 +4481,12 @@ bus_generic_rman_deactivate_resource(device_t dev, device_t child, int type,
     int rid, struct resource *r)
 {
 	struct resource_map map;
-#ifdef INVARIANTS_XXX
+#ifdef INVARIANTS
 	struct rman *rm;
 #endif
 	int error;
 
-#ifdef INVARIANTS_XXX
+#ifdef INVARIANTS
 	rm = BUS_GET_RMAN(dev, type, rman_get_flags(r));
 	KASSERT(rman_is_region_manager(r, rm),
 	    ("%s: rman %p doesn't match for resource %p", __func__, rm, r));
@@ -4617,6 +4673,13 @@ bus_adjust_resource(device_t dev, int type, struct resource *r, rman_res_t start
 	return (BUS_ADJUST_RESOURCE(dev->parent, dev, type, r, start, end));
 }
 
+int
+bus_adjust_resource_new(device_t dev, struct resource *r, rman_res_t start,
+    rman_res_t end)
+{
+	return (bus_adjust_resource(dev, rman_get_type(r), r, start, end));
+}
+
 /**
  * @brief Wrapper function for BUS_TRANSLATE_RESOURCE().
  *
@@ -4646,6 +4709,13 @@ bus_activate_resource(device_t dev, int type, int rid, struct resource *r)
 	return (BUS_ACTIVATE_RESOURCE(dev->parent, dev, type, rid, r));
 }
 
+int
+bus_activate_resource_new(device_t dev, struct resource *r)
+{
+	return (bus_activate_resource(dev, rman_get_type(r), rman_get_rid(r),
+	    r));
+}
+
 /**
  * @brief Wrapper function for BUS_DEACTIVATE_RESOURCE().
  *
@@ -4658,6 +4728,13 @@ bus_deactivate_resource(device_t dev, int type, int rid, struct resource *r)
 	if (dev->parent == NULL)
 		return (EINVAL);
 	return (BUS_DEACTIVATE_RESOURCE(dev->parent, dev, type, rid, r));
+}
+
+int
+bus_deactivate_resource_new(device_t dev, struct resource *r)
+{
+	return (bus_deactivate_resource(dev, rman_get_type(r), rman_get_rid(r),
+	    r));
 }
 
 /**
@@ -4675,6 +4752,13 @@ bus_map_resource(device_t dev, int type, struct resource *r,
 	return (BUS_MAP_RESOURCE(dev->parent, dev, type, r, args, map));
 }
 
+int
+bus_map_resource_new(device_t dev, struct resource *r,
+    struct resource_map_request *args, struct resource_map *map)
+{
+	return (bus_map_resource(dev, rman_get_type(r), r, args, map));
+}
+
 /**
  * @brief Wrapper function for BUS_UNMAP_RESOURCE().
  *
@@ -4688,6 +4772,13 @@ bus_unmap_resource(device_t dev, int type, struct resource *r,
 	if (dev->parent == NULL)
 		return (EINVAL);
 	return (BUS_UNMAP_RESOURCE(dev->parent, dev, type, r, map));
+}
+
+int
+bus_unmap_resource_new(device_t dev, struct resource *r,
+    struct resource_map *map)
+{
+	return (bus_unmap_resource(dev, rman_get_type(r), r, map));
 }
 
 /**
@@ -4705,6 +4796,13 @@ bus_release_resource(device_t dev, int type, int rid, struct resource *r)
 		return (EINVAL);
 	rv = BUS_RELEASE_RESOURCE(dev->parent, dev, type, rid, r);
 	return (rv);
+}
+
+int
+bus_release_resource_new(device_t dev, struct resource *r)
+{
+	return (bus_release_resource(dev, rman_get_type(r), rman_get_rid(r),
+	    r));
 }
 
 /**
