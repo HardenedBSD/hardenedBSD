@@ -26,12 +26,6 @@ MAN=
 # pam should always happen before ssh here for static linking
 LIBADD=	pam ssh util
 
-.if ${MK_LDNS} != "no"
-CFLAGS+=	-DHAVE_LDNS=1
-#DPADD+=	${LIBLDNS}
-#LDADD+=	-lldns
-.endif
-
 .if ${MK_AUDIT} != "no"
 CFLAGS+= -DUSE_BSM_AUDIT=1 -DHAVE_GETAUDIT_ADDR=1
 LIBADD+=	bsm
@@ -45,8 +39,6 @@ LDFLAGS+=-L${LIBBLACKLISTDIR}
 .endif
 
 .if ${MK_GSSAPI} != "no" && ${MK_KERBEROS_SUPPORT} != "no"
-CFLAGS+= -include krb5_config.h
-SRCS+=	krb5_config.h
 LIBADD+=	gssapi_krb5 gssapi krb5
 .endif
 

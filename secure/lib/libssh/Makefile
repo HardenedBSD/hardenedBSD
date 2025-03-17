@@ -46,14 +46,9 @@ SRCS+=	bcrypt_pbkdf.c blowfish.c bsd-misc.c bsd-signal.c explicit_bzero.c \
 SRCS+=	getrrsetbyname.c
 .else
 LDNSDIR=	${SRCTOP}/contrib/ldns
-CFLAGS+=	-DHAVE_LDNS=1 -I${LDNSDIR}
+CFLAGS+=	-I${LDNSDIR}
 SRCS+=	getrrsetbyname-ldns.c
 LIBADD+=	ldns
-.endif
-
-.if ${MK_GSSAPI} != "no" && ${MK_KERBEROS_SUPPORT} != "no"
-CFLAGS+= -include krb5_config.h
-SRCS+=	 krb5_config.h
 .endif
 
 .if defined(LOCALBASE)
