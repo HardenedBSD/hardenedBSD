@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: BSD-1-Clause
  *
  * Copyright 2012 Konstantin Belousov <kib@FreeBSD.org>
- * Copyright (c) 2018 The FreeBSD Foundation
+ * Copyright (c) 2018, 2023 The FreeBSD Foundation
  *
  * Parts of this software was developed by Konstantin Belousov
  * <kib@FreeBSD.org> under sponsorship from the FreeBSD Foundation.
@@ -25,14 +25,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/param.h>
 #include <sys/elf.h>
 #include <sys/elf_common.h>
-
-extern int main(int, char **, char **);
+#include <stdlib.h>
+#include "libc_private.h"
 
 extern void (*__preinit_array_start[])(int, char **, char **) __hidden;
 extern void (*__preinit_array_end[])(int, char **, char **) __hidden;
@@ -42,6 +39,8 @@ extern void (*__fini_array_start[])(void) __hidden;
 extern void (*__fini_array_end[])(void) __hidden;
 extern void _fini(void) __hidden;
 extern void _init(void) __hidden;
+
+extern char **environ;
 
 extern int _DYNAMIC;
 #pragma weak _DYNAMIC
@@ -79,9 +78,7 @@ process_irelocs(void)
 #error "Define platform reloc type"
 #endif
 
-char **environ;
-const char *__progname = "";
-
+#ifndef PIC
 static void
 finalizer(void)
 {
@@ -96,10 +93,12 @@ finalizer(void)
 	}
 	_fini();
 }
+#endif
 
-static inline void
+static void
 handle_static_init(int argc, char **argv, char **env)
 {
+#ifndef PIC
 	void (*fn)(int, char **, char **);
 	size_t array_size, n;
 
@@ -121,9 +120,10 @@ handle_static_init(int argc, char **argv, char **env)
 		if ((uintptr_t)fn != 0 && (uintptr_t)fn != 1)
 			fn(argc, argv, env);
 	}
+#endif
 }
 
-static inline void
+static void
 handle_argv(int argc, char *argv[], char **env)
 {
 	const char *s;
@@ -137,4 +137,52 @@ handle_argv(int argc, char *argv[], char **env)
 				__progname = s + 1;
 		}
 	}
+}
+
+void
+__libc_start1(int argc, char *argv[], char *env[], void (*cleanup)(void),
+    int (*mainX)(int, char *[], char *[]))
+{
+	handle_argv(argc, argv, env);
+
+	if (&_DYNAMIC != NULL) {
+		atexit(cleanup);
+	} else {
+#ifndef CRT_IRELOC_SUPPRESS
+		INIT_IRELOCS;
+		process_irelocs();
+#endif
+		_init_tls();
+	}
+
+	handle_static_init(argc, argv, env);
+	exit(mainX(argc, argv, env));
+}
+
+/* XXXKIB _mcleanup and monstartup defs */
+extern void _mcleanup(void);
+extern void monstartup(void *, void *);
+
+void
+__libc_start1_gcrt(int argc, char *argv[], char *env[],
+    void (*cleanup)(void), int (*mainX)(int, char *[], char *[]),
+    int *eprolp, int *etextp)
+{
+	handle_argv(argc, argv, env);
+
+	if (&_DYNAMIC != NULL) {
+		atexit(cleanup);
+	} else {
+#ifndef CRT_IRELOC_SUPPRESS
+		INIT_IRELOCS;
+		process_irelocs();
+#endif
+		_init_tls();
+	}
+
+	atexit(_mcleanup);
+	monstartup(eprolp, etextp);
+
+	handle_static_init(argc, argv, env);
+	exit(mainX(argc, argv, env));
 }

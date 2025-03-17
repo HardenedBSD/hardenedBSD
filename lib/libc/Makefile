@@ -47,6 +47,8 @@ INSTALL_PIC_ARCHIVE=
 BUILD_NOSSP_PIC_ARCHIVE=
 PRECIOUSLIB=
 
+MK_LTOLIB=	no
+
 .ifndef NO_THREAD_STACK_UNWIND
 CANCELPOINTS_CFLAGS=-fexceptions
 CFLAGS+=${CANCELPOINTS_CFLAGS}
@@ -87,6 +89,7 @@ MIASM=
 NOASM=
 
 .include "${LIBC_SRCTOP}/${LIBC_ARCH}/Makefile.inc"
+.include "${LIBC_SRCTOP}/csu/Makefile.inc"
 .include "${LIBC_SRCTOP}/db/Makefile.inc"
 .include "${LIBC_SRCTOP}/compat-43/Makefile.inc"
 .include "${LIBC_SRCTOP}/gdtoa/Makefile.inc"

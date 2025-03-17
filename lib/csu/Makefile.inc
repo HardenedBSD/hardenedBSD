@@ -7,7 +7,6 @@ MK_UBSAN:=	no
 
 .include <src.opts.mk>
 MK_SSP=	no
-
 MK_LTOLIB=	no
 
 .if !defined(BUILDING_TESTS)

@@ -1,5 +1,6 @@
-/* LINTLIBRARY */
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright 1996-1998 John D. Polstra.
  * All rights reserved.
  *
@@ -24,7 +25,26 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#include "csu_common.h"
+#ifdef _CSU_COMMON_H_
 
-void _start(char *, ...) __dead2;
+/*
+ * This file includes both definitions and declarations, it can be
+ * included only into one compilation unit for csu objects.  We cannot
+ * practically check this, but at least guard against
+ * double-inclusion.
+ */
+#error "Include this file only once"
+#else
+#define _CSU_COMMON_H_
+
+char **environ;
+const char *__progname = "";
+
+#ifdef GCRT
+extern int eprol;
+extern int etext;
+#endif
+
+int main(int, char **, char **);
+
+#endif	/* _CSU_COMMON_H_ */
