@@ -5,6 +5,10 @@
  * Copyright (c) 1999 Cameron Grant <cg@FreeBSD.org>
  * Copyright (c) 1995 Hannu Savolainen
  * All rights reserved.
+ * Copyright (c) 2024-2025 The FreeBSD Foundation
+ *
+ * Portions of this software were developed by Christos Margiolis
+ * <christos@FreeBSD.org> under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -84,7 +88,6 @@ struct snd_mixer;
 #include <dev/sound/pcm/buffer.h>
 #include <dev/sound/pcm/matrix.h>
 #include <dev/sound/pcm/channel.h>
-#include <dev/sound/pcm/pcm.h>
 #include <dev/sound/pcm/feeder.h>
 #include <dev/sound/pcm/mixer.h>
 #include <dev/sound/pcm/dsp.h>
@@ -100,7 +103,7 @@ struct snd_mixer;
 #define SOUND_MAXVER	SOUND_MODVER
 
 #define SD_F_SIMPLEX		0x00000001
-#define SD_F_AUTOVCHAN		0x00000002
+/* unused			0x00000002 */
 #define SD_F_SOFTPCMVOL		0x00000004
 #define SD_F_BUSY		0x00000008
 #define SD_F_MPSAFE		0x00000010
@@ -123,7 +126,7 @@ struct snd_mixer;
 
 #define SD_F_BITS		"\020"					\
 				"\001SIMPLEX"				\
-				"\002AUTOVCHAN"				\
+				/* "\002 */				\
 				"\003SOFTPCMVOL"			\
 				"\004BUSY"				\
 				"\005MPSAFE"				\
