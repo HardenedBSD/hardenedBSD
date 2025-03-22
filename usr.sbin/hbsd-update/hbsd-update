@@ -621,6 +621,14 @@ apply_mtree() {
 		return 1
 	fi
 
+	mtree -eU \
+	    -f ${tmpdir}/mtree/BSD.hardened.dist \
+	    -p ${mountpoint}
+	res=${?}
+	if [ ${res} -gt 0 ]; then
+		return 1
+	fi
+
 	if [ -f ${tmpdir}/mtree/BSD.tests.dist ]; then
 		mkdir -p ${mountpoint}/usr/tests
 		mtree -eU \
