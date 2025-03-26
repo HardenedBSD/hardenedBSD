@@ -76,7 +76,7 @@ struct acpi_iicbus_ivars {
 	ACPI_HANDLE		handle;
 };
 
-static int install_space_handler = 0;
+static int install_space_handler = 1;
 TUNABLE_INT("hw.iicbus.enable_acpi_space_handler", &install_space_handler);
 
 static inline bool
@@ -254,6 +254,9 @@ acpi_iicbus_space_handler(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address,
 	Function &= AML_FIELD_ATTRIO(AML_FIELD_ATTRIB_MASK, ACPI_IO_MASK);
 	sc = __containerof(info, struct acpi_iicbus_softc, space_handler_info);
 	dev = sc->super_sc.dev;
+
+	/* the address is expected to need shifting */
+	sb->SlaveAddress <<= 1;
 
 	switch (Function) {
 	case AML_FIELD_ATTRIO(AML_FIELD_ATTRIB_SEND_RECEIVE, ACPI_READ):
