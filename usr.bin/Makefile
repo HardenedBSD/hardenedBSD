@@ -257,9 +257,6 @@ SUBDIR.${MK_TOOLCHAIN}+=	ar
 SUBDIR.${MK_TOOLCHAIN}+=	nm
 SUBDIR.${MK_TOOLCHAIN}+=	objcopy
 SUBDIR.${MK_TOOLCHAIN}+=	size
-<<<<<<< HEAD
-SUBDIR.${MK_TOOLCHAIN}+=	strings
-=======
 .endif
 # Include elftoolchain's strings in build targets even if using LLVM_BINUTILS,
 # as we may later install with different options.  In particular, the release
@@ -267,7 +264,6 @@ SUBDIR.${MK_TOOLCHAIN}+=	strings
 # MK_TOOLCHAIN=no which implies MK_LLVM_BINUTILS=no.
 .if ${MK_LLVM_BINUTILS} == "no" || !make(install)
 SUBDIR+=			strings
->>>>>>> origin/freebsd/14-stable/main
 .endif
 SUBDIR.${MK_TOOLCHAIN}+=	c89
 SUBDIR.${MK_TOOLCHAIN}+=	c99
