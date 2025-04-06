@@ -2002,6 +2002,7 @@ dsp_oss_audioinfo(struct cdev *i_dev, oss_audioinfo *ai, bool ex)
 	if (ai->dev == -1 && i_dev->si_devsw != &dsp_cdevsw)
 		return (EINVAL);
 
+	bus_topo_lock();
 	for (unit = 0; pcm_devclass != NULL &&
 	    unit < devclass_get_maxunit(pcm_devclass); unit++) {
 		d = devclass_get_softc(pcm_devclass, unit);
@@ -2009,6 +2010,7 @@ dsp_oss_audioinfo(struct cdev *i_dev, oss_audioinfo *ai, bool ex)
 			if ((ai->dev == -1 && unit == snd_unit) ||
 			    ai->dev == unit) {
 				dsp_oss_audioinfo_unavail(ai, unit);
+				bus_topo_unlock();
 				return (0);
 			} else {
 				d = NULL;
@@ -2027,6 +2029,7 @@ dsp_oss_audioinfo(struct cdev *i_dev, oss_audioinfo *ai, bool ex)
 			d = NULL;
 		}
 	}
+	bus_topo_unlock();
 
 	/* Exhausted the search -- nothing is locked, so return. */
 	if (d == NULL)
@@ -2183,6 +2186,7 @@ dsp_oss_engineinfo(struct cdev *i_dev, oss_audioinfo *ai)
 	 * Search for the requested audio device (channel).  Start by
 	 * iterating over pcm devices.
 	 */ 
+	bus_topo_lock();
 	for (unit = 0; pcm_devclass != NULL &&
 	    unit < devclass_get_maxunit(pcm_devclass); unit++) {
 		d = devclass_get_softc(pcm_devclass, unit);
@@ -2332,9 +2336,11 @@ dsp_oss_engineinfo(struct cdev *i_dev, oss_audioinfo *ai)
 
 		CHN_UNLOCK(ch);
 		PCM_UNLOCK(d);
+		bus_topo_unlock();
 
 		return (0);
 	}
+	bus_topo_unlock();
 
 	/* Exhausted the search -- nothing is locked, so return. */
 	return (EINVAL);
