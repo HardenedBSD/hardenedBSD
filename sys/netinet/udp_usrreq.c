@@ -851,6 +851,8 @@ udp_getcred(SYSCTL_HANDLER_ARGS)
 	struct inpcb *inp;
 	int error;
 
+	if (req->newptr == NULL)
+		return (EINVAL);
 	error = priv_check(req->td, PRIV_NETINET_GETCRED);
 	if (error)
 		return (error);
