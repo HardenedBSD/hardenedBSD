@@ -1357,7 +1357,11 @@ main() {
 	res=${?}
 	if [ ${res} -gt 0 ]; then
 		cleanup
-		destroy_be
+		if [ ! ${res} -eq 2 ]; then
+			# bectl returns 2 when the boot environment name is
+			# already taken.
+			destroy_be
+		fi
 		exit 1
 	fi
 
