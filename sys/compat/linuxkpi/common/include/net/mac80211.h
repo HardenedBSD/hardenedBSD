@@ -42,6 +42,7 @@
 #include <linux/workqueue.h>
 #include <linux/dcache.h>
 #include <net/cfg80211.h>
+#include <net/if_inet6.h>
 
 #define	ARPHRD_IEEE80211_RADIOTAP		__LINE__ /* XXX TODO brcmfmac */
 
@@ -342,6 +343,7 @@ struct ieee80211_bss_conf {
 	bool					eht_support;
 	bool					csa_active;
 	bool					mu_mimo_owner;
+	bool					color_change_active;
 	uint32_t				sync_device_ts;
 	uint64_t				sync_tsf;
 	uint16_t				beacon_int;
@@ -362,7 +364,6 @@ struct ieee80211_bss_conf {
 	int		twt_requester, uora_exists, uora_ocw_range;
 	int		assoc_capability, enable_beacon, hidden_ssid, ibss_joined, twt_protected;
 	int		twt_responder, unsol_bcast_probe_resp_interval;
-	int		color_change_active;
 };
 
 struct ieee80211_channel_switch {
@@ -370,18 +371,6 @@ struct ieee80211_channel_switch {
 	int		block_tx, count, delay, device_timestamp, timestamp;
 	uint8_t					link_id;
 	struct cfg80211_chan_def		chandef;
-};
-
-struct ieee80211_cipher_scheme {
-	uint32_t	cipher;
-	uint8_t		iftype;		/* We do not know the size of this. */
-	uint8_t		hdr_len;
-	uint8_t		pn_len;
-	uint8_t		pn_off;
-	uint8_t		key_idx_off;
-	uint8_t		key_idx_mask;
-	uint8_t		key_idx_shift;
-	uint8_t		mic_len;
 };
 
 enum ieee80211_event_type {
@@ -507,8 +496,6 @@ struct ieee80211_hw {
 	/* TODO FIXME */
 	int		extra_tx_headroom, weight_multiplier;
 	int		max_rate_tries, max_rates, max_report_rates;
-	struct ieee80211_cipher_scheme	*cipher_schemes;
-	int				n_cipher_schemes;
 	const char			*rate_control_algorithm;
 	struct {
 		uint16_t units_pos;	/* radiotap "spec" is .. inconsistent. */
@@ -581,10 +568,13 @@ struct ieee80211_key_seq {
 			uint8_t		pn[IEEE80211_CCMP_PN_LEN];
 		} ccmp;
 		struct {
-			uint8_t		pn[IEEE80211_CCMP_PN_LEN];
+			uint8_t		pn[IEEE80211_GCMP_PN_LEN];
+		} gcmp;
+		struct {
+			uint8_t		pn[IEEE80211_CMAC_PN_LEN];
 		} aes_cmac;
 		struct {
-			uint8_t		pn[IEEE80211_CCMP_PN_LEN];
+			uint8_t		pn[IEEE80211_GMAC_PN_LEN];
 		} aes_gmac;
 		struct {
 			uint32_t	iv32;
@@ -841,15 +831,13 @@ struct ieee80211_vif_cfg {
 struct ieee80211_vif {
 	/* TODO FIXME */
 	enum nl80211_iftype		type;
-	int		csa_active, mu_mimo_owner;
 	int		cab_queue;
-	int     color_change_active, offload_flags;
+	int		offload_flags;
 	enum ieee80211_vif_driver_flags	driver_flags;
 	bool				p2p;
 	bool				probe_req_reg;
 	uint8_t				addr[ETH_ALEN];
 	struct ieee80211_vif_cfg	cfg;
-	struct ieee80211_chanctx_conf	*chanctx_conf;
 	struct ieee80211_txq		*txq;
 	struct ieee80211_bss_conf	bss_conf;
 	struct ieee80211_bss_conf	*link_conf[IEEE80211_MLD_MAX_NUM_LINKS];	/* rcu? */
@@ -1086,9 +1074,7 @@ struct ieee80211_ops {
 	int  (*set_tim)(struct ieee80211_hw *, struct ieee80211_sta *, bool);
 
 	int  (*set_key)(struct ieee80211_hw *, enum set_key_cmd, struct ieee80211_vif *, struct ieee80211_sta *, struct ieee80211_key_conf *);
-	void (*set_default_unicast_key)(struct ieee80211_hw *, struct ieee80211_vif *, int);
 	void (*update_tkip_key)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_key_conf *, struct ieee80211_sta *, u32, u16 *);
-	void (*set_rekey_data)(struct ieee80211_hw *, struct ieee80211_vif *, struct cfg80211_gtk_rekey_data *);
 
 	int  (*start_pmsr)(struct ieee80211_hw *, struct ieee80211_vif *, struct cfg80211_pmsr_request *);
 	void (*abort_pmsr)(struct ieee80211_hw *, struct ieee80211_vif *, struct cfg80211_pmsr_request *);
@@ -1132,8 +1118,17 @@ struct ieee80211_ops {
 	void (*link_sta_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_link_sta *, struct dentry *);
 	void (*link_add_debugfs)(struct ieee80211_hw *, struct ieee80211_vif *, struct ieee80211_bss_conf *, struct dentry *);
 /* #endif */
+/* #ifdef CONFIG_PM_SLEEP */		/* Do not change depending on compile-time option. */
+	int (*suspend)(struct ieee80211_hw *, struct cfg80211_wowlan *);
+	int (*resume)(struct ieee80211_hw *);
+	void (*set_wakeup)(struct ieee80211_hw *, bool);
+	void (*set_rekey_data)(struct ieee80211_hw *, struct ieee80211_vif *, struct cfg80211_gtk_rekey_data *);
+	void (*set_default_unicast_key)(struct ieee80211_hw *, struct ieee80211_vif *, int);
+/* #if IS_ENABLED(CONFIG_IPV6) */
+	void (*ipv6_addr_change)(struct ieee80211_hw *, struct ieee80211_vif *, struct inet6_dev *);
+/* #endif */
+/* #endif CONFIG_PM_SLEEP */
 };
-
 
 /* -------------------------------------------------------------------------- */
 
@@ -2422,7 +2417,7 @@ ieee80211_get_tkip_p1k_iv(struct ieee80211_key_conf *key,
 
 static __inline struct ieee80211_key_conf *
 ieee80211_gtk_rekey_add(struct ieee80211_vif *vif,
-    struct ieee80211_key_conf *key)
+    struct ieee80211_key_conf *key, int link_id)
 {
         TODO();
         return (NULL);

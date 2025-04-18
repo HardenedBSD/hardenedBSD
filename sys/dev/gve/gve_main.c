@@ -32,10 +32,10 @@
 #include "gve_adminq.h"
 #include "gve_dqo.h"
 
-#define GVE_DRIVER_VERSION "GVE-FBSD-1.3.2\n"
+#define GVE_DRIVER_VERSION "GVE-FBSD-1.3.3\n"
 #define GVE_VERSION_MAJOR 1
 #define GVE_VERSION_MINOR 3
-#define GVE_VERSION_SUB 2
+#define GVE_VERSION_SUB 3
 
 #define GVE_DEFAULT_RX_COPYBREAK 256
 
@@ -190,6 +190,122 @@ gve_down(struct gve_priv *priv)
 
 reset:
 	gve_schedule_reset(priv);
+}
+
+int
+gve_adjust_rx_queues(struct gve_priv *priv, uint16_t new_queue_cnt)
+{
+	int err;
+
+	GVE_IFACE_LOCK_ASSERT(priv->gve_iface_lock);
+
+	gve_down(priv);
+
+	if (new_queue_cnt < priv->rx_cfg.num_queues) {
+		/*
+		 * Freeing a ring still preserves its ntfy_id,
+		 * which is needed if we create the ring again.
+		 */
+		gve_free_rx_rings(priv, new_queue_cnt, priv->rx_cfg.num_queues);
+	} else {
+		err = gve_alloc_rx_rings(priv, priv->rx_cfg.num_queues, new_queue_cnt);
+		if (err != 0) {
+			device_printf(priv->dev, "Failed to allocate new queues");
+			/* Failed to allocate rings, start back up with old ones */
+			gve_up(priv);
+			return (err);
+
+		}
+	}
+	priv->rx_cfg.num_queues = new_queue_cnt;
+
+	err = gve_up(priv);
+	if (err != 0)
+		gve_schedule_reset(priv);
+
+	return (err);
+}
+
+int
+gve_adjust_tx_queues(struct gve_priv *priv, uint16_t new_queue_cnt)
+{
+	int err;
+
+	GVE_IFACE_LOCK_ASSERT(priv->gve_iface_lock);
+
+	gve_down(priv);
+
+	if (new_queue_cnt < priv->tx_cfg.num_queues) {
+		/*
+		 * Freeing a ring still preserves its ntfy_id,
+		 * which is needed if we create the ring again.
+		 */
+		gve_free_tx_rings(priv, new_queue_cnt, priv->tx_cfg.num_queues);
+	} else {
+		err = gve_alloc_tx_rings(priv, priv->tx_cfg.num_queues, new_queue_cnt);
+		if (err != 0) {
+			device_printf(priv->dev, "Failed to allocate new queues");
+			/* Failed to allocate rings, start back up with old ones */
+			gve_up(priv);
+			return (err);
+
+		}
+	}
+	priv->tx_cfg.num_queues = new_queue_cnt;
+
+	err = gve_up(priv);
+	if (err != 0)
+		gve_schedule_reset(priv);
+
+	return (err);
+}
+
+int
+gve_adjust_ring_sizes(struct gve_priv *priv, uint16_t new_desc_cnt, bool is_rx)
+{
+	int err;
+	uint16_t prev_desc_cnt;
+
+	GVE_IFACE_LOCK_ASSERT(priv->gve_iface_lock);
+
+	gve_down(priv);
+
+	if (is_rx) {
+		gve_free_rx_rings(priv, 0, priv->rx_cfg.num_queues);
+		prev_desc_cnt = priv->rx_desc_cnt;
+		priv->rx_desc_cnt = new_desc_cnt;
+		err = gve_alloc_rx_rings(priv, 0, priv->rx_cfg.num_queues);
+		if (err != 0) {
+			device_printf(priv->dev,
+			    "Failed to allocate rings. Trying to start back up with previous ring size.");
+			priv->rx_desc_cnt = prev_desc_cnt;
+			err = gve_alloc_rx_rings(priv, 0, priv->rx_cfg.num_queues);
+		}
+	} else {
+		gve_free_tx_rings(priv, 0, priv->tx_cfg.num_queues);
+		prev_desc_cnt = priv->tx_desc_cnt;
+		priv->tx_desc_cnt = new_desc_cnt;
+		err = gve_alloc_tx_rings(priv, 0, priv->tx_cfg.num_queues);
+		if (err != 0) {
+			device_printf(priv->dev,
+			    "Failed to allocate rings. Trying to start back up with previous ring size.");
+			priv->tx_desc_cnt = prev_desc_cnt;
+			err = gve_alloc_tx_rings(priv, 0, priv->tx_cfg.num_queues);
+		}
+	}
+
+	if (err != 0) {
+		device_printf(priv->dev, "Failed to allocate rings! Cannot start device back up!");
+		return (err);
+	}
+
+	err = gve_up(priv);
+	if (err != 0) {
+		gve_schedule_reset(priv);
+		return (err);
+	}
+
+	return (0);
 }
 
 static int
@@ -480,10 +596,14 @@ static void
 gve_free_rings(struct gve_priv *priv)
 {
 	gve_free_irqs(priv);
-	gve_free_tx_rings(priv);
-	gve_free_rx_rings(priv);
-	if (gve_is_qpl(priv))
-		gve_free_qpls(priv);
+
+	gve_free_tx_rings(priv, 0, priv->tx_cfg.num_queues);
+	free(priv->tx, M_GVE);
+	priv->tx = NULL;
+
+	gve_free_rx_rings(priv, 0, priv->rx_cfg.num_queues);
+	free(priv->rx, M_GVE);
+	priv->rx = NULL;
 }
 
 static int
@@ -491,17 +611,15 @@ gve_alloc_rings(struct gve_priv *priv)
 {
 	int err;
 
-	if (gve_is_qpl(priv)) {
-		err = gve_alloc_qpls(priv);
-		if (err != 0)
-			goto abort;
-	}
-
-	err = gve_alloc_rx_rings(priv);
+	priv->rx = malloc(sizeof(struct gve_rx_ring) * priv->rx_cfg.max_queues,
+	    M_GVE, M_WAITOK | M_ZERO);
+	err = gve_alloc_rx_rings(priv, 0, priv->rx_cfg.num_queues);
 	if (err != 0)
 		goto abort;
 
-	err = gve_alloc_tx_rings(priv);
+	priv->tx = malloc(sizeof(struct gve_tx_ring) * priv->tx_cfg.max_queues,
+	    M_GVE, M_WAITOK | M_ZERO);
+	err = gve_alloc_tx_rings(priv, 0, priv->tx_cfg.num_queues);
 	if (err != 0)
 		goto abort;
 
@@ -603,7 +721,7 @@ gve_set_queue_cnts(struct gve_priv *priv)
 		    priv->rx_cfg.num_queues);
 	}
 
-	priv->num_queues = priv->tx_cfg.num_queues + priv->rx_cfg.num_queues;
+	priv->num_queues = priv->tx_cfg.max_queues + priv->rx_cfg.max_queues;
 	priv->mgmt_msix_idx = priv->num_queues;
 }
 

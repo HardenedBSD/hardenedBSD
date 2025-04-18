@@ -63,6 +63,10 @@
  */
 #define GVE_QPL_DIVISOR	16
 
+/* Ring Size Limits */
+#define GVE_DEFAULT_MIN_RX_RING_SIZE	512
+#define GVE_DEFAULT_MIN_TX_RING_SIZE	256
+
 static MALLOC_DEFINE(M_GVE, "gve", "gve allocations");
 
 struct gve_dma_handle {
@@ -529,12 +533,17 @@ struct gve_priv {
 	uint16_t num_event_counters;
 	uint16_t default_num_queues;
 	uint16_t tx_desc_cnt;
+	uint16_t max_tx_desc_cnt;
+	uint16_t min_tx_desc_cnt;
 	uint16_t rx_desc_cnt;
+	uint16_t max_rx_desc_cnt;
+	uint16_t min_rx_desc_cnt;
 	uint16_t rx_pages_per_qpl;
 	uint64_t max_registered_pages;
 	uint64_t num_registered_pages;
 	uint32_t supported_features;
 	uint16_t max_mtu;
+	bool modify_ringsize_enabled;
 
 	struct gve_dma_handle counter_array_mem;
 	__be32 *counters;
@@ -542,7 +551,6 @@ struct gve_priv {
 	struct gve_irq_db *irq_db_indices;
 
 	enum gve_queue_format queue_format;
-	struct gve_queue_page_list *qpls;
 	struct gve_queue_config tx_cfg;
 	struct gve_queue_config rx_cfg;
 	uint32_t num_queues;
@@ -621,6 +629,9 @@ gve_is_qpl(struct gve_priv *priv)
 
 /* Defined in gve_main.c */
 void gve_schedule_reset(struct gve_priv *priv);
+int gve_adjust_tx_queues(struct gve_priv *priv, uint16_t new_queue_cnt);
+int gve_adjust_rx_queues(struct gve_priv *priv, uint16_t new_queue_cnt);
+int gve_adjust_ring_sizes(struct gve_priv *priv, uint16_t new_desc_cnt, bool is_rx);
 
 /* Register access functions defined in gve_utils.c */
 uint32_t gve_reg_bar_read_4(struct gve_priv *priv, bus_size_t offset);
@@ -629,15 +640,16 @@ void gve_db_bar_write_4(struct gve_priv *priv, bus_size_t offset, uint32_t val);
 void gve_db_bar_dqo_write_4(struct gve_priv *priv, bus_size_t offset, uint32_t val);
 
 /* QPL (Queue Page List) functions defined in gve_qpl.c */
-int gve_alloc_qpls(struct gve_priv *priv);
-void gve_free_qpls(struct gve_priv *priv);
+struct gve_queue_page_list *gve_alloc_qpl(struct gve_priv *priv, uint32_t id,
+    int npages, bool single_kva);
+void gve_free_qpl(struct gve_priv *priv, struct gve_queue_page_list *qpl);
 int gve_register_qpls(struct gve_priv *priv);
 int gve_unregister_qpls(struct gve_priv *priv);
 void gve_mextadd_free(struct mbuf *mbuf);
 
 /* TX functions defined in gve_tx.c */
-int gve_alloc_tx_rings(struct gve_priv *priv);
-void gve_free_tx_rings(struct gve_priv *priv);
+int gve_alloc_tx_rings(struct gve_priv *priv, uint16_t start_idx, uint16_t stop_idx);
+void gve_free_tx_rings(struct gve_priv *priv, uint16_t start_idx, uint16_t stop_idx);
 int gve_create_tx_rings(struct gve_priv *priv);
 int gve_destroy_tx_rings(struct gve_priv *priv);
 int gve_tx_intr(void *arg);
@@ -656,8 +668,8 @@ int gve_xmit_dqo_qpl(struct gve_tx_ring *tx, struct mbuf *mbuf);
 void gve_tx_cleanup_tq_dqo(void *arg, int pending);
 
 /* RX functions defined in gve_rx.c */
-int gve_alloc_rx_rings(struct gve_priv *priv);
-void gve_free_rx_rings(struct gve_priv *priv);
+int gve_alloc_rx_rings(struct gve_priv *priv, uint16_t start_idx, uint16_t stop_idx);
+void gve_free_rx_rings(struct gve_priv *priv, uint16_t start_idx, uint16_t stop_idx);
 int gve_create_rx_rings(struct gve_priv *priv);
 int gve_destroy_rx_rings(struct gve_priv *priv);
 int gve_rx_intr(void *arg);

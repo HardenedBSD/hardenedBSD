@@ -459,7 +459,7 @@ lkpi_80211_mo_assign_vif_chanctx(struct ieee80211_hw *hw, struct ieee80211_vif *
 	    hw, vif, conf, chanctx_conf);
 	error = lhw->ops->assign_vif_chanctx(hw, vif, conf, chanctx_conf);
 	if (error == 0)
-		vif->chanctx_conf = chanctx_conf;
+		vif->bss_conf.chanctx_conf = chanctx_conf;
 
 out:
 	return (error);
@@ -467,21 +467,23 @@ out:
 
 void
 lkpi_80211_mo_unassign_vif_chanctx(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-    struct ieee80211_bss_conf *conf, struct ieee80211_chanctx_conf **chanctx_conf)
+    struct ieee80211_bss_conf *conf, struct ieee80211_chanctx_conf *chanctx_conf)
 {
 	struct lkpi_hw *lhw;
+
+	might_sleep();
+	lockdep_assert_wiphy(hw->wiphy);
 
 	lhw = HW_TO_LHW(hw);
 	if (lhw->ops->unassign_vif_chanctx == NULL)
 		return;
 
-	if (*chanctx_conf == NULL)
+	if (chanctx_conf == NULL)
 		return;
 
 	LKPI_80211_TRACE_MO("hw %p vif %p bss_conf %p chanctx_conf %p",
-	    hw, vif, conf, *chanctx_conf);
-	lhw->ops->unassign_vif_chanctx(hw, vif, conf, *chanctx_conf);
-	*chanctx_conf = NULL;
+	    hw, vif, conf, chanctx_conf);
+	lhw->ops->unassign_vif_chanctx(hw, vif, conf, chanctx_conf);
 }
 
 
@@ -550,6 +552,9 @@ lkpi_80211_mo_bss_info_changed(struct ieee80211_hw *hw, struct ieee80211_vif *vi
 	lhw = HW_TO_LHW(hw);
 	if (lhw->ops->link_info_changed == NULL &&
 	    lhw->ops->bss_info_changed == NULL)
+		return;
+
+	if (changed == 0)
 		return;
 
 	LKPI_80211_TRACE_MO("hw %p vif %p conf %p changed %#jx", hw, vif, conf, (uintmax_t)changed);
