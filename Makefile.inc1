@@ -797,6 +797,7 @@ TMAKE=		\
 # TOOLS_PREFIX set in BMAKE
 XMAKE=		${BMAKE} \
 		TARGET=${TARGET} TARGET_ARCH=${TARGET_ARCH} \
+		MK_CLANG=${MK_CLANG_BOOTSTRAP} \
 		MK_LLDB=no \
 		MK_LLVM_BINUTILS=yes \
 		MK_TESTS=no
@@ -2864,8 +2865,12 @@ _elftctools=	lib/libelftc \
 .endif
 
 .if ${MK_CLANG_BOOTSTRAP} != "no"
+<<<<<<< HEAD
 _clang=		usr.bin/clang
 _ar=		usr.bin/clang/llvm-ar
+=======
+_clang=		usr.bin/clang/clang
+>>>>>>> origin/freebsd/14-stable/main
 .endif
 .if ${MK_LLD_BOOTSTRAP} != "no"
 _lld=		usr.bin/clang/lld
