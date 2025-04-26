@@ -101,6 +101,7 @@ CFLAGS += -mno-relax
 
 .include <bsd.libnames.mk>
 
+<<<<<<< HEAD
 # prefer .s to a .c, add .po, remove stuff not used in the BSD libraries
 # .pico used for PIC object files
 # .nossppico used for NOSSP PIC object files
@@ -223,6 +224,9 @@ PO_FLAG=-pg
 	${CC:N${CCACHE_BIN}} ${PICFLAG} -DPIC ${CFLAGS:C/^-fstack-protector.*$//} ${ACFLAGS} \
 	    -c ${.IMPSRC} -o ${.TARGET}
 	${CTFCONVERT_CMD}
+=======
+.include <bsd.suffixes-extra.mk>
+>>>>>>> origin/freebsd/14-stable/main
 
 _LIBDIR:=${LIBDIR}
 _SHLIBDIR:=${SHLIBDIR}
