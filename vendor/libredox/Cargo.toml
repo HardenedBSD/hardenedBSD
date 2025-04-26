@@ -1,0 +1,29 @@
+[dependencies.bitflags]
+version = "2"
+
+[dependencies.ioslice]
+optional = true
+version = "0.6"
+
+[dependencies.libc]
+version = "0.2"
+
+[dependencies.redox_syscall]
+optional = true
+version = "0.5"
+
+[features]
+call = []
+default = ["call", "std", "redox_syscall"]
+mkns = ["ioslice"]
+std = []
+
+[package]
+authors = ["4lDO2 <4lDO2@protonmail.com>"]
+description = "Redox stable ABI"
+edition = "2021"
+exclude = ["target"]
+license = "MIT"
+name = "libredox"
+repository = "https://gitlab.redox-os.org/redox-os/libredox.git"
+version = "0.1.3"

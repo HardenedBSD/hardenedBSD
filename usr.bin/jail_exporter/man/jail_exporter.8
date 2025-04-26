@@ -1,0 +1,265 @@
+.Dd January 10, 2019
+.Dt JAIL_EXPORTER 8
+.Os
+.Sh NAME
+.Nm jail_exporter
+.Nd Prometheus exporter for jail metrics
+.Sh SYNOPSIS
+.Nm
+.Op Fl hV
+.Op Fl Fl help
+.Op Fl Fl version
+.Op Fl Fl rc-script
+.Nm
+.Op Fl Fl output.file-path Ns = Ns Ar path
+.Op Fl Fl web.auth-config Ns = Ns Ar path
+.Op Fl Fl web.listen-address Ns = Ns Ar addr:port
+.Op Fl Fl web.telemetry-path Ns = Ns Ar path
+.Nm
+.Cm bcrypt
+.Op Fl Fl random
+.Op Fl Fl cost Ns = Ns Ar cost
+.Op Fl Fl length Ns = Ns Ar length
+.Op Ar password
+.Sh DESCRIPTION
+.Ss Command Line Arguments
+.Nm jail_exporter
+is a Prometheus exporter for jail metrics.
+The options are as follows:
+.Bl -tag -width indent
+.It Fl h , Fl Fl help
+Prints help information
+.It Fl V , Fl Fl version
+Prints version information
+.It Fl Fl rc-script
+Dumps the
+.Nm
+.Xr rc 8
+script to stdout.
+This crate feature is disabled by default when installed from
+.Xr pkg 8
+or
+.Xr ports 7
+as they supply a suitable
+.Xr rc 8
+script already.
+.It Fl Fl output.file-path Ns = Ns Ar path
+Specify a
+.Ar path
+to write collected metrics to.
+When
+.Nm
+is given a
+.Ar path
+it will exit immediately after writing the metrics and the HTTPd will not be
+started.
+This option is designed to be paired with the Node Exporter Textfile Collector.
+Giving a
+.Ar path
+of
+.Dq Cm -
+will output collected metrics to stdout.
+.It Fl Fl web.auth-config Ns = Ns Ar path
+Specify a
+.Ar path
+to load HTTP Basic Authentication configuration from.
+The configuration is in the YAML format and is documented in the
+.Sx EXAMPLES
+section.
+There is no default location for this configuration file, but a location such
+as
+.Pa /usr/local/etc/jail_exporter.yaml
+or
+.Pa /usr/local/etc/jail_exporter/config.yaml
+is suggested.
+.It Fl Fl web.listen-address Ns = Ns Ar addr:port
+Specify an
+.Ar addr:port
+on which to expose the metrics and web interface.
+Defaults to
+.Dq Cm 127.0.0.1:9452 .
+If specifying an IPv6
+.Ar addr:port
+the address portion should be enclosed within square brackets, for example:
+.Dq Cm [::1]:9452 .
+.It Fl Fl web.telemetry-path Ns = Ns Ar path
+Specify a
+.Ar path
+under which to expose the metrics.
+Defaults to
+.Dq Cm /metrics .
+.El
+.Ss Sub-Commands
+.Nm
+also features a
+.Cm bcrypt
+sub-command, useful for hashing the passwords used for HTTP Basic
+authentication.
+This sub-command features the following arguments:
+.Bl -tag -width indent
+.It Fl Fl random
+Generates a random password and outputs both the plaintext and hashed values.
+.It Fl Fl cost Ns = Ns Ar cost
+Specifies the bcrypt
+.Ar cost
+of the hash.
+Defaults to
+.Dq Cm 12 .
+.It Fl Fl length Ns = Ns Ar length
+Specifies the password length to generate when used with the
+.Fl Fl random
+flag.
+Defaults to
+.Dq Cm 32 .
+.It Ar password
+Optionally specify a
+.Ar password
+to hash.
+If a
+.Ar password
+is not specified, it is interactively prompted for.
+.El
+.Ss HTTP Basic Authentication Configuration
+HTTP basic authentication is configured via a YAML configuration file.
+The format of this file follows the suggestions of the Prometheus
+exporter-toolkit.
+This authentication configuration consists of a
+.Dq basic_auth_users
+key which is a map of usernames to bcrypt hashed passwords.
+These hashes can be generated with the
+.Nm
+.Cm bcrypt
+sub-command or any other utility capable of generating bcrypt hashes.
+Any keys in the file other than
+.Dq basic_auth_users
+are ignored.
+.Pp
+An example HTTP basic authentication configuration can be found in the
+.Sx EXAMPLES
+section.
+.Sh USAGE
+.Nm
+must be run as
+.Dq root
+in order to access the required
+.Xr rctl 8
+APIs.
+Although
+.Fx
+ships with RACCT/RCTL support in the kernel, it is disabled by default.
+It can be enabled by setting
+.Va kern.racct.enable Ns = Ns Qq Ar 1
+in
+.Pa /boot/loader.conf .
+After setting this, a reboot will be required to enable RACCT/RCTL.
+.Sh METRICS
+The metrics that are exported are those listed in the RESOURCES section of
+.Xr rctl 8 ,
+and the following additional metrics:
+.Bl -tag -width num
+.It Va exporter_build_info
+The version of the currently running exporter, and the version of Rust used to
+build the exporter.
+The version is given in the
+.Dq version
+label on the metric, while the Rust version used to build the exporter is given
+in the
+.Dq rustversion
+label.
+Does not possess a
+.Dq name
+label.
+.It Va id
+The ID of the named jail
+.It Va num
+The current number of jails running.
+Does not possess a
+.Dq name
+label.
+.El
+.Pp
+All metrics are prefixed with the string
+.Dq jail_
+and in most cases (except for the metrics mentioned above) possess a
+.Dq name
+label containing the name of the jail.
+An example of a metric output by the exporter would be:
+.Bd -literal -offset indent
+# HELP jail_cputime_seconds_total CPU time, in seconds
+# TYPE jail_cputime_seconds_total counter
+jail_cputime_seconds_total{name="test"} 300
+.Ed
+.Sh "ENVIRONMENT VARIABLES"
+.Nm
+can also take its configuration from environment variables.
+In the event that both command line options and environment variables are
+specified, the command line options will win.
+.Bl -tag -width WEB_LISTEN_ADDRESS
+.It Ev OUTPUT_FILE_PATH
+is equivalent to setting the
+.Fl Fl output.file-path
+option.
+.It Ev WEB_AUTH_CONFIG
+is equivalent to setting the
+.Fl Fl web.auth-config
+option.
+.It Ev WEB_LISTEN_ADDRESS
+is equivalent to setting the
+.Fl Fl web.listen-address
+option.
+.It Ev WEB_TELEMETRY_PATH
+is equivalent to setting the
+.Fl Fl web.telemetry-path
+option.
+.El
+.Sh FILES
+.Bl -tag -width /usr/local/etc/rc.d/jail_exporter -compact
+.It Pa /usr/local/etc/rc.d/jail_exporter
+the
+.Xr rc 8
+script
+.It Pa /usr/local/sbin/jail_exporter
+the exporter daemon
+.El
+.Sh EXAMPLES
+.Ss HTTP Basic Authentication
+Simple configuration file for two users:
+.Pp
+.Dl ---
+.Dl basic_auth_users:
+.Dl \ \ foo: '$2b$12$cGBwrALG2Crkm5jPdvzlG.R8.j8LMeCEecm4y/So6YVd4YiIrfqsW'
+.Dl \ \ bar: '$2b$12$8c6yHGFexzAvbtNSHV3WNO0zJoaWfDy9WqX7s8vCAajV08LE/cW06'
+.Ss Sub-Commands
+Generating a bcrypt password hash by specifying the password on the command
+line using the default bcrypt cost:
+.Pp
+.Dl $ jail_exporter bcrypt foopass
+.Pp
+Generating a random bcrypt password hash with an increased cost and custom
+length:
+.Pp
+.Dl $ jail_exporter bcrypt --random --cost 14 --length 48
+.Pp
+Generating a bcrypt password via the interactive prompt:
+.Pp
+.Dl $ jail_exporter bcrypt
+.Sh SEE ALSO
+.Xr rctl 4 ,
+.Xr loader.conf 5 ,
+.Xr ports 7 ,
+.Xr jail 8 ,
+.Xr rc 8 ,
+.Xr rctl 8
+.Sh HISTORY
+.Nm
+was started during the summer of 2018 on
+.Fx 11.1 .
+.Sh AUTHORS
+.Nm
+was developed by
+.An David O'Rourke
+with contributions from
+.An Fabian Freyer .
+.Sh BUGS
+Please report bugs, issues, and feature requests to
+.Lk https://github.com/phyber/jail_exporter/issues

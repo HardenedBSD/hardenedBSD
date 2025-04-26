@@ -1,0 +1,36 @@
+[dependencies.compiler_builtins]
+optional = true
+version = "0.1.2"
+
+[dependencies.core]
+optional = true
+package = "rustc-std-workspace-core"
+version = "1.0.0"
+
+[features]
+rustc-dep-of-std = ["core", "compiler_builtins"]
+std = []
+
+[lib]
+name = "rustc_demangle"
+path = "src/lib.rs"
+
+[package]
+authors = ["Alex Crichton <alex@alexcrichton.com>"]
+autobenches = false
+autobins = false
+autoexamples = false
+autotests = false
+description = "Rust compiler symbol demangling.\n"
+documentation = "https://docs.rs/rustc-demangle"
+homepage = "https://github.com/rust-lang/rustc-demangle"
+license = "MIT/Apache-2.0"
+name = "rustc-demangle"
+readme = "README.md"
+repository = "https://github.com/rust-lang/rustc-demangle"
+version = "0.1.24"
+[package.metadata.docs.rs]
+features = ["std"]
+rustdoc-args = ["--cfg", "docsrs"]
+[profile.release]
+lto = true

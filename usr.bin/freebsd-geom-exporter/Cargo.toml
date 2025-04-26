@@ -1,0 +1,31 @@
+[package]
+name = "freebsd-geom-exporter"
+version = "0.1.1"
+edition = "2021"
+authors = ["Alan Somers <asomers@gmail.com>"]
+license = "BSD-2-Clause"
+repository = "https://github.com/asomers/gstat-rs"
+description = "Proemtheus exporter for FreeBSD's GEOM device statistics"
+keywords = ["freebsd", "geom", "monitoring", "prometheus"]
+rust-version = "1.70"
+
+[package.metadata.release]
+pre-release-replacements = [
+    { file="CHANGELOG.md", search="Unreleased", replace="{{version}}" },
+    { file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}" }
+]
+
+[[bin]]
+name = "geom-exporter"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+freebsd-libgeom = { version = "0.3.0", path = "../../lib/freebsd-libgeom" }
+prometheus_exporter = "0.8.4"
+
+[dependencies.regex]
+# Directly, gstat only needs regex 1.3.  But transitively bindgen needs 1.5.1 or later.
+version = "1.6"
+# Disable the unicode feature, since geom providers names are always ASCII
+features = [ "perf", "std" ]

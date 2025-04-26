@@ -1,0 +1,133 @@
+.\" Copyright (c) 2021 Axcient
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\" $FreeBSD$
+.\"
+.Dd July 26, 2021
+.Dt ZTOP 1
+.Os
+.Sh NAME
+.Nm ztop
+.Nd Display ZFS datasets' I/O in real time
+.Sh SYNOPSIS
+.Nm
+.Op Fl ahrV
+.Op Fl d Ar depth
+.Op Fl f Ar filter
+.Op Fl t Ar time
+.Op Fl S Ar key
+.Op Ar pool ...
+.Sh DESCRIPTION
+The
+.Nm
+utility can be used to monitor the performance of
+.Xr zfs 8
+datasets.
+.Pp
+The options are as follows:
+.Bl -tag -width indent
+.It Fl a , Fl Fl auto
+Do not display idle datasets.
+.It Fl c , Fl Fl children
+Include child datasets' statistics with their parents'.
+This is especially useful when combined with
+.Ar -d .
+.It Fl d , Fl Fl depth Ar depth
+Only display datasets up to the given depth.
+.It Fl f , Fl Fl filter Ar filter
+A regular expression that can be used to only show statistics for some
+datasets.
+Only datasets with the names matching
+.Ar filter
+will be displayed.
+The format of the regular expression is described at
+.Lk https://docs.rs/regex .
+.It Fl t , Fl Fl time Ar time
+Refresh the
+.Nm
+display every
+.Ar interval
+seconds.
+Suffixes like
+.Cm s , ms ,
+and
+.Cm us
+are accepted.
+.It Fl r , Fl Fl reverse
+Reverse the sort order
+.It Fl s , Fl Fl column Ar column
+Sort the devices by
+.Ar column .
+The spelling of
+.Ar column
+should match the displayed column header.
+.El
+.Pp
+.Nm
+displays performance statistics for ZFS datasets.
+If one or more
+.Ar pool
+are specified, then only those pools' datasets will be displayed.
+.Sh INTERACTIVE COMMANDS
+These commands are currently recognized.
+.Bl -tag -width indent
+.It Ic +
+Sort by the next column to the right.
+.It Ic -
+Sort by the next column to the left.
+.It Ic <
+Halve the update interval.
+.It Ic >
+Double the update interval.
+.It Ic a
+Toggle auto mode.
+This has the same effect as the
+.Fl Fl auto
+command line option.
+.It Ic c
+Toggle children mode.
+This has the same effect as the
+.Fl Fl children
+command line option.
+.It Ic D
+Decrease the depth of displayed datasets.
+.It Ic d
+Increase the depth of displayed datasets.
+.It Ic f
+Display only datasets with the names matching a regular expression
+(prompt for filter expression).
+.It Ic F
+Remove dataset filter.
+.It Ic q
+Quit
+.It Ic r
+Toggle reverse sort.
+This has the same effect as the
+.Fl Fl reverse
+command line option.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr zpool-iostat 8

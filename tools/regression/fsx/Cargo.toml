@@ -1,0 +1,33 @@
+[package]
+name = "fsx"
+version = "0.2.0"
+edition = "2021"
+authors = ["Alan Somers <asomers@gmail.com>"]
+license = "APSL-2.0"
+repository = "https://github.com/asomers/fsx-rs"
+description = "File System eXerciser"
+categories = ["filesystem", "development-tools::testing"]
+rust-version = "1.77.0"
+keywords = ["filesystem", "test"]
+
+[dependencies]
+cfg-if = "1.0"
+clap = { version = "4.0.12", features = ["derive"] }
+clap-verbosity-flag = "2.1.1"
+env_logger = "0.11.1"
+libc = "0.2.154"
+log = "0.4.17"
+mdconfig = "0.2.0"
+nix = { version = "0.28.0", default-features = false, features = [ "feature", "fs", "ioctl", "mman", "zerocopy" ]}
+rand = { version = "0.8.5" }
+rand_xorshift = "0.3"
+ringbuffer = "0.11.0"
+serde = "1.0.145"
+serde_derive = "1.0.145"
+toml = { version = "0.8.11", default-features = false, features = [ "parse" ] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+pretty_assertions = "1.3"
+rstest = "0.16.0"
+tempfile = "3.0"

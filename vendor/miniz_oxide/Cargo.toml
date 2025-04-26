@@ -1,0 +1,47 @@
+[dependencies.adler]
+default-features = false
+version = "1.0"
+
+[dependencies.alloc]
+optional = true
+package = "rustc-std-workspace-alloc"
+version = "1.0.0"
+
+[dependencies.compiler_builtins]
+optional = true
+version = "0.1.2"
+
+[dependencies.core]
+optional = true
+package = "rustc-std-workspace-core"
+version = "1.0.0"
+
+[dependencies.simd-adler32]
+default-features = false
+optional = true
+version = "0.3.3"
+
+[features]
+default = ["with-alloc"]
+rustc-dep-of-std = ["core", "alloc", "compiler_builtins", "adler/rustc-dep-of-std"]
+simd = ["simd-adler32"]
+std = []
+with-alloc = []
+
+[lib]
+name = "miniz_oxide"
+
+[package]
+authors = ["Frommi <daniil.liferenko@gmail.com>", "oyvindln <oyvindln@users.noreply.github.com>"]
+categories = ["compression"]
+description = "DEFLATE compression and decompression library rewritten in Rust based on miniz"
+documentation = "https://docs.rs/miniz_oxide"
+edition = "2018"
+exclude = ["benches/*", "tests/*"]
+homepage = "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide"
+keywords = ["zlib", "miniz", "deflate", "encoding"]
+license = "MIT OR Zlib OR Apache-2.0"
+name = "miniz_oxide"
+readme = "Readme.md"
+repository = "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide"
+version = "0.7.4"

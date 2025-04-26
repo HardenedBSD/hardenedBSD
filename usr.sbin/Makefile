@@ -29,7 +29,6 @@ SUBDIR=	adduser \
 	fwget \
 	getfmac \
 	getpmac \
-	gstat \
 	i2c \
 	ifmcstat \
 	iostat \

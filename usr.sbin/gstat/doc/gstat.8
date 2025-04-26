@@ -1,0 +1,190 @@
+.\" Copyright (c) 2021 Axcient
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\" $FreeBSD$
+.\"
+.Dd February 4, 2024
+.Dt GSTAT 8
+.Os
+.Sh NAME
+.Nm gstat
+.Nd print statistics about GEOM disks
+.Sh SYNOPSIS
+.Nm
+.Op Fl adhospRrS
+.Op Fl f Ar filter
+.Op Fl I Ar interval
+.Op Fl S Ar key
+.Sh DESCRIPTION
+The
+.Nm
+utility can be used to monitor I/O transactions of
+.Xr geom 4
+devices.
+.Pp
+The options are as follows:
+.Bl -tag -width indent
+.It Fl a , Fl Fl auto
+Only display providers that are at least 0.1% busy.
+.It Fl d , Fl Fl delete
+Enable display of statistics for delete
+.Pq Dv BIO_DELETE
+operations.
+.It Fl f , Fl Fl filter Ar filter
+A regular expression that can be used to only show statistics for some
+devices.
+Only devices with the names matching
+.Ar filter
+will be displayed.
+The format of the regular expression is described at
+.Lk https://docs.rs/regex .
+.It Fl o , Fl Fl other
+Enable display of statistics for other operations
+.Pq Dv BIO_FLUSH .
+.It Fl s , Fl Fl size
+Enable blocks' size statistics.
+.It Fl I , Fl Fl interval Ar interval
+Refresh the
+.Nm
+display every
+.Ar interval
+microseconds.
+Adding a suffix of
+.Cm s , ms ,
+or
+.Cm us
+(the default) indicates that the update interval is specified in
+seconds, milliseconds, or microseconds, respectively.
+.It Fl p , Fl Fl physical
+Only display physical providers (those with rank of 1).
+.It Fl R , Fl Fl reset-config
+Reset the configuration to defaults.
+.It Fl r , Fl Fl reverse
+Reverse the sort order
+.It Fl S , Fl Fl column Ar column
+Sort the devices by
+.Ar column .
+The spelling of
+.Ar column
+should match the displayed column header.
+.El
+.Pp
+.Nm
+displays information about the performance of GEOM devices.
+It can be configured from the command line, or on-line by interactive commands.
+In either case, the configuration will be automatically saved between
+invocations.  It is based on the familiar
+.Nm gstat
+command from 
+.Fx , 
+but with several notable changes:
+.Bl -bullet -width xx
+.It
+It can sort the devices.
+.It
+It can display or hide arbitrary columns of data.
+.It
+If the screen has enough space, it will display multiple devices side-by-side.
+.It
+It can pause the display temporarily.
+.It
+Its settings are automatically persisted to a configuration file.
+.It
+It does not support batch mod (the
+.Fl bBC
+flags).
+If you need batch mode, you should use
+.Xr iostat 8
+instead.
+.It
+It does not display GEOM consumers, only producers.
+.El
+.Sh INTERACTIVE COMMANDS
+These commands are currently recognized.
+.Bl -tag -width indent
+.It Ic <SPACE>
+Pause/unpause updating the display.
+.It Ic <DOWN ARROW> Ic <UP ARROW>
+Select one row of the table.
+This is purely for visual focus purposes.
+It has no other effect.
+.It Ic <DELETE>
+Delete the selected sort column from the display.
+.It Ic <INSERT>
+Bring up the column selector dialog box.
+This can be used to control exactly which columns are displayed.
+.It Ic +
+Sort by the next column to the right.
+.It Ic -
+Sort by the next column to the left.
+.It Ic <
+Halve the update interval.
+.It Ic >
+Double the update interval.
+.It Ic a
+Toggle auto mode.
+This has the same effect as the
+.Fl Fl auto
+command line option.
+.It Ic f
+Display only devices with the names matching a regular expression
+(prompt for filter expression).
+.It Ic F
+Remove device filter.
+.It Ic p
+Toggle physical mode.
+This has the same effect as the
+.Fl Fl physical
+command line option.
+.It Ic q
+Quit
+.It Ic r
+Toggle reverse sort.
+This has the same effect as the
+.Fl Fl reverse
+command line option.
+.El
+.Sh ENVIRONMENT
+The following environment variable affects the execution of
+.Nm :
+.Bl -tag -width NO_COLOR
+.It Ev NO_COLOR
+Output will be rendered in black-and-white only, without color.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr systat 1 ,
+.Xr geom 4 ,
+.Xr iostat 8 ,
+.Xr vmstat 8
+.Sh HISTORY
+A
+.Nm
+utility appeared in
+.Fx 5.0 .
+It was rewritten in Rust during 2021 by
+.An Alan Somers Aq Mt asomers@FreeBSD.org
+under the sponsorship of Axcient.
+

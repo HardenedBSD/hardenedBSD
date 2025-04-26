@@ -1,0 +1,12 @@
+---
+# An example configuration file for HTTP basic authentication
+# Usernames and passwords live under a basic_auth_users key.
+basic_auth_users:
+    # Username are plaintext, excluding control characters and the colon (:)
+    # character. Passwords are bcrypt hashed.
+    bob: '$2b$12$YQEBUkH./t9oZTWqgK5NxeKI7pj/7bxa1Sct5FkplDgcdwWJ1PrRO'
+    foo: '$2b$12$n2uFO.vPTiO3NjEUQ73AA.R4PslDrFmEucF0j5qICJ0525oKYOYGm'
+
+# Any other keys in the file are ignored.
+ignored:
+    sure: 'is'

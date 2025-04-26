@@ -1,0 +1,30 @@
+[package]
+name = "freebsd-libgeom"
+version = "0.3.0"
+edition = "2021"
+authors = ["Alan Somers <asomers@gmail.com>"]
+license = "BSD-2-Clause"
+repository = "https://github.com/asomers/gstat-rs"
+description = "Rust bindings to FreeBSD's libgeom library"
+categories = ["api-bindings", "os::freebsd-apis"]
+keywords = ["freebsd"]
+rust-version = "1.70"
+
+[package.metadata.docs.rs]
+targets = [
+  "x86_64-unknown-freebsd",
+]
+
+[package.metadata.release]
+pre-release-replacements = [
+    { file="CHANGELOG.md", search="Unreleased", replace="{{version}}" },
+    { file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}" }
+]
+
+[dependencies]
+freebsd-libgeom-sys = { version = "=0.1.6", path = "../freebsd-libgeom-sys" }
+lazy_static = "1.4"
+
+[dev-dependencies]
+approx = "0.5.0"
+nix = { version = "0.29.0", default-features = false, features = ["time"] }

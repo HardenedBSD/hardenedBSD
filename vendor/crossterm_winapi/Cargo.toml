@@ -1,0 +1,17 @@
+[package]
+authors = ["T. Post"]
+description = "WinAPI wrapper that provides some basic simple abstractions around common WinAPI calls"
+documentation = "https://docs.rs/crossterm_winapi/"
+edition = "2018"
+exclude = ["target", "Cargo.lock"]
+keywords = ["winapi", "abstractions", "crossterm", "windows", "screen_buffer"]
+license = "MIT"
+name = "crossterm_winapi"
+readme = "README.md"
+repository = "https://github.com/crossterm-rs/crossterm-winapi"
+version = "0.9.1"
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+[target."cfg(windows)".dependencies.winapi]
+features = ["winbase", "consoleapi", "processenv", "handleapi", "synchapi", "impl-default"]
+version = "0.3.8"

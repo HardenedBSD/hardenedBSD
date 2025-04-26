@@ -1,0 +1,6 @@
+---
+basic_auth_users:
+    foo: '$2b$04$nFPE4cwFjOFGUmdp.o2NTuh/blJDaEwikX1qoitVe144TsS2l5whS' # baz
+    baz: '$2b$04$dFgE.8scUuR9idW7KBEVGulT4KITuBF58a8y1kztHVrYGV8cGJjZe' # daz
+other:
+    ignored: 'section'

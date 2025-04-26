@@ -1,0 +1,21 @@
+[lib]
+name = "windows_x86_64_gnu"
+path = "src/lib.rs"
+
+[package]
+authors = ["Microsoft"]
+autobenches = false
+autobins = false
+autoexamples = false
+autotests = false
+description = "Import lib for Windows"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+name = "windows_x86_64_gnu"
+readme = false
+repository = "https://github.com/microsoft/windows-rs"
+rust-version = "1.56"
+version = "0.52.6"
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = []

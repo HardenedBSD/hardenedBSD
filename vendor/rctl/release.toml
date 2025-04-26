@@ -1,0 +1,17 @@
+tag-message = "Release {{version}}"
+pre-release-commit-message = "release: {{version}}"
+
+[[pre-release-replacements]] 
+file="CHANGELOG.md"
+search="Unreleased"
+replace="{{version}}"
+
+[[pre-release-replacements]] 
+file="CHANGELOG.md"
+search="ReleaseDate"
+replace="{{date}}"
+
+[[post-release-replacements]]
+file="CHANGELOG.md"
+search="# Changelog"
+replace="# Changelog\n\n## [Unreleased] - ReleaseDate"

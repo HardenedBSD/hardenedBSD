@@ -1,0 +1,86 @@
+.\" Copyright (c) 2023 Axcient
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd April 17, 2024
+.Dt GEOM-EXPORTER 8
+.Os
+.Sh NAME
+.Nm geom-exporter
+.Nd Export GEOM statistics to Prometheus
+.Sh SYNOPSIS
+.Nm
+.Op Fl hP
+.Op Fl b Ar address
+.Op Fl p Ar port
+.Op Fl f Ar pattern
+.Op Fl F Ar pattern
+.Sh DESCRIPTION
+Prometheus is a monitoring system that gathers metrics from its targets by
+fetching them through HTTP GET requests.
+Metrics are identified by a name and an optional set of labels.
+Sample values are required to be numerical.
+.Pp
+The
+.Nm
+daemon publishes statistics from the
+.Fx
+GEOM system via an HTTP server, in the correct format to be scraped by
+Prometheus.
+Its options are as follows:
+.Bl -tag -width indent
+.It Fl f , Fl Fl pattern Ar pattern
+A regular expression that can be used to only show statistics for some
+devices.
+Only devices with the names matching
+.Ar pattern
+will be published.
+The format of the regular expression is described at
+.Lk https://docs.rs/regex .
+.It Fl F , Fl Fl pattern Ar pattern
+A regular expression that can be used to exclude devices.
+No devices with names matching
+.Ar pattern
+will be published.
+.It Fl b , Fl Fl address Ar address
+Bind to this local address.
+By default,
+.Nm
+will bind to the wildcard address.
+.It Fl p , Fl Fl port Ar port
+Serve metrics on this TCP port.
+The default is 9248.
+.It Fl P , Fl Fl physical
+Only display physical providers (those with rank of 1).
+.El
+.Sh SEE ALSO
+.Xr gstat 8
+.Pp
+Prometheus project:
+.Pa https://prometheus.io/ .
+.Pp
+Prometheus exposition formats:
+.Pa https://prometheus.io/docs/instrumenting/exposition_formats/ .
+.Pp
+Prometheus default port allocations:
+.Pa https://github.com/prometheus/prometheus/wiki/Default-port-allocations .

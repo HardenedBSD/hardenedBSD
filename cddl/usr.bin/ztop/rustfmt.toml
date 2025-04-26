@@ -1,0 +1,13 @@
+brace_style = "SameLineWhere"
+edition = "2021"
+format_strings = true
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+imports_layout = "HorizontalVertical"
+match_block_trailing_comma = false
+max_width = 80
+reorder_impl_items = true
+reorder_imports = true
+struct_field_align_threshold = 16
+use_field_init_shorthand = true
+# TODO: chained method calls https://github.com/rust-lang/rustfmt/issues/4306

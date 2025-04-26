@@ -1,0 +1,3 @@
+---
+basic_auth_users:
+    foo:foo: 'bar'

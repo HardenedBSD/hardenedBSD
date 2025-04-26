@@ -1,0 +1,112 @@
+# Sample FSX Configuration file
+# Customize this file for each file system of interest
+# The file format is [TOML](https://toml.io/en/)
+
+# Maximum size in bytes for the file under test.
+# Default: 256 kB
+flen = 262144
+
+# Disable msync after mapwrite
+# Default: false
+nomsyncafterwrite = false
+
+# Disable verifications of file size.
+# Default: false
+nosizechecks = false
+
+# Block mode: never change the file's size.
+# This option is useful for testing block devices rather than file systems.
+# When using block mode, FSX will never change the file's size, even at startup.
+# The user must ensure that the file under test has the desired size before
+# starting FSX.
+#
+# Usually, when testing block devices, one should also set:
+# * nosizechecks              - true
+# * opsize.align              - The block device's minimum allocation size
+# * flen                      - By default, it will use the file's size.  But
+#                               you may set it lower to save RAM.
+# * weights.close_open        - 0.0
+# * weights.posix_fallocate   - 0.0
+# * weights.truncate          - 0.0
+# * -P                        - To anything except the device under test
+# Default: false
+blockmode = false
+
+# Options related to the statistical distribution of operation sizes
+[opsize]
+# Maximum size in bytes for any read or write operation
+# Default: 65536
+max = 65536
+
+# Minimum size in bytes for any read or write operation
+# Default: 0
+min = 0
+
+# Alignment in bytes for any read, write, truncate, or posix_fallocate operation
+# Default: 1
+align = 1
+
+# Relative frequencies of various operations.  They need not add up to any
+# particular value.
+[weights]
+# Close the file and reopen it.
+# Default: 0
+close_open = 1
+
+# Read with pread(2)
+# Default: 10
+read = 10
+
+# Write with pwrite(2)
+# Default: 10
+write = 10
+
+# Read with mmap(2), memory accesses, and munmap(2)
+# Default: 10
+mapread = 10
+
+# write with mmap(2), memory accesses, msync, and munmap(2)
+# Default: 10
+mapwrite = 10
+
+# msync(MS_INVALIDATE)
+# Default: 0
+invalidate = 1
+
+# Shrink or extend the file with ftruncate(2)
+# Default: 10
+truncate = 1
+
+# fsync()
+# Default: 0
+fsync = 1
+
+# fdatasync()
+# Default: 0
+fdatasync = 1
+
+# posix_fallocate()
+# NB: not all file systems are capable of supporting this operation.
+# Default: 0
+posix_fallocate = 0
+
+# Hole punching
+# FreeBSD: fspacectl()
+# Linux: fallocate(_, FALLOC_FL_PUNCH_HOLE, _, _)
+# Others: not supported
+# Default: 0
+punch_hole = 0
+
+# Read via sendfile(2)
+# Default: 0
+sendfile = 0
+
+# Advise the kernel about cache behavior with posix_fadvise.  The specific
+# advice given will be randomly determined from among all advice types
+# supported by the OS.
+# Default: 0
+posix_fadvise = 0
+
+# Copy a region of the file to a different region with copy_file_range(2)
+# Default: 0
+copy_file_range = 0

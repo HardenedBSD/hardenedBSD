@@ -1,0 +1,16 @@
+[workspace]
+members = [
+	"cddl/usr.bin/ztop",
+	"lib/freebsd-libgeom",
+	"lib/freebsd-libgeom-sys",
+	"tools/regression/fsx",
+	"usr.bin/jail_exporter",
+	"usr.bin/freebsd-geom-exporter",
+	"usr.bin/nfs-exporter",
+	"usr.sbin/gstat"
+]
+resolver = "2"
+
+[workspace.metadata.vendor-filter]
+platforms = ["*-unknown-freebsd"]
+all-features = true

@@ -1,0 +1,87 @@
+[dependencies.alloc]
+optional = true
+package = "rustc-std-workspace-alloc"
+version = "1.0.0"
+
+[dependencies.compiler_builtins]
+optional = true
+version = "0.1.2"
+
+[dependencies.core]
+optional = true
+package = "rustc-std-workspace-core"
+version = "1.0.0"
+
+[dependencies.crc32fast]
+default-features = false
+optional = true
+version = "1.2"
+
+[dependencies.flate2]
+optional = true
+version = "1"
+
+[dependencies.hashbrown]
+default-features = false
+features = ["ahash"]
+optional = true
+version = "0.14.0"
+
+[dependencies.indexmap]
+default-features = false
+optional = true
+version = "2.0"
+
+[dependencies.memchr]
+default-features = false
+version = "2.4.1"
+
+[dependencies.ruzstd]
+optional = true
+version = "0.7.0"
+
+[dependencies.wasmparser]
+default-features = false
+optional = true
+version = "0.214.0"
+
+[features]
+all = ["read", "write", "build", "std", "compression", "wasm"]
+archive = []
+build = ["build_core", "write_std", "elf"]
+build_core = ["read_core", "write_core"]
+cargo-all = []
+coff = []
+compression = ["dep:flate2", "dep:ruzstd", "std"]
+default = ["read", "compression"]
+doc = ["read_core", "write_std", "build_core", "std", "compression", "archive", "coff", "elf", "macho", "pe", "wasm", "xcoff"]
+elf = []
+macho = []
+pe = ["coff"]
+read = ["read_core", "archive", "coff", "elf", "macho", "pe", "xcoff", "unaligned"]
+read_core = []
+rustc-dep-of-std = ["core", "compiler_builtins", "alloc", "memchr/rustc-dep-of-std"]
+std = ["memchr/std"]
+unaligned = []
+unstable = []
+unstable-all = ["all", "unstable"]
+wasm = ["dep:wasmparser"]
+write = ["write_std", "coff", "elf", "macho", "pe", "xcoff"]
+write_core = ["dep:crc32fast", "dep:indexmap", "dep:hashbrown"]
+write_std = ["write_core", "std", "indexmap?/std", "crc32fast?/std"]
+xcoff = []
+
+[package]
+description = "A unified interface for reading and writing object file formats."
+edition = "2018"
+include = ["/Cargo.toml", "/CHANGELOG.md", "/README.md", "/LICENSE-APACHE", "/LICENSE-MIT", "/src", "/tests"]
+keywords = ["object", "elf", "mach-o", "pe", "coff"]
+license = "Apache-2.0 OR MIT"
+name = "object"
+readme = "README.md"
+repository = "https://github.com/gimli-rs/object"
+resolver = "2"
+rust-version = "1.65"
+version = "0.36.2"
+[package.metadata.docs.rs]
+features = ["doc"]

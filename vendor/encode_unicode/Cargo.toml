@@ -1,0 +1,28 @@
+[dependencies.ascii]
+default-features = false
+optional = true
+version = ">=0.8, <2"
+
+[dependencies.clippy]
+optional = true
+version = "0.*"
+
+[features]
+default = ["std"]
+std = []
+
+[package]
+authors = ["Torbjørn Birch Moltu <t.b.moltu@lyse.net>"]
+categories = ["encoding", "no-std"]
+description = "UTF-8 and UTF-16 character types, iterators and related methods for char, u8 and u16.\n"
+documentation = "https://docs.rs/encode_unicode/"
+keywords = ["unicode", "UTF-8", "UTF-16"]
+license = "MIT/Apache-2.0"
+name = "encode_unicode"
+readme = "README.md"
+repository = "https://github.com/tormol/encode_unicode"
+version = "0.3.6"
+[package.metadata.docs.rs]
+features = ["ascii/std"]
+[target."cfg(unix)".dev-dependencies.lazy_static]
+version = "1.0.*"

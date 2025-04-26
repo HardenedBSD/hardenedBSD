@@ -1,0 +1,109 @@
+.Dd December 29, 2023
+.Dt FSX 1
+.Os
+.Sh NAME
+.Nm fsx
+.Nd File System eXerciser
+.Sh SYNOPSIS
+.Nm
+.Op Fl hqVv
+.Op Fl b Ar OPNUM
+.Op Fl f Ar PATH
+.Op Fl m Ar FROM:TO
+.Op Fl N Ar NUMOPS
+.Op Fl P Ar DIRPATH
+.Op Fl S Ar SEED
+.Op Ar FILENAME
+.Sh DESCRIPTION
+The
+.Nm
+utility tests file system I/O routines for correctness, with random input.
+It generates a pseudorandom sequence of file modifications and applies them
+to a file on the file system under test.
+On every read, it verifies the expected data.
+It's highly configurable, and the test sequence is 100% reproducible according
+to a seed value.
+If a failure is detected,
+.Nm
+will log the most recent operations and write the expected file contents to
+.Ar FILENAME.fsxgood .
+.Pp
+The options are as follows:
+.Bl -tag -width indent
+.It Fl b Ar OPNUM
+Begin real I/O at operation number
+.Ar OPNUM .
+Previous operations will be simulated, and their cumulative effect written
+to the file just before real I/O starts.
+.It Fl h , Fl Fl help
+Print usage information.
+.It Fl f Ar PATH
+Load configuration from
+.Ar PATH .
+The configuration file describes the types of operations that
+.Nm
+will issue, whereas the other operations describe how
+.Nm
+will issue them.
+Generally the user should customize the configuration file for each file system
+of interest.
+See the example configuration file for documentation of its contents.
+.It Fl m Ar FROM:TO
+Monitor operations within the byte range
+.Ar [FROM,TO).
+All operations in this range will be logged at the
+.Dv LOG_WARN
+log level.
+.It Fl N Ar NUMOPS
+Terminate after processing
+.Ar NUMOPS
+operations.
+If this option is not specified,
+.Nm
+will run until interrupted or a failure is detected.
+.It Fl q , Fl Fl quiet
+Decrease verbosity.
+This option may be specified up to two times.
+.It Fl P Ar DIRPATH
+On failure, save artifacts to the directory named by
+.Ar DIRPATH .
+.It Fl S Ar SEED
+Seed the random number generator with this value.
+By default,
+.Nm
+will select a seed pseudorandomly, and log it to
+.Em stderr .
+.It Fl V , Fl Fl version
+Print the program's version.
+.It Fl v , Fl Fl verbose
+Increase logging verbosity.
+This option may be specified up to three times.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh HISTORY
+The first version of
+.Nm
+was written in C at Apple Computer, beginning in 1998,
+by
+.An Avadis Tevanian Jr .
+It was imported into
+.Fx 5.0
+by
+.An Jordan Hubbard Aq Mt jkh@FreeBSD.org ,
+but only as a development tool.
+It was never installed as part of any release.
+It's had occasional enhancements since then.
+.Pp
+.Nm
+was independently imported into Linux in 2001 by user
+.An robbiew ,
+and has occasionally merged in features from the
+.Fx
+version.
+.Pp
+A tool by the same name was included in DEC Unix 4.0, but I don't think it
+shared any code.
+.Pp
+This version is a full rewrite in Rust, by
+.An Alan Somers Aq Mt asomers@FreeBSD.org .

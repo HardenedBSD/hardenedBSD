@@ -1,0 +1,29 @@
+[package]
+name = "freebsd-nfs-exporter"
+description = "Prometheus exporter for FreeBSD NFS stats"
+version = "0.4.4"
+authors = ["Alan Somers <asomers@axcient.com>"]
+license = "MIT/Apache-2.0"
+edition = "2021"
+repository = "https://github.com/Axcient/freebsd-nfs-exporter.git"
+rust-version = "1.77"
+keywords = ["prometheus", "monitoring", "nfs", "freebsd"]
+exclude = [
+    "/.gitignore",
+]
+
+[[bin]]
+name = "nfs-exporter"
+path = "src/main.rs"
+
+[dependencies]
+bincode = "1.3.0"
+clap = { version = "4.1", default-features = true, features = ["cargo", "derive"] }
+env_logger = "0.10"
+prometheus_exporter = "0.8.4"
+capsicum = { version = "0.4.1", features = ["casper"] }
+serde = "1.0.63"
+serde_derive = "1.0"
+
+[build-dependencies]
+bindgen = { version = "0.66.0", features=[] }

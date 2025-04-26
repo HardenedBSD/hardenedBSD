@@ -1,0 +1,23 @@
+[package]
+name = "freebsd-libgeom-sys"
+version = "0.1.6"
+edition = "2021"
+authors = ["Alan Somers <asomers@gmail.com>"]
+license = "BSD-2-Clause"
+repository = "https://github.com/asomers/gstat-rs"
+description = "Rust FFI bindings to FreeBSD's libgeom library"
+categories = ["external-ffi-bindings", "os::freebsd-apis"]
+keywords = ["freebsd"]
+
+[package.metadata.docs.rs]
+targets = [
+  "x86_64-unknown-freebsd",
+]
+
+[package.metadata.release]
+pre-release-replacements = []
+
+[dependencies]
+
+[build-dependencies]
+bindgen = { version = "0.66", features=[] }

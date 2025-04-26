@@ -1,0 +1,45 @@
+[package]
+name = "gstat"
+version = "0.1.6"
+edition = "2021"
+authors = ["Alan Somers <asomers@gmail.com>"]
+license = "BSD-2-Clause"
+repository = "https://github.com/asomers/gstat-rs"
+description = "Enhanced replacement for FreeBSD's gstat utility"
+categories = ["command-line-utilities"]
+keywords = ["freebsd"]
+include = ["src/**/*", "LICENSE", "README.md"]
+rust-version = "1.70"
+
+[package.metadata.docs.rs]
+targets = [
+  "x86_64-unknown-freebsd",
+]
+
+[package.metadata.release]
+pre-release-replacements = [
+    { file="CHANGELOG.md", search="Unreleased", replace="{{version}}" },
+    { file="CHANGELOG.md", search="ReleaseDate", replace="{{date}}" }
+]
+
+[dependencies]
+anyhow = "1.0.14"
+bitfield = "0.13.2"
+clap = { version = "4.0", features = ["derive"] }
+confy = "0.6.0"
+crossterm = { version = "0.27.0", default-features = false, features = ["events"]}
+freebsd-libgeom = { version = "0.3.0", path = "../../lib/freebsd-libgeom" }
+humanize-rs = "0.1.5"
+nix = { version = "0.29.0", default-features = false, features = ["time"] }
+serde = "1.0.97"
+serde_derive = "1.0.97"
+ratatui = { version = "0.25.0", default-features = false, features = ["crossterm", "unstable"] }
+
+[dependencies.regex]
+# Directly, gstat only needs regex 1.3.  But transitively bindgen needs 1.5.1 or later.
+version = "1.6"
+# Disable the unicode feature, since geom providers names are always ASCII
+features = [ "perf", "std" ]
+
+[dev-dependencies]
+nonzero_ext = "0.2.0"

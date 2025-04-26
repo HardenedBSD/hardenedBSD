@@ -1,0 +1,45 @@
+[lib]
+name = "windows_targets"
+path = "src/lib.rs"
+[lints.rust]
+missing_docs = "warn"
+
+[lints.rust.rust_2018_idioms]
+level = "warn"
+priority = -1
+
+[lints.rust.unexpected_cfgs]
+check-cfg = ["cfg(windows_raw_dylib, windows_debugger_visualizer, windows_slim_errors)"]
+level = "warn"
+priority = 0
+
+[package]
+authors = ["Microsoft"]
+autobenches = false
+autobins = false
+autoexamples = false
+autotests = false
+description = "Import libs for Windows"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+name = "windows-targets"
+readme = "readme.md"
+repository = "https://github.com/microsoft/windows-rs"
+rust-version = "1.56"
+version = "0.52.6"
+[target.aarch64-pc-windows-gnullvm.dependencies.windows_aarch64_gnullvm]
+version = "0.52.6"
+[target."cfg(all(any(target_arch = \"x86_64\", target_arch = \"arm64ec\"), target_env = \"msvc\", not(windows_raw_dylib)))".dependencies.windows_x86_64_msvc]
+version = "0.52.6"
+[target."cfg(all(target_arch = \"aarch64\", target_env = \"msvc\", not(windows_raw_dylib)))".dependencies.windows_aarch64_msvc]
+version = "0.52.6"
+[target."cfg(all(target_arch = \"x86\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))".dependencies.windows_i686_gnu]
+version = "0.52.6"
+[target."cfg(all(target_arch = \"x86\", target_env = \"msvc\", not(windows_raw_dylib)))".dependencies.windows_i686_msvc]
+version = "0.52.6"
+[target."cfg(all(target_arch = \"x86_64\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))".dependencies.windows_x86_64_gnu]
+version = "0.52.6"
+[target.i686-pc-windows-gnullvm.dependencies.windows_i686_gnullvm]
+version = "0.52.6"
+[target.x86_64-pc-windows-gnullvm.dependencies.windows_x86_64_gnullvm]
+version = "0.52.6"

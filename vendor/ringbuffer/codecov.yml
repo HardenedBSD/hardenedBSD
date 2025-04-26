@@ -1,0 +1,9 @@
+coverage:
+  status:
+    patch:
+      default:
+        enabled: false
+        if_not_found: success
+
+codecov:
+  require_ci_to_pass: true

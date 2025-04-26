@@ -1,0 +1,76 @@
+[build-dependencies.cc]
+version = "1.0.97"
+[dependencies.cfg-if]
+version = "1.0"
+
+[dependencies.cpp_demangle]
+default-features = false
+features = ["alloc"]
+optional = true
+version = "0.4.0"
+
+[dependencies.rustc-demangle]
+version = "0.1.24"
+
+[dependencies.serde]
+features = ["derive"]
+optional = true
+version = "1.0"
+[dev-dependencies.libloading]
+version = "0.7"
+
+[features]
+coresymbolication = []
+dbghelp = []
+default = ["std"]
+dl_iterate_phdr = []
+dladdr = []
+kernel32 = []
+libunwind = []
+serialize-serde = ["serde"]
+std = []
+unix-backtrace = []
+verify-winapi = ["winapi/dbghelp", "winapi/handleapi", "winapi/libloaderapi", "winapi/memoryapi", "winapi/minwindef", "winapi/processthreadsapi", "winapi/synchapi", "winapi/tlhelp32", "winapi/winbase", "winapi/winnt", "winapi/winnls", "winapi/stringapiset"]
+
+[lib]
+name = "backtrace"
+path = "src/lib.rs"
+[lints.rust]
+unexpected_cfgs = "allow"
+
+[package]
+authors = ["The Rust Project Developers"]
+autobenches = false
+autobins = false
+autoexamples = false
+autotests = false
+description = "A library to acquire a stack trace (backtrace) at runtime in a Rust program.\n"
+documentation = "https://docs.rs/backtrace"
+edition = "2021"
+exclude = ["/ci/"]
+homepage = "https://github.com/rust-lang/backtrace-rs"
+license = "MIT OR Apache-2.0"
+name = "backtrace"
+readme = "README.md"
+repository = "https://github.com/rust-lang/backtrace-rs"
+rust-version = "1.65.0"
+version = "0.3.73"
+[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.addr2line]
+default-features = false
+version = "0.22.0"
+
+[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.libc]
+default-features = false
+version = "0.2.146"
+
+[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.miniz_oxide]
+default-features = false
+version = "0.7.0"
+
+[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.object]
+default-features = false
+features = ["read_core", "elf", "macho", "pe", "xcoff", "unaligned", "archive"]
+version = "0.36.0"
+[target."cfg(windows)".dependencies.winapi]
+optional = true
+version = "0.3.9"
