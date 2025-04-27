@@ -19,21 +19,19 @@ TAGS+=		package=${PACKAGE:Ubase-rust-utils}
 TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
 
 CARGO?=			${LOCALBASE}/bin/cargo
+RUSTC?=			${LOCALBASE}/bin/rustc
 CARGO_TARGET_DIR?=	${OBJROOT}${TARGET}.${TARGET_ARCH}/rust-cargo
 .export CARGO_TARGET_DIR
-
-RUSTC?=			${LOCALBASE}/bin/rustc
 .export RUSTC
 
 CARGO_PROFILE?=		release
-
 CARGO_FLAGS+=		--offline
+CARGO_FLAGS+=		--profile ${CARGO_PROFILE}
 
 all:
-	env -C ${.CURDIR} ${CARGO} build ${CARGO_FLAGS} --profile ${CARGO_PROFILE}
+	env -C ${.CURDIR} ${CARGO} build ${CARGO_FLAGS}
 
 install:
-.if defined(PROG)
 	${INSTALL} \
 		${TAG_ARGS} \
 		-o ${BINOWN} \
@@ -41,7 +39,6 @@ install:
 		-m ${BINMODE} \
 		${CARGO_TARGET_DIR}/${CARGO_PROFILE}/${PROG} \
 		${DESTDIR}${BINDIR}/${PROG}
-.endif
 
 clean:
 	env -C ${.CURDIR} ${CARGO} clean --profile ${CARGO_PROFILE}
