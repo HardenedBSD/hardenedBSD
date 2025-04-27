@@ -52,9 +52,12 @@ clean:
 
 cleandir: clean
 
+<<<<<<< HEAD
 check: all
 	env -C ${.CURDIR} ${CARGO} test --bin ${PROG} --tests
 
+=======
+>>>>>>> asomers/rust-in-base-demo
 .include <bsd.obj.mk>
 .include <bsd.incs.mk>
 .include <bsd.sys.mk>
