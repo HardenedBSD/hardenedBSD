@@ -46,6 +46,7 @@ version = "0.1"
 default-features = false
 optional = true
 version = "1"
+
 [dev-dependencies.backtrace]
 version = "0.3.13"
 
@@ -68,6 +69,9 @@ rustc-dep-of-std = ["core", "alloc", "compiler_builtins", "gimli/rustc-dep-of-st
 std = ["gimli/std"]
 std-object = ["std", "object", "object/std", "object/compression", "gimli/endian-reader"]
 
+[lib]
+path = "src/lib.rs"
+
 [package]
 categories = ["development-tools::debugging"]
 description = "A cross-platform symbolication library written in Rust, using `gimli`"
@@ -81,6 +85,7 @@ readme = "./README.md"
 repository = "https://github.com/gimli-rs/addr2line"
 rust-version = "1.65"
 version = "0.22.0"
+
 [profile.bench]
 codegen-units = 1
 debug = 2

@@ -8,26 +8,45 @@ use crate::{
     },
 };
 
+/// Defines how many points are going to be used to draw a [`Map`].
+///
+/// You generally want a [high](MapResolution::High) resolution map.
 #[derive(Debug, Default, Display, EnumString, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum MapResolution {
+    /// A lesser resolution for the [`Map`] [`Shape`].
+    ///
+    /// Contains about 1000 points.
     #[default]
     Low,
+    /// A higher resolution for the [`Map`] [`Shape`].
+    ///
+    /// Contains about 5000 points, you likely want to use [`Marker::Braille`] with this.
+    ///
+    /// [`Marker::Braille`]: (crate::symbols::Marker::Braille)
     High,
 }
 
 impl MapResolution {
-    fn data(self) -> &'static [(f64, f64)] {
+    const fn data(self) -> &'static [(f64, f64)] {
         match self {
-            MapResolution::Low => &WORLD_LOW_RESOLUTION,
-            MapResolution::High => &WORLD_HIGH_RESOLUTION,
+            Self::Low => &WORLD_LOW_RESOLUTION,
+            Self::High => &WORLD_HIGH_RESOLUTION,
         }
     }
 }
 
-/// Shape to draw a world map with the given resolution and color
+/// A world map
+///
+/// A world map can be rendered with different [resolutions](MapResolution) and [colors](Color).
 #[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 pub struct Map {
+    /// The resolution of the map.
+    ///
+    /// This is the number of points used to draw the map.
     pub resolution: MapResolution,
+    /// Map color
+    ///
+    /// This is the color of the points of the map.
     pub color: Color,
 }
 
@@ -46,11 +65,7 @@ mod tests {
     use strum::ParseError;
 
     use super::*;
-    use crate::{
-        assert_buffer_eq,
-        prelude::*,
-        widgets::{canvas::Canvas, Widget},
-    };
+    use crate::{prelude::*, symbols::Marker, widgets::canvas::Canvas};
 
     #[test]
     fn map_resolution_to_string() {
@@ -86,7 +101,7 @@ mod tests {
                 context.draw(&Map::default());
             });
         canvas.render(buffer.area, &mut buffer);
-        let expected = Buffer::with_lines(vec![
+        let expected = Buffer::with_lines([
             "                                                                                ",
             "                   ••••••• •• •• •• •                                           ",
             "            ••••••••••••••       •••      ••••  •••  ••    ••••                 ",
@@ -128,7 +143,7 @@ mod tests {
             "       •                                                                        ",
             "                                                                                ",
         ]);
-        assert_buffer_eq!(buffer, expected);
+        assert_eq!(buffer, expected);
     }
 
     #[test]
@@ -145,7 +160,7 @@ mod tests {
                 });
             });
         canvas.render(buffer.area, &mut buffer);
-        let expected = Buffer::with_lines(vec![
+        let expected = Buffer::with_lines([
             "                                                                                ",
             "                  ⢀⣠⠤⠤⠤⠔⢤⣤⡄⠤⡠⣄⠢⠂⢢⠰⣠⡄⣀⡀                      ⣀                   ",
             "            ⢀⣀⡤⣦⠲⢶⣿⣮⣿⡉⣰⢶⢏⡂        ⢀⣟⠁     ⢺⣻⢿⠏   ⠈⠉⠁ ⢀⣀    ⠈⠓⢳⣢⣂⡀               ",
@@ -187,6 +202,6 @@ mod tests {
             "⠶⠔⠲⠤⠠⠜⢗⠤⠄                 ⠘⠉  ⠁                                            ⠈⠉⠒⠔⠤",
             "                                                                                ",
         ]);
-        assert_buffer_eq!(buffer, expected);
+        assert_eq!(buffer, expected);
     }
 }

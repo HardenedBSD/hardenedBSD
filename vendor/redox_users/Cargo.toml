@@ -23,6 +23,9 @@ version = "1.4"
 auth = ["rust-argon2", "zeroize"]
 default = ["auth"]
 
+[lib]
+path = "src/lib.rs"
+
 [package]
 authors = ["Jose Narvaez <goyox86@gmail.com>", "Wesley Hershberger <mggmugginsmc@gmail.com>"]
 description = "A Rust library to access Redox users and groups functionality"

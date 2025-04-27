@@ -7,20 +7,19 @@
 
 use std::{error::Error, io};
 
-use termwiz::{
-    caps::Capabilities,
-    cell::{AttributeChange, Blink, Intensity, Underline},
-    color::{AnsiColor, ColorAttribute, SrgbaTuple},
-    surface::{Change, CursorVisibility, Position},
-    terminal::{buffered::BufferedTerminal, ScreenSize, SystemTerminal, Terminal},
-};
-
 use crate::{
     backend::{Backend, WindowSize},
     buffer::Cell,
     layout::Size,
     prelude::Rect,
-    style::{Color, Modifier},
+    style::{Color, Modifier, Style},
+    termwiz::{
+        caps::Capabilities,
+        cell::{AttributeChange, Blink, CellAttributes, Intensity, Underline},
+        color::{AnsiColor, ColorAttribute, ColorSpec, LinearRgba, RgbColor, SrgbaTuple},
+        surface::{Change, CursorVisibility, Position},
+        terminal::{buffered::BufferedTerminal, ScreenSize, SystemTerminal, Terminal},
+    },
 };
 
 /// A [`Backend`] implementation that uses [Termwiz] to render to the terminal.
@@ -52,14 +51,14 @@ use crate::{
 /// # std::result::Result::Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// See the the [examples] directory for more examples. See the [`backend`] module documentation
+/// See the the [Examples] directory for more examples. See the [`backend`] module documentation
 /// for more details on raw mode and alternate screen.
 ///
 /// [`backend`]: crate::backend
 /// [`Terminal`]: crate::terminal::Terminal
 /// [`BufferedTerminal`]: termwiz::terminal::buffered::BufferedTerminal
 /// [Termwiz]: https://crates.io/crates/termwiz
-/// [examples]: https://github.com/ratatui-org/ratatui/tree/main/examples#readme
+/// [Examples]: https://github.com/ratatui-org/ratatui/tree/main/examples/README.md
 pub struct TermwizBackend {
     buffered_terminal: BufferedTerminal<SystemTerminal>,
 }
@@ -84,23 +83,23 @@ impl TermwizBackend {
     /// let backend = TermwizBackend::new()?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn new() -> Result<TermwizBackend, Box<dyn Error>> {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
         let mut buffered_terminal =
             BufferedTerminal::new(SystemTerminal::new(Capabilities::new_from_env()?)?)?;
         buffered_terminal.terminal().set_raw_mode()?;
         buffered_terminal.terminal().enter_alternate_screen()?;
-        Ok(TermwizBackend { buffered_terminal })
+        Ok(Self { buffered_terminal })
     }
 
     /// Creates a new Termwiz backend instance with the given buffered terminal.
-    pub fn with_buffered_terminal(instance: BufferedTerminal<SystemTerminal>) -> TermwizBackend {
-        TermwizBackend {
+    pub const fn with_buffered_terminal(instance: BufferedTerminal<SystemTerminal>) -> Self {
+        Self {
             buffered_terminal: instance,
         }
     }
 
     /// Returns a reference to the buffered terminal used by the backend.
-    pub fn buffered_terminal(&self) -> &BufferedTerminal<SystemTerminal> {
+    pub const fn buffered_terminal(&self) -> &BufferedTerminal<SystemTerminal> {
         &self.buffered_terminal
     }
 
@@ -111,7 +110,7 @@ impl TermwizBackend {
 }
 
 impl Backend for TermwizBackend {
-    fn draw<'a, I>(&mut self, content: I) -> Result<(), io::Error>
+    fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
     where
         I: Iterator<Item = (u16, u16, &'a Cell)>,
     {
@@ -181,13 +180,13 @@ impl Backend for TermwizBackend {
         Ok(())
     }
 
-    fn hide_cursor(&mut self) -> Result<(), io::Error> {
+    fn hide_cursor(&mut self) -> io::Result<()> {
         self.buffered_terminal
             .add_change(Change::CursorVisibility(CursorVisibility::Hidden));
         Ok(())
     }
 
-    fn show_cursor(&mut self) -> Result<(), io::Error> {
+    fn show_cursor(&mut self) -> io::Result<()> {
         self.buffered_terminal
             .add_change(Change::CursorVisibility(CursorVisibility::Visible));
         Ok(())
@@ -207,18 +206,18 @@ impl Backend for TermwizBackend {
         Ok(())
     }
 
-    fn clear(&mut self) -> Result<(), io::Error> {
+    fn clear(&mut self) -> io::Result<()> {
         self.buffered_terminal
             .add_change(Change::ClearScreen(termwiz::color::ColorAttribute::Default));
         Ok(())
     }
 
-    fn size(&self) -> Result<Rect, io::Error> {
+    fn size(&self) -> io::Result<Rect> {
         let (cols, rows) = self.buffered_terminal.dimensions();
         Ok(Rect::new(0, 0, u16_max(cols), u16_max(rows)))
     }
 
-    fn window_size(&mut self) -> Result<WindowSize, io::Error> {
+    fn window_size(&mut self) -> io::Result<WindowSize> {
         let ScreenSize {
             cols,
             rows,
@@ -241,7 +240,7 @@ impl Backend for TermwizBackend {
         })
     }
 
-    fn flush(&mut self) -> Result<(), io::Error> {
+    fn flush(&mut self) -> io::Result<()> {
         self.buffered_terminal
             .flush()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -249,12 +248,73 @@ impl Backend for TermwizBackend {
     }
 }
 
+impl From<CellAttributes> for Style {
+    fn from(value: CellAttributes) -> Self {
+        let mut style = Self::new()
+            .add_modifier(value.intensity().into())
+            .add_modifier(value.underline().into())
+            .add_modifier(value.blink().into());
+
+        if value.italic() {
+            style.add_modifier |= Modifier::ITALIC;
+        }
+        if value.reverse() {
+            style.add_modifier |= Modifier::REVERSED;
+        }
+        if value.strikethrough() {
+            style.add_modifier |= Modifier::CROSSED_OUT;
+        }
+        if value.invisible() {
+            style.add_modifier |= Modifier::HIDDEN;
+        }
+
+        style.fg = Some(value.foreground().into());
+        style.bg = Some(value.background().into());
+        #[cfg(feature = "underline-color")]
+        {
+            style.underline_color = Some(value.underline_color().into());
+        }
+
+        style
+    }
+}
+
+impl From<Intensity> for Modifier {
+    fn from(value: Intensity) -> Self {
+        match value {
+            Intensity::Normal => Self::empty(),
+            Intensity::Bold => Self::BOLD,
+            Intensity::Half => Self::DIM,
+        }
+    }
+}
+
+impl From<Underline> for Modifier {
+    fn from(value: Underline) -> Self {
+        match value {
+            Underline::None => Self::empty(),
+            _ => Self::UNDERLINED,
+        }
+    }
+}
+
+impl From<Blink> for Modifier {
+    fn from(value: Blink) -> Self {
+        match value {
+            Blink::None => Self::empty(),
+            Blink::Slow => Self::SLOW_BLINK,
+            Blink::Rapid => Self::RAPID_BLINK,
+        }
+    }
+}
+
 impl From<Color> for ColorAttribute {
-    fn from(color: Color) -> ColorAttribute {
+    fn from(color: Color) -> Self {
         match color {
-            Color::Reset => ColorAttribute::Default,
+            Color::Reset => Self::Default,
             Color::Black => AnsiColor::Black.into(),
-            Color::Gray | Color::DarkGray => AnsiColor::Grey.into(),
+            Color::DarkGray => AnsiColor::Grey.into(),
+            Color::Gray => AnsiColor::Silver.into(),
             Color::Red => AnsiColor::Maroon.into(),
             Color::LightRed => AnsiColor::Red.into(),
             Color::Green => AnsiColor::Green.into(),
@@ -268,15 +328,336 @@ impl From<Color> for ColorAttribute {
             Color::White => AnsiColor::White.into(),
             Color::Blue => AnsiColor::Navy.into(),
             Color::LightBlue => AnsiColor::Blue.into(),
-            Color::Indexed(i) => ColorAttribute::PaletteIndex(i),
-            Color::Rgb(r, g, b) => {
-                ColorAttribute::TrueColorWithDefaultFallback(SrgbaTuple::from((r, g, b)))
-            }
+            Color::Indexed(i) => Self::PaletteIndex(i),
+            Color::Rgb(r, g, b) => Self::TrueColorWithDefaultFallback(SrgbaTuple::from((r, g, b))),
         }
+    }
+}
+
+impl From<AnsiColor> for Color {
+    fn from(value: AnsiColor) -> Self {
+        match value {
+            AnsiColor::Black => Self::Black,
+            AnsiColor::Grey => Self::DarkGray,
+            AnsiColor::Silver => Self::Gray,
+            AnsiColor::Maroon => Self::Red,
+            AnsiColor::Red => Self::LightRed,
+            AnsiColor::Green => Self::Green,
+            AnsiColor::Lime => Self::LightGreen,
+            AnsiColor::Olive => Self::Yellow,
+            AnsiColor::Yellow => Self::LightYellow,
+            AnsiColor::Purple => Self::Magenta,
+            AnsiColor::Fuchsia => Self::LightMagenta,
+            AnsiColor::Teal => Self::Cyan,
+            AnsiColor::Aqua => Self::LightCyan,
+            AnsiColor::White => Self::White,
+            AnsiColor::Navy => Self::Blue,
+            AnsiColor::Blue => Self::LightBlue,
+        }
+    }
+}
+
+impl From<ColorAttribute> for Color {
+    fn from(value: ColorAttribute) -> Self {
+        match value {
+            ColorAttribute::TrueColorWithDefaultFallback(srgba)
+            | ColorAttribute::TrueColorWithPaletteFallback(srgba, _) => srgba.into(),
+            ColorAttribute::PaletteIndex(i) => Self::Indexed(i),
+            ColorAttribute::Default => Self::Reset,
+        }
+    }
+}
+
+impl From<ColorSpec> for Color {
+    fn from(value: ColorSpec) -> Self {
+        match value {
+            ColorSpec::Default => Self::Reset,
+            ColorSpec::PaletteIndex(i) => Self::Indexed(i),
+            ColorSpec::TrueColor(srgba) => srgba.into(),
+        }
+    }
+}
+
+impl From<SrgbaTuple> for Color {
+    fn from(value: SrgbaTuple) -> Self {
+        let (r, g, b, _) = value.to_srgb_u8();
+        Self::Rgb(r, g, b)
+    }
+}
+
+impl From<RgbColor> for Color {
+    fn from(value: RgbColor) -> Self {
+        let (r, g, b) = value.to_tuple_rgb8();
+        Self::Rgb(r, g, b)
+    }
+}
+
+impl From<LinearRgba> for Color {
+    fn from(value: LinearRgba) -> Self {
+        value.to_srgb().into()
     }
 }
 
 #[inline]
 fn u16_max(i: usize) -> u16 {
     u16::try_from(i).unwrap_or(u16::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod into_color {
+        use Color as C;
+
+        use super::*;
+
+        #[test]
+        fn from_linear_rgba() {
+            // full black + opaque
+            assert_eq!(C::from(LinearRgba(0., 0., 0., 1.)), Color::Rgb(0, 0, 0));
+            // full black + transparent
+            assert_eq!(C::from(LinearRgba(0., 0., 0., 0.)), Color::Rgb(0, 0, 0));
+
+            // full white + opaque
+            assert_eq!(C::from(LinearRgba(1., 1., 1., 1.)), C::Rgb(254, 254, 254));
+            // full white + transparent
+            assert_eq!(C::from(LinearRgba(1., 1., 1., 0.)), C::Rgb(254, 254, 254));
+
+            // full red
+            assert_eq!(C::from(LinearRgba(1., 0., 0., 1.)), C::Rgb(254, 0, 0));
+            // full green
+            assert_eq!(C::from(LinearRgba(0., 1., 0., 1.)), C::Rgb(0, 254, 0));
+            // full blue
+            assert_eq!(C::from(LinearRgba(0., 0., 1., 1.)), C::Rgb(0, 0, 254));
+
+            // See https://stackoverflow.com/questions/12524623/what-are-the-practical-differences-when-working-with-colors-in-a-linear-vs-a-no
+            // for an explanation
+
+            // half red
+            assert_eq!(C::from(LinearRgba(0.214, 0., 0., 1.)), C::Rgb(127, 0, 0));
+            // half green
+            assert_eq!(C::from(LinearRgba(0., 0.214, 0., 1.)), C::Rgb(0, 127, 0));
+            // half blue
+            assert_eq!(C::from(LinearRgba(0., 0., 0.214, 1.)), C::Rgb(0, 0, 127));
+        }
+
+        #[test]
+        fn from_srgba() {
+            // full black + opaque
+            assert_eq!(C::from(SrgbaTuple(0., 0., 0., 1.)), Color::Rgb(0, 0, 0));
+            // full black + transparent
+            assert_eq!(C::from(SrgbaTuple(0., 0., 0., 0.)), Color::Rgb(0, 0, 0));
+
+            // full white + opaque
+            assert_eq!(C::from(SrgbaTuple(1., 1., 1., 1.)), C::Rgb(255, 255, 255));
+            // full white + transparent
+            assert_eq!(C::from(SrgbaTuple(1., 1., 1., 0.)), C::Rgb(255, 255, 255));
+
+            // full red
+            assert_eq!(C::from(SrgbaTuple(1., 0., 0., 1.)), C::Rgb(255, 0, 0));
+            // full green
+            assert_eq!(C::from(SrgbaTuple(0., 1., 0., 1.)), C::Rgb(0, 255, 0));
+            // full blue
+            assert_eq!(C::from(SrgbaTuple(0., 0., 1., 1.)), C::Rgb(0, 0, 255));
+
+            // half red
+            assert_eq!(C::from(SrgbaTuple(0.5, 0., 0., 1.)), C::Rgb(127, 0, 0));
+            // half green
+            assert_eq!(C::from(SrgbaTuple(0., 0.5, 0., 1.)), C::Rgb(0, 127, 0));
+            // half blue
+            assert_eq!(C::from(SrgbaTuple(0., 0., 0.5, 1.)), C::Rgb(0, 0, 127));
+        }
+
+        #[test]
+        fn from_rgbcolor() {
+            // full black
+            assert_eq!(C::from(RgbColor::new_8bpc(0, 0, 0)), Color::Rgb(0, 0, 0));
+            // full white
+            assert_eq!(
+                C::from(RgbColor::new_8bpc(255, 255, 255)),
+                C::Rgb(255, 255, 255)
+            );
+
+            // full red
+            assert_eq!(C::from(RgbColor::new_8bpc(255, 0, 0)), C::Rgb(255, 0, 0));
+            // full green
+            assert_eq!(C::from(RgbColor::new_8bpc(0, 255, 0)), C::Rgb(0, 255, 0));
+            // full blue
+            assert_eq!(C::from(RgbColor::new_8bpc(0, 0, 255)), C::Rgb(0, 0, 255));
+
+            // half red
+            assert_eq!(C::from(RgbColor::new_8bpc(127, 0, 0)), C::Rgb(127, 0, 0));
+            // half green
+            assert_eq!(C::from(RgbColor::new_8bpc(0, 127, 0)), C::Rgb(0, 127, 0));
+            // half blue
+            assert_eq!(C::from(RgbColor::new_8bpc(0, 0, 127)), C::Rgb(0, 0, 127));
+        }
+
+        #[test]
+        fn from_colorspec() {
+            assert_eq!(C::from(ColorSpec::Default), C::Reset);
+            assert_eq!(C::from(ColorSpec::PaletteIndex(33)), C::Indexed(33));
+            assert_eq!(
+                C::from(ColorSpec::TrueColor(SrgbaTuple(0., 0., 0., 1.))),
+                C::Rgb(0, 0, 0)
+            );
+        }
+
+        #[test]
+        fn from_colorattribute() {
+            assert_eq!(C::from(ColorAttribute::Default), C::Reset);
+            assert_eq!(C::from(ColorAttribute::PaletteIndex(32)), C::Indexed(32));
+            assert_eq!(
+                C::from(ColorAttribute::TrueColorWithDefaultFallback(SrgbaTuple(
+                    0., 0., 0., 1.
+                ))),
+                C::Rgb(0, 0, 0)
+            );
+            assert_eq!(
+                C::from(ColorAttribute::TrueColorWithPaletteFallback(
+                    SrgbaTuple(0., 0., 0., 1.),
+                    31
+                )),
+                C::Rgb(0, 0, 0)
+            );
+        }
+
+        #[test]
+        fn from_ansicolor() {
+            assert_eq!(C::from(AnsiColor::Black), Color::Black);
+            assert_eq!(C::from(AnsiColor::Grey), Color::DarkGray);
+            assert_eq!(C::from(AnsiColor::Silver), Color::Gray);
+            assert_eq!(C::from(AnsiColor::Maroon), Color::Red);
+            assert_eq!(C::from(AnsiColor::Red), Color::LightRed);
+            assert_eq!(C::from(AnsiColor::Green), Color::Green);
+            assert_eq!(C::from(AnsiColor::Lime), Color::LightGreen);
+            assert_eq!(C::from(AnsiColor::Olive), Color::Yellow);
+            assert_eq!(C::from(AnsiColor::Yellow), Color::LightYellow);
+            assert_eq!(C::from(AnsiColor::Purple), Color::Magenta);
+            assert_eq!(C::from(AnsiColor::Fuchsia), Color::LightMagenta);
+            assert_eq!(C::from(AnsiColor::Teal), Color::Cyan);
+            assert_eq!(C::from(AnsiColor::Aqua), Color::LightCyan);
+            assert_eq!(C::from(AnsiColor::White), Color::White);
+            assert_eq!(C::from(AnsiColor::Navy), Color::Blue);
+            assert_eq!(C::from(AnsiColor::Blue), Color::LightBlue);
+        }
+    }
+
+    mod into_modifier {
+        use super::*;
+
+        #[test]
+        fn from_intensity() {
+            assert_eq!(Modifier::from(Intensity::Normal), Modifier::empty());
+            assert_eq!(Modifier::from(Intensity::Bold), Modifier::BOLD);
+            assert_eq!(Modifier::from(Intensity::Half), Modifier::DIM);
+        }
+
+        #[test]
+        fn from_underline() {
+            assert_eq!(Modifier::from(Underline::None), Modifier::empty());
+            assert_eq!(Modifier::from(Underline::Single), Modifier::UNDERLINED);
+            assert_eq!(Modifier::from(Underline::Double), Modifier::UNDERLINED);
+            assert_eq!(Modifier::from(Underline::Curly), Modifier::UNDERLINED);
+            assert_eq!(Modifier::from(Underline::Dashed), Modifier::UNDERLINED);
+            assert_eq!(Modifier::from(Underline::Dotted), Modifier::UNDERLINED);
+        }
+
+        #[test]
+        fn from_blink() {
+            assert_eq!(Modifier::from(Blink::None), Modifier::empty());
+            assert_eq!(Modifier::from(Blink::Slow), Modifier::SLOW_BLINK);
+            assert_eq!(Modifier::from(Blink::Rapid), Modifier::RAPID_BLINK);
+        }
+    }
+
+    #[test]
+    fn from_cell_attribute_for_style() {
+        use crate::style::Stylize;
+
+        #[cfg(feature = "underline-color")]
+        const STYLE: Style = Style::new()
+            .underline_color(Color::Reset)
+            .fg(Color::Reset)
+            .bg(Color::Reset);
+        #[cfg(not(feature = "underline-color"))]
+        const STYLE: Style = Style::new().fg(Color::Reset).bg(Color::Reset);
+
+        // default
+        assert_eq!(Style::from(CellAttributes::default()), STYLE);
+
+        // foreground color
+        assert_eq!(
+            Style::from(
+                CellAttributes::default()
+                    .set_foreground(ColorAttribute::PaletteIndex(31))
+                    .to_owned()
+            ),
+            STYLE.fg(Color::Indexed(31))
+        );
+        // background color
+        assert_eq!(
+            Style::from(
+                CellAttributes::default()
+                    .set_background(ColorAttribute::PaletteIndex(31))
+                    .to_owned()
+            ),
+            STYLE.bg(Color::Indexed(31))
+        );
+        // underlined
+        assert_eq!(
+            Style::from(
+                CellAttributes::default()
+                    .set_underline(Underline::Single)
+                    .to_owned()
+            ),
+            STYLE.underlined()
+        );
+        // blink
+        assert_eq!(
+            Style::from(CellAttributes::default().set_blink(Blink::Slow).to_owned()),
+            STYLE.slow_blink()
+        );
+        // intensity
+        assert_eq!(
+            Style::from(
+                CellAttributes::default()
+                    .set_intensity(Intensity::Bold)
+                    .to_owned()
+            ),
+            STYLE.bold()
+        );
+        // italic
+        assert_eq!(
+            Style::from(CellAttributes::default().set_italic(true).to_owned()),
+            STYLE.italic()
+        );
+        // reversed
+        assert_eq!(
+            Style::from(CellAttributes::default().set_reverse(true).to_owned()),
+            STYLE.reversed()
+        );
+        // strikethrough
+        assert_eq!(
+            Style::from(CellAttributes::default().set_strikethrough(true).to_owned()),
+            STYLE.crossed_out()
+        );
+        // hidden
+        assert_eq!(
+            Style::from(CellAttributes::default().set_invisible(true).to_owned()),
+            STYLE.hidden()
+        );
+
+        // underline color
+        #[cfg(feature = "underline-color")]
+        assert_eq!(
+            Style::from(
+                CellAttributes::default()
+                    .set_underline_color(AnsiColor::Red)
+                    .to_owned()
+            ),
+            STYLE.underline_color(Color::Indexed(9))
+        );
+    }
 }

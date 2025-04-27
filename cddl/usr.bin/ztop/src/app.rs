@@ -3,7 +3,6 @@ use std::{
     collections::{btree_map, BTreeMap},
     error::Error,
     mem,
-    num::NonZeroUsize,
     ops::AddAssign,
 };
 
@@ -44,23 +43,21 @@ impl Snapshot {
     fn compute(&self, prev: Option<&Self>, etime: f64) -> Element {
         if let Some(prev) = prev {
             Element {
-                name:  self.name.clone(),
-                ops_r: (self.reads - prev.reads) as f64 / etime,
-                r_s:   (self.nread - prev.nread) as f64 / etime,
-                ops_w: (self.writes - prev.writes) as f64 / etime,
-                w_s:   (self.nwritten - prev.nwritten) as f64 / etime,
-                ops_d: (self.nunlinks - prev.nunlinks) as f64 / etime,
-                d_s:   (self.nunlinked - prev.nunlinked) as f64 / etime,
+                name:       self.name.clone(),
+                ops_r:      (self.reads - prev.reads) as f64 / etime,
+                r_s:        (self.nread - prev.nread) as f64 / etime,
+                ops_w:      (self.writes - prev.writes) as f64 / etime,
+                w_s:        (self.nwritten - prev.nwritten) as f64 / etime,
+                ops_unlink: (self.nunlinked - prev.nunlinked) as f64 / etime,
             }
         } else {
             Element {
-                name:  self.name.clone(),
-                ops_r: self.reads as f64 / etime,
-                r_s:   self.nread as f64 / etime,
-                ops_w: self.writes as f64 / etime,
-                w_s:   self.nwritten as f64 / etime,
-                ops_d: self.nunlinks as f64 / etime,
-                d_s:   self.nunlinked as f64 / etime,
+                name:       self.name.clone(),
+                ops_r:      self.reads as f64 / etime,
+                r_s:        self.nread as f64 / etime,
+                ops_w:      self.writes as f64 / etime,
+                w_s:        self.nwritten as f64 / etime,
+                ops_unlink: self.nunlinked as f64 / etime,
             }
         }
     }
@@ -209,7 +206,7 @@ struct DataSourceIter<'a> {
     etime:      f64,
 }
 
-impl<'a> Iterator for DataSourceIter<'a> {
+impl Iterator for DataSourceIter<'_> {
     type Item = Element;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -222,26 +219,24 @@ impl<'a> Iterator for DataSourceIter<'a> {
 /// One thing to display in the table
 #[derive(Clone, Debug)]
 pub struct Element {
-    pub name:  String,
+    pub name:       String,
     /// Read IOPs
-    pub ops_r: f64,
+    pub ops_r:      f64,
     /// Read B/s
-    pub r_s:   f64,
-    /// Delete IOPs
-    pub ops_d: f64,
-    /// Delete B/s
-    pub d_s:   f64,
+    pub r_s:        f64,
+    /// Files unlinked per second
+    pub ops_unlink: f64,
     /// Write IOPs
-    pub ops_w: f64,
+    pub ops_w:      f64,
     /// Write B/s
-    pub w_s:   f64,
+    pub w_s:        f64,
 }
 
 #[derive(Default)]
 pub struct App {
     auto:        bool,
     data:        DataSource,
-    depth:       Option<NonZeroUsize>,
+    depth:       Option<usize>,
     filter:      Option<Regex>,
     reverse:     bool,
     should_quit: bool,
@@ -254,7 +249,7 @@ impl App {
         auto: bool,
         children: bool,
         pools: Vec<String>,
-        depth: Option<NonZeroUsize>,
+        depth: Option<usize>,
         filter: Option<Regex>,
         reverse: bool,
         sort_idx: Option<usize>,
@@ -285,8 +280,8 @@ impl App {
         let mut v = self.data.iter()
             .filter(move |elem| {
                 if let Some(limit) = depth {
-                    let edepth = elem.name.split('/').count();
-                    edepth <= limit.get()
+                    let edepth = elem.name.split('/').count() - 1;
+                    edepth <= limit
                 } else {
                     true
                 }
@@ -294,23 +289,24 @@ impl App {
                  filter.as_ref()
                  .map(|f| f.is_match(&elem.name))
                  .unwrap_or(true)
-            ).filter(|elem| !auto || (elem.r_s + elem.w_s + elem.d_s > 1.0))
-            .collect::<Vec<_>>();
+            ).filter(|elem| !auto ||
+                     (elem.r_s + elem.w_s + elem.ops_unlink > 1.0)
+            ).collect::<Vec<_>>();
         match (self.reverse, self.sort_idx) {
-            (false, Some(0)) => v.sort_by(|x, y| x.ops_r.total_cmp(&y.ops_r)),
-            (true,  Some(0)) => v.sort_by(|x, y| y.ops_r.total_cmp(&x.ops_r)),
-            (false, Some(1)) => v.sort_by(|x, y| x.r_s.total_cmp(&y.r_s)),
-            (true,  Some(1)) => v.sort_by(|x, y| y.r_s.total_cmp(&x.r_s)),
-            (false, Some(2)) => v.sort_by(|x, y| x.ops_w.total_cmp(&y.ops_w)),
-            (true,  Some(2)) => v.sort_by(|x, y| y.ops_w.total_cmp(&x.ops_w)),
-            (false, Some(3)) => v.sort_by(|x, y| x.w_s.total_cmp(&y.w_s)),
-            (true,  Some(3)) => v.sort_by(|x, y| y.w_s.total_cmp(&x.w_s)),
-            (false, Some(4)) => v.sort_by(|x, y| x.ops_d.total_cmp(&y.ops_d)),
-            (true,  Some(4)) => v.sort_by(|x, y| y.ops_d.total_cmp(&x.ops_d)),
-            (false, Some(5)) => v.sort_by(|x, y| x.d_s.total_cmp(&y.d_s)),
-            (true,  Some(5)) => v.sort_by(|x, y| y.d_s.total_cmp(&x.d_s)),
-            (false, Some(6)) => v.sort_by(|x, y| x.name.cmp(&y.name)),
-            (true,  Some(6)) => v.sort_by(|x, y| y.name.cmp(&x.name)),
+            (true, Some(0)) => v.sort_by(|x, y| x.ops_r.total_cmp(&y.ops_r)),
+            (false,  Some(0)) => v.sort_by(|x, y| y.ops_r.total_cmp(&x.ops_r)),
+            (true, Some(1)) => v.sort_by(|x, y| x.r_s.total_cmp(&y.r_s)),
+            (false,  Some(1)) => v.sort_by(|x, y| y.r_s.total_cmp(&x.r_s)),
+            (true, Some(2)) => v.sort_by(|x, y| x.ops_w.total_cmp(&y.ops_w)),
+            (false,  Some(2)) => v.sort_by(|x, y| y.ops_w.total_cmp(&x.ops_w)),
+            (true, Some(3)) => v.sort_by(|x, y| x.w_s.total_cmp(&y.w_s)),
+            (false,  Some(3)) => v.sort_by(|x, y| y.w_s.total_cmp(&x.w_s)),
+            (true, Some(4)) => v.sort_by(|x, y|
+                x.ops_unlink.total_cmp(&y.ops_unlink)),
+            (false,  Some(4)) => v.sort_by(|x, y|
+                y.ops_unlink.total_cmp(&x.ops_unlink)),
+            (false, Some(5)) => v.sort_by(|x, y| x.name.cmp(&y.name)),
+            (true,  Some(5)) => v.sort_by(|x, y| y.name.cmp(&x.name)),
             _ => ()
         }
         v
@@ -327,13 +323,13 @@ impl App {
     pub fn on_d(&mut self, more_depth: bool) {
         self.depth = if more_depth {
             match self.depth {
-                None => NonZeroUsize::new(1),
-                Some(x) => NonZeroUsize::new(x.get() + 1),
+                None => Some(1),
+                Some(x) => Some(x + 1),
             }
         } else {
             match self.depth {
-                None => None,
-                Some(x) => NonZeroUsize::new(x.get() - 1),
+                None => Some(0),
+                Some(x) => Some(x.saturating_sub(1)),
             }
         }
     }
@@ -342,13 +338,13 @@ impl App {
         self.sort_idx = match self.sort_idx {
             Some(0) => None,
             Some(old) => Some(old - 1),
-            None => Some(6),
+            None => Some(5),
         }
     }
 
     pub fn on_plus(&mut self) {
         self.sort_idx = match self.sort_idx {
-            Some(old) if old >= 6 => None,
+            Some(old) if old >= 5 => None,
             Some(old) => Some(old + 1),
             None => Some(0),
         }

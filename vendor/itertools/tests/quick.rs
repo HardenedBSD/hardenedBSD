@@ -67,8 +67,8 @@ impl qc::Arbitrary for Inexact {
         let ue_value = usize::arbitrary(g);
         let oe_value = usize::arbitrary(g);
         // Compensate for quickcheck using extreme values too rarely
-        let ue_choices = &[0, ue_value, usize::max_value()];
-        let oe_choices = &[0, oe_value, usize::max_value()];
+        let ue_choices = &[0, ue_value, usize::MAX];
+        let oe_choices = &[0, oe_value, usize::MAX];
         Self {
             underestimate: *ue_choices.choose(g).unwrap(),
             overestimate: *oe_choices.choose(g).unwrap(),
@@ -450,43 +450,10 @@ quickcheck! {
         assert_eq!(answer.into_iter().last(), a.multi_cartesian_product().last());
     }
 
-    #[allow(deprecated)]
-    fn size_step(a: Iter<i16, Exact>, s: usize) -> bool {
-        let mut s = s;
-        if s == 0 {
-            s += 1; // never zero
-        }
-        let filt = a.clone().dedup();
-        correct_size_hint(filt.step(s)) &&
-            exact_size(a.step(s))
-    }
-
-    #[allow(deprecated)]
-    fn equal_step(a: Iter<i16>, s: usize) -> bool {
-        let mut s = s;
-        if s == 0 {
-            s += 1; // never zero
-        }
-        let mut i = 0;
-        itertools::equal(a.clone().step(s), a.filter(|_| {
-            let keep = i % s == 0;
-            i += 1;
-            keep
-        }))
-    }
-
-    #[allow(deprecated)]
-    fn equal_step_vec(a: Vec<i16>, s: usize) -> bool {
-        let mut s = s;
-        if s == 0 {
-            s += 1; // never zero
-        }
-        let mut i = 0;
-        itertools::equal(a.iter().step(s), a.iter().filter(|_| {
-            let keep = i % s == 0;
-            i += 1;
-            keep
-        }))
+    fn correct_empty_multi_product() -> () {
+        let empty = Vec::<std::vec::IntoIter<i32>>::new().into_iter().multi_cartesian_product();
+        assert!(correct_size_hint(empty.clone()));
+        itertools::assert_equal(empty, std::iter::once(Vec::new()))
     }
 
     fn size_multipeek(a: Iter<u16, Exact>, s: u8) -> bool {
@@ -604,6 +571,14 @@ quickcheck! {
         let b = &b[..len];
         itertools::equal(zip_eq(a, b), zip(a, b))
     }
+
+    #[should_panic]
+    fn zip_eq_panics(a: Vec<u8>, b: Vec<u8>) -> TestResult {
+        if a.len() == b.len() { return TestResult::discard(); }
+        zip_eq(a.iter(), b.iter()).for_each(|_| {});
+        TestResult::passed() // won't come here
+    }
+
     fn equal_positions(a: Vec<i32>) -> bool {
         let with_pos = a.iter().positions(|v| v % 2 == 0);
         let without = a.iter().enumerate().filter(|(_, v)| *v % 2 == 0).map(|(i, _)| i);
@@ -876,7 +851,7 @@ quickcheck! {
     fn size_put_back(a: Vec<u8>, x: Option<u8>) -> bool {
         let mut it = put_back(a.into_iter());
         if let Some(t) = x {
-            it.put_back(t)
+            it.put_back(t);
         }
         correct_size_hint(it)
     }
@@ -1047,58 +1022,58 @@ quickcheck! {
 }
 
 quickcheck! {
-    fn fuzz_group_by_lazy_1(it: Iter<u8>) -> bool {
+    fn fuzz_chunk_by_lazy_1(it: Iter<u8>) -> bool {
         let jt = it.clone();
-        let groups = it.group_by(|k| *k);
-        itertools::equal(jt, groups.into_iter().flat_map(|(_, x)| x))
+        let chunks = it.chunk_by(|k| *k);
+        itertools::equal(jt, chunks.into_iter().flat_map(|(_, x)| x))
     }
 }
 
 quickcheck! {
-    fn fuzz_group_by_lazy_2(data: Vec<u8>) -> bool {
-        let groups = data.iter().group_by(|k| *k / 10);
-        let res = itertools::equal(data.iter(), groups.into_iter().flat_map(|(_, x)| x));
+    fn fuzz_chunk_by_lazy_2(data: Vec<u8>) -> bool {
+        let chunks = data.iter().chunk_by(|k| *k / 10);
+        let res = itertools::equal(data.iter(), chunks.into_iter().flat_map(|(_, x)| x));
         res
     }
 }
 
 quickcheck! {
-    fn fuzz_group_by_lazy_3(data: Vec<u8>) -> bool {
-        let grouper = data.iter().group_by(|k| *k / 10);
-        let groups = grouper.into_iter().collect_vec();
-        let res = itertools::equal(data.iter(), groups.into_iter().flat_map(|(_, x)| x));
+    fn fuzz_chunk_by_lazy_3(data: Vec<u8>) -> bool {
+        let grouper = data.iter().chunk_by(|k| *k / 10);
+        let chunks = grouper.into_iter().collect_vec();
+        let res = itertools::equal(data.iter(), chunks.into_iter().flat_map(|(_, x)| x));
         res
     }
 }
 
 quickcheck! {
-    fn fuzz_group_by_lazy_duo(data: Vec<u8>, order: Vec<(bool, bool)>) -> bool {
-        let grouper = data.iter().group_by(|k| *k / 3);
-        let mut groups1 = grouper.into_iter();
-        let mut groups2 = grouper.into_iter();
+    fn fuzz_chunk_by_lazy_duo(data: Vec<u8>, order: Vec<(bool, bool)>) -> bool {
+        let grouper = data.iter().chunk_by(|k| *k / 3);
+        let mut chunks1 = grouper.into_iter();
+        let mut chunks2 = grouper.into_iter();
         let mut elts = Vec::<&u8>::new();
-        let mut old_groups = Vec::new();
+        let mut old_chunks = Vec::new();
 
         let tup1 = |(_, b)| b;
         for &(ord, consume_now) in &order {
-            let iter = &mut [&mut groups1, &mut groups2][ord as usize];
+            let iter = &mut [&mut chunks1, &mut chunks2][ord as usize];
             match iter.next() {
                 Some((_, gr)) => if consume_now {
-                    for og in old_groups.drain(..) {
+                    for og in old_chunks.drain(..) {
                         elts.extend(og);
                     }
                     elts.extend(gr);
                 } else {
-                    old_groups.push(gr);
+                    old_chunks.push(gr);
                 },
                 None => break,
             }
         }
-        for og in old_groups.drain(..) {
+        for og in old_chunks.drain(..) {
             elts.extend(og);
         }
-        for gr in groups1.map(&tup1) { elts.extend(gr); }
-        for gr in groups2.map(&tup1) { elts.extend(gr); }
+        for gr in chunks1.map(&tup1) { elts.extend(gr); }
+        for gr in chunks2.map(&tup1) { elts.extend(gr); }
         itertools::assert_equal(&data, elts);
         true
     }
@@ -1367,13 +1342,12 @@ quickcheck! {
 }
 
 quickcheck! {
-    #[allow(deprecated)]
-    fn tree_fold1_f64(mut a: Vec<f64>) -> TestResult {
+    fn tree_reduce_f64(mut a: Vec<f64>) -> TestResult {
         fn collapse_adjacent<F>(x: Vec<f64>, mut f: F) -> Vec<f64>
             where F: FnMut(f64, f64) -> f64
         {
             let mut out = Vec::new();
-            for i in (0..x.len()).step(2) {
+            for i in (0..x.len()).step_by(2) {
                 if i == x.len()-1 {
                     out.push(x[i])
                 } else {
@@ -1387,7 +1361,7 @@ quickcheck! {
             return TestResult::discard();
         }
 
-        let actual = a.iter().cloned().tree_fold1(f64::atan2);
+        let actual = a.iter().cloned().tree_reduce(f64::atan2);
 
         while a.len() > 1 {
             a = collapse_adjacent(a, f64::atan2);
@@ -1529,16 +1503,16 @@ quickcheck! {
         }
     }
 
-    fn correct_grouping_map_by_fold_first_modulo_key(a: Vec<u8>, modulo: u8) -> () {
+    fn correct_grouping_map_by_reduce_modulo_key(a: Vec<u8>, modulo: u8) -> () {
         let modulo = if modulo == 0 { 1 } else { modulo } as u64; // Avoid `% 0`
         let lookup = a.iter().map(|&b| b as u64) // Avoid overflows
             .into_grouping_map_by(|i| i % modulo)
-            .fold_first(|acc, &key, val| {
+            .reduce(|acc, &key, val| {
                 assert!(val % modulo == key);
                 acc + val
             });
 
-        // TODO: Swap `fold1` with stdlib's `fold_first` when it's stabilized
+        // TODO: Swap `fold1` with stdlib's `reduce` when it's stabilized
         let group_map_lookup = a.iter()
             .map(|&b| b as u64)
             .map(|i| (i % modulo, i))
@@ -1982,5 +1956,12 @@ quickcheck! {
         } else {
             result_set.is_empty()
         }
+    }
+
+    fn tail(v: Vec<i32>, n: u8) -> bool {
+        let n = n as usize;
+        let result = &v[v.len().saturating_sub(n)..];
+        itertools::equal(v.iter().tail(n), result)
+            && itertools::equal(v.iter().filter(|_| true).tail(n), result)
     }
 }

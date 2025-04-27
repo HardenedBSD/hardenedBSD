@@ -399,6 +399,9 @@ wtypes = []
 wtypesbase = []
 xinput = []
 
+[lib]
+path = "src/lib.rs"
+
 [package]
 authors = ["Peter Atashian <retep998@gmail.com>"]
 categories = ["external-ffi-bindings", "no-std", "os::windows-apis"]
@@ -411,11 +414,14 @@ name = "winapi"
 readme = "README.md"
 repository = "https://github.com/retep998/winapi-rs"
 version = "0.3.9"
+
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
 features = ["everything", "impl-debug", "impl-default"]
 targets = ["aarch64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-msvc"]
+
 [target.i686-pc-windows-gnu.dependencies.winapi-i686-pc-windows-gnu]
 version = "0.4"
+
 [target.x86_64-pc-windows-gnu.dependencies.winapi-x86_64-pc-windows-gnu]
 version = "0.4"

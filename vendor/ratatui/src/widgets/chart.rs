@@ -1,18 +1,15 @@
-#![warn(missing_docs)]
-use std::{borrow::Cow, cmp::max};
+use std::cmp::max;
 
 use strum::{Display, EnumString};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    buffer::Buffer,
-    layout::{Alignment, Constraint, Rect},
-    style::{Color, Style, Styled},
-    symbols,
-    text::{Line, Span},
+    layout::Flex,
+    prelude::*,
+    style::Styled,
     widgets::{
         canvas::{Canvas, Line as CanvasLine, Points},
-        Block, Borders, Widget,
+        Block,
     },
 };
 
@@ -58,7 +55,7 @@ impl<'a> Axis<'a> {
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn title<T>(mut self, title: T) -> Axis<'a>
+    pub fn title<T>(mut self, title: T) -> Self
     where
         T: Into<Line<'a>>,
     {
@@ -72,7 +69,7 @@ impl<'a> Axis<'a> {
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn bounds(mut self, bounds: [f64; 2]) -> Axis<'a> {
+    pub const fn bounds(mut self, bounds: [f64; 2]) -> Self {
         self.bounds = bounds;
         self
     }
@@ -100,7 +97,7 @@ impl<'a> Axis<'a> {
     ///         .labels(vec!["0".bold(), "25".into(), "50".bold()]);
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn labels(mut self, labels: Vec<Span<'a>>) -> Axis<'a> {
+    pub fn labels(mut self, labels: Vec<Span<'a>>) -> Self {
         self.labels = Some(labels);
         self
     }
@@ -108,6 +105,9 @@ impl<'a> Axis<'a> {
     /// Sets the axis style
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
+    ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
     ///
     /// # Example
     ///
@@ -119,8 +119,8 @@ impl<'a> Axis<'a> {
     /// let axis = Axis::default().red();
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Axis<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 
@@ -132,7 +132,7 @@ impl<'a> Axis<'a> {
     ///
     /// On the X axis, this parameter only affects the first label.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn labels_alignment(mut self, alignment: Alignment) -> Axis<'a> {
+    pub const fn labels_alignment(mut self, alignment: Alignment) -> Self {
         self.labels_alignment = alignment;
         self
     }
@@ -177,14 +177,14 @@ pub enum LegendPosition {
 
 impl LegendPosition {
     fn layout(
-        &self,
+        self,
         area: Rect,
         legend_width: u16,
         legend_height: u16,
         x_title_width: u16,
         y_title_width: u16,
     ) -> Option<Rect> {
-        let mut height_margin = (area.height - legend_height) as i32;
+        let mut height_margin = i32::from(area.height - legend_height);
         if x_title_width != 0 {
             height_margin -= 1;
         }
@@ -273,8 +273,7 @@ impl LegendPosition {
 ///
 /// This is the main element composing a [`Chart`].
 ///
-/// A dataset can be [named](Dataset::name) to be referenced in the legend (NOTE: Currently,
-/// datasets with an empty name will show an empty line in the legend, see [PR 527]).
+/// A dataset can be [named](Dataset::name). Only named datasets will be rendered in the legend.
 ///
 /// After that, you can pass it data with [`Dataset::data`]. Data is an array of `f64` tuples
 /// (`(f64, f64)`), the first element being X and the second Y. It's also worth noting that, unlike
@@ -282,14 +281,12 @@ impl LegendPosition {
 ///
 /// You can also customize the rendering by using [`Dataset::marker`] and [`Dataset::graph_type`].
 ///
-/// [PR 527]: https://github.com/ratatui-org/ratatui/pull/527
-///
 /// # Example
 ///
 /// This example draws a red line between two points.
 ///
 /// ```rust
-/// use ratatui::{prelude::*, widgets::*};
+/// use ratatui::{prelude::*, symbols::Marker, widgets::*};
 ///
 /// let dataset = Dataset::default()
 ///     .name("dataset 1")
@@ -301,7 +298,7 @@ impl LegendPosition {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Dataset<'a> {
     /// Name of the dataset (used in the legend if shown)
-    name: Cow<'a, str>,
+    name: Option<Line<'a>>,
     /// A reference to the actual data
     data: &'a [(f64, f64)],
     /// Symbol used for each points of this dataset
@@ -315,24 +312,26 @@ pub struct Dataset<'a> {
 impl<'a> Dataset<'a> {
     /// Sets the name of the dataset
     ///
-    /// The dataset's name is used when displaying the chart legend. Currently, datasets with an
-    /// empty name will show an empty line in the legend, see [PR 527]).
+    /// The dataset's name is used when displaying the chart legend. Datasets don't require a name
+    /// and can be created without specifying one. Once assigned, a name can't be removed, only
+    /// changed
     ///
-    /// [PR 527]: https://github.com/ratatui-org/ratatui/pull/527
+    /// The name can be styled (see [`Line`] for that), but the dataset's style will always have
+    /// precedence.
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn name<S>(mut self, name: S) -> Dataset<'a>
+    pub fn name<S>(mut self, name: S) -> Self
     where
-        S: Into<Cow<'a, str>>,
+        S: Into<Line<'a>>,
     {
-        self.name = name.into();
+        self.name = Some(name.into());
         self
     }
 
     /// Sets the data points of this dataset
     ///
-    /// Points will then either be rendered as scrattered points or with lines between them
+    /// Points will then either be rendered as scattered points or with lines between them
     /// depending on [`Dataset::graph_type`].
     ///
     /// Data consist in an array of `f64` tuples (`(f64, f64)`), the first element being X and the
@@ -341,7 +340,7 @@ impl<'a> Dataset<'a> {
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn data(mut self, data: &'a [(f64, f64)]) -> Dataset<'a> {
+    pub const fn data(mut self, data: &'a [(f64, f64)]) -> Self {
         self.data = data;
         self
     }
@@ -349,14 +348,14 @@ impl<'a> Dataset<'a> {
     /// Sets the kind of character to use to display this dataset
     ///
     /// You can use dots (`•`), blocks (`█`), bars (`▄`), braille (`⠓`, `⣇`, `⣿`) or half-blocks
-    /// (`█`, `▄`, and `▀`). See [symbols::Marker] for more details.
+    /// (`█`, `▄`, and `▀`). See [`symbols::Marker`] for more details.
     ///
     /// Note [`Marker::Braille`](symbols::Marker::Braille) requires a font that supports Unicode
     /// Braille Patterns.
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn marker(mut self, marker: symbols::Marker) -> Dataset<'a> {
+    pub const fn marker(mut self, marker: symbols::Marker) -> Self {
         self.marker = marker;
         self
     }
@@ -369,7 +368,7 @@ impl<'a> Dataset<'a> {
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn graph_type(mut self, graph_type: GraphType) -> Dataset<'a> {
+    pub const fn graph_type(mut self, graph_type: GraphType) -> Self {
         self.graph_type = graph_type;
         self
     }
@@ -378,6 +377,9 @@ impl<'a> Dataset<'a> {
     ///
     /// The given style will be used to draw the legend and the data points. Currently the legend
     /// will use the entire style whereas the data points will only use the foreground.
+    ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     ///
@@ -391,15 +393,14 @@ impl<'a> Dataset<'a> {
     /// let dataset = Dataset::default().red();
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Dataset<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 }
 
 /// A container that holds all the infos about where to display each elements of the chart (axis,
 /// labels, legend, ...).
-#[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 struct ChartLayout {
     /// Location of the title of the x axis
     title_x: Option<(u16, u16)>,
@@ -475,7 +476,7 @@ struct ChartLayout {
 ///
 /// // Create the chart and link all the parts together
 /// let chart = Chart::new(datasets)
-///     .block(Block::default().title("Chart"))
+///     .block(Block::new().title("Chart"))
 ///     .x_axis(x_axis)
 ///     .y_axis(y_axis);
 /// ```
@@ -493,7 +494,7 @@ pub struct Chart<'a> {
     style: Style,
     /// Constraints used to determine whether the legend should be shown or not
     hidden_legend_constraints: (Constraint, Constraint),
-    /// The position detnermine where the legenth is shown or hide regaurdless of
+    /// The position determine where the length is shown or hide regardless of
     /// `hidden_legend_constraints`
     legend_position: Option<LegendPosition>,
 }
@@ -524,8 +525,8 @@ impl<'a> Chart<'a> {
     ///     Dataset::default().data(&data_points2),
     /// ]);
     /// ```
-    pub fn new(datasets: Vec<Dataset<'a>>) -> Chart<'a> {
-        Chart {
+    pub fn new(datasets: Vec<Dataset<'a>>) -> Self {
+        Self {
             block: None,
             x_axis: Axis::default(),
             y_axis: Axis::default(),
@@ -540,19 +541,22 @@ impl<'a> Chart<'a> {
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn block(mut self, block: Block<'a>) -> Chart<'a> {
+    pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 
     /// Sets the style of the entire chart
     ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
     /// Styles of [`Axis`] and [`Dataset`] will have priority over this style.
     ///
     /// This is a fluent setter method which must be chained or used as it consumes self
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Chart<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 
@@ -574,7 +578,7 @@ impl<'a> Chart<'a> {
     /// );
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn x_axis(mut self, axis: Axis<'a>) -> Chart<'a> {
+    pub fn x_axis(mut self, axis: Axis<'a>) -> Self {
         self.x_axis = axis;
         self
     }
@@ -597,7 +601,7 @@ impl<'a> Chart<'a> {
     /// );
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn y_axis(mut self, axis: Axis<'a>) -> Chart<'a> {
+    pub fn y_axis(mut self, axis: Axis<'a>) -> Self {
         self.y_axis = axis;
         self
     }
@@ -633,7 +637,7 @@ impl<'a> Chart<'a> {
     /// let chart = Chart::new(vec![]).hidden_legend_constraints(constraints);
     /// ```
     ///
-    /// Always hide the legend. Note this can be accomplished more exclicitely by passing `None` to
+    /// Always hide the legend. Note this can be accomplished more explicitly by passing `None` to
     /// [`Chart::legend_position`].
     ///
     /// ```
@@ -642,7 +646,10 @@ impl<'a> Chart<'a> {
     /// let chart = Chart::new(vec![]).hidden_legend_constraints(constraints);
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn hidden_legend_constraints(mut self, constraints: (Constraint, Constraint)) -> Chart<'a> {
+    pub const fn hidden_legend_constraints(
+        mut self,
+        constraints: (Constraint, Constraint),
+    ) -> Self {
         self.hidden_legend_constraints = constraints;
         self
     }
@@ -677,84 +684,101 @@ impl<'a> Chart<'a> {
     /// let chart = Chart::new(vec![]).legend_position(None);
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn legend_position(mut self, position: Option<LegendPosition>) -> Chart<'a> {
+    pub const fn legend_position(mut self, position: Option<LegendPosition>) -> Self {
         self.legend_position = position;
         self
     }
 
     /// Compute the internal layout of the chart given the area. If the area is too small some
     /// elements may be automatically hidden
-    fn layout(&self, area: Rect) -> ChartLayout {
-        let mut layout = ChartLayout::default();
+    fn layout(&self, area: Rect) -> Option<ChartLayout> {
         if area.height == 0 || area.width == 0 {
-            return layout;
+            return None;
         }
         let mut x = area.left();
         let mut y = area.bottom() - 1;
 
+        let mut label_x = None;
         if self.x_axis.labels.is_some() && y > area.top() {
-            layout.label_x = Some(y);
+            label_x = Some(y);
             y -= 1;
         }
 
-        layout.label_y = self.y_axis.labels.as_ref().and(Some(x));
+        let label_y = self.y_axis.labels.as_ref().and(Some(x));
         x += self.max_width_of_labels_left_of_y_axis(area, self.y_axis.labels.is_some());
 
+        let mut axis_x = None;
         if self.x_axis.labels.is_some() && y > area.top() {
-            layout.axis_x = Some(y);
+            axis_x = Some(y);
             y -= 1;
         }
 
+        let mut axis_y = None;
         if self.y_axis.labels.is_some() && x + 1 < area.right() {
-            layout.axis_y = Some(x);
+            axis_y = Some(x);
             x += 1;
         }
 
-        if x < area.right() && y > 1 {
-            layout.graph_area = Rect::new(x, area.top(), area.right() - x, y - area.top() + 1);
-        }
+        let graph_width = area.right().saturating_sub(x);
+        let graph_height = y.saturating_sub(area.top()).saturating_add(1);
+        debug_assert_ne!(
+            graph_width, 0,
+            "Axis and labels should have been hidden due to the small area"
+        );
+        debug_assert_ne!(
+            graph_height, 0,
+            "Axis and labels should have been hidden due to the small area"
+        );
+        let graph_area = Rect::new(x, area.top(), graph_width, graph_height);
 
+        let mut title_x = None;
         if let Some(ref title) = self.x_axis.title {
             let w = title.width() as u16;
-            if w < layout.graph_area.width && layout.graph_area.height > 2 {
-                layout.title_x = Some((x + layout.graph_area.width - w, y));
+            if w < graph_area.width && graph_area.height > 2 {
+                title_x = Some((x + graph_area.width - w, y));
             }
         }
 
+        let mut title_y = None;
         if let Some(ref title) = self.y_axis.title {
             let w = title.width() as u16;
-            if w + 1 < layout.graph_area.width && layout.graph_area.height > 2 {
-                layout.title_y = Some((x, area.top()));
+            if w + 1 < graph_area.width && graph_area.height > 2 {
+                title_y = Some((x, area.top()));
             }
         }
 
+        let mut legend_area = None;
         if let Some(legend_position) = self.legend_position {
-            if let Some(inner_width) = self.datasets.iter().map(|d| d.name.width() as u16).max() {
+            let legends = self
+                .datasets
+                .iter()
+                .filter_map(|d| Some(d.name.as_ref()?.width() as u16));
+
+            if let Some(inner_width) = legends.clone().max() {
                 let legend_width = inner_width + 2;
-                let legend_height = self.datasets.len() as u16 + 2;
-                let max_legend_width = self
-                    .hidden_legend_constraints
-                    .0
-                    .apply(layout.graph_area.width);
-                let max_legend_height = self
-                    .hidden_legend_constraints
-                    .1
-                    .apply(layout.graph_area.height);
+                let legend_height = legends.count() as u16 + 2;
+
+                let [max_legend_width] = Layout::horizontal([self.hidden_legend_constraints.0])
+                    .flex(Flex::Start)
+                    .areas(graph_area);
+
+                let [max_legend_height] = Layout::vertical([self.hidden_legend_constraints.1])
+                    .flex(Flex::Start)
+                    .areas(graph_area);
+
                 if inner_width > 0
-                    && legend_width <= max_legend_width
-                    && legend_height <= max_legend_height
+                    && legend_width <= max_legend_width.width
+                    && legend_height <= max_legend_height.height
                 {
-                    layout.legend_area = legend_position.layout(
-                        layout.graph_area,
+                    legend_area = legend_position.layout(
+                        graph_area,
                         legend_width,
                         legend_height,
-                        layout
-                            .title_x
+                        title_x
                             .and(self.x_axis.title.as_ref())
                             .map(|t| t.width() as u16)
                             .unwrap_or_default(),
-                        layout
-                            .title_y
+                        title_y
                             .and(self.y_axis.title.as_ref())
                             .map(|t| t.width() as u16)
                             .unwrap_or_default(),
@@ -762,7 +786,16 @@ impl<'a> Chart<'a> {
                 }
             }
         }
-        layout
+        Some(ChartLayout {
+            title_x,
+            title_y,
+            label_x,
+            label_y,
+            axis_x,
+            axis_y,
+            legend_area,
+            graph_area,
+        })
     }
 
     fn max_width_of_labels_left_of_y_axis(&self, area: Rect, has_y_axis: bool) -> u16 {
@@ -797,7 +830,7 @@ impl<'a> Chart<'a> {
     }
 
     fn render_x_labels(
-        &mut self,
+        &self,
         buf: &mut Buffer,
         layout: &ChartLayout,
         chart_area: Rect,
@@ -880,7 +913,7 @@ impl<'a> Chart<'a> {
     }
 
     fn render_y_labels(
-        &mut self,
+        &self,
         buf: &mut Buffer,
         layout: &ChartLayout,
         chart_area: Rect,
@@ -904,31 +937,28 @@ impl<'a> Chart<'a> {
     }
 }
 
-impl<'a> Widget for Chart<'a> {
-    fn render(mut self, area: Rect, buf: &mut Buffer) {
-        if area.area() == 0 {
-            return;
-        }
+impl Widget for Chart<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.render_ref(area, buf);
+    }
+}
+
+impl WidgetRef for Chart<'_> {
+    #[allow(clippy::too_many_lines)]
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         buf.set_style(area, self.style);
+
+        self.block.render_ref(area, buf);
+        let chart_area = self.block.inner_if_some(area);
+        let Some(layout) = self.layout(chart_area) else {
+            return;
+        };
+        let graph_area = layout.graph_area;
+
         // Sample the style of the entire widget. This sample will be used to reset the style of
         // the cells that are part of the components put on top of the grah area (i.e legend and
         // axis names).
         let original_style = buf.get(area.left(), area.top()).style();
-
-        let chart_area = match self.block.take() {
-            Some(b) => {
-                let inner_area = b.inner(area);
-                b.render(area, buf);
-                inner_area
-            }
-            None => area,
-        };
-
-        let layout = self.layout(chart_area);
-        let graph_area = layout.graph_area;
-        if graph_area.width < 1 || graph_area.height < 1 {
-            return;
-        }
 
         self.render_x_labels(buf, &layout, chart_area, graph_area);
         self.render_y_labels(buf, &layout, chart_area, graph_area);
@@ -968,7 +998,7 @@ impl<'a> Widget for Chart<'a> {
                         coords: dataset.data,
                         color: dataset.style.fg.unwrap_or(Color::Reset),
                     });
-                    if let GraphType::Line = dataset.graph_type {
+                    if dataset.graph_type == GraphType::Line {
                         for data in dataset.data.windows(2) {
                             ctx.draw(&CanvasLine {
                                 x1: data[0].0,
@@ -984,7 +1014,7 @@ impl<'a> Widget for Chart<'a> {
         }
 
         if let Some((x, y)) = layout.title_x {
-            let title = self.x_axis.title.unwrap();
+            let title = self.x_axis.title.as_ref().unwrap();
             let width = graph_area
                 .right()
                 .saturating_sub(x)
@@ -998,11 +1028,11 @@ impl<'a> Widget for Chart<'a> {
                 },
                 original_style,
             );
-            buf.set_line(x, y, &title, width);
+            buf.set_line(x, y, title, width);
         }
 
         if let Some((x, y)) = layout.title_y {
-            let title = self.y_axis.title.unwrap();
+            let title = self.y_axis.title.as_ref().unwrap();
             let width = graph_area
                 .right()
                 .saturating_sub(x)
@@ -1016,20 +1046,28 @@ impl<'a> Widget for Chart<'a> {
                 },
                 original_style,
             );
-            buf.set_line(x, y, &title, width);
+            buf.set_line(x, y, title, width);
         }
 
         if let Some(legend_area) = layout.legend_area {
             buf.set_style(legend_area, original_style);
-            Block::default()
-                .borders(Borders::ALL)
-                .render(legend_area, buf);
-            for (i, dataset) in self.datasets.iter().enumerate() {
-                buf.set_string(
-                    legend_area.x + 1,
-                    legend_area.y + 1 + i as u16,
-                    &dataset.name,
-                    dataset.style,
+            Block::bordered().render(legend_area, buf);
+
+            for (i, (dataset_name, dataset_style)) in self
+                .datasets
+                .iter()
+                .filter_map(|ds| Some((ds.name.as_ref()?, ds.style())))
+                .enumerate()
+            {
+                let name = dataset_name.clone().patch_style(dataset_style);
+                name.render(
+                    Rect {
+                        x: legend_area.x + 1,
+                        y: legend_area.y + 1 + i as u16,
+                        width: legend_area.width - 2,
+                        height: 1,
+                    },
+                    buf,
                 );
             }
         }
@@ -1037,47 +1075,47 @@ impl<'a> Widget for Chart<'a> {
 }
 
 impl<'a> Styled for Axis<'a> {
-    type Item = Axis<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         self.style(style)
     }
 }
 
 impl<'a> Styled for Dataset<'a> {
-    type Item = Dataset<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         self.style(style)
     }
 }
 
 impl<'a> Styled for Chart<'a> {
-    type Item = Chart<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         self.style(style)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use strum::ParseError;
 
     use super::*;
-    use crate::style::{Modifier, Stylize};
 
     struct LegendTestCase {
         chart_area: Rect,
@@ -1111,7 +1149,7 @@ mod tests {
                 .x_axis(Axis::default().title("X axis"))
                 .y_axis(Axis::default().title("Y axis"))
                 .hidden_legend_constraints(case.hidden_legend_constraints);
-            let layout = chart.layout(case.chart_area);
+            let layout = chart.layout(case.chart_area).unwrap();
             assert_eq!(layout.legend_area, case.legend_area);
         }
     }
@@ -1125,7 +1163,7 @@ mod tests {
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::DIM)
-        )
+        );
     }
 
     #[test]
@@ -1137,7 +1175,7 @@ mod tests {
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::DIM)
-        )
+        );
     }
 
     #[test]
@@ -1149,7 +1187,7 @@ mod tests {
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::DIM)
-        )
+        );
     }
 
     #[test]
@@ -1172,21 +1210,59 @@ mod tests {
             .x_axis(Axis::default().title("xxxxxxxxxxxxxxxx"));
         let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 4));
         widget.render(buffer.area, &mut buffer);
+        assert_eq!(buffer, Buffer::with_lines(vec![" ".repeat(8); 4]));
+    }
 
-        assert_eq!(buffer, Buffer::with_lines(vec![" ".repeat(8); 4]))
+    #[test]
+    fn datasets_without_name_dont_contribute_to_legend_height() {
+        let data_named_1 = Dataset::default().name("data1"); // must occupy a row in legend
+        let data_named_2 = Dataset::default().name(""); // must occupy a row in legend, even if name is empty
+        let data_unnamed = Dataset::default(); // must not occupy a row in legend
+        let widget = Chart::new(vec![data_named_1, data_unnamed, data_named_2]);
+        let buffer = Buffer::empty(Rect::new(0, 0, 50, 25));
+        let layout = widget.layout(buffer.area).unwrap();
+
+        assert!(layout.legend_area.is_some());
+        assert_eq!(layout.legend_area.unwrap().height, 4); // 2 for borders, 2 for rows
+    }
+
+    #[test]
+    fn no_legend_if_no_named_datasets() {
+        let dataset = Dataset::default();
+        let widget = Chart::new(vec![dataset; 3]);
+        let buffer = Buffer::empty(Rect::new(0, 0, 50, 25));
+        let layout = widget.layout(buffer.area).unwrap();
+
+        assert!(layout.legend_area.is_none());
+    }
+
+    #[test]
+    fn dataset_legend_style_is_patched() {
+        let long_dataset_name = Dataset::default().name("Very long name");
+        let short_dataset =
+            Dataset::default().name(Line::from("Short name").alignment(Alignment::Right));
+        let widget = Chart::new(vec![long_dataset_name, short_dataset])
+            .hidden_legend_constraints((100.into(), 100.into()));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 5));
+        widget.render(buffer.area, &mut buffer);
+        let expected = Buffer::with_lines([
+            "    ┌──────────────┐",
+            "    │Very long name│",
+            "    │    Short name│",
+            "    └──────────────┘",
+            "                    ",
+        ]);
+        assert_eq!(buffer, expected);
     }
 
     #[test]
     fn test_chart_have_a_topleft_legend() {
         let chart = Chart::new(vec![Dataset::default().name("Ds1")])
             .legend_position(Some(LegendPosition::TopLeft));
-
         let area = Rect::new(0, 0, 30, 20);
         let mut buffer = Buffer::empty(area);
-
         chart.render(buffer.area, &mut buffer);
-
-        let expected = Buffer::with_lines(vec![
+        let expected = Buffer::with_lines([
             "┌───┐                         ",
             "│Ds1│                         ",
             "└───┘                         ",
@@ -1208,7 +1284,6 @@ mod tests {
             "                              ",
             "                              ",
         ]);
-
         assert_eq!(buffer, expected);
     }
 
@@ -1216,13 +1291,10 @@ mod tests {
     fn test_chart_have_a_long_y_axis_title_overlapping_legend() {
         let chart = Chart::new(vec![Dataset::default().name("Ds1")])
             .y_axis(Axis::default().title("The title overlap a legend."));
-
         let area = Rect::new(0, 0, 30, 20);
         let mut buffer = Buffer::empty(area);
-
         chart.render(buffer.area, &mut buffer);
-
-        let expected = Buffer::with_lines(vec![
+        let expected = Buffer::with_lines([
             "The title overlap a legend.   ",
             "                         ┌───┐",
             "                         │Ds1│",
@@ -1244,7 +1316,6 @@ mod tests {
             "                              ",
             "                              ",
         ]);
-
         assert_eq!(buffer, expected);
     }
 
@@ -1252,13 +1323,10 @@ mod tests {
     fn test_chart_have_overflowed_y_axis() {
         let chart = Chart::new(vec![Dataset::default().name("Ds1")])
             .y_axis(Axis::default().title("The title overlap a legend."));
-
         let area = Rect::new(0, 0, 10, 10);
         let mut buffer = Buffer::empty(area);
-
         chart.render(buffer.area, &mut buffer);
-
-        let expected = Buffer::with_lines(vec![
+        let expected = Buffer::with_lines([
             "          ",
             "          ",
             "          ",
@@ -1270,7 +1338,6 @@ mod tests {
             "          ",
             "          ",
         ]);
-
         assert_eq!(buffer, expected);
     }
 
@@ -1279,13 +1346,9 @@ mod tests {
         let name = "Data";
         let chart = Chart::new(vec![Dataset::default().name(name)])
             .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
-
         let area = Rect::new(0, 0, name.len() as u16 + 2, 3);
         let mut buffer = Buffer::empty(area);
-
-        let expected = Buffer::with_lines(vec!["┌────┐", "│Data│", "└────┘"]);
-
-        [
+        for position in [
             LegendPosition::TopLeft,
             LegendPosition::Top,
             LegendPosition::TopRight,
@@ -1294,176 +1357,107 @@ mod tests {
             LegendPosition::Bottom,
             LegendPosition::BottomLeft,
             LegendPosition::BottomRight,
-        ]
-        .iter()
-        .for_each(|&position| {
+        ] {
             let chart = chart.clone().legend_position(Some(position));
             buffer.reset();
             chart.render(buffer.area, &mut buffer);
+            #[rustfmt::skip]
+            let expected = Buffer::with_lines([
+                "┌────┐",
+                "│Data│",
+                "└────┘",
+            ]);
             assert_eq!(buffer, expected);
-        });
+        }
     }
 
-    #[test]
-    fn test_legend_of_chart_have_odd_margin_size() {
+    #[rstest]
+    #[case(Some(LegendPosition::TopLeft), [
+        "┌────┐   ",
+        "│Data│   ",
+        "└────┘   ",
+        "         ",
+        "         ",
+        "         ",
+    ])]
+    #[case(Some(LegendPosition::Top), [
+        " ┌────┐  ",
+        " │Data│  ",
+        " └────┘  ",
+        "         ",
+        "         ",
+        "         ",
+    ])]
+    #[case(Some(LegendPosition::TopRight), [
+        "   ┌────┐",
+        "   │Data│",
+        "   └────┘",
+        "         ",
+        "         ",
+        "         ",
+    ])]
+    #[case(Some(LegendPosition::Left), [
+        "         ",
+        "┌────┐   ",
+        "│Data│   ",
+        "└────┘   ",
+        "         ",
+        "         ",
+    ])]
+    #[case(Some(LegendPosition::Right), [
+        "         ",
+        "   ┌────┐",
+        "   │Data│",
+        "   └────┘",
+        "         ",
+        "         ",
+    ])]
+    #[case(Some(LegendPosition::BottomLeft), [
+        "         ",
+        "         ",
+        "         ",
+        "┌────┐   ",
+        "│Data│   ",
+        "└────┘   ",
+    ])]
+    #[case(Some(LegendPosition::Bottom), [
+        "         ",
+        "         ",
+        "         ",
+        " ┌────┐  ",
+        " │Data│  ",
+        " └────┘  ",
+    ])]
+    #[case(Some(LegendPosition::BottomRight), [
+        "         ",
+        "         ",
+        "         ",
+        "   ┌────┐",
+        "   │Data│",
+        "   └────┘",
+    ])]
+    #[case(None, [
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+        "         ",
+    ])]
+    fn test_legend_of_chart_have_odd_margin_size<'line, Lines>(
+        #[case] legend_position: Option<LegendPosition>,
+        #[case] expected: Lines,
+    ) where
+        Lines: IntoIterator,
+        Lines::Item: Into<Line<'line>>,
+    {
         let name = "Data";
-        let base_chart = Chart::new(vec![Dataset::default().name(name)])
-            .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
-
         let area = Rect::new(0, 0, name.len() as u16 + 2 + 3, 3 + 3);
         let mut buffer = Buffer::empty(area);
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::TopLeft));
-        buffer.reset();
+        let chart = Chart::new(vec![Dataset::default().name(name)])
+            .legend_position(legend_position)
+            .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)));
         chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "┌────┐   ",
-                "│Data│   ",
-                "└────┘   ",
-                "         ",
-                "         ",
-                "         ",
-            ])
-        );
-        buffer.reset();
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::Top));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                " ┌────┐  ",
-                " │Data│  ",
-                " └────┘  ",
-                "         ",
-                "         ",
-                "         ",
-            ])
-        );
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::TopRight));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "   ┌────┐",
-                "   │Data│",
-                "   └────┘",
-                "         ",
-                "         ",
-                "         ",
-            ])
-        );
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::Left));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "┌────┐   ",
-                "│Data│   ",
-                "└────┘   ",
-                "         ",
-                "         ",
-            ])
-        );
-        buffer.reset();
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::Right));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "   ┌────┐",
-                "   │Data│",
-                "   └────┘",
-                "         ",
-                "         ",
-            ])
-        );
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::BottomLeft));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "         ",
-                "         ",
-                "┌────┐   ",
-                "│Data│   ",
-                "└────┘   ",
-            ])
-        );
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::Bottom));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "         ",
-                "         ",
-                " ┌────┐  ",
-                " │Data│  ",
-                " └────┘  ",
-            ])
-        );
-
-        let chart = base_chart
-            .clone()
-            .legend_position(Some(LegendPosition::BottomRight));
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "         ",
-                "         ",
-                "   ┌────┐",
-                "   │Data│",
-                "   └────┘",
-            ])
-        );
-
-        let chart = base_chart.clone().legend_position(None);
-        buffer.reset();
-        chart.render(buffer.area, &mut buffer);
-        assert_eq!(
-            buffer,
-            Buffer::with_lines(vec![
-                "         ",
-                "         ",
-                "         ",
-                "         ",
-                "         ",
-                "         ",
-            ])
-        );
+        assert_eq!(buffer, Buffer::with_lines(expected));
     }
 }

@@ -19,14 +19,14 @@ use crate::common::CapRights;
 #[derive(Debug)]
 pub enum Fcntl {
     /// Get descriptor status flags.
-    GetFL = 0x8,
+    GetFL = libc::CAP_FCNTL_GETFL,
     /// Set descriptor status flags.
-    SetFL = 0x10,
+    SetFL = libc::CAP_FCNTL_SETFL,
     /// Get the process ID or process group currently receiving SIGIO and SIGURG
     /// signals.
-    GetOwn = 0x20,
+    GetOwn = libc::CAP_FCNTL_GETOWN,
     /// Set the process or process group to receive SIGIO and SIGURG signal.
-    SetOwn = 0x40,
+    SetOwn = libc::CAP_FCNTL_SETOWN,
 }
 
 /// Used to construct a new set of allowed fcntl commands.

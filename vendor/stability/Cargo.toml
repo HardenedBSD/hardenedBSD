@@ -10,9 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
+rust-version = "1.60"
 name = "stability"
-version = "0.1.1"
+version = "0.2.1"
 authors = ["Stephen M. Coakley <me@stephencoakley.com>"]
 description = "Rust API stability attributes for the rest of us."
 documentation = "https://docs.rs/stability/"
@@ -22,9 +23,13 @@ repository = "https://github.com/sagebind/stability"
 
 [lib]
 proc-macro = true
+
 [dependencies.quote]
 version = "1"
 
 [dependencies.syn]
-version = "1"
-features = ["derive", "full"]
+version = "2"
+features = [
+    "derive",
+    "full",
+]

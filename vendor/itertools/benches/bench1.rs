@@ -7,10 +7,6 @@ use std::cmp;
 use std::iter::repeat;
 use std::ops::{Add, Range};
 
-mod extra;
-
-use crate::extra::ZipSlices;
-
 fn slice_iter(c: &mut Criterion) {
     let xs: Vec<_> = repeat(1i32).take(20).collect();
 
@@ -116,72 +112,6 @@ fn zip_slices_ziptuple(c: &mut Criterion) {
                 black_box(x);
                 black_box(y);
             }
-        })
-    });
-}
-
-fn zipslices(c: &mut Criterion) {
-    let xs = vec![0; 1024];
-    let ys = vec![0; 768];
-    let xs = black_box(xs);
-    let ys = black_box(ys);
-
-    c.bench_function("zipslices", move |b| {
-        b.iter(|| {
-            for (&x, &y) in ZipSlices::new(&xs, &ys) {
-                black_box(x);
-                black_box(y);
-            }
-        })
-    });
-}
-
-fn zipslices_mut(c: &mut Criterion) {
-    let xs = vec![0; 1024];
-    let ys = vec![0; 768];
-    let xs = black_box(xs);
-    let mut ys = black_box(ys);
-
-    c.bench_function("zipslices mut", move |b| {
-        b.iter(|| {
-            for (&x, &mut y) in ZipSlices::from_slices(&xs[..], &mut ys[..]) {
-                black_box(x);
-                black_box(y);
-            }
-        })
-    });
-}
-
-fn zipdot_i32_zipslices(c: &mut Criterion) {
-    let xs = vec![2; 1024];
-    let ys = vec![2; 768];
-    let xs = black_box(xs);
-    let ys = black_box(ys);
-
-    c.bench_function("zipdot i32 zipslices", move |b| {
-        b.iter(|| {
-            let mut s = 0i32;
-            for (&x, &y) in ZipSlices::new(&xs, &ys) {
-                s += x * y;
-            }
-            s
-        })
-    });
-}
-
-fn zipdot_f32_zipslices(c: &mut Criterion) {
-    let xs = vec![2f32; 1024];
-    let ys = vec![2f32; 768];
-    let xs = black_box(xs);
-    let ys = black_box(ys);
-
-    c.bench_function("zipdot f32 zipslices", move |b| {
-        b.iter(|| {
-            let mut s = 0.;
-            for (&x, &y) in ZipSlices::new(&xs, &ys) {
-                s += x * y;
-            }
-            s
         })
     });
 }
@@ -390,7 +320,7 @@ fn zip_unchecked_counted_loop3(c: &mut Criterion) {
     });
 }
 
-fn group_by_lazy_1(c: &mut Criterion) {
+fn chunk_by_lazy_1(c: &mut Criterion) {
     let mut data = vec![0; 1024];
     for (index, elt) in data.iter_mut().enumerate() {
         *elt = index / 10;
@@ -398,10 +328,10 @@ fn group_by_lazy_1(c: &mut Criterion) {
 
     let data = black_box(data);
 
-    c.bench_function("group by lazy 1", move |b| {
+    c.bench_function("chunk by lazy 1", move |b| {
         b.iter(|| {
-            for (_key, group) in &data.iter().group_by(|elt| **elt) {
-                for elt in group {
+            for (_key, chunk) in &data.iter().chunk_by(|elt| **elt) {
+                for elt in chunk {
                     black_box(elt);
                 }
             }
@@ -409,7 +339,7 @@ fn group_by_lazy_1(c: &mut Criterion) {
     });
 }
 
-fn group_by_lazy_2(c: &mut Criterion) {
+fn chunk_by_lazy_2(c: &mut Criterion) {
     let mut data = vec![0; 1024];
     for (index, elt) in data.iter_mut().enumerate() {
         *elt = index / 2;
@@ -417,10 +347,10 @@ fn group_by_lazy_2(c: &mut Criterion) {
 
     let data = black_box(data);
 
-    c.bench_function("group by lazy 2", move |b| {
+    c.bench_function("chunk by lazy 2", move |b| {
         b.iter(|| {
-            for (_key, group) in &data.iter().group_by(|elt| **elt) {
-                for elt in group {
+            for (_key, chunk) in &data.iter().chunk_by(|elt| **elt) {
+                for elt in chunk {
                     black_box(elt);
                 }
             }
@@ -436,8 +366,8 @@ fn slice_chunks(c: &mut Criterion) {
 
     c.bench_function("slice chunks", move |b| {
         b.iter(|| {
-            for group in data.chunks(sz) {
-                for elt in group {
+            for chunk in data.chunks(sz) {
+                for elt in chunk {
                     black_box(elt);
                 }
             }
@@ -453,8 +383,8 @@ fn chunks_lazy_1(c: &mut Criterion) {
 
     c.bench_function("chunks lazy 1", move |b| {
         b.iter(|| {
-            for group in &data.iter().chunks(sz) {
-                for elt in group {
+            for chunk in &data.iter().chunks(sz) {
+                for elt in chunk {
                     black_box(elt);
                 }
             }
@@ -801,10 +731,6 @@ criterion_group!(
     zipdot_f32_default_zip,
     zip_default_zip3,
     zip_slices_ziptuple,
-    zipslices,
-    zipslices_mut,
-    zipdot_i32_zipslices,
-    zipdot_f32_zipslices,
     zip_checked_counted_loop,
     zipdot_i32_checked_counted_loop,
     zipdot_f32_checked_counted_loop,
@@ -813,8 +739,8 @@ criterion_group!(
     zipdot_i32_unchecked_counted_loop,
     zipdot_f32_unchecked_counted_loop,
     zip_unchecked_counted_loop3,
-    group_by_lazy_1,
-    group_by_lazy_2,
+    chunk_by_lazy_1,
+    chunk_by_lazy_2,
     slice_chunks,
     chunks_lazy_1,
     equal,

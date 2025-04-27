@@ -1,7 +1,6 @@
-use std::{
-    fmt::{self, Debug, Display},
-    str::FromStr,
-};
+#![allow(clippy::unreadable_literal)]
+
+use std::{fmt, str::FromStr};
 
 /// ANSI Color
 ///
@@ -35,6 +34,9 @@ use std::{
 /// - we support `-` and `_` and ` ` as separators for all colors
 /// - we support both `gray` and `grey` spellings
 ///
+/// `From<Color> for Style` is implemented by creating a style with the foreground color set to the
+/// given color. This allows you to use colors anywhere that accepts `Into<Style>`.
+///
 /// # Example
 ///
 /// ```
@@ -61,7 +63,6 @@ use std::{
 ///
 /// [ANSI color table]: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Color {
     /// Resets the foreground or background color
     #[default]
@@ -124,12 +125,123 @@ pub enum Color {
     Indexed(u8),
 }
 
+impl Color {
+    /// Convert a u32 to a Color
+    ///
+    /// The u32 should be in the format 0x00RRGGBB.
+    pub const fn from_u32(u: u32) -> Self {
+        let r = (u >> 16) as u8;
+        let g = (u >> 8) as u8;
+        let b = u as u8;
+        Self::Rgb(r, g, b)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Color {
+    /// This utilises the [`fmt::Display`] implementation for serialization.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Color {
+    /// This is used to deserialize a value into Color via serde.
+    ///
+    /// This implementation uses the `FromStr` trait to deserialize strings, so named colours, RGB,
+    /// and indexed values are able to be deserialized. In addition, values that were produced by
+    /// the the older serialization implementation of Color are also able to be deserialized.
+    ///
+    /// Prior to v0.26.0, Ratatui would be serialized using a map for indexed and RGB values, for
+    /// examples in json `{"Indexed": 10}` and `{"Rgb": [255, 0, 255]}` respectively. Now they are
+    /// serialized using the string representation of the index and the RGB hex value, for example
+    /// in json it would now be `"10"` and `"#FF00FF"` respectively.
+    ///
+    /// See the [`Color`] documentation for more information on color names.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ratatui::prelude::*;
+    ///
+    /// #[derive(Debug, serde::Deserialize)]
+    /// struct Theme {
+    ///     color: Color,
+    /// }
+    ///
+    /// # fn get_theme() -> Result<(), serde_json::Error> {
+    /// let theme: Theme = serde_json::from_str(r#"{"color": "bright-white"}"#)?;
+    /// assert_eq!(theme.color, Color::White);
+    ///
+    /// let theme: Theme = serde_json::from_str(r##"{"color": "#00FF00"}"##)?;
+    /// assert_eq!(theme.color, Color::Rgb(0, 255, 0));
+    ///
+    /// let theme: Theme = serde_json::from_str(r#"{"color": "42"}"#)?;
+    /// assert_eq!(theme.color, Color::Indexed(42));
+    ///
+    /// let err = serde_json::from_str::<Theme>(r#"{"color": "invalid"}"#).unwrap_err();
+    /// assert!(err.is_data());
+    /// assert_eq!(
+    ///     err.to_string(),
+    ///     "Failed to parse Colors at line 1 column 20"
+    /// );
+    ///
+    /// // Deserializing from the previous serialization implementation
+    /// let theme: Theme = serde_json::from_str(r#"{"color": {"Rgb":[255,0,255]}}"#)?;
+    /// assert_eq!(theme.color, Color::Rgb(255, 0, 255));
+    ///
+    /// let theme: Theme = serde_json::from_str(r#"{"color": {"Indexed":10}}"#)?;
+    /// assert_eq!(theme.color, Color::Indexed(10));
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Colors are currently serialized with the `Display` implementation, so
+        /// RGB values are serialized via hex, for example "#FFFFFF".
+        ///
+        /// Previously they were serialized using serde derive, which encoded
+        /// RGB values as a map, for example { "rgb": [255, 255, 255] }.
+        ///
+        /// The deserialization implementation utilises a `Helper` struct
+        /// to be able to support both formats for backwards compatibility.
+        #[derive(serde::Deserialize)]
+        enum ColorWrapper {
+            Rgb(u8, u8, u8),
+            Indexed(u8),
+        }
+
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum ColorFormat {
+            V2(String),
+            V1(ColorWrapper),
+        }
+
+        let multi_type = ColorFormat::deserialize(deserializer)
+            .map_err(|err| serde::de::Error::custom(format!("Failed to parse Colors: {err}")))?;
+        match multi_type {
+            ColorFormat::V2(s) => FromStr::from_str(&s).map_err(serde::de::Error::custom),
+            ColorFormat::V1(color_wrapper) => match color_wrapper {
+                ColorWrapper::Rgb(red, green, blue) => Ok(Self::Rgb(red, green, blue)),
+                ColorWrapper::Indexed(index) => Ok(Self::Indexed(index)),
+            },
+        }
+    }
+}
+
 /// Error type indicating a failure to parse a color string.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ParseColorError;
 
-impl std::fmt::Display for ParseColorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ParseColorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Failed to parse Colors")
     }
 }
@@ -201,16 +313,7 @@ impl FromStr for Color {
                 _ => {
                     if let Ok(index) = s.parse::<u8>() {
                         Self::Indexed(index)
-                    } else if let (Ok(r), Ok(g), Ok(b)) = {
-                        if !s.starts_with('#') || s.len() != 7 {
-                            return Err(ParseColorError);
-                        }
-                        (
-                            u8::from_str_radix(&s[1..3], 16),
-                            u8::from_str_radix(&s[3..5], 16),
-                            u8::from_str_radix(&s[5..7], 16),
-                        )
-                    } {
+                    } else if let Some((r, g, b)) = parse_hex_color(s) {
                         Self::Rgb(r, g, b)
                     } else {
                         return Err(ParseColorError);
@@ -221,29 +324,148 @@ impl FromStr for Color {
     }
 }
 
-impl Display for Color {
+fn parse_hex_color(input: &str) -> Option<(u8, u8, u8)> {
+    if !input.starts_with('#') || input.len() != 7 {
+        return None;
+    }
+    let r = u8::from_str_radix(input.get(1..3)?, 16).ok()?;
+    let g = u8::from_str_radix(input.get(3..5)?, 16).ok()?;
+    let b = u8::from_str_radix(input.get(5..7)?, 16).ok()?;
+    Some((r, g, b))
+}
+
+impl fmt::Display for Color {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Color::Reset => write!(f, "Reset"),
-            Color::Black => write!(f, "Black"),
-            Color::Red => write!(f, "Red"),
-            Color::Green => write!(f, "Green"),
-            Color::Yellow => write!(f, "Yellow"),
-            Color::Blue => write!(f, "Blue"),
-            Color::Magenta => write!(f, "Magenta"),
-            Color::Cyan => write!(f, "Cyan"),
-            Color::Gray => write!(f, "Gray"),
-            Color::DarkGray => write!(f, "DarkGray"),
-            Color::LightRed => write!(f, "LightRed"),
-            Color::LightGreen => write!(f, "LightGreen"),
-            Color::LightYellow => write!(f, "LightYellow"),
-            Color::LightBlue => write!(f, "LightBlue"),
-            Color::LightMagenta => write!(f, "LightMagenta"),
-            Color::LightCyan => write!(f, "LightCyan"),
-            Color::White => write!(f, "White"),
-            Color::Rgb(r, g, b) => write!(f, "#{:02X}{:02X}{:02X}", r, g, b),
-            Color::Indexed(i) => write!(f, "{}", i),
+            Self::Reset => write!(f, "Reset"),
+            Self::Black => write!(f, "Black"),
+            Self::Red => write!(f, "Red"),
+            Self::Green => write!(f, "Green"),
+            Self::Yellow => write!(f, "Yellow"),
+            Self::Blue => write!(f, "Blue"),
+            Self::Magenta => write!(f, "Magenta"),
+            Self::Cyan => write!(f, "Cyan"),
+            Self::Gray => write!(f, "Gray"),
+            Self::DarkGray => write!(f, "DarkGray"),
+            Self::LightRed => write!(f, "LightRed"),
+            Self::LightGreen => write!(f, "LightGreen"),
+            Self::LightYellow => write!(f, "LightYellow"),
+            Self::LightBlue => write!(f, "LightBlue"),
+            Self::LightMagenta => write!(f, "LightMagenta"),
+            Self::LightCyan => write!(f, "LightCyan"),
+            Self::White => write!(f, "White"),
+            Self::Rgb(r, g, b) => write!(f, "#{r:02X}{g:02X}{b:02X}"),
+            Self::Indexed(i) => write!(f, "{i}"),
         }
+    }
+}
+
+impl Color {
+    /// Converts a HSL representation to a `Color::Rgb` instance.
+    ///
+    /// The `from_hsl` function converts the Hue, Saturation and Lightness values to a
+    /// corresponding `Color` RGB equivalent.
+    ///
+    /// Hue values should be in the range [0, 360].
+    /// Saturation and L values should be in the range [0, 100].
+    /// Values that are not in the range are clamped to be within the range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ratatui::prelude::*;
+    ///
+    /// let color: Color = Color::from_hsl(360.0, 100.0, 100.0);
+    /// assert_eq!(color, Color::Rgb(255, 255, 255));
+    ///
+    /// let color: Color = Color::from_hsl(0.0, 0.0, 0.0);
+    /// assert_eq!(color, Color::Rgb(0, 0, 0));
+    /// ```
+    pub fn from_hsl(h: f64, s: f64, l: f64) -> Self {
+        // Clamp input values to valid ranges
+        let h = h.clamp(0.0, 360.0);
+        let s = s.clamp(0.0, 100.0);
+        let l = l.clamp(0.0, 100.0);
+
+        // Delegate to the function for normalized HSL to RGB conversion
+        normalized_hsl_to_rgb(h / 360.0, s / 100.0, l / 100.0)
+    }
+}
+
+/// Converts normalized HSL (Hue, Saturation, Lightness) values to RGB (Red, Green, Blue) color
+/// representation. H, S, and L values should be in the range [0, 1].
+///
+/// Based on <https://github.com/killercup/hsl-rs/blob/b8a30e11afd75f262e0550725333293805f4ead0/src/lib.rs>
+fn normalized_hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> Color {
+    // This function can be made into `const` in the future.
+    // This comment contains the relevant information for making it `const`.
+    //
+    // If it is `const` and made public, users can write the following:
+    //
+    // ```rust
+    // const SLATE_50: Color = normalized_hsl_to_rgb(0.210, 0.40, 0.98);
+    // ```
+    //
+    // For it to be const now, we need `#![feature(const_fn_floating_point_arithmetic)]`
+    // Tracking issue: https://github.com/rust-lang/rust/issues/57241
+    //
+    // We would also need to remove the use of `.round()` in this function, i.e.:
+    //
+    // ```rust
+    // Color::Rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+    // ```
+
+    // Initialize RGB components
+    let red: f64;
+    let green: f64;
+    let blue: f64;
+
+    // Check if the color is achromatic (grayscale)
+    if saturation == 0.0 {
+        red = lightness;
+        green = lightness;
+        blue = lightness;
+    } else {
+        // Calculate RGB components for colored cases
+        let q = if lightness < 0.5 {
+            lightness * (1.0 + saturation)
+        } else {
+            lightness + saturation - lightness * saturation
+        };
+        let p = 2.0 * lightness - q;
+        red = hue_to_rgb(p, q, hue + 1.0 / 3.0);
+        green = hue_to_rgb(p, q, hue);
+        blue = hue_to_rgb(p, q, hue - 1.0 / 3.0);
+    }
+
+    // Scale RGB components to the range [0, 255] and create a Color::Rgb instance
+    Color::Rgb(
+        (red * 255.0).round() as u8,
+        (green * 255.0).round() as u8,
+        (blue * 255.0).round() as u8,
+    )
+}
+
+/// Helper function to calculate RGB component for a specific hue value.
+fn hue_to_rgb(p: f64, q: f64, t: f64) -> f64 {
+    // Adjust the hue value to be within the valid range [0, 1]
+    let mut t = t;
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+
+    // Calculate the RGB component based on the hue value
+    if t < 1.0 / 6.0 {
+        p + (q - p) * 6.0 * t
+    } else if t < 1.0 / 2.0 {
+        q
+    } else if t < 2.0 / 3.0 {
+        p + (q - p) * (2.0 / 3.0 - t) * 6.0
+    } else {
+        p
     }
 }
 
@@ -251,7 +473,46 @@ impl Display for Color {
 mod tests {
     use std::error::Error;
 
+    #[cfg(feature = "serde")]
+    use serde::de::{Deserialize, IntoDeserializer};
+
     use super::*;
+
+    #[test]
+    fn test_hsl_to_rgb() {
+        // Test with valid HSL values
+        let color = Color::from_hsl(120.0, 50.0, 75.0);
+        assert_eq!(color, Color::Rgb(159, 223, 159));
+
+        // Test with H value at upper bound
+        let color = Color::from_hsl(360.0, 50.0, 75.0);
+        assert_eq!(color, Color::Rgb(223, 159, 159));
+
+        // Test with H value exceeding the upper bound
+        let color = Color::from_hsl(400.0, 50.0, 75.0);
+        assert_eq!(color, Color::Rgb(223, 159, 159));
+
+        // Test with S and L values exceeding the upper bound
+        let color = Color::from_hsl(240.0, 120.0, 150.0);
+        assert_eq!(color, Color::Rgb(255, 255, 255));
+
+        // Test with H, S, and L values below the lower bound
+        let color = Color::from_hsl(-20.0, -50.0, -20.0);
+        assert_eq!(color, Color::Rgb(0, 0, 0));
+
+        // Test with S and L values below the lower bound
+        let color = Color::from_hsl(60.0, -20.0, -10.0);
+        assert_eq!(color, Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn from_u32() {
+        assert_eq!(Color::from_u32(0x000000), Color::Rgb(0, 0, 0));
+        assert_eq!(Color::from_u32(0xFF0000), Color::Rgb(255, 0, 0));
+        assert_eq!(Color::from_u32(0x00FF00), Color::Rgb(0, 255, 0));
+        assert_eq!(Color::from_u32(0x0000FF), Color::Rgb(0, 0, 255));
+        assert_eq!(Color::from_u32(0xFFFFFF), Color::Rgb(255, 255, 255));
+    }
 
     #[test]
     fn from_rgb_color() {
@@ -327,6 +588,7 @@ mod tests {
             "abcdef0",       // 7 chars is not a color
             " bcdefa",       // doesn't start with a '#'
             "#abcdef00",     // too many chars
+            "#1🦀2",         // len 7 but on char boundaries shouldnt panic
             "resett",        // typo
             "lightblackk",   // typo
         ];
@@ -360,5 +622,85 @@ mod tests {
         assert_eq!(format!("{}", Color::Indexed(10)), "10");
         assert_eq!(format!("{}", Color::Rgb(255, 0, 0)), "#FF0000");
         assert_eq!(format!("{}", Color::Reset), "Reset");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialize() -> Result<(), serde::de::value::Error> {
+        assert_eq!(
+            Color::Black,
+            Color::deserialize("Black".into_deserializer())?
+        );
+        assert_eq!(
+            Color::Magenta,
+            Color::deserialize("magenta".into_deserializer())?
+        );
+        assert_eq!(
+            Color::LightGreen,
+            Color::deserialize("LightGreen".into_deserializer())?
+        );
+        assert_eq!(
+            Color::White,
+            Color::deserialize("bright-white".into_deserializer())?
+        );
+        assert_eq!(
+            Color::Indexed(42),
+            Color::deserialize("42".into_deserializer())?
+        );
+        assert_eq!(
+            Color::Rgb(0, 255, 0),
+            Color::deserialize("#00ff00".into_deserializer())?
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialize_error() {
+        let color: Result<_, serde::de::value::Error> =
+            Color::deserialize("invalid".into_deserializer());
+        assert!(color.is_err());
+
+        let color: Result<_, serde::de::value::Error> =
+            Color::deserialize("#00000000".into_deserializer());
+        assert!(color.is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serialize_then_deserialize() -> Result<(), serde_json::Error> {
+        let json_rgb = serde_json::to_string(&Color::Rgb(255, 0, 255))?;
+        assert_eq!(json_rgb, r##""#FF00FF""##);
+        assert_eq!(
+            serde_json::from_str::<Color>(&json_rgb)?,
+            Color::Rgb(255, 0, 255)
+        );
+
+        let json_white = serde_json::to_string(&Color::White)?;
+        assert_eq!(json_white, r#""White""#);
+
+        let json_indexed = serde_json::to_string(&Color::Indexed(10))?;
+        assert_eq!(json_indexed, r#""10""#);
+        assert_eq!(
+            serde_json::from_str::<Color>(&json_indexed)?,
+            Color::Indexed(10)
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialize_with_previous_format() -> Result<(), serde_json::Error> {
+        assert_eq!(Color::White, serde_json::from_str::<Color>("\"White\"")?);
+        assert_eq!(
+            Color::Rgb(255, 0, 255),
+            serde_json::from_str::<Color>(r#"{"Rgb":[255,0,255]}"#)?
+        );
+        assert_eq!(
+            Color::Indexed(10),
+            serde_json::from_str::<Color>(r#"{"Indexed":10}"#)?
+        );
+        Ok(())
     }
 }

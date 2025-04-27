@@ -2,7 +2,7 @@
 
 use std::{ffi::CString, fs, io::Write, process::Command};
 
-use assert_cmd::prelude::*;
+use assert_cmd::{cargo::cargo_bin, prelude::*};
 use pretty_assertions::assert_eq;
 use rstest::rstest;
 use tempfile::{NamedTempFile, TempDir};
@@ -288,8 +288,7 @@ fn stability(#[case] conf: &str, #[case] args: &str, #[case] stderr: &str) {
         tf.as_file_mut().set_len(1048576).unwrap();
     }
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(args.split_ascii_whitespace())
         .args(["-vv", "-f"])
         .arg(cf.path())
@@ -308,8 +307,7 @@ fn stability(#[case] conf: &str, #[case] args: &str, #[case] stderr: &str) {
 fn miscompare() {
     let tf = NamedTempFile::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-N10", "-S10", "--inject", "3"])
         .arg(tf.path())
         .assert()
@@ -357,8 +355,7 @@ fn artifacts_dir() {
     let tf = NamedTempFile::new().unwrap();
     let artifacts_dir = TempDir::new().unwrap();
 
-    Command::cargo_bin("fsx")
-        .unwrap()
+    Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-N2", "-S11", "--inject", "1", "-P"])
         .arg(artifacts_dir.path())
         .arg(tf.path())
@@ -392,8 +389,7 @@ truncate = 0",
     let tf = NamedTempFile::new().unwrap();
     let artifacts_dir = TempDir::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-N2", "-S72", "-P"])
         .arg(artifacts_dir.path())
         .arg(tf.path())
@@ -429,8 +425,7 @@ truncate = 0",
     tf.as_file_mut().set_len(1 << 40).unwrap(); // 1 TiB
     let artifacts_dir = TempDir::new().unwrap();
 
-    Command::cargo_bin("fsx")
-        .unwrap()
+    Command::new(cargo_bin!("fsx"))
         .args(["-N1", "-S72", "-P"])
         .arg(artifacts_dir.path())
         .arg(tf.path())
@@ -513,8 +508,7 @@ fn read_weights(#[case] wconf: &str, #[case] stderr: &str) {
     let mut tf = NamedTempFile::new().unwrap();
     tf.as_file_mut().set_len(8192).unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-S", "200", "-N", "1", "-P", "/tmp"])
         .arg("-f")
         .arg(cf.path())
@@ -572,8 +566,7 @@ fn weights(#[case] wconf: &str, #[case] stderr: &str) {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-S", "200", "-N", "1"])
         .arg("-f")
         .arg(cf.path())
@@ -605,7 +598,7 @@ fn posix_fallocate() {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let mut cmd = Command::cargo_bin("fsx").unwrap();
+    let mut cmd = Command::new(cargo_bin!("fsx"));
     cmd.args(["-vv", "-S", "200", "-N", "1"])
         .arg("-f")
         .arg(cf.path())
@@ -655,7 +648,7 @@ fn posix_fadvise() {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let mut cmd = Command::cargo_bin("fsx").unwrap();
+    let mut cmd = Command::new(cargo_bin!("fsx"));
     cmd.args(["-vv", "-N", "6", "-S", "12318153001044186923"])
         .arg("-f")
         .arg(cf.path())
@@ -693,8 +686,7 @@ fn punch_hole() {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-S", "301", "-N", "10", "-P", "/tmp", "-f"])
         .arg(cf.path())
         .arg(tf.path())
@@ -740,8 +732,7 @@ fn punch_hole_monitor() {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args([
             "-vv",
             "-S",
@@ -789,8 +780,7 @@ fn punch_hole_zero() {
 
     let tf = NamedTempFile::new().unwrap();
 
-    let cmd = Command::cargo_bin("fsx")
-        .unwrap()
+    let cmd = Command::new(cargo_bin!("fsx"))
         .args(["-vv", "-S", "301", "-N", "1", "-f"])
         .arg(cf.path())
         .arg(tf.path())
@@ -934,8 +924,7 @@ truncate = 0",
 
         let artifacts_dir = TempDir::new().unwrap();
 
-        Command::cargo_bin("fsx")
-            .unwrap()
+        Command::new(cargo_bin!("fsx"))
             .args(["-N10", "-P"])
             .arg(artifacts_dir.path())
             .arg("-f")

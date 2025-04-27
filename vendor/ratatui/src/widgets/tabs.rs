@@ -1,12 +1,4 @@
-#![deny(missing_docs)]
-use crate::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style, Styled},
-    symbols,
-    text::{Line, Span},
-    widgets::{Block, Widget},
-};
+use crate::{prelude::*, style::Styled, widgets::Block};
 
 const DEFAULT_HIGHLIGHT_STYLE: Style = Style::new().add_modifier(Modifier::REVERSED);
 
@@ -25,12 +17,21 @@ const DEFAULT_HIGHLIGHT_STYLE: Style = Style::new().add_modifier(Modifier::REVER
 /// use ratatui::{prelude::*, widgets::*};
 ///
 /// Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"])
-///     .block(Block::default().title("Tabs").borders(Borders::ALL))
+///     .block(Block::bordered().title("Tabs"))
 ///     .style(Style::default().white())
 ///     .highlight_style(Style::default().yellow())
 ///     .select(2)
 ///     .divider(symbols::DOT)
 ///     .padding("->", "<-");
+/// ```
+///
+/// In addition to `Tabs::new`, any iterator whose element is convertible to `Line` can be collected
+/// into `Tabs`.
+///
+/// ```
+/// use ratatui::widgets::Tabs;
+///
+/// (0..5).map(|i| format!("Tab{i}")).collect::<Tabs>();
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 pub struct Tabs<'a> {
@@ -83,11 +84,12 @@ impl<'a> Tabs<'a> {
     /// # use ratatui::{prelude::*, widgets::Tabs};
     /// let tabs = Tabs::new(vec!["Tab 1".red(), "Tab 2".blue()]);
     /// ```
-    pub fn new<T>(titles: Vec<T>) -> Tabs<'a>
+    pub fn new<Iter>(titles: Iter) -> Self
     where
-        T: Into<Line<'a>>,
+        Iter: IntoIterator,
+        Iter::Item: Into<Line<'a>>,
     {
-        Tabs {
+        Self {
             block: None,
             titles: titles.into_iter().map(Into::into).collect(),
             selected: 0,
@@ -101,7 +103,7 @@ impl<'a> Tabs<'a> {
 
     /// Surrounds the `Tabs` with a [`Block`].
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn block(mut self, block: Block<'a>) -> Tabs<'a> {
+    pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
@@ -111,28 +113,34 @@ impl<'a> Tabs<'a> {
     /// The first tab has index 0 (this is also the default index).
     /// The selected tab can have a different style with [`Tabs::highlight_style`].
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn select(mut self, selected: usize) -> Tabs<'a> {
+    pub const fn select(mut self, selected: usize) -> Self {
         self.selected = selected;
         self
     }
 
     /// Sets the style of the tabs.
     ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
     /// This will set the given style on the entire render area.
     /// More precise style can be applied to the titles by styling the ones given to [`Tabs::new`].
     /// The selected tab can be styled differently using [`Tabs::highlight_style`].
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Tabs<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 
     /// Sets the style for the highlighted tab.
     ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
     /// Highlighted tab can be selected with [`Tabs::select`].
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn highlight_style(mut self, style: Style) -> Tabs<'a> {
-        self.highlight_style = style;
+    pub fn highlight_style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.highlight_style = style.into();
         self
     }
 
@@ -152,7 +160,8 @@ impl<'a> Tabs<'a> {
     /// # use ratatui::{prelude::*, widgets::Tabs};
     /// let tabs = Tabs::new(vec!["Tab 1", "Tab 2"]).divider("-");
     /// ```
-    pub fn divider<T>(mut self, divider: T) -> Tabs<'a>
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub fn divider<T>(mut self, divider: T) -> Self
     where
         T: Into<Span<'a>>,
     {
@@ -176,7 +185,8 @@ impl<'a> Tabs<'a> {
     /// # use ratatui::{prelude::*, widgets::Tabs};
     /// let tabs = Tabs::new(vec!["Tab 1", "Tab 2"]).padding("", "");
     /// ```
-    pub fn padding<T, U>(mut self, left: T, right: U) -> Tabs<'a>
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub fn padding<T, U>(mut self, left: T, right: U) -> Self
     where
         T: Into<Line<'a>>,
         U: Into<Line<'a>>,
@@ -197,7 +207,8 @@ impl<'a> Tabs<'a> {
     /// # use ratatui::{prelude::*, widgets::Tabs};
     /// let tabs = Tabs::new(vec!["Tab 1", "Tab 2"]).padding_left("->");
     /// ```
-    pub fn padding_left<T>(mut self, padding: T) -> Tabs<'a>
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub fn padding_left<T>(mut self, padding: T) -> Self
     where
         T: Into<Line<'a>>,
     {
@@ -216,7 +227,8 @@ impl<'a> Tabs<'a> {
     /// # use ratatui::{prelude::*, widgets::Tabs};
     /// let tabs = Tabs::new(vec!["Tab 1", "Tab 2"]).padding_right("<-");
     /// ```
-    pub fn padding_right<T>(mut self, padding: T) -> Tabs<'a>
+    #[must_use = "method moves the value of self and returns the modified value"]
+    pub fn padding_right<T>(mut self, padding: T) -> Self
     where
         T: Into<Line<'a>>,
     {
@@ -226,36 +238,41 @@ impl<'a> Tabs<'a> {
 }
 
 impl<'a> Styled for Tabs<'a> {
-    type Item = Tabs<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         self.style(style)
     }
 }
 
-impl<'a> Widget for Tabs<'a> {
-    fn render(mut self, area: Rect, buf: &mut Buffer) {
-        buf.set_style(area, self.style);
-        let tabs_area = match self.block.take() {
-            Some(b) => {
-                let inner_area = b.inner(area);
-                b.render(area, buf);
-                inner_area
-            }
-            None => area,
-        };
+impl Widget for Tabs<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.render_ref(area, buf);
+    }
+}
 
-        if tabs_area.height < 1 {
+impl WidgetRef for Tabs<'_> {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, self.style);
+        self.block.render_ref(area, buf);
+        let inner = self.block.inner_if_some(area);
+        self.render_tabs(inner, buf);
+    }
+}
+
+impl Tabs<'_> {
+    fn render_tabs(&self, tabs_area: Rect, buf: &mut Buffer) {
+        if tabs_area.is_empty() {
             return;
         }
 
         let mut x = tabs_area.left();
         let titles_length = self.titles.len();
-        for (i, title) in self.titles.into_iter().enumerate() {
+        for (i, title) in self.titles.iter().enumerate() {
             let last_title = titles_length - 1 == i;
             let remaining_width = tabs_area.right().saturating_sub(x);
 
@@ -272,7 +289,7 @@ impl<'a> Widget for Tabs<'a> {
             }
 
             // Title
-            let pos = buf.set_line(x, tabs_area.top(), &title, remaining_width);
+            let pos = buf.set_line(x, tabs_area.top(), title, remaining_width);
             if i == self.selected {
                 buf.set_style(
                     Rect {
@@ -304,10 +321,18 @@ impl<'a> Widget for Tabs<'a> {
     }
 }
 
+impl<'a, Item> FromIterator<Item> for Tabs<'a>
+where
+    Item: Into<Line<'a>>,
+{
+    fn from_iter<Iter: IntoIterator<Item = Item>>(iter: Iter) -> Self {
+        Self::new(iter)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{assert_buffer_eq, prelude::*, widgets::Borders};
 
     #[test]
     fn new() {
@@ -333,60 +358,81 @@ mod tests {
         );
     }
 
-    fn render(tabs: Tabs, area: Rect) -> Buffer {
+    #[test]
+    fn new_from_vec_of_str() {
+        Tabs::new(vec!["a", "b"]);
+    }
+
+    #[test]
+    fn collect() {
+        let tabs: Tabs = (0..5).map(|i| format!("Tab{i}")).collect();
+        assert_eq!(
+            tabs.titles,
+            vec![
+                Line::from("Tab0"),
+                Line::from("Tab1"),
+                Line::from("Tab2"),
+                Line::from("Tab3"),
+                Line::from("Tab4"),
+            ],
+        );
+    }
+
+    #[track_caller]
+    fn test_case(tabs: Tabs, area: Rect, expected: &Buffer) {
         let mut buffer = Buffer::empty(area);
         tabs.render(area, &mut buffer);
-        buffer
+        assert_eq!(&buffer, expected);
     }
 
     #[test]
     fn render_default() {
         let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]);
-        let mut expected = Buffer::with_lines(vec![" Tab1 │ Tab2 │ Tab3 │ Tab4    "]);
+        let mut expected = Buffer::with_lines([" Tab1 │ Tab2 │ Tab3 │ Tab4    "]);
         // first tab selected
         expected.set_style(Rect::new(1, 0, 4, 1), DEFAULT_HIGHLIGHT_STYLE);
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 1)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
     fn render_no_padding() {
         let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]).padding("", "");
-        let mut expected = Buffer::with_lines(vec!["Tab1│Tab2│Tab3│Tab4           "]);
+        let mut expected = Buffer::with_lines(["Tab1│Tab2│Tab3│Tab4           "]);
         // first tab selected
         expected.set_style(Rect::new(0, 0, 4, 1), DEFAULT_HIGHLIGHT_STYLE);
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 1)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
     fn render_more_padding() {
         let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]).padding("---", "++");
-        let mut expected = Buffer::with_lines(vec!["---Tab1++│---Tab2++│---Tab3++│"]);
+        let mut expected = Buffer::with_lines(["---Tab1++│---Tab2++│---Tab3++│"]);
         // first tab selected
         expected.set_style(Rect::new(3, 0, 4, 1), DEFAULT_HIGHLIGHT_STYLE);
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 1)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
     fn render_with_block() {
-        let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"])
-            .block(Block::default().title("Tabs").borders(Borders::ALL));
-        let mut expected = Buffer::with_lines(vec![
+        let tabs =
+            Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]).block(Block::bordered().title("Tabs"));
+        let mut expected = Buffer::with_lines([
             "┌Tabs────────────────────────┐",
             "│ Tab1 │ Tab2 │ Tab3 │ Tab4  │",
             "└────────────────────────────┘",
         ]);
         // first tab selected
         expected.set_style(Rect::new(2, 1, 4, 1), DEFAULT_HIGHLIGHT_STYLE);
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 3)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 3), &expected);
     }
 
     #[test]
     fn render_style() {
         let tabs =
             Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]).style(Style::default().fg(Color::Red));
-        let mut expected = Buffer::with_lines(vec![" Tab1 │ Tab2 │ Tab3 │ Tab4    ".red()]);
+        let mut expected = Buffer::with_lines([" Tab1 │ Tab2 │ Tab3 │ Tab4    ".red()]);
         expected.set_style(Rect::new(1, 0, 4, 1), DEFAULT_HIGHLIGHT_STYLE.red());
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 1)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
@@ -394,40 +440,32 @@ mod tests {
         let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]);
 
         // first tab selected
-        assert_buffer_eq!(
-            render(tabs.clone().select(0), Rect::new(0, 0, 30, 1)),
-            Buffer::with_lines(vec![Line::from(vec![
-                " ".into(),
-                "Tab1".reversed(),
-                " │ Tab2 │ Tab3 │ Tab4    ".into(),
-            ])])
-        );
+        let expected = Buffer::with_lines([Line::from(vec![
+            " ".into(),
+            "Tab1".reversed(),
+            " │ Tab2 │ Tab3 │ Tab4    ".into(),
+        ])]);
+        test_case(tabs.clone().select(0), Rect::new(0, 0, 30, 1), &expected);
 
         // second tab selected
-        assert_buffer_eq!(
-            render(tabs.clone().select(1), Rect::new(0, 0, 30, 1)),
-            Buffer::with_lines(vec![Line::from(vec![
-                " Tab1 │ ".into(),
-                "Tab2".reversed(),
-                " │ Tab3 │ Tab4    ".into(),
-            ])])
-        );
+        let expected = Buffer::with_lines([Line::from(vec![
+            " Tab1 │ ".into(),
+            "Tab2".reversed(),
+            " │ Tab3 │ Tab4    ".into(),
+        ])]);
+        test_case(tabs.clone().select(1), Rect::new(0, 0, 30, 1), &expected);
 
         // last tab selected
-        assert_buffer_eq!(
-            render(tabs.clone().select(3), Rect::new(0, 0, 30, 1)),
-            Buffer::with_lines(vec![Line::from(vec![
-                " Tab1 │ Tab2 │ Tab3 │ ".into(),
-                "Tab4".reversed(),
-                "    ".into(),
-            ])])
-        );
+        let expected = Buffer::with_lines([Line::from(vec![
+            " Tab1 │ Tab2 │ Tab3 │ ".into(),
+            "Tab4".reversed(),
+            "    ".into(),
+        ])]);
+        test_case(tabs.clone().select(3), Rect::new(0, 0, 30, 1), &expected);
 
         // out of bounds selects no tab
-        assert_buffer_eq!(
-            render(tabs.clone().select(4), Rect::new(0, 0, 30, 1)),
-            Buffer::with_lines(vec![" Tab1 │ Tab2 │ Tab3 │ Tab4    "])
-        );
+        let expected = Buffer::with_lines([" Tab1 │ Tab2 │ Tab3 │ Tab4    "]);
+        test_case(tabs.clone().select(4), Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
@@ -436,23 +474,21 @@ mod tests {
             .style(Style::new().red())
             .highlight_style(Style::new().underlined())
             .select(0);
-        assert_buffer_eq!(
-            render(tabs, Rect::new(0, 0, 30, 1)),
-            Buffer::with_lines(vec![Line::from(vec![
-                " ".red(),
-                "Tab1".red().underlined(),
-                " │ Tab2 │ Tab3 │ Tab4    ".red(),
-            ])])
-        );
+        let expected = Buffer::with_lines([Line::from(vec![
+            " ".red(),
+            "Tab1".red().underlined(),
+            " │ Tab2 │ Tab3 │ Tab4    ".red(),
+        ])]);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
     fn render_divider() {
         let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3", "Tab4"]).divider("--");
-        let mut expected = Buffer::with_lines(vec![" Tab1 -- Tab2 -- Tab3 -- Tab4 "]);
+        let mut expected = Buffer::with_lines([" Tab1 -- Tab2 -- Tab3 -- Tab4 "]);
         // first tab selected
         expected.set_style(Rect::new(1, 0, 4, 1), DEFAULT_HIGHLIGHT_STYLE);
-        assert_buffer_eq!(render(tabs, Rect::new(0, 0, 30, 1)), expected);
+        test_case(tabs, Rect::new(0, 0, 30, 1), &expected);
     }
 
     #[test]
@@ -469,6 +505,6 @@ mod tests {
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::ITALIC)
-        )
+        );
     }
 }

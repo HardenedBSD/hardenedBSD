@@ -1,3 +1,5 @@
+# Comment out the below parts temporarily when downloading new dependencies.
+# https://github.com/coreos/cargo-vendor-filterer/issues/73
 [source.crates-io]
 replace-with = "vendored-sources"
 

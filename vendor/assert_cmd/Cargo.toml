@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.74"
 name = "assert_cmd"
-version = "2.0.15"
+version = "2.0.17"
 authors = [
     "Pascal Hertleif <killercup@gmail.com>",
     "Ed Page <eopage@gmail.com>",
@@ -29,6 +29,7 @@ include = [
     "benches/**/*",
     "examples/**/*",
 ]
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -53,6 +54,7 @@ all-features = true
 rustdoc-args = [
     "--cfg",
     "docsrs",
+    "--generate-link-to-definition",
 ]
 
 [[package.metadata.release.pre-release-replacements]]
@@ -89,6 +91,13 @@ replace = """
 <!-- next-url -->
 [Unreleased]: https://github.com/assert-rs/assert_cmd/compare/{{tag_name}}...HEAD"""
 search = "<!-- next-url -->"
+
+[features]
+color = [
+    "dep:anstream",
+    "predicates/color",
+]
+color-auto = ["color"]
 
 [lib]
 name = "assert_cmd"
@@ -139,12 +148,8 @@ version = "1.0.14"
 [dev-dependencies.escargot]
 version = "0.5"
 
-[features]
-color = [
-    "dep:anstream",
-    "predicates/color",
-]
-color-auto = ["color"]
+[target."cfg(any())".dependencies.libc]
+version = "0.2.137"
 
 [lints.clippy]
 bool_assert_comparison = "allow"
@@ -180,7 +185,6 @@ let_and_return = "allow"
 linkedlist = "warn"
 lossy_float_literal = "warn"
 macro_use_imports = "warn"
-match_wildcard_for_single_variants = "warn"
 mem_forget = "warn"
 mutex_integer = "warn"
 needless_continue = "warn"
@@ -192,10 +196,10 @@ rc_mutex = "warn"
 redundant_feature_names = "warn"
 ref_option_ref = "warn"
 rest_pat_in_fully_bound_structs = "warn"
+result_large_err = "allow"
 same_functions_in_if_condition = "warn"
 self_named_module_files = "warn"
 semicolon_if_nothing_returned = "warn"
-single_match_else = "warn"
 str_to_string = "warn"
 string_add = "warn"
 string_add_assign = "warn"
@@ -203,14 +207,18 @@ string_lit_as_bytes = "warn"
 string_to_string = "warn"
 todo = "warn"
 trait_duplication_in_bounds = "warn"
+uninlined_format_args = "warn"
 verbose_file_reads = "warn"
 wildcard_imports = "warn"
 zero_sized_map_values = "warn"
 
 [lints.rust]
-rust_2018_idioms = "warn"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
 unused_qualifications = "warn"
+
+[lints.rust.rust_2018_idioms]
+level = "warn"
+priority = -1

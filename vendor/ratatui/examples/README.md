@@ -1,8 +1,27 @@
 # Examples
 
-These gifs were created using [VHS](https://github.com/charmbracelet/vhs). Each example has a
-corresponding `.tape` file that holds instructions for how to generate the images. Note that the
-images themselves are stored in a separate git branch to avoid bloating the main repository.
+This folder might use unreleased code. View the examples for the latest release instead.
+
+> [!WARNING]
+>
+> There may be backwards incompatible changes in these examples, as they are designed to compile
+> against the `main` branch.
+>
+> There are a few workaround for this problem:
+>
+> - View the examples as they were when the latest version was release by selecting the tag that
+>   matches that version. E.g. <https://github.com/ratatui-org/ratatui/tree/v0.26.1/examples>.
+> - If you're viewing this file on GitHub, there is a combo box at the top of this page  which
+>   allows you to select any previous tagged version.
+> - To view the code locally, checkout the tag. E.g. `git switch --detach v0.26.1`.
+> - Use the latest [alpha version of Ratatui] in your app. These are released weekly on Saturdays.
+> - Compile your code against the main branch either locally by adding e.g. `path = "../ratatui"` to
+>   the dependency, or remotely by adding `git = "https://github.com/ratatui-org/ratatui"`
+>
+> For a list of unreleased breaking changes, see [BREAKING-CHANGES.md].
+>
+> We don't keep the CHANGELOG updated with unreleased changes, check the git commit history or run
+> `git-cliff -u` against a cloned version of this repository.
 
 ## Demo2
 
@@ -145,6 +164,18 @@ cargo run --example=gauge --features=crossterm
 
 ![Gauge][gauge.gif]
 
+## Line Gauge
+
+Demonstrates the [`Line
+Gauge`](https://docs.rs/ratatui/latest/ratatui/widgets/struct.LineGauge.html) widget. Source:
+[line_gauge.rs](./line_gauge.rs).
+
+```shell
+cargo run --example=line_gauge --features=crossterm
+```
+
+![LineGauge][line_gauge.gif]
+
 ## Inline
 
 Demonstrates how to use the
@@ -286,7 +317,8 @@ cargo run --example=tabs --features=crossterm
 
 Demonstrates one approach to accepting user input. Source [user_input.rs](./user_input.rs).
 
-> [!NOTE] Consider using [`tui-textarea`](https://crates.io/crates/tui-textarea) or
+> [!NOTE]
+> Consider using [`tui-textarea`](https://crates.io/crates/tui-textarea) or
 > [`tui-input`](https://crates.io/crates/tui-input) crates for more functional text entry UIs.
 
 ```shell
@@ -295,13 +327,20 @@ cargo run --example=user_input --features=crossterm
 
 ![User Input][user_input.gif]
 
-<!--
-links to images to make it easier to update in bulk
-These are generated with `vhs publish examples/xxx.gif`
+## How to update these examples
 
-To update these examples in bulk:
+These gifs were created using [VHS](https://github.com/charmbracelet/vhs). Each example has a
+corresponding `.tape` file that holds instructions for how to generate the images. Note that the
+images themselves are stored in a separate `images` git branch to avoid bloating the main
+repository.
+
+<!--
+
+Links to images to make them easier to update in bulk. Use the following script to update and upload
+the examples to the images branch. (Requires push access to the branch).
+
 ```shell
-examples/generate.bash
+examples/vhs/generate.bash
 ```
 -->
 
@@ -319,6 +358,7 @@ examples/generate.bash
 [inline.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/inline.gif?raw=true
 [layout.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/layout.gif?raw=true
 [list.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/list.gif?raw=true
+[line_gauge.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/line_gauge.gif?raw=true
 [modifiers.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/modifiers.gif?raw=true
 [panic.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/panic.gif?raw=true
 [paragraph.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/paragraph.gif?raw=true
@@ -326,6 +366,9 @@ examples/generate.bash
 [ratatui-logo.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/ratatui-logo.gif?raw=true
 [scrollbar.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/scrollbar.gif?raw=true
 [sparkline.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/sparkline.gif?raw=true
-[table.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/table.gif?raw=true
+[table.gif]:  https://vhs.charm.sh/vhs-6njXBytDf0rwPufUtmSSpI.gif
 [tabs.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/tabs.gif?raw=true
 [user_input.gif]: https://github.com/ratatui-org/ratatui/blob/images/examples/user_input.gif?raw=true
+
+[alpha version of Ratatui]: https://crates.io/crates/ratatui/versions
+[BREAKING-CHANGES.md]: https://github.com/ratatui-org/ratatui/blob/main/BREAKING-CHANGES.md

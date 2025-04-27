@@ -13,8 +13,15 @@
 edition = "2021"
 rust-version = "1.62"
 name = "casper-sys"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Alan Somers <asomers@gmail.com>"]
+build = "build.rs"
+links = "casper"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 FFI bindings for FreeBSD's libcasper
 """
@@ -24,8 +31,13 @@ keywords = [
     "FreeBSD",
     "capsicum",
 ]
+categories = ["external-ffi-bindings"]
 license = "MPL-2.0"
 repository = "https://github.com/dlrobertson/capsicum-rs"
+
+[lib]
+name = "casper_sys"
+path = "src/lib.rs"
 
 [dependencies.libnv-sys]
 version = "0.2.1"

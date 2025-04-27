@@ -1,3 +1,18 @@
+//! # [Ratatui] Inline example
+//!
+//! The latest version of this example is available in the [examples] folder in the repository.
+//!
+//! Please note that the examples are designed to be run against the `main` branch of the Github
+//! repository. This means that you may not be able to compile with the latest release version on
+//! crates.io, or the one that you have installed locally.
+//!
+//! See the [examples readme] for more information on finding examples that match the version of the
+//! library you are using.
+//!
+//! [Ratatui]: https://github.com/ratatui-org/ratatui
+//! [examples]: https://github.com/ratatui-org/ratatui/blob/main/examples
+//! [examples readme]: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md
+
 use std::{
     collections::{BTreeMap, VecDeque},
     error::Error,
@@ -8,7 +23,16 @@ use std::{
 };
 
 use rand::distributions::{Distribution, Uniform};
-use ratatui::{prelude::*, widgets::*};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
+    symbols,
+    terminal::{Frame, Terminal, Viewport},
+    text::{Line, Span},
+    widgets::{block, Block, Gauge, LineGauge, List, ListItem, Paragraph, Widget},
+    TerminalOptions,
+};
 
 const NUM_DOWNLOADS: usize = 10;
 
@@ -114,6 +138,7 @@ fn input_handling(tx: mpsc::Sender<Event>) {
     });
 }
 
+#[allow(clippy::cast_precision_loss, clippy::needless_pass_by_value)]
 fn workers(tx: mpsc::Sender<Event>) -> Vec<Worker> {
     (0..4)
         .map(|id| {
@@ -153,6 +178,7 @@ fn downloads() -> Downloads {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     workers: Vec<Worker>,
@@ -179,7 +205,7 @@ fn run_app<B: Backend>(
             Event::DownloadUpdate(worker_id, _download_id, progress) => {
                 let download = downloads.in_progress.get_mut(&worker_id).unwrap();
                 download.progress = progress;
-                redraw = false
+                redraw = false;
             }
             Event::DownloadDone(worker_id, download_id) => {
                 let download = downloads.in_progress.remove(&worker_id).unwrap();
@@ -215,28 +241,24 @@ fn run_app<B: Backend>(
 }
 
 fn ui(f: &mut Frame, downloads: &Downloads) {
-    let size = f.size();
+    let area = f.size();
 
-    let block = Block::default().title(block::Title::from("Progress").alignment(Alignment::Center));
-    f.render_widget(block, size);
+    let block = Block::new().title(block::Title::from("Progress").alignment(Alignment::Center));
+    f.render_widget(block, area);
 
-    let chunks = Layout::default()
-        .constraints([Constraint::Length(2), Constraint::Length(4)])
-        .margin(1)
-        .split(size);
+    let vertical = Layout::vertical([Constraint::Length(2), Constraint::Length(4)]).margin(1);
+    let horizontal = Layout::horizontal([Constraint::Percentage(20), Constraint::Percentage(80)]);
+    let [progress_area, main] = vertical.areas(area);
+    let [list_area, gauge_area] = horizontal.areas(main);
 
     // total progress
     let done = NUM_DOWNLOADS - downloads.pending.len() - downloads.in_progress.len();
+    #[allow(clippy::cast_precision_loss)]
     let progress = LineGauge::default()
-        .gauge_style(Style::default().fg(Color::Blue))
+        .filled_style(Style::default().fg(Color::Blue))
         .label(format!("{done}/{NUM_DOWNLOADS}"))
         .ratio(done as f64 / NUM_DOWNLOADS as f64);
-    f.render_widget(progress, chunks[0]);
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-        .split(chunks[1]);
+    f.render_widget(progress, progress_area);
 
     // in progress downloads
     let items: Vec<ListItem> = downloads
@@ -259,21 +281,22 @@ fn ui(f: &mut Frame, downloads: &Downloads) {
         })
         .collect();
     let list = List::new(items);
-    f.render_widget(list, chunks[0]);
+    f.render_widget(list, list_area);
 
+    #[allow(clippy::cast_possible_truncation)]
     for (i, (_, download)) in downloads.in_progress.iter().enumerate() {
         let gauge = Gauge::default()
             .gauge_style(Style::default().fg(Color::Yellow))
             .ratio(download.progress / 100.0);
-        if chunks[1].top().saturating_add(i as u16) > size.bottom() {
+        if gauge_area.top().saturating_add(i as u16) > area.bottom() {
             continue;
         }
         f.render_widget(
             gauge,
             Rect {
-                x: chunks[1].left(),
-                y: chunks[1].top().saturating_add(i as u16),
-                width: chunks[1].width,
+                x: gauge_area.left(),
+                y: gauge_area.top().saturating_add(i as u16),
+                width: gauge_area.width,
                 height: 1,
             },
         );

@@ -1,47 +1,58 @@
-FreeBSD Source:
----------------
-This is the top level of the FreeBSD source directory.
+FreeBSD, with Rust
+==================
 
-FreeBSD is an operating system used to power modern servers, desktops, and embedded platforms.
-A large community has continually developed it for more than thirty years.
-Its advanced networking, security, and storage features have made FreeBSD the platform of choice for many of the busiest web sites and most pervasive embedded networking and storage devices.
+The FreeBSD source tree, enhanced with components written in Rust.
 
-For copyright information, please see [the file COPYRIGHT](COPYRIGHT) in this directory.
-Additional copyright information also exists for some sources in this tree - please see the specific source directories for more information.
+How to Use
+==========
 
-The Makefile in this directory supports a number of targets for building components (or all) of the FreeBSD source tree.
-See build(7), config(8), [FreeBSD handbook on building userland](https://docs.freebsd.org/en/books/handbook/cutting-edge/#makeworld), and [Handbook for kernels](https://docs.freebsd.org/en/books/handbook/kernelconfig/) for more information, including setting make(1) variables.
+Building
+--------
 
-For information on the CPU architectures and platforms supported by FreeBSD, see the [FreeBSD
-website's Platforms page](https://www.freebsd.org/platforms/).
+To build everything, including C and Rust programs, do `env
+OPTIONAL_TOOLCHAIN=rust-cargo make buildworld` like usual.
 
-For official FreeBSD bootable images, see the [release page](https://download.freebsd.org/ftp/releases/ISO-IMAGES/).
+To build just a single Rust program, cd into its subdirectory and do
+`env OPTIONAL_TOOLCHAIN=rust-cargo make build`
 
-Source Roadmap:
----------------
-| Directory | Description |
-| --------- | ----------- |
-| bin | System/user commands. |
-| cddl | Various commands and libraries under the Common Development and Distribution License. |
-| contrib | Packages contributed by 3rd parties. |
-| crypto | Cryptography stuff (see [crypto/README](crypto/README)). |
-| etc | Template files for /etc. |
-| gnu | Commands and libraries under the GNU General Public License (GPL) or Lesser General Public License (LGPL). Please see [gnu/COPYING](gnu/COPYING) and [gnu/COPYING.LIB](gnu/COPYING.LIB) for more information. |
-| include | System include files. |
-| kerberos5 | Kerberos5 (Heimdal) package. |
-| lib | System libraries. |
-| libexec | System daemons. |
-| release | Release building Makefile & associated tools. |
-| rescue | Build system for statically linked /rescue utilities. |
-| sbin | System commands. |
-| secure | Cryptographic libraries and commands. |
-| share | Shared resources. |
-| stand | Boot loader sources. |
-| sys | Kernel sources (see [sys/README.md](sys/README.md)). |
-| targets | Support for experimental `DIRDEPS_BUILD` |
-| tests | Regression tests which can be run by Kyua.  See [tests/README](tests/README) for additional information. |
-| tools | Utilities for regression testing and miscellaneous tasks. |
-| usr.bin | User commands. |
-| usr.sbin | System administration commands. |
+How to Develop
+==============
 
-For information on synchronizing your source tree with one or more of the FreeBSD Project's development branches, please see [FreeBSD Handbook](https://docs.freebsd.org/en/books/handbook/cutting-edge/#current-stable).
+Updating an existing Rust crate
+-------------------------------
+
+* First make any changes to the crate.  Edit files locally, copy the source
+  from github, or whatever.
+* If there are any changes to the crate's dependencies:
+  - Comment out the vendor-related lines in .cargo/config.toml
+  - Run `mv vendor vendor.bak`
+  - Run `cargo vendor-filterer`
+  - Test your changes
+  - Run `rm -r vendor.bak`
+  - Commit everything
+
+Updating a dependency
+---------------------
+
+*
+
+Adding a new Rust crate
+-----------------------
+
+Status
+======
+[✓] Add at least one Rust executable
+[✓] Add at least one Rust library
+[ ] Add at least one Rust dynamic library
+[✓] Vendor all Rust dependencies
+[✓] Add a new program, wholly written in Rust
+[ ] Add a program that uses a private interface in base.
+[✓] Rewrite an existing program in Rust, with enhanced features
+[✓] Tweak each crate's dependencies, so as to prevent building multiple versions of the same dependency.
+[ ] Store all Rust object files in MAKEOBJDIRPREFIX, instead of target/
+[ ] Invoke `cargo` via `make` during buildworld
+[ ] Invoke `cargo` when running `make` in a subdirectory, to build just that subdirectory's contents.
+[ ] Rust should link to libs (and build with headers) in the build tree, not in the installed system
+[ ] Use Cargo's -Zbuild-dir feature, when that stabilizes, instead of CARGO_TARGET_DIR
+[ ] Rename the vendor tree to vendor/rust, to allow for the possibility of components written in other languages.
+[ ] Make should control the version of Rust used, rather than relying on PATH.

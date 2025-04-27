@@ -1,15 +1,8 @@
-#![warn(missing_docs)]
 use std::cmp::min;
 
 use strum::{Display, EnumString};
 
-use crate::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Style, Styled},
-    symbols,
-    widgets::{Block, Widget},
-};
+use crate::{prelude::*, style::Styled, widgets::Block};
 
 /// Widget to render a sparkline over one or more lines.
 ///
@@ -31,13 +24,13 @@ use crate::{
 /// use ratatui::{prelude::*, widgets::*};
 ///
 /// Sparkline::default()
-///     .block(Block::default().title("Sparkline").borders(Borders::ALL))
+///     .block(Block::bordered().title("Sparkline"))
 ///     .data(&[0, 2, 3, 4, 1, 4, 10])
 ///     .max(5)
 ///     .direction(RenderDirection::RightToLeft)
 ///     .style(Style::default().red().on_white());
 /// ```
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Sparkline<'a> {
     /// A block to wrap the widget in
     block: Option<Block<'a>>,
@@ -66,33 +59,23 @@ pub enum RenderDirection {
     RightToLeft,
 }
 
-impl<'a> Default for Sparkline<'a> {
-    fn default() -> Sparkline<'a> {
-        Sparkline {
-            block: None,
-            style: Style::default(),
-            data: &[],
-            max: None,
-            bar_set: symbols::bar::NINE_LEVELS,
-            direction: RenderDirection::LeftToRight,
-        }
-    }
-}
-
 impl<'a> Sparkline<'a> {
     /// Wraps the sparkline with the given `block`.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn block(mut self, block: Block<'a>) -> Sparkline<'a> {
+    pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 
     /// Sets the style of the entire widget.
     ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
     /// The foreground corresponds to the bars while the background is everything else.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Sparkline<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 
@@ -109,7 +92,7 @@ impl<'a> Sparkline<'a> {
     /// # }
     /// ```
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn data(mut self, data: &'a [u64]) -> Sparkline<'a> {
+    pub const fn data(mut self, data: &'a [u64]) -> Self {
         self.data = data;
         self
     }
@@ -119,7 +102,7 @@ impl<'a> Sparkline<'a> {
     /// Every bar will be scaled accordingly. If no max is given, this will be the max in the
     /// dataset.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn max(mut self, max: u64) -> Sparkline<'a> {
+    pub const fn max(mut self, max: u64) -> Self {
         self.max = Some(max);
         self
     }
@@ -129,7 +112,7 @@ impl<'a> Sparkline<'a> {
     /// Can be [`symbols::bar::THREE_LEVELS`], [`symbols::bar::NINE_LEVELS`] (default) or a custom
     /// [`Set`](symbols::bar::Set).
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn bar_set(mut self, bar_set: symbols::bar::Set) -> Sparkline<'a> {
+    pub const fn bar_set(mut self, bar_set: symbols::bar::Set) -> Self {
         self.bar_set = bar_set;
         self
     }
@@ -138,43 +121,47 @@ impl<'a> Sparkline<'a> {
     ///
     /// [`RenderDirection::LeftToRight`] by default.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn direction(mut self, direction: RenderDirection) -> Sparkline<'a> {
+    pub const fn direction(mut self, direction: RenderDirection) -> Self {
         self.direction = direction;
         self
     }
 }
 
 impl<'a> Styled for Sparkline<'a> {
-    type Item = Sparkline<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         self.style(style)
     }
 }
 
-impl<'a> Widget for Sparkline<'a> {
-    fn render(mut self, area: Rect, buf: &mut Buffer) {
-        let spark_area = match self.block.take() {
-            Some(b) => {
-                let inner_area = b.inner(area);
-                b.render(area, buf);
-                inner_area
-            }
-            None => area,
-        };
+impl Widget for Sparkline<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.render_ref(area, buf);
+    }
+}
 
-        if spark_area.height < 1 {
+impl WidgetRef for Sparkline<'_> {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        self.block.render_ref(area, buf);
+        let inner = self.block.inner_if_some(area);
+        self.render_sparkline(inner, buf);
+    }
+}
+
+impl Sparkline<'_> {
+    fn render_sparkline(&self, spark_area: Rect, buf: &mut Buffer) {
+        if spark_area.is_empty() {
             return;
         }
 
-        let max = match self.max {
-            Some(v) => v,
-            None => *self.data.iter().max().unwrap_or(&1u64),
-        };
+        let max = self
+            .max
+            .unwrap_or_else(|| *self.data.iter().max().unwrap_or(&1));
         let max_index = min(spark_area.width as usize, self.data.len());
         let mut data = self
             .data
@@ -224,11 +211,7 @@ mod tests {
     use strum::ParseError;
 
     use super::*;
-    use crate::{
-        assert_buffer_eq,
-        buffer::Cell,
-        style::{Color, Modifier, Stylize},
-    };
+    use crate::buffer::Cell;
 
     #[test]
     fn render_direction_to_string() {
@@ -256,9 +239,7 @@ mod tests {
     // filled with x symbols to make it easier to assert on the result
     fn render(widget: Sparkline, width: u16) -> Buffer {
         let area = Rect::new(0, 0, width, 1);
-        let mut cell = Cell::default();
-        cell.set_symbol("x");
-        let mut buffer = Buffer::filled(area, &cell);
+        let mut buffer = Buffer::filled(area, Cell::new("x"));
         widget.render(area, &mut buffer);
         buffer
     }
@@ -267,21 +248,21 @@ mod tests {
     fn it_does_not_panic_if_max_is_zero() {
         let widget = Sparkline::default().data(&[0, 0, 0]);
         let buffer = render(widget, 6);
-        assert_buffer_eq!(buffer, Buffer::with_lines(vec!["   xxx"]));
+        assert_eq!(buffer, Buffer::with_lines(["   xxx"]));
     }
 
     #[test]
     fn it_does_not_panic_if_max_is_set_to_zero() {
         let widget = Sparkline::default().data(&[0, 1, 2]).max(0);
         let buffer = render(widget, 6);
-        assert_buffer_eq!(buffer, Buffer::with_lines(vec!["   xxx"]));
+        assert_eq!(buffer, Buffer::with_lines(["   xxx"]));
     }
 
     #[test]
     fn it_draws() {
         let widget = Sparkline::default().data(&[0, 1, 2, 3, 4, 5, 6, 7, 8]);
         let buffer = render(widget, 12);
-        assert_buffer_eq!(buffer, Buffer::with_lines(vec![" ▁▂▃▄▅▆▇█xxx"]));
+        assert_eq!(buffer, Buffer::with_lines([" ▁▂▃▄▅▆▇█xxx"]));
     }
 
     #[test]
@@ -290,7 +271,7 @@ mod tests {
             .data(&[0, 1, 2, 3, 4, 5, 6, 7, 8])
             .direction(RenderDirection::LeftToRight);
         let buffer = render(widget, 12);
-        assert_buffer_eq!(buffer, Buffer::with_lines(vec![" ▁▂▃▄▅▆▇█xxx"]));
+        assert_eq!(buffer, Buffer::with_lines([" ▁▂▃▄▅▆▇█xxx"]));
     }
 
     #[test]
@@ -299,7 +280,7 @@ mod tests {
             .data(&[0, 1, 2, 3, 4, 5, 6, 7, 8])
             .direction(RenderDirection::RightToLeft);
         let buffer = render(widget, 12);
-        assert_buffer_eq!(buffer, Buffer::with_lines(vec!["xxx█▇▆▅▄▃▂▁ "]));
+        assert_eq!(buffer, Buffer::with_lines(["xxx█▇▆▅▄▃▂▁ "]));
     }
 
     #[test]
@@ -316,6 +297,6 @@ mod tests {
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::DIM)
-        )
+        );
     }
 }

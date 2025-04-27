@@ -1,5 +1,6 @@
 [build-dependencies.cc]
 version = "1.0.97"
+
 [dependencies.cfg-if]
 version = "1.0"
 
@@ -16,6 +17,7 @@ version = "0.1.24"
 features = ["derive"]
 optional = true
 version = "1.0"
+
 [dev-dependencies.libloading]
 version = "0.7"
 
@@ -33,8 +35,8 @@ unix-backtrace = []
 verify-winapi = ["winapi/dbghelp", "winapi/handleapi", "winapi/libloaderapi", "winapi/memoryapi", "winapi/minwindef", "winapi/processthreadsapi", "winapi/synchapi", "winapi/tlhelp32", "winapi/winbase", "winapi/winnt", "winapi/winnls", "winapi/stringapiset"]
 
 [lib]
-name = "backtrace"
 path = "src/lib.rs"
+
 [lints.rust]
 unexpected_cfgs = "allow"
 
@@ -44,7 +46,9 @@ autobenches = false
 autobins = false
 autoexamples = false
 autotests = false
-description = "A library to acquire a stack trace (backtrace) at runtime in a Rust program.\n"
+description = """
+A library to acquire a stack trace (backtrace) at runtime in a Rust program.
+"""
 documentation = "https://docs.rs/backtrace"
 edition = "2021"
 exclude = ["/ci/"]
@@ -55,22 +59,24 @@ readme = "README.md"
 repository = "https://github.com/rust-lang/backtrace-rs"
 rust-version = "1.65.0"
 version = "0.3.73"
-[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.addr2line]
+
+[target.'cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))'.dependencies.addr2line]
 default-features = false
 version = "0.22.0"
 
-[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.libc]
+[target.'cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))'.dependencies.libc]
 default-features = false
 version = "0.2.146"
 
-[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.miniz_oxide]
+[target.'cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))'.dependencies.miniz_oxide]
 default-features = false
 version = "0.7.0"
 
-[target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.object]
+[target.'cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))'.dependencies.object]
 default-features = false
 features = ["read_core", "elf", "macho", "pe", "xcoff", "unaligned", "archive"]
 version = "0.36.0"
+
 [target."cfg(windows)".dependencies.winapi]
 optional = true
 version = "0.3.9"

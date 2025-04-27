@@ -1,5 +1,21 @@
-/// This example shows all the colors supported by ratatui. It will render a grid of foreground
-/// and background colors with their names and indexes.
+//! # [Ratatui] Colors example
+//!
+//! The latest version of this example is available in the [examples] folder in the repository.
+//!
+//! Please note that the examples are designed to be run against the `main` branch of the Github
+//! repository. This means that you may not be able to compile with the latest release version on
+//! crates.io, or the one that you have installed locally.
+//!
+//! See the [examples readme] for more information on finding examples that match the version of the
+//! library you are using.
+//!
+//! [Ratatui]: https://github.com/ratatui-org/ratatui
+//! [examples]: https://github.com/ratatui-org/ratatui/blob/main/examples
+//! [examples readme]: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md
+
+// This example shows all the colors supported by ratatui. It will render a grid of foreground
+// and background colors with their names and indexes.
+
 use std::{
     error::Error,
     io::{self, Stdout},
@@ -7,13 +23,20 @@ use std::{
     time::Duration,
 };
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 use itertools::Itertools;
-use ratatui::{prelude::*, widgets::*};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    crossterm::{
+        event::{self, Event, KeyCode},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    },
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Color, Style, Stylize},
+    terminal::{Frame, Terminal},
+    text::Line,
+    widgets::{Block, Borders, Paragraph},
+};
 
 type Result<T> = result::Result<T, Box<dyn Error>>;
 
@@ -33,7 +56,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
+                if key.code == KeyCode::Char('q') {
                     return Ok(());
                 }
             }
@@ -42,14 +65,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 }
 
 fn ui(frame: &mut Frame) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(30),
-            Constraint::Length(17),
-            Constraint::Length(2),
-        ])
-        .split(frame.size());
+    let layout = Layout::vertical([
+        Constraint::Length(30),
+        Constraint::Length(17),
+        Constraint::Length(2),
+    ])
+    .split(frame.size());
 
     render_named_colors(frame, layout[0]);
     render_indexed_colors(frame, layout[1]);
@@ -76,10 +97,7 @@ const NAMED_COLORS: [Color; 16] = [
 ];
 
 fn render_named_colors(frame: &mut Frame, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3); 10])
-        .split(area);
+    let layout = Layout::vertical([Constraint::Length(3); 10]).split(area);
 
     render_fg_named_colors(frame, Color::Reset, layout[0]);
     render_fg_named_colors(frame, Color::Black, layout[1]);
@@ -99,15 +117,11 @@ fn render_fg_named_colors(frame: &mut Frame, bg: Color, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1); 2])
+    let layout = Layout::vertical([Constraint::Length(1); 2])
         .split(inner)
         .iter()
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Ratio(1, 8); 8])
+            Layout::horizontal([Constraint::Ratio(1, 8); 8])
                 .split(*area)
                 .to_vec()
         })
@@ -124,15 +138,11 @@ fn render_bg_named_colors(frame: &mut Frame, fg: Color, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1); 2])
+    let layout = Layout::vertical([Constraint::Length(1); 2])
         .split(inner)
         .iter()
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Ratio(1, 8); 8])
+            Layout::horizontal([Constraint::Ratio(1, 8); 8])
                 .split(*area)
                 .to_vec()
         })
@@ -149,23 +159,18 @@ fn render_indexed_colors(frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // 0 - 15
-            Constraint::Length(1), // blank
-            Constraint::Min(6),    // 16 - 123
-            Constraint::Length(1), // blank
-            Constraint::Min(6),    // 124 - 231
-            Constraint::Length(1), // blank
-        ])
-        .split(inner);
+    let layout = Layout::vertical([
+        Constraint::Length(1), // 0 - 15
+        Constraint::Length(1), // blank
+        Constraint::Min(6),    // 16 - 123
+        Constraint::Length(1), // blank
+        Constraint::Min(6),    // 124 - 231
+        Constraint::Length(1), // blank
+    ])
+    .split(inner);
 
     //    0   1   2   3   4   5    6   7   8   9  10  11   12  13  14  15
-    let color_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(5); 16])
-        .split(layout[0]);
+    let color_layout = Layout::horizontal([Constraint::Length(5); 16]).split(layout[0]);
     for i in 0..16 {
         let color = Color::Indexed(i);
         let color_index = format!("{i:0>2}");
@@ -196,25 +201,19 @@ fn render_indexed_colors(frame: &mut Frame, area: Rect) {
         .iter()
         // two rows of 3 columns
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(27); 3])
+            Layout::horizontal([Constraint::Length(27); 3])
                 .split(*area)
                 .to_vec()
         })
         // each with 6 rows
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1); 6])
+            Layout::vertical([Constraint::Length(1); 6])
                 .split(area)
                 .to_vec()
         })
         // each with 6 columns
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(4); 6])
+            Layout::horizontal([Constraint::Min(4); 6])
                 .split(area)
                 .to_vec()
         })
@@ -235,31 +234,27 @@ fn render_indexed_colors(frame: &mut Frame, area: Rect) {
 }
 
 fn title_block(title: String) -> Block<'static> {
-    Block::default()
+    Block::new()
         .borders(Borders::TOP)
-        .border_style(Style::new().dark_gray())
-        .title(title)
         .title_alignment(Alignment::Center)
+        .border_style(Style::new().dark_gray())
         .title_style(Style::new().reset())
+        .title(title)
 }
 
 fn render_indexed_grayscale(frame: &mut Frame, area: Rect) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // 232 - 243
-            Constraint::Length(1), // 244 - 255
-        ])
-        .split(area)
-        .iter()
-        .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(6); 12])
-                .split(*area)
-                .to_vec()
-        })
-        .collect_vec();
+    let layout = Layout::vertical([
+        Constraint::Length(1), // 232 - 243
+        Constraint::Length(1), // 244 - 255
+    ])
+    .split(area)
+    .iter()
+    .flat_map(|area| {
+        Layout::horizontal([Constraint::Length(6); 12])
+            .split(*area)
+            .to_vec()
+    })
+    .collect_vec();
 
     for i in 232..=255 {
         let color = Color::Indexed(i);

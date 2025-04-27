@@ -1,3 +1,6 @@
+[lib]
+path = "src/lib.rs"
+
 [package]
 authors = ["Microsoft"]
 description = "Import lib for Windows"
@@ -6,6 +9,7 @@ license = "MIT OR Apache-2.0"
 name = "windows_x86_64_gnu"
 repository = "https://github.com/microsoft/windows-rs"
 version = "0.48.5"
+
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
 targets = []

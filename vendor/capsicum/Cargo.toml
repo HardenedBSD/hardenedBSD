@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.77.0"
 name = "capsicum"
-version = "0.4.2"
+version = "0.4.4"
 authors = ["Dan Robertson <dan@dlrobertson.com>"]
 build = "build.rs"
 include = [
@@ -24,6 +24,7 @@ include = [
     "README.md",
     "CHANGELOG.md",
 ]
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -54,14 +55,14 @@ name = "capsicum"
 path = "src/lib.rs"
 
 [dependencies.casper-sys]
-version = "0.1.1"
+version = "0.1.2"
 optional = true
 
 [dependencies.ctor]
-version = "0.2.3"
+version = "0.2.9"
 
 [dependencies.libc]
-version = "0.2.147"
+version = "0.2.156"
 features = ["extra_traits"]
 
 [dependencies.libnv]
@@ -99,6 +100,6 @@ version = "0.9.4"
 [features]
 casper = [
     "casper-sys",
-    "libnv",
-    "libnv-sys",
+    "dep:libnv",
+    "dep:libnv-sys",
 ]

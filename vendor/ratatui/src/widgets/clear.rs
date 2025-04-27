@@ -1,4 +1,4 @@
-use crate::{buffer::Buffer, layout::Rect, widgets::Widget};
+use crate::prelude::*;
 
 /// A widget to clear/reset a certain area to allow overdrawing (e.g. for popups).
 ///
@@ -11,7 +11,7 @@ use crate::{buffer::Buffer, layout::Rect, widgets::Widget};
 /// use ratatui::{prelude::*, widgets::*};
 ///
 /// fn draw_on_clear(f: &mut Frame, area: Rect) {
-///     let block = Block::default().title("Block").borders(Borders::ALL);
+///     let block = Block::bordered().title("Block");
 ///     f.render_widget(Clear, area); // <- this will clear/reset the area first
 ///     f.render_widget(block, area); // now render the block widget
 /// }
@@ -26,6 +26,12 @@ pub struct Clear;
 
 impl Widget for Clear {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        self.render_ref(area, buf);
+    }
+}
+
+impl WidgetRef for Clear {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         for x in area.left()..area.right() {
             for y in area.top()..area.bottom() {
                 buf.get_mut(x, y).reset();
@@ -37,24 +43,21 @@ impl Widget for Clear {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assert_buffer_eq;
 
     #[test]
     fn render() {
-        let mut buf = Buffer::with_lines(vec!["xxxxxxxxxxxxxxx"; 7]);
+        let mut buffer = Buffer::with_lines(["xxxxxxxxxxxxxxx"; 7]);
         let clear = Clear;
-        clear.render(Rect::new(1, 2, 3, 4), &mut buf);
-        assert_buffer_eq!(
-            buf,
-            Buffer::with_lines(vec![
-                "xxxxxxxxxxxxxxx",
-                "xxxxxxxxxxxxxxx",
-                "x   xxxxxxxxxxx",
-                "x   xxxxxxxxxxx",
-                "x   xxxxxxxxxxx",
-                "x   xxxxxxxxxxx",
-                "xxxxxxxxxxxxxxx",
-            ])
-        );
+        clear.render(Rect::new(1, 2, 3, 4), &mut buffer);
+        let expected = Buffer::with_lines([
+            "xxxxxxxxxxxxxxx",
+            "xxxxxxxxxxxxxxx",
+            "x   xxxxxxxxxxx",
+            "x   xxxxxxxxxxx",
+            "x   xxxxxxxxxxx",
+            "x   xxxxxxxxxxx",
+            "xxxxxxxxxxxxxxx",
+        ]);
+        assert_eq!(buffer, expected);
     }
 }

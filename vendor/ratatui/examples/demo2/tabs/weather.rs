@@ -1,51 +1,71 @@
 use itertools::Itertools;
 use palette::Okhsv;
 use ratatui::{
-    prelude::*,
-    widgets::{calendar::CalendarEventStore, *},
+    buffer::Buffer,
+    layout::{Constraint, Direction, Layout, Margin, Rect},
+    style::{Color, Style, Stylize},
+    symbols,
+    widgets::{
+        calendar::{CalendarEventStore, Monthly},
+        Bar, BarChart, BarGroup, Block, Clear, LineGauge, Padding, Widget,
+    },
 };
 use time::OffsetDateTime;
 
-use crate::{color_from_oklab, layout, RgbSwatch, THEME};
+use crate::{color_from_oklab, RgbSwatch, THEME};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WeatherTab {
-    pub selected_row: usize,
+    pub download_progress: usize,
 }
 
 impl WeatherTab {
-    pub fn new(selected_row: usize) -> Self {
-        Self { selected_row }
+    /// Simulate a download indicator by decrementing the row index.
+    pub fn prev(&mut self) {
+        self.download_progress = self.download_progress.saturating_sub(1);
+    }
+
+    /// Simulate a download indicator by incrementing the row index.
+    pub fn next(&mut self) {
+        self.download_progress = self.download_progress.saturating_add(1);
     }
 }
 
 impl Widget for WeatherTab {
     fn render(self, area: Rect, buf: &mut Buffer) {
         RgbSwatch.render(area, buf);
-        let area = area.inner(&Margin {
+        let area = area.inner(Margin {
             vertical: 1,
             horizontal: 2,
         });
         Clear.render(area, buf);
         Block::new().style(THEME.content).render(area, buf);
 
-        let area = area.inner(&Margin {
+        let area = area.inner(Margin {
             horizontal: 2,
             vertical: 1,
         });
-        let area = layout(area, Direction::Vertical, vec![0, 1, 1]);
-        render_gauges(self.selected_row, area[2], buf);
+        let [main, _, gauges] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
+        let [calendar, charts] =
+            Layout::horizontal([Constraint::Length(23), Constraint::Min(0)]).areas(main);
+        let [simple, horizontal] =
+            Layout::vertical([Constraint::Length(29), Constraint::Min(0)]).areas(charts);
 
-        let area = layout(area[0], Direction::Horizontal, vec![23, 0]);
-        render_calendar(area[0], buf);
-        let area = layout(area[1], Direction::Horizontal, vec![29, 0]);
-        render_simple_barchart(area[0], buf);
-        render_horizontal_barchart(area[1], buf);
+        render_calendar(calendar, buf);
+        render_simple_barchart(simple, buf);
+        render_horizontal_barchart(horizontal, buf);
+        render_gauge(self.download_progress, gauges, buf);
     }
 }
 
 fn render_calendar(area: Rect, buf: &mut Buffer) {
     let date = OffsetDateTime::now_utc().date();
-    calendar::Monthly::new(date, CalendarEventStore::today(Style::new().red().bold()))
+    Monthly::new(date, CalendarEventStore::today(Style::new().red().bold()))
         .block(Block::new().padding(Padding::new(0, 0, 2, 0)))
         .show_month_header(Style::new().bold())
         .show_weekdays_header(Style::new().italic())
@@ -70,7 +90,7 @@ fn render_simple_barchart(area: Rect, buf: &mut Buffer) {
                 // This doesn't actually render correctly as the text is too wide for the bar
                 // See https://github.com/ratatui-org/ratatui/issues/513 for more info
                 // (the demo GIFs hack around this by hacking the calculation in bars.rs)
-                .text_value(format!("{}°", value))
+                .text_value(format!("{value}°"))
                 .style(if value > 70 {
                     Style::new().fg(Color::Red)
                 } else {
@@ -114,20 +134,22 @@ fn render_horizontal_barchart(area: Rect, buf: &mut Buffer) {
         .render(area, buf);
 }
 
-pub fn render_gauges(progress: usize, area: Rect, buf: &mut Buffer) {
+#[allow(clippy::cast_precision_loss)]
+pub fn render_gauge(progress: usize, area: Rect, buf: &mut Buffer) {
     let percent = (progress * 3).min(100) as f64;
 
     render_line_gauge(percent, area, buf);
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn render_line_gauge(percent: f64, area: Rect, buf: &mut Buffer) {
     // cycle color hue based on the percent for a neat effect yellow -> red
     let hue = 90.0 - (percent as f32 * 0.6);
     let value = Okhsv::max_value();
-    let fg = color_from_oklab(hue, Okhsv::max_saturation(), value);
-    let bg = color_from_oklab(hue, Okhsv::max_saturation(), value * 0.5);
+    let filled_color = color_from_oklab(hue, Okhsv::max_saturation(), value);
+    let unfilled_color = color_from_oklab(hue, Okhsv::max_saturation(), value * 0.5);
     let label = if percent < 100.0 {
-        format!("Downloading: {}%", percent)
+        format!("Downloading: {percent}%")
     } else {
         "Download Complete!".into()
     };
@@ -135,7 +157,8 @@ fn render_line_gauge(percent: f64, area: Rect, buf: &mut Buffer) {
         .ratio(percent / 100.0)
         .label(label)
         .style(Style::new().light_blue())
-        .gauge_style(Style::new().fg(fg).bg(bg))
+        .filled_style(Style::new().fg(filled_color))
+        .unfilled_style(Style::new().fg(unfilled_color))
         .line_set(symbols::line::THICK)
         .render(area, buf);
 }

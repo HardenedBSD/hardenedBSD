@@ -60,6 +60,9 @@ use std::fmt;
 use std::path;
 use std::process;
 
+#[doc(inline)]
+pub use crate::cargo_bin;
+
 /// Create a [`Command`] for a `bin` in the Cargo project.
 ///
 /// `CommandCargoExt` is an extension trait for [`Command`][std::process::Command] to easily launch a crate's
@@ -94,6 +97,8 @@ where
     /// binaries that can't be launched directly, such as cross-compiled binaries. When using
     /// this method with [cross](https://github.com/cross-rs/cross), no extra configuration is
     /// needed.
+    ///
+    /// **NOTE:** Prefer [`cargo_bin!`] as this makes assumptions about cargo
     ///
     /// # Examples
     ///
@@ -181,7 +186,7 @@ impl Error for CargoError {}
 impl fmt::Display for CargoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref cause) = self.cause {
-            writeln!(f, "Cause: {}", cause)?;
+            writeln!(f, "Cause: {cause}")?;
         }
         Ok(())
     }
@@ -217,12 +222,14 @@ fn target_dir() -> path::PathBuf {
 }
 
 /// Look up the path to a cargo-built binary within an integration test.
+///
+/// **NOTE:** Prefer [`cargo_bin!`] as this makes assumptions about cargo
 pub fn cargo_bin<S: AsRef<str>>(name: S) -> path::PathBuf {
     cargo_bin_str(name.as_ref())
 }
 
 fn cargo_bin_str(name: &str) -> path::PathBuf {
-    let env_var = format!("CARGO_BIN_EXE_{}", name);
+    let env_var = format!("CARGO_BIN_EXE_{name}");
     env::var_os(env_var)
         .map(|p| p.into())
         .unwrap_or_else(|| target_dir().join(format!("{}{}", name, env::consts::EXE_SUFFIX)))

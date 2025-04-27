@@ -1,36 +1,39 @@
 #![cfg(feature = "use_std")]
 
-use crate::MinMaxResult;
+use crate::{
+    adaptors::map::{MapSpecialCase, MapSpecialCaseFn},
+    MinMaxResult,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt;
 use std::hash::Hash;
 use std::iter::Iterator;
 use std::ops::{Add, Mul};
 
 /// A wrapper to allow for an easy [`into_grouping_map_by`](crate::Itertools::into_grouping_map_by)
-#[derive(Clone)]
-pub struct MapForGrouping<I, F>(I, F);
+pub type MapForGrouping<I, F> = MapSpecialCase<I, GroupingMapFn<F>>;
 
-impl<I: fmt::Debug, F> fmt::Debug for MapForGrouping<I, F> {
-    debug_fmt_fields!(MapForGrouping, 0);
+#[derive(Clone)]
+pub struct GroupingMapFn<F>(F);
+
+impl<F> std::fmt::Debug for GroupingMapFn<F> {
+    debug_fmt_fields!(GroupingMapFn,);
 }
 
-impl<I, F> MapForGrouping<I, F> {
-    pub(crate) fn new(iter: I, key_mapper: F) -> Self {
-        Self(iter, key_mapper)
+impl<V, K, F: FnMut(&V) -> K> MapSpecialCaseFn<V> for GroupingMapFn<F> {
+    type Out = (K, V);
+    fn call(&mut self, v: V) -> Self::Out {
+        ((self.0)(&v), v)
     }
 }
 
-impl<K, V, I, F> Iterator for MapForGrouping<I, F>
-where
-    I: Iterator<Item = V>,
-    K: Hash + Eq,
-    F: FnMut(&V) -> K,
-{
-    type Item = (K, V);
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|val| ((self.1)(&val), val))
+pub(crate) fn new_map_for_grouping<K, I: Iterator, F: FnMut(&I::Item) -> K>(
+    iter: I,
+    key_mapper: F,
+) -> MapForGrouping<I, F> {
+    MapSpecialCase {
+        iter,
+        f: GroupingMapFn(key_mapper),
     }
 }
 
@@ -217,14 +220,14 @@ where
     ///
     /// let lookup = (1..=7)
     ///     .into_grouping_map_by(|&n| n % 3)
-    ///     .fold_first(|acc, _key, val| acc + val);
+    ///     .reduce(|acc, _key, val| acc + val);
     ///
     /// assert_eq!(lookup[&0], 3 + 6);
     /// assert_eq!(lookup[&1], 1 + 4 + 7);
     /// assert_eq!(lookup[&2], 2 + 5);
     /// assert_eq!(lookup.len(), 3);
     /// ```
-    pub fn fold_first<FO>(self, mut operation: FO) -> HashMap<K, V>
+    pub fn reduce<FO>(self, mut operation: FO) -> HashMap<K, V>
     where
         FO: FnMut(V, &K, V) -> V,
     {
@@ -234,6 +237,15 @@ where
                 None => val,
             })
         })
+    }
+
+    /// See [`.reduce()`](GroupingMap::reduce).
+    #[deprecated(note = "Use .reduce() instead", since = "0.13.0")]
+    pub fn fold_first<FO>(self, operation: FO) -> HashMap<K, V>
+    where
+        FO: FnMut(V, &K, V) -> V,
+    {
+        self.reduce(operation)
     }
 
     /// Groups elements from the `GroupingMap` source by key and collects the elements of each group in
@@ -318,7 +330,7 @@ where
     where
         F: FnMut(&K, &V, &V) -> Ordering,
     {
-        self.fold_first(|acc, key, val| match compare(key, &acc, &val) {
+        self.reduce(|acc, key, val| match compare(key, &acc, &val) {
             Ordering::Less | Ordering::Equal => val,
             Ordering::Greater => acc,
         })
@@ -399,7 +411,7 @@ where
     where
         F: FnMut(&K, &V, &V) -> Ordering,
     {
-        self.fold_first(|acc, key, val| match compare(key, &acc, &val) {
+        self.reduce(|acc, key, val| match compare(key, &acc, &val) {
             Ordering::Less | Ordering::Equal => acc,
             Ordering::Greater => val,
         })
@@ -438,7 +450,7 @@ where
     /// If several elements are equally maximum, the last element is picked.
     /// If several elements are equally minimum, the first element is picked.
     ///
-    /// See [.minmax()](crate::Itertools::minmax) for the non-grouping version.
+    /// See [`Itertools::minmax`](crate::Itertools::minmax) for the non-grouping version.
     ///
     /// Differences from the non grouping version:
     /// - It never produces a `MinMaxResult::NoElements`
@@ -550,7 +562,7 @@ where
 
     /// Groups elements from the `GroupingMap` source by key and sums them.
     ///
-    /// This is just a shorthand for `self.fold_first(|acc, _, val| acc + val)`.
+    /// This is just a shorthand for `self.reduce(|acc, _, val| acc + val)`.
     /// It is more limited than `Iterator::sum` since it doesn't use the `Sum` trait.
     ///
     /// Returns a `HashMap` associating the key of each group with the sum of that group's elements.
@@ -571,12 +583,12 @@ where
     where
         V: Add<V, Output = V>,
     {
-        self.fold_first(|acc, _, val| acc + val)
+        self.reduce(|acc, _, val| acc + val)
     }
 
     /// Groups elements from the `GroupingMap` source by key and multiply them.
     ///
-    /// This is just a shorthand for `self.fold_first(|acc, _, val| acc * val)`.
+    /// This is just a shorthand for `self.reduce(|acc, _, val| acc * val)`.
     /// It is more limited than `Iterator::product` since it doesn't use the `Product` trait.
     ///
     /// Returns a `HashMap` associating the key of each group with the product of that group's elements.
@@ -597,6 +609,6 @@ where
     where
         V: Mul<V, Output = V>,
     {
-        self.fold_first(|acc, _, val| acc * val)
+        self.reduce(|acc, _, val| acc * val)
     }
 }

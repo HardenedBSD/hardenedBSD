@@ -1,10 +1,8 @@
 use std::error::Error;
 
 use ratatui::{
-    assert_buffer_eq,
     backend::{Backend, TestBackend},
     layout::Rect,
-    prelude::Buffer,
     widgets::{Paragraph, Widget},
     Terminal, TerminalOptions, Viewport,
 };
@@ -51,6 +49,31 @@ fn terminal_draw_returns_the_completed_frame() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn terminal_draw_increments_frame_count() -> Result<(), Box<dyn Error>> {
+    let backend = TestBackend::new(10, 10);
+    let mut terminal = Terminal::new(backend)?;
+    let frame = terminal.draw(|f| {
+        assert_eq!(f.count(), 0);
+        let paragraph = Paragraph::new("Test");
+        f.render_widget(paragraph, f.size());
+    })?;
+    assert_eq!(frame.count, 0);
+    let frame = terminal.draw(|f| {
+        assert_eq!(f.count(), 1);
+        let paragraph = Paragraph::new("test");
+        f.render_widget(paragraph, f.size());
+    })?;
+    assert_eq!(frame.count, 1);
+    let frame = terminal.draw(|f| {
+        assert_eq!(f.count(), 2);
+        let paragraph = Paragraph::new("test");
+        f.render_widget(paragraph, f.size());
+    })?;
+    assert_eq!(frame.count, 2);
+    Ok(())
+}
+
+#[test]
 fn terminal_insert_before_moves_viewport() -> Result<(), Box<dyn Error>> {
     // When we have a terminal with 5 lines, and a single line viewport, if we insert a
     // number of lines less than the `terminal height - viewport height` it should move
@@ -80,16 +103,13 @@ fn terminal_insert_before_moves_viewport() -> Result<(), Box<dyn Error>> {
         f.render_widget(paragraph, f.size());
     })?;
 
-    assert_buffer_eq!(
-        terminal.backend().buffer().clone(),
-        Buffer::with_lines(vec![
-            "------ Line 1 ------",
-            "------ Line 2 ------",
-            "[---- Viewport ----]",
-            "                    ",
-            "                    ",
-        ])
-    );
+    terminal.backend().assert_buffer_lines([
+        "------ Line 1 ------",
+        "------ Line 2 ------",
+        "[---- Viewport ----]",
+        "                    ",
+        "                    ",
+    ]);
 
     Ok(())
 }
@@ -125,16 +145,13 @@ fn terminal_insert_before_scrolls_on_large_input() -> Result<(), Box<dyn Error>>
         f.render_widget(paragraph, f.size());
     })?;
 
-    assert_buffer_eq!(
-        terminal.backend().buffer().clone(),
-        Buffer::with_lines(vec![
-            "------ Line 2 ------",
-            "------ Line 3 ------",
-            "------ Line 4 ------",
-            "------ Line 5 ------",
-            "[---- Viewport ----]",
-        ])
-    );
+    terminal.backend().assert_buffer_lines([
+        "------ Line 2 ------",
+        "------ Line 3 ------",
+        "------ Line 4 ------",
+        "------ Line 5 ------",
+        "[---- Viewport ----]",
+    ]);
 
     Ok(())
 }
@@ -180,16 +197,13 @@ fn terminal_insert_before_scrolls_on_many_inserts() -> Result<(), Box<dyn Error>
         f.render_widget(paragraph, f.size());
     })?;
 
-    assert_buffer_eq!(
-        terminal.backend().buffer().clone(),
-        Buffer::with_lines(vec![
-            "------ Line 2 ------",
-            "------ Line 3 ------",
-            "------ Line 4 ------",
-            "------ Line 5 ------",
-            "[---- Viewport ----]",
-        ])
-    );
+    terminal.backend().assert_buffer_lines([
+        "------ Line 2 ------",
+        "------ Line 3 ------",
+        "------ Line 4 ------",
+        "------ Line 5 ------",
+        "[---- Viewport ----]",
+    ]);
 
     Ok(())
 }

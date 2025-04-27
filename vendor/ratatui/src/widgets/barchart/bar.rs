@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
-use crate::{buffer::Buffer, prelude::Rect, style::Style, text::Line};
+use crate::prelude::*;
 
 /// A bar to be shown by the [`BarChart`](crate::widgets::BarChart) widget.
 ///
@@ -36,7 +36,7 @@ pub struct Bar<'a> {
     pub(super) style: Style,
     /// style of the value printed at the bottom of the bar.
     pub(super) value_style: Style,
-    /// optional text_value to be shown on the bar instead of the actual value
+    /// optional `text_value` to be shown on the bar instead of the actual value
     pub(super) text_value: Option<String>,
 }
 
@@ -47,10 +47,10 @@ impl<'a> Bar<'a> {
     ///
     /// # See also
     ///
-    /// [`Bar::value_style`] to style the value.  
+    /// [`Bar::value_style`] to style the value.
     /// [`Bar::text_value`] to set the displayed value.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn value(mut self, value: u64) -> Bar<'a> {
+    pub const fn value(mut self, value: u64) -> Self {
         self.value = value;
         self
     }
@@ -58,47 +58,52 @@ impl<'a> Bar<'a> {
     /// Set the label of the bar.
     ///
     /// For [`Vertical`](crate::layout::Direction::Vertical) bars,
-    /// display the label **under** the bar.  
+    /// display the label **under** the bar.
     /// For [`Horizontal`](crate::layout::Direction::Horizontal) bars,
-    /// display the label **in** the bar.  
+    /// display the label **in** the bar.
     /// See [`BarChart::direction`](crate::widgets::BarChart::direction) to set the direction.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn label(mut self, label: Line<'a>) -> Bar<'a> {
+    pub fn label(mut self, label: Line<'a>) -> Self {
         self.label = Some(label);
         self
     }
 
     /// Set the style of the bar.
     ///
-    /// This will apply to every non-styled element.
-    /// It can be seen and used as a default value.
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
+    /// This will apply to every non-styled element. It can be seen and used as a default value.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn style(mut self, style: Style) -> Bar<'a> {
-        self.style = style;
+    pub fn style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.style = style.into();
         self
     }
 
     /// Set the style of the value.
     ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    ///
     /// # See also
     ///
     /// [`Bar::value`] to set the value.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn value_style(mut self, style: Style) -> Bar<'a> {
-        self.value_style = style;
+    pub fn value_style<S: Into<Style>>(mut self, style: S) -> Self {
+        self.value_style = style.into();
         self
     }
 
     /// Set the text value printed in the bar.
     ///
-    /// If `text_value` is not set, then the [ToString] representation of `value` will be shown on
+    /// If `text_value` is not set, then the [`ToString`] representation of `value` will be shown on
     /// the bar.
     ///
     /// # See also
     ///
     /// [`Bar::value`] to set the value.
     #[must_use = "method moves the value of self and returns the modified value"]
-    pub fn text_value(mut self, text_value: String) -> Bar<'a> {
+    pub fn text_value(mut self, text_value: String) -> Self {
         self.text_value = Some(text_value);
         self
     }
@@ -106,28 +111,25 @@ impl<'a> Bar<'a> {
     /// Render the value of the bar.
     ///
     /// [`text_value`](Bar::text_value) is used if set, otherwise the value is converted to string.
-    /// The value is rendered using value_style. If the value width is greater than the
+    /// The value is rendered using `value_style`. If the value width is greater than the
     /// bar width, then the value is split into 2 parts. the first part is rendered in the bar
-    /// using value_style. The second part is rendered outside the bar using bar_style
+    /// using `value_style`. The second part is rendered outside the bar using `bar_style`
     pub(super) fn render_value_with_different_styles(
-        self,
+        &self,
         buf: &mut Buffer,
         area: Rect,
         bar_length: usize,
         default_value_style: Style,
         bar_style: Style,
     ) {
-        let text = if let Some(text) = self.text_value {
-            text
-        } else {
-            self.value.to_string()
-        };
+        let value = self.value.to_string();
+        let text = self.text_value.as_ref().unwrap_or(&value);
 
         if !text.is_empty() {
             let style = default_value_style.patch(self.value_style);
             // Since the value may be longer than the bar itself, we need to use 2 different styles
             // while rendering. Render the first part with the default value style
-            buf.set_stringn(area.x, area.y, &text, bar_length, style);
+            buf.set_stringn(area.x, area.y, text, bar_length, style);
             // render the second part with the bar_style
             if text.len() > bar_length {
                 let (first, second) = text.split_at(bar_length);
@@ -145,7 +147,7 @@ impl<'a> Bar<'a> {
     }
 
     pub(super) fn render_value(
-        self,
+        &self,
         buf: &mut Buffer,
         max_width: u16,
         x: u16,
@@ -154,14 +156,10 @@ impl<'a> Bar<'a> {
         ticks: u64,
     ) {
         if self.value != 0 {
-            let value_label = if let Some(text) = self.text_value {
-                text
-            } else {
-                self.value.to_string()
-            };
-
-            let width = value_label.width() as u16;
             const TICKS_PER_LINE: u64 = 8;
+            let value = self.value.to_string();
+            let value_label = self.text_value.as_ref().unwrap_or(&value);
+            let width = value_label.width() as u16;
             // if we have enough space or the ticks are greater equal than 1 cell (8)
             // then print the value
             if width < max_width || (width == max_width && ticks >= TICKS_PER_LINE) {
@@ -176,25 +174,29 @@ impl<'a> Bar<'a> {
     }
 
     pub(super) fn render_label(
-        &mut self,
+        &self,
         buf: &mut Buffer,
         max_width: u16,
         x: u16,
         y: u16,
         default_label_style: Style,
     ) {
-        if let Some(label) = &mut self.label {
-            // patch label styles
-            for span in &mut label.spans {
-                span.style = default_label_style.patch(span.style);
-            }
-
-            buf.set_line(
-                x + (max_width.saturating_sub(label.width() as u16) >> 1),
-                y,
-                label,
-                max_width,
-            );
+        // center the label. Necessary to do it this way as we don't want to set the style
+        // of the whole area, just the label area
+        let width = self
+            .label
+            .as_ref()
+            .map_or(0, Line::width)
+            .min(max_width as usize) as u16;
+        let area = Rect {
+            x: x + (max_width.saturating_sub(width)) / 2,
+            y,
+            width,
+            height: 1,
+        };
+        buf.set_style(area, default_label_style);
+        if let Some(label) = &self.label {
+            label.render(area, buf);
         }
     }
 }

@@ -5,12 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - ReleaseDate
+## [0.3.0] - 2025-02-23
 
 ### Fixed
 
 - Correctly reset terminal settings when quitting the application.
-  (#[38](https://github.com/asomers/gstat-rs/pull/38))
+  (#[2fe9cd1](https://github.com/asomers/ztop/commit/2fe9cd17d041d4b02f0a9e79000c6c1a4bf58d06))
+
+### Changed
+
+- Changed the default sort order.  By default, sort descending for numeric
+  columns or ascending for dataset name.
+  (#[56](https://github.com/asomers/gstat-rs/pull/56))
+
+- Changed the `-d` switch to match the behavior of `zfs list -d`: A depth of 0
+  means to display each pool, a depth of 1 means to display one dataset deeper,
+  etc.
+  (#[55](https://github.com/asomers/gstat-rs/pull/55))
+
+- Tweaked colors for better visibility on some terminals.
+  (#[48](https://github.com/asomers/gstat-rs/pull/48))
 
 ## [0.2.3] - 2023-12-18
 

@@ -13,8 +13,14 @@ use crate::{
 pub trait Styled {
     type Item;
 
+    /// Returns the style of the object.
     fn style(&self) -> Style;
-    fn set_style(self, style: Style) -> Self::Item;
+
+    /// Sets the style of the object.
+    ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item;
 }
 
 /// Generates two methods for each color, one for setting the foreground color (`red()`, `blue()`,
@@ -127,17 +133,13 @@ macro_rules! modifier {
 ///     "world".green().on_yellow().not_bold(),
 /// ]);
 /// let paragraph = Paragraph::new(line).italic().underlined();
-/// let block = Block::default()
-///     .title("Title")
-///     .borders(Borders::ALL)
-///     .on_white()
-///     .bold();
+/// let block = Block::bordered().title("Title").on_white().bold();
 /// ```
 pub trait Stylize<'a, T>: Sized {
     #[must_use = "`bg` returns the modified style without modifying the original"]
-    fn bg(self, color: Color) -> T;
+    fn bg<C: Into<Color>>(self, color: C) -> T;
     #[must_use = "`fg` returns the modified style without modifying the original"]
-    fn fg<S: Into<Color>>(self, color: S) -> T;
+    fn fg<C: Into<Color>>(self, color: C) -> T;
     #[must_use = "`reset` returns the modified style without modifying the original"]
     fn reset(self) -> T;
     #[must_use = "`add_modifier` returns the modified style without modifying the original"]
@@ -177,12 +179,12 @@ impl<'a, T, U> Stylize<'a, T> for U
 where
     U: Styled<Item = T>,
 {
-    fn bg(self, color: Color) -> T {
-        let style = self.style().bg(color);
+    fn bg<C: Into<Color>>(self, color: C) -> T {
+        let style = self.style().bg(color.into());
         self.set_style(style)
     }
 
-    fn fg<S: Into<Color>>(self, color: S) -> T {
+    fn fg<C: Into<Color>>(self, color: C) -> T {
         let style = self.style().fg(color.into());
         self.set_style(style)
     }
@@ -209,7 +211,7 @@ impl<'a> Styled for &'a str {
         Style::default()
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         Span::styled(self, style)
     }
 }
@@ -221,7 +223,7 @@ impl Styled for String {
         Style::default()
     }
 
-    fn set_style(self, style: Style) -> Self::Item {
+    fn set_style<S: Into<Style>>(self, style: S) -> Self::Item {
         Span::styled(self, style)
     }
 }
@@ -342,7 +344,7 @@ mod tests {
 
         // format!() is used to create a temporary String inside a closure, which suffers the same
         // issue as above without the `Styled` trait impl for `String`
-        let items = vec![String::from("a"), String::from("b")];
+        let items = [String::from("a"), String::from("b")];
         let sss = items.iter().map(|s| format!("{s}{s}").red()).collect_vec();
         assert_eq!(sss, vec![Span::from("aa").red(), Span::from("bb").red()]);
     }
@@ -387,12 +389,12 @@ mod tests {
 
     #[test]
     fn repeated_attributes() {
-        let cyan_bg = Style::default().bg(Color::Cyan);
-        let cyan_fg = Style::default().fg(Color::Cyan);
+        let bg = Style::default().bg(Color::Cyan);
+        let fg = Style::default().fg(Color::Cyan);
 
         // Behavior: the last one set is the definitive one
-        assert_eq!("hello".on_red().on_cyan(), Span::styled("hello", cyan_bg));
-        assert_eq!("hello".red().cyan(), Span::styled("hello", cyan_fg));
+        assert_eq!("hello".on_red().on_cyan(), Span::styled("hello", bg));
+        assert_eq!("hello".red().cyan(), Span::styled("hello", fg));
     }
 
     #[test]

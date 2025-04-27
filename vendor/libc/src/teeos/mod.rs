@@ -5,32 +5,9 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-// only supported on Rust > 1.59, so we can directly reexport c_void from core.
-pub use core::ffi::c_void;
-
-use Option;
-
-pub type c_schar = i8;
-
-pub type c_uchar = u8;
-
-pub type c_short = i16;
-
-pub type c_ushort = u16;
-
-pub type c_int = i32;
-
-pub type c_uint = u32;
+use crate::prelude::*;
 
 pub type c_bool = i32;
-
-pub type c_float = f32;
-
-pub type c_double = f64;
-
-pub type c_longlong = i64;
-
-pub type c_ulonglong = u64;
 
 pub type intmax_t = i64;
 
@@ -48,22 +25,12 @@ pub type ssize_t = isize;
 
 pub type pid_t = c_int;
 
-// aarch64 specifc
-pub type c_char = u8;
-
 pub type wchar_t = u32;
 
-pub type c_long = i64;
-
-pub type c_ulong = u64;
-
-#[repr(align(16))]
-pub struct _CLongDouble(pub u128);
-
 // long double in C means A float point value, which has 128bit length.
-// but some bit maybe not used, so the really length of long double could be 80(x86) or 128(power pc/IEEE)
+// but some bit maybe not used, so the real length of long double could be 80(x86) or 128(power pc/IEEE)
 // this is different from f128(not stable and not included default) in Rust, so we use u128 for FFI(Rust to C).
-// this is unstable and will couse to memfault/data abort.
+// this is unstable and will cause to memfault/data abort.
 pub type c_longdouble = _CLongDouble;
 
 pub type pthread_t = c_ulong;
@@ -93,6 +60,9 @@ pub type wint_t = c_uint;
 pub type wctype_t = c_ulong;
 
 pub type cmpfunc = extern "C" fn(x: *const c_void, y: *const c_void) -> c_int;
+
+#[repr(align(16))]
+pub struct _CLongDouble(pub u128);
 
 #[repr(align(8))]
 #[repr(C)]
@@ -177,41 +147,41 @@ pub struct div_t {
 }
 
 // fcntl
-pub const O_CREAT: u32 = 0100;
+pub const O_CREAT: u32 = 0o100;
 
-pub const O_EXCL: u32 = 0200;
+pub const O_EXCL: u32 = 0o200;
 
-pub const O_NOCTTY: u32 = 0400;
+pub const O_NOCTTY: u32 = 0o400;
 
-pub const O_TRUNC: u32 = 01000;
+pub const O_TRUNC: u32 = 0o1000;
 
-pub const O_APPEND: u32 = 02000;
+pub const O_APPEND: u32 = 0o2000;
 
-pub const O_NONBLOCK: u32 = 04000;
+pub const O_NONBLOCK: u32 = 0o4000;
 
-pub const O_DSYNC: u32 = 010000;
+pub const O_DSYNC: u32 = 0o10000;
 
-pub const O_SYNC: u32 = 04010000;
+pub const O_SYNC: u32 = 0o4010000;
 
-pub const O_RSYNC: u32 = 04010000;
+pub const O_RSYNC: u32 = 0o4010000;
 
-pub const O_DIRECTORY: u32 = 0200000;
+pub const O_DIRECTORY: u32 = 0o200000;
 
-pub const O_NOFOLLOW: u32 = 0400000;
+pub const O_NOFOLLOW: u32 = 0o400000;
 
-pub const O_CLOEXEC: u32 = 02000000;
+pub const O_CLOEXEC: u32 = 0o2000000;
 
-pub const O_ASYNC: u32 = 020000;
+pub const O_ASYNC: u32 = 0o20000;
 
-pub const O_DIRECT: u32 = 040000;
+pub const O_DIRECT: u32 = 0o40000;
 
-pub const O_LARGEFILE: u32 = 0100000;
+pub const O_LARGEFILE: u32 = 0o100000;
 
-pub const O_NOATIME: u32 = 01000000;
+pub const O_NOATIME: u32 = 0o1000000;
 
-pub const O_PATH: u32 = 010000000;
+pub const O_PATH: u32 = 0o10000000;
 
-pub const O_TMPFILE: u32 = 020200000;
+pub const O_TMPFILE: u32 = 0o20200000;
 
 pub const O_NDELAY: u32 = O_NONBLOCK;
 
@@ -1109,8 +1079,8 @@ extern "C" {
     pub fn pthread_cond_timedwait(
         cond: *mut pthread_cond_t,
         lock: *mut pthread_mutex_t,
-        abstime: *const ::timespec,
-    ) -> ::c_int;
+        abstime: *const timespec,
+    ) -> c_int;
 
     pub fn pthread_mutexattr_setrobust(attr: *mut pthread_mutexattr_t, robustness: c_int) -> c_int;
 

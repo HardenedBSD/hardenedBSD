@@ -1,29 +1,50 @@
+//! # [Ratatui] Sparkline example
+//!
+//! The latest version of this example is available in the [examples] folder in the repository.
+//!
+//! Please note that the examples are designed to be run against the `main` branch of the Github
+//! repository. This means that you may not be able to compile with the latest release version on
+//! crates.io, or the one that you have installed locally.
+//!
+//! See the [examples readme] for more information on finding examples that match the version of the
+//! library you are using.
+//!
+//! [Ratatui]: https://github.com/ratatui-org/ratatui
+//! [examples]: https://github.com/ratatui-org/ratatui/blob/main/examples
+//! [examples readme]: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md
+
 use std::{
     error::Error,
     io,
     time::{Duration, Instant},
 };
 
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 use rand::{
     distributions::{Distribution, Uniform},
     rngs::ThreadRng,
 };
-use ratatui::{prelude::*, widgets::*};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    crossterm::{
+        event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    },
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    terminal::{Frame, Terminal},
+    widgets::{Block, Borders, Sparkline},
+};
 
 #[derive(Clone)]
-pub struct RandomSignal {
+struct RandomSignal {
     distribution: Uniform<u64>,
     rng: ThreadRng,
 }
 
 impl RandomSignal {
-    pub fn new(lower: u64, upper: u64) -> RandomSignal {
-        RandomSignal {
+    fn new(lower: u64, upper: u64) -> Self {
+        Self {
             distribution: Uniform::new(lower, upper),
             rng: rand::thread_rng(),
         }
@@ -45,12 +66,12 @@ struct App {
 }
 
 impl App {
-    fn new() -> App {
+    fn new() -> Self {
         let mut signal = RandomSignal::new(0, 100);
         let data1 = signal.by_ref().take(200).collect::<Vec<u64>>();
         let data2 = signal.by_ref().take(200).collect::<Vec<u64>>();
         let data3 = signal.by_ref().take(200).collect::<Vec<u64>>();
-        App {
+        Self {
             signal,
             data1,
             data2,
@@ -112,7 +133,7 @@ fn run_app<B: Backend>(
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
+                if key.code == KeyCode::Char('q') {
                     return Ok(());
                 }
             }
@@ -125,28 +146,26 @@ fn run_app<B: Backend>(
 }
 
 fn ui(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(0),
-        ])
-        .split(f.size());
+    let chunks = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .split(f.size());
     let sparkline = Sparkline::default()
         .block(
-            Block::default()
-                .title("Data1")
-                .borders(Borders::LEFT | Borders::RIGHT),
+            Block::new()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .title("Data1"),
         )
         .data(&app.data1)
         .style(Style::default().fg(Color::Yellow));
     f.render_widget(sparkline, chunks[0]);
     let sparkline = Sparkline::default()
         .block(
-            Block::default()
-                .title("Data2")
-                .borders(Borders::LEFT | Borders::RIGHT),
+            Block::new()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .title("Data2"),
         )
         .data(&app.data2)
         .style(Style::default().bg(Color::Green));
@@ -154,9 +173,9 @@ fn ui(f: &mut Frame, app: &App) {
     // Multiline
     let sparkline = Sparkline::default()
         .block(
-            Block::default()
-                .title("Data3")
-                .borders(Borders::LEFT | Borders::RIGHT),
+            Block::new()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .title("Data3"),
         )
         .data(&app.data3)
         .style(Style::default().fg(Color::Red));

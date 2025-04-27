@@ -9,7 +9,7 @@ description = "Enhanced replacement for FreeBSD's gstat utility"
 categories = ["command-line-utilities"]
 keywords = ["freebsd"]
 include = ["src/**/*", "LICENSE", "README.md"]
-rust-version = "1.70"
+rust-version = "1.80"
 
 [package.metadata.docs.rs]
 targets = [

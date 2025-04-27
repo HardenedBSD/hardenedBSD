@@ -1,7 +1,9 @@
 #![allow(unstable_name_collisions)]
 
 use itertools::Itertools;
+use quickcheck::Arbitrary;
 use quickcheck::{quickcheck, TestResult};
+use rand::Rng;
 use std::fmt::Debug;
 
 struct Unspecialized<I>(I);
@@ -163,7 +165,6 @@ quickcheck! {
         TestResult::passed()
     }
 
-    #[ignore] // It currently fails because `MultiProduct` is not fused.
     fn multi_cartesian_product(a: Vec<u8>, b: Vec<u8>, c: Vec<u8>) -> TestResult {
         if a.len() * b.len() * c.len() > 100 {
             return TestResult::discard();
@@ -453,8 +454,8 @@ quickcheck! {
         test_specializations(&v.into_iter().filter_map_ok(|i| if i < 20 { Some(i * 2) } else { None }));
     }
 
-    // `Option<u8>` because `Vec<u8>` would be very slow!! And we can't give `[u8; 3]`.
-    fn flatten_ok(v: Vec<Result<Option<u8>, char>>) -> () {
+    // `SmallIter2<u8>` because `Vec<u8>` is too slow and we get bad coverage from a singleton like Option<u8>
+    fn flatten_ok(v: Vec<Result<SmallIter2<u8>, char>>) -> () {
         let it = v.into_iter().flatten_ok();
         test_specializations(&it);
         test_double_ended_specializations(&it);
@@ -467,7 +468,7 @@ quickcheck! {
         helper(v.iter().copied());
         helper(v.iter().copied().filter(Result::is_ok));
 
-        fn helper(it: impl Iterator<Item = Result<u8, u8>> + Clone) {
+        fn helper(it: impl DoubleEndedIterator<Item = Result<u8, u8>> + Clone) {
             macro_rules! check_results_specialized {
                 ($src:expr, |$it:pat| $closure:expr) => {
                     assert_eq!(
@@ -483,6 +484,7 @@ quickcheck! {
             check_results_specialized!(it, |i| i.count());
             check_results_specialized!(it, |i| i.last());
             check_results_specialized!(it, |i| i.collect::<Vec<_>>());
+            check_results_specialized!(it, |i| i.rev().collect::<Vec<_>>());
             check_results_specialized!(it, |i| {
                 let mut parameters_from_fold = vec![];
                 let fold_result = i.fold(vec![], |mut acc, v| {
@@ -491,6 +493,15 @@ quickcheck! {
                     acc
                 });
                 (parameters_from_fold, fold_result)
+            });
+            check_results_specialized!(it, |i| {
+                let mut parameters_from_rfold = vec![];
+                let rfold_result = i.rfold(vec![], |mut acc, v| {
+                    parameters_from_rfold.push((acc.clone(), v));
+                    acc.push(v);
+                    acc
+                });
+                (parameters_from_rfold, rfold_result)
             });
             check_results_specialized!(it, |mut i| {
                 let mut parameters_from_all = vec![];
@@ -504,6 +515,67 @@ quickcheck! {
             let size = it.clone().count();
             for n in 0..size + 2 {
                 check_results_specialized!(it, |mut i| i.nth(n));
+            }
+            for n in 0..size + 2 {
+                check_results_specialized!(it, |mut i| i.nth_back(n));
+            }
+        }
+    }
+}
+
+/// Like `VecIntoIter<T>` with maximum 2 elements.
+#[derive(Debug, Clone, Default)]
+enum SmallIter2<T> {
+    #[default]
+    Zero,
+    One(T),
+    Two(T, T),
+}
+
+impl<T: Arbitrary> Arbitrary for SmallIter2<T> {
+    fn arbitrary<G: quickcheck::Gen>(g: &mut G) -> Self {
+        match g.gen_range(0u8, 3) {
+            0 => Self::Zero,
+            1 => Self::One(T::arbitrary(g)),
+            2 => Self::Two(T::arbitrary(g), T::arbitrary(g)),
+            _ => unreachable!(),
+        }
+    }
+    // maybe implement shrink too, maybe not
+}
+
+impl<T> Iterator for SmallIter2<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match std::mem::take(self) {
+            Self::Zero => None,
+            Self::One(val) => Some(val),
+            Self::Two(val, second) => {
+                *self = Self::One(second);
+                Some(val)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = match self {
+            Self::Zero => 0,
+            Self::One(_) => 1,
+            Self::Two(_, _) => 2,
+        };
+        (len, Some(len))
+    }
+}
+
+impl<T> DoubleEndedIterator for SmallIter2<T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match std::mem::take(self) {
+            Self::Zero => None,
+            Self::One(val) => Some(val),
+            Self::Two(first, val) => {
+                *self = Self::One(first);
+                Some(val)
             }
         }
     }

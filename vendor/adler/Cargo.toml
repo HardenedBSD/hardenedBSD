@@ -6,6 +6,7 @@ version = "0.1.2"
 optional = true
 package = "rustc-std-workspace-core"
 version = "1.0.0"
+
 [dev-dependencies.criterion]
 version = "0.3.2"
 
@@ -13,6 +14,9 @@ version = "0.3.2"
 default = ["std"]
 rustc-dep-of-std = ["core", "compiler_builtins"]
 std = []
+
+[lib]
+path = "src/lib.rs"
 
 [package]
 authors = ["Jonas Schievink <jonasschievink@gmail.com>"]
@@ -25,6 +29,7 @@ name = "adler"
 readme = "README.md"
 repository = "https://github.com/jonas-schievink/adler.git"
 version = "1.0.2"
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg=docsrs"]
 
@@ -35,15 +40,23 @@ tag-message = "{{version}}"
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
-replace = "## Unreleased\n\nNo changes.\n\n## [{{version}} - {{date}}](https://github.com/jonas-schievink/adler/releases/tag/v{{version}})\n"
-search = "## Unreleased\n"
+replace = """
+## Unreleased
+
+No changes.
+
+## [{{version}} - {{date}}](https://github.com/jonas-schievink/adler/releases/tag/v{{version}})
+"""
+search = """
+## Unreleased
+"""
 
 [[package.metadata.release.pre-release-replacements]]
 file = "README.md"
-replace = "adler = \"{{version}}\""
-search = "adler = \"[a-z0-9\\\\.-]+\""
+replace = 'adler = "{{version}}"'
+search = 'adler = "[a-z0-9\\.-]+"'
 
 [[package.metadata.release.pre-release-replacements]]
 file = "src/lib.rs"
 replace = "https://docs.rs/adler/{{version}}"
-search = "https://docs.rs/adler/[a-z0-9\\.-]+"
+search = 'https://docs.rs/adler/[a-z0-9\.-]+'

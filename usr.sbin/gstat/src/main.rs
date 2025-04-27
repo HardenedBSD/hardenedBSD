@@ -125,7 +125,6 @@ impl Cli {
 }
 
 impl BitOrAssign for Cli {
-    #[allow(clippy::or_fun_call)]
     fn bitor_assign(&mut self, rhs: Self) {
         self.auto |= rhs.auto;
         self.delete |= rhs.delete;
@@ -649,8 +648,6 @@ where
     Ok(())
 }
 
-// https://github.com/rust-lang/rust-clippy/issues/7483
-#[allow(clippy::or_fun_call)]
 fn main() -> Result<()> {
     let cli: Cli = Cli::parse();
     let mut cfg = if cli.reset_config {

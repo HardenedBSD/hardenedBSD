@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] - 2024-12-08
+
+### Removed
+
+- Deprecated the `Right::CAP_ALL*` and `Right::CAP_UNUSED*` constants, because
+  they aren't stable across different OS versions, and they probably never had
+  any legitimate use in our consumers anyway.
+  ([#109](https://github.com/dlrobertson/capsicum-rs/pull/109))
+
+## [0.4.3] - 2024-10-14
+
+### Fixed
+
+- Fixed two misnamed constants: `Right::Fchflagsat` and `Right::Mknotat`.
+  ([#87](https://github.com/dlrobertson/capsicum-rs/pull/87))
+
+### Removed
+
+- Removed the `libnv` and `libnv-sys` crate features.  Those were accidental
+  and never intended to be exposed.  They are merely implementation details of
+  the `casper` feature. 
+  ([#107](https://github.com/dlrobertson/capsicum-rs/pull/107))
+
 ## [0.4.2] - 2024-06-04
 
 ### Fixed

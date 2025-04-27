@@ -16,6 +16,9 @@ version = "1.0.0"
 default = []
 rustc-dep-of-std = ["core", "alloc", "compiler_builtins/rustc-dep-of-std"]
 
+[lib]
+path = "src/lib.rs"
+
 [package]
 authors = ["Stefan Lankes"]
 categories = ["os"]

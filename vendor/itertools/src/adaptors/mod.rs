@@ -5,11 +5,9 @@
 //! except according to those terms.
 
 mod coalesce;
-mod map;
+pub(crate) mod map;
 mod multi_product;
 pub use self::coalesce::*;
-#[allow(deprecated)]
-pub use self::map::MapResults;
 pub use self::map::{map_into, map_ok, MapInto, MapOk};
 #[cfg(feature = "use_alloc")]
 pub use self::multi_product::*;
@@ -35,7 +33,7 @@ pub struct Interleave<I, J> {
 
 /// Create an iterator that interleaves elements in `i` and `j`.
 ///
-/// [`IntoIterator`] enabled version of `[Itertools::interleave]`.
+/// [`IntoIterator`] enabled version of [`Itertools::interleave`](crate::Itertools::interleave).
 pub fn interleave<I, J>(
     i: I,
     j: J,
@@ -280,10 +278,10 @@ where
 
     /// Put back a single value to the front of the iterator.
     ///
-    /// If a value is already in the put back slot, it is overwritten.
+    /// If a value is already in the put back slot, it is returned.
     #[inline]
-    pub fn put_back(&mut self, x: I::Item) {
-        self.top = Some(x);
+    pub fn put_back(&mut self, x: I::Item) -> Option<I::Item> {
+        self.top.replace(x)
     }
 }
 
@@ -473,7 +471,7 @@ where
 /// A “meta iterator adaptor”. Its closure receives a reference to the iterator
 /// and may pick off as many elements as it likes, to produce the next iterator element.
 ///
-/// Iterator element type is *X*, if the return type of `F` is *Option\<X\>*.
+/// Iterator element type is `X` if the return type of `F` is `Option<X>`.
 ///
 /// See [`.batching()`](crate::Itertools::batching) for more information.
 #[derive(Clone)]
@@ -506,69 +504,6 @@ where
         (self.f)(&mut self.iter)
     }
 }
-
-/// An iterator adaptor that steps a number elements in the base iterator
-/// for each iteration.
-///
-/// The iterator steps by yielding the next element from the base iterator,
-/// then skipping forward *n-1* elements.
-///
-/// See [`.step()`](crate::Itertools::step) for more information.
-#[deprecated(note = "Use std .step_by() instead", since = "0.8.0")]
-#[allow(deprecated)]
-#[derive(Clone, Debug)]
-#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
-pub struct Step<I> {
-    iter: Fuse<I>,
-    skip: usize,
-}
-
-/// Create a `Step` iterator.
-///
-/// **Panics** if the step is 0.
-#[allow(deprecated)]
-pub fn step<I>(iter: I, step: usize) -> Step<I>
-where
-    I: Iterator,
-{
-    assert!(step != 0);
-    Step {
-        iter: iter.fuse(),
-        skip: step - 1,
-    }
-}
-
-#[allow(deprecated)]
-impl<I> Iterator for Step<I>
-where
-    I: Iterator,
-{
-    type Item = I::Item;
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let elt = self.iter.next();
-        if self.skip > 0 {
-            self.iter.nth(self.skip - 1);
-        }
-        elt
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let (low, high) = self.iter.size_hint();
-        let div = |x: usize| {
-            if x == 0 {
-                0
-            } else {
-                1 + (x - 1) / (self.skip + 1)
-            }
-        };
-        (div(low), high.map(div))
-    }
-}
-
-// known size
-#[allow(deprecated)]
-impl<I> ExactSizeIterator for Step<I> where I: ExactSizeIterator {}
 
 /// An iterator adaptor that borrows from a `Clone`-able iterator
 /// to only pick off elements while the predicate returns `true`.
@@ -677,7 +612,7 @@ where
 /// See [`.tuple_combinations()`](crate::Itertools::tuple_combinations) for more
 /// information.
 #[derive(Clone, Debug)]
-#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
+#[must_use = "this iterator adaptor is not lazy but does nearly nothing unless consumed"]
 pub struct TupleCombinations<I, T>
 where
     I: Iterator,

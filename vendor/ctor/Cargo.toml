@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "ctor"
-version = "0.2.8"
+version = "0.2.9"
 authors = ["Matt Mastracci <matthew@mastracci.com>"]
 description = "__attribute__((constructor)) for Rust"
 readme = "README.md"

@@ -1,3 +1,18 @@
+//! # [Ratatui] Panic Hook example
+//!
+//! The latest version of this example is available in the [examples] folder in the repository.
+//!
+//! Please note that the examples are designed to be run against the `main` branch of the Github
+//! repository. This means that you may not be able to compile with the latest release version on
+//! crates.io, or the one that you have installed locally.
+//!
+//! See the [examples readme] for more information on finding examples that match the version of the
+//! library you are using.
+//!
+//! [Ratatui]: https://github.com/ratatui-org/ratatui
+//! [examples]: https://github.com/ratatui-org/ratatui/blob/main/examples
+//! [examples readme]: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md
+
 //! How to use a panic hook to reset the terminal before printing the panic to
 //! the terminal.
 //!
@@ -16,11 +31,16 @@
 
 use std::{error::Error, io};
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    crossterm::{
+        event::{self, Event, KeyCode},
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    },
+    terminal::{Frame, Terminal},
+    text::Line,
+    widgets::{Block, Paragraph},
 };
-use ratatui::{prelude::*, widgets::*};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -124,11 +144,9 @@ fn ui(f: &mut Frame, app: &App) {
         Line::from("try first without the panic handler to see the difference"),
     ];
 
-    let b = Block::default()
-        .title("Panic Handler Demo")
-        .borders(Borders::ALL);
+    let paragraph = Paragraph::new(text)
+        .block(Block::bordered().title("Panic Handler Demo"))
+        .centered();
 
-    let p = Paragraph::new(text).block(b).alignment(Alignment::Center);
-
-    f.render_widget(p, f.size());
+    f.render_widget(paragraph, f.size());
 }

@@ -1,8 +1,8 @@
 # Breaking Changes
 
 This document contains a list of breaking changes in each version and some notes to help migrate
-between versions. It is compile manually from the commit history and changelog. We also tag PRs on
-github with a [breaking change] label.
+between versions. It is compiled manually from the commit history and changelog. We also tag PRs on
+GitHub with a [breaking change] label.
 
 [breaking change]: (https://github.com/ratatui-org/ratatui/issues?q=label%3A%22breaking+change%22)
 
@@ -10,6 +10,23 @@ github with a [breaking change] label.
 
 This is a quick summary of the sections below:
 
+- [v0.27.0](#v0270)
+  - List no clamps the selected index to list
+  - Prelude items added / removed
+  - 'termion' updated to 4.0
+  - `Rect::inner` takes `Margin` directly instead of reference
+  - `Buffer::filled` takes `Cell` directly instead of reference
+  - `Stylize::bg()` now accepts `Into<Color>`
+  - Removed deprecated `List::start_corner`
+  - `LineGauge::gauge_style` is deprecated
+- [v0.26.0](#v0260)
+  - `Flex::Start` is the new default flex mode for `Layout`
+  - `patch_style` & `reset_style` now consume and return `Self`
+  - Removed deprecated `Block::title_on_bottom`
+  - `Line` now has an extra `style` field which applies the style to the entire line
+  - `Block` style methods cannot be created in a const context
+  - `Tabs::new()` now accepts `IntoIterator<Item: Into<Line<'a>>>`
+  - `Table::new` now accepts `IntoIterator<Item: Into<Row<'a>>>`.
 - [v0.25.0](#v0250)
   - Removed `Axis::title_style` and `Buffer::set_background`
   - `List::new()` now accepts `IntoIterator<Item = Into<ListItem<'a>>>`
@@ -29,7 +46,7 @@ This is a quick summary of the sections below:
   - `Scrollbar`: symbols moved to `symbols` module
   - MSRV is now 1.67.0
 - [v0.22.0](#v0220)
-  - serde representation of `Borders` and `Modifiers` has changed
+  - `serde` representation of `Borders` and `Modifiers` has changed
 - [v0.21.0](#v0210)
   - MSRV is now 1.65.0
   - `terminal::ViewPort` is now an enum
@@ -39,14 +56,277 @@ This is a quick summary of the sections below:
   - MSRV is now 1.63.0
   - `List` no longer ignores empty strings
 
+## [v0.27.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.27.0)
+
+### List no clamps the selected index to list ([#1159])
+
+[#1149]: https://github.com/ratatui-org/ratatui/pull/1149
+
+The `List` widget now clamps the selected index to the bounds of the list when navigating with
+`first`, `last`, `previous`, and `next`, as well as when setting the index directly with `select`.
+
+Previously selecting an index past the end of the list would show treat the list as having a
+selection which was not visible. Now the last item in the list will be selected instead.
+
+### Prelude items added / removed ([#1149])
+
+The following items have been removed from the prelude:
+
+- `style::Styled` - this trait is useful for widgets that want to
+  support the Stylize trait, but it adds complexity as widgets have two
+  `style` methods and a `set_style` method.
+- `symbols::Marker` - this item is used by code that needs to draw to
+  the `Canvas` widget, but it's not a common item that would be used by
+  most users of the library.
+- `terminal::{CompletedFrame, TerminalOptions, Viewport}` - these items
+  are rarely used by code that needs to interact with the terminal, and
+  they're generally only ever used once in any app.
+
+The following items have been added to the prelude:
+
+- `layout::{Position, Size}` - these items are used by code that needs
+  to interact with the layout system. These are newer items that were
+  added in the last few releases, which should be used more liberally.
+  This may cause conflicts for types defined elsewhere with a similar
+  name.
+
+To update your app:
+
+```diff
+// if your app uses Styled::style() or Styled::set_style():
+-use ratatui::prelude::*;
++use ratatui::{prelude::*, style::Styled};
+
+// if your app uses symbols::Marker:
+-use ratatui::prelude::*;
++use ratatui::{prelude::*, symbols::Marker}
+
+// if your app uses terminal::{CompletedFrame, TerminalOptions, Viewport}
+-use ratatui::prelude::*;
++use ratatui::{prelude::*, terminal::{CompletedFrame, TerminalOptions, Viewport}};
+
+// to disambiguate existing types named Position or Size:
+- use some_crate::{Position, Size};
+- let size: Size = ...;
+- let position: Position = ...;
++ let size: some_crate::Size = ...;
++ let position: some_crate::Position = ...;
+```
+
+### Termion is updated to 4.0 [#1106]
+
+Changelog: <https://gitlab.redox-os.org/redox-os/termion/-/blob/master/CHANGELOG.md>
+
+A change is only necessary if you were matching on all variants of the `MouseEvent` enum without a
+wildcard. In this case, you need to either handle the two new variants, `MouseLeft` and
+`MouseRight`, or add a wildcard.
+
+[#1106]: https://github.com/ratatui-org/ratatui/pull/1106
+
+### `Rect::inner` takes `Margin` directly instead of reference ([#1008])
+
+[#1008]: https://github.com/ratatui-org/ratatui/pull/1008
+
+`Margin` needs to be passed without reference now.
+
+```diff
+-let area = area.inner(&Margin {
++let area = area.inner(Margin {
+     vertical: 0,
+     horizontal: 2,
+ });
+```
+
+### `Buffer::filled` takes `Cell` directly instead of reference ([#1148])
+
+[#1148]: https://github.com/ratatui-org/ratatui/pull/1148
+
+`Buffer::filled` moves the `Cell` instead of taking a reference.
+
+```diff
+-Buffer::filled(area, &Cell::new("X"));
++Buffer::filled(area, Cell::new("X"));
+```
+
+### `Stylize::bg()` now accepts `Into<Color>` ([#1103])
+
+[#1103]: https://github.com/ratatui-org/ratatui/pull/1103
+
+Previously, `Stylize::bg()` accepted `Color` but now accepts `Into<Color>`. This allows more
+flexible types from calling scopes, though it can break some type inference in the calling scope.
+
+### Remove deprecated `List::start_corner` and `layout::Corner` ([#759])
+
+[#759]: https://github.com/ratatui-org/ratatui/pull/759
+
+`List::start_corner` was deprecated in v0.25. Use `List::direction` and `ListDirection` instead.
+
+```diff
+- list.start_corner(Corner::TopLeft);
+- list.start_corner(Corner::TopRight);
+// This is not an error, BottomRight rendered top to bottom previously
+- list.start_corner(Corner::BottomRight);
+// all becomes
++ list.direction(ListDirection::TopToBottom);
+```
+
+```diff
+- list.start_corner(Corner::BottomLeft);
+// becomes
++ list.direction(ListDirection::BottomToTop);
+```
+
+`layout::Corner` was removed entirely.
+
+### `LineGauge::gauge_style` is deprecated ([#565])
+
+[#565]: https://github.com/ratatui-org/ratatui/pull/1148
+
+`LineGauge::gauge_style` is deprecated and replaced with `LineGauge::filled_style` and `LineGauge::unfilled_style`:
+
+```diff
+let gauge = LineGauge::default()
+- .gauge_style(Style::default().fg(Color::Red).bg(Color::Blue)
++ .filled_style(Style::default().fg(Color::Green))
++ .unfilled_style(Style::default().fg(Color::White));
+```
+
+## [v0.26.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.26.0)
+
+### `Flex::Start` is the new default flex mode for `Layout` ([#881])
+
+[#881]: https://github.com/ratatui-org/ratatui/pull/881
+
+Previously, constraints would stretch to fill all available space, violating constraints if
+necessary.
+
+With v0.26.0, `Flex` modes are introduced, and the default is `Flex::Start`, which will align
+areas associated with constraints to be beginning of the area. With v0.26.0, additionally,
+`Min` constraints grow to fill excess space. These changes will allow users to build layouts
+more easily.
+
+With v0.26.0, users will most likely not need to change what constraints they use to create
+existing layouts with `Flex::Start`. However, to get old behavior, use `Flex::Legacy`.
+
+```diff
+- let rects = Layout::horizontal([Length(1), Length(2)]).split(area);
+// becomes
++ let rects = Layout::horizontal([Length(1), Length(2)]).flex(Flex::Legacy).split(area);
+```
+
+### `Table::new()` now accepts `IntoIterator<Item: Into<Row<'a>>>` ([#774])
+
+[#774]: https://github.com/ratatui-org/ratatui/pull/774
+
+Previously, `Table::new()` accepted `IntoIterator<Item=Row<'a>>`. The argument change to
+`IntoIterator<Item: Into<Row<'a>>>`, This allows more flexible types from calling scopes, though it
+can some break type inference in the calling scope for empty containers.
+
+This can be resolved either by providing an explicit type (e.g. `Vec::<Row>::new()`), or by using
+`Table::default()`.
+
+```diff
+- let table = Table::new(vec![], widths);
+// becomes
++ let table = Table::default().widths(widths);
+```
+
+### `Tabs::new()` now accepts `IntoIterator<Item: Into<Line<'a>>>` ([#776])
+
+[#776]: https://github.com/ratatui-org/ratatui/pull/776
+
+Previously, `Tabs::new()` accepted `Vec<T>` where `T: Into<Line<'a>>`. This allows more flexible
+types from calling scopes, though it can break some type inference in the calling scope.
+
+This typically occurs when collecting an iterator prior to calling `Tabs::new`, and can be resolved
+by removing the call to `.collect()`.
+
+```diff
+- let tabs = Tabs::new((0.3).map(|i| format!("{i}")).collect());
+// becomes
++ let tabs = Tabs::new((0.3).map(|i| format!("{i}")));
+```
+
+### Table::default() now sets segment_size to None and column_spacing to ([#751])
+
+[#751]: https://github.com/ratatui-org/ratatui/pull/751
+
+The default() implementation of Table now sets the column_spacing field to 1 and the segment_size
+field to `SegmentSize::None`. This will affect the rendering of a small amount of apps.
+
+To use the previous default values, call `table.segment_size(Default::default())` and
+`table.column_spacing(0)`.
+
+### `patch_style` & `reset_style` now consumes and returns `Self` ([#754])
+
+[#754]: https://github.com/ratatui-org/ratatui/pull/754
+
+Previously, `patch_style` and `reset_style` in `Text`, `Line` and `Span` were using a mutable
+reference to `Self`. To be more consistent with the rest of `ratatui`, which is using fluent
+setters, these now take ownership of `Self` and return it.
+
+The following example shows how to migrate for `Line`, but the same applies for `Text` and `Span`.
+
+```diff
+- let mut line = Line::from("foobar");
+- line.patch_style(style);
+// becomes
++ let line = Line::new("foobar").patch_style(style);
+```
+
+### Remove deprecated `Block::title_on_bottom` ([#757])
+
+`Block::title_on_bottom` was deprecated in v0.22. Use `Block::title` and `Title::position` instead.
+
+```diff
+- block.title("foobar").title_on_bottom();
++ block.title(Title::from("foobar").position(Position::Bottom));
+```
+
+### `Block` style methods cannot be used in a const context ([#720])
+
+[#720]: https://github.com/ratatui-org/ratatui/pull/720
+
+Previously the `style()`, `border_style()` and `title_style()` methods could be used to create a
+`Block` in a constant context. These now accept `Into<Style>` instead of `Style`. These methods no
+longer can be called from a constant context.
+
+### `Line` now has a `style` field that applies to the entire line ([#708])
+
+[#708]: https://github.com/ratatui-org/ratatui/pull/708
+
+Previously the style of a `Line` was stored in the `Span`s that make up the line. Now the `Line`
+itself has a `style` field, which can be set with the `Line::styled` method. Any code that creates
+`Line`s using the struct initializer instead of constructors will fail to compile due to the added
+field. This can be easily fixed by adding `..Default::default()` to the field list or by using a
+constructor method (`Line::styled()`, `Line::raw()`) or conversion method (`Line::from()`).
+
+Each `Span` contained within the line will no longer have the style that is applied to the line in
+the `Span::style` field.
+
+```diff
+  let line = Line {
+      spans: vec!["".into()],
+      alignment: Alignment::Left,
++     ..Default::default()
+  };
+
+  // or
+
+  let line = Line::raw(vec!["".into()])
+      .alignment(Alignment::Left);
+```
+
 ## [v0.25.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.25.0)
 
-### Removed `Axis::title_style` and `Buffer::set_background`
+### Removed `Axis::title_style` and `Buffer::set_background` ([#691])
+
+[#691]: https://github.com/ratatui-org/ratatui/pull/691
 
 These items were deprecated since 0.10.
 
 - You should use styling capabilities of [`text::Line`] given as argument of [`Axis::title`]
-instead of `Axis::title_style`
+  instead of `Axis::title_style`
 - You should use styling capabilities of [`Buffer::set_style`] instead of `Buffer::set_background`
 
 [`text::Line`]: https://docs.rs/ratatui/latest/ratatui/text/struct.Line.html
@@ -57,7 +337,7 @@ instead of `Axis::title_style`
 
 [#672]: https://github.com/ratatui-org/ratatui/pull/672
 
-Previously `List::new()` took `Into<Vec<ListItem<'a>>>`. This change will throw a compilation 
+Previously `List::new()` took `Into<Vec<ListItem<'a>>>`. This change will throw a compilation
 error for `IntoIterator`s with an indeterminate item (e.g. empty vecs).
 
 E.g.
@@ -70,23 +350,22 @@ E.g.
 
 ### The default `Tabs::highlight_style` is now `Style::new().reversed()` ([#635])
 
+[#635]: https://github.com/ratatui-org/ratatui/pull/635
+
 Previously the default highlight style for tabs was `Style::default()`, which meant that a `Tabs`
 widget in the default configuration would not show any indication of the selected tab.
-
-[#635]: https://github.com/ratatui-org/ratatui/pull/635
 
 ### The default `Tabs::highlight_style` is now `Style::new().reversed()` ([#635])
 
 Previously the default highlight style for tabs was `Style::default()`, which meant that a `Tabs`
 widget in the default configuration would not show any indication of the selected tab.
 
-
-### `Table::new()` now requires specifying the widths of the columns (#664)
+### `Table::new()` now requires specifying the widths of the columns ([#664])
 
 [#664]: https://github.com/ratatui-org/ratatui/pull/664
 
-Previously `Table`s could be constructed without widths. In almost all cases this is an error.
-A new widths parameter is now mandatory on `Table::new()`. Existing code of the form:
+Previously `Table`s could be constructed without `widths`. In almost all cases this is an error.
+A new `widths` parameter is now mandatory on `Table::new()`. Existing code of the form:
 
 ```diff
 - Table::new(rows).widths(widths)
@@ -144,7 +423,7 @@ let layout = layout::new(Direction::Vertical, [Constraint::Min(1), Constraint::M
 
 ## [v0.24.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.24.0)
 
-### ScrollbarState field type changed from `u16` to `usize` ([#456])
+### `ScrollbarState` field type changed from `u16` to `usize` ([#456])
 
 [#456]: https://github.com/ratatui-org/ratatui/pull/456
 
@@ -237,7 +516,7 @@ new module locations. E.g.:
 ```diff
 - use ratatui::{widgets::scrollbar::{Scrollbar, Set}};
 // becomes
-+ use ratatui::{widgets::Scrollbar, symbols::scrollbar::Set} 
++ use ratatui::{widgets::Scrollbar, symbols::scrollbar::Set}
 ```
 
 ### MSRV updated to 1.67 ([#361])
@@ -248,17 +527,17 @@ The MSRV of ratatui is now 1.67 due to an MSRV update in a dependency (`time`).
 
 ## [v0.22.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.22.0)
 
-### bitflags updated to 2.3 ([#205])
+### `bitflags` updated to 2.3 ([#205])
 
 [#205]: https://github.com/ratatui-org/ratatui/issues/205
 
-The serde representation of bitflags has changed. Any existing serialized types that have Borders or
-Modifiers will need to be re-serialized. This is documented in the [bitflags
+The `serde` representation of `bitflags` has changed. Any existing serialized types that have
+Borders or Modifiers will need to be re-serialized. This is documented in the [`bitflags`
 changelog](https://github.com/bitflags/bitflags/blob/main/CHANGELOG.md#200-rc2)..
 
 ## [v0.21.0](https://github.com/ratatui-org/ratatui/releases/tag/v0.21.0)
 
-### MSRV is 1.65.0  ([#171])
+### MSRV is 1.65.0 ([#171])
 
 [#171]: https://github.com/ratatui-org/ratatui/issues/171
 
@@ -269,7 +548,7 @@ The minimum supported rust version is now 1.65.0.
 [#114]: https://github.com/ratatui-org/ratatui/issues/114
 
 In order to support inline viewports, the unstable method `Terminal::with_options()` was stabilized
-and  `ViewPort` was changed from a struct to an enum.
+and `ViewPort` was changed from a struct to an enum.
 
 ```diff
 let terminal = Terminal::with_options(backend, TerminalOptions {
@@ -285,9 +564,9 @@ let terminal = Terminal::with_options(backend, TerminalOptions {
 
 [#168]: https://github.com/ratatui-org/ratatui/issues/168
 
-A new type `Masked` was introduced that implements `From<Text<'a>>`. This causes any code that did
-previously did not need to use type annotations to fail to compile.  To fix this, annotate or call
-to_string() / to_owned() / as_str() on the value. E.g.:
+A new type `Masked` was introduced that implements `From<Text<'a>>`. This causes any code that
+previously did not need to use type annotations to fail to compile. To fix this, annotate or call
+`to_string()` / `to_owned()` / `as_str()` on the value. E.g.:
 
 ```diff
 - let paragraph = Paragraph::new("".as_ref());

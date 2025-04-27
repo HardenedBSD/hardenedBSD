@@ -56,15 +56,15 @@ impl OutputAssertExt for process::Output {
     }
 }
 
-impl<'c> OutputAssertExt for &'c mut process::Command {
+impl OutputAssertExt for &mut process::Command {
     fn assert(self) -> Assert {
         let output = match self.output() {
             Ok(output) => output,
             Err(err) => {
-                panic!("Failed to spawn {:?}: {}", self, err);
+                panic!("Failed to spawn {self:?}: {err}");
             }
         };
-        Assert::new(output).append_context("command", format!("{:?}", self))
+        Assert::new(output).append_context("command", format!("{self:?}"))
     }
 }
 
@@ -1084,13 +1084,13 @@ impl fmt::Display for AssertError {
                 writeln!(f, "Command interrupted")
             }
             AssertReason::UnexpectedReturnCode { case_tree } => {
-                writeln!(f, "Unexpected return code, failed {}", case_tree)
+                writeln!(f, "Unexpected return code, failed {case_tree}")
             }
             AssertReason::UnexpectedStdout { case_tree } => {
-                writeln!(f, "Unexpected stdout, failed {}", case_tree)
+                writeln!(f, "Unexpected stdout, failed {case_tree}")
             }
             AssertReason::UnexpectedStderr { case_tree } => {
-                writeln!(f, "Unexpected stderr, failed {}", case_tree)
+                writeln!(f, "Unexpected stderr, failed {case_tree}")
             }
         }?;
         write!(f, "{}", self.assert)

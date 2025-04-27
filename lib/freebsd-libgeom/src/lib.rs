@@ -5,9 +5,6 @@
 //! missing.  Open a Github issue if you have a good use for them.
 //! <https://www.freebsd.org/cgi/man.cgi?query=libgeom>
 
-// https://github.com/rust-lang/rust-clippy/issues/1553
-#![allow(clippy::redundant_closure_call)]
-
 use std::{
     ffi::CStr,
     fmt,
@@ -18,10 +15,10 @@ use std::{
     os::raw::c_void,
     pin::Pin,
     ptr::NonNull,
+    sync::LazyLock,
 };
 
 use freebsd_libgeom_sys::*;
-use lazy_static::lazy_static;
 
 // BINTIME_SCALE is 1 / 2**64
 const BINTIME_SCALE: f64 = 5.421010862427522e-20;
@@ -116,16 +113,14 @@ macro_rules! ms_per_xfer {
     }
 }
 
-lazy_static! {
-    static ref GEOM_STATS: io::Result<()> = {
-        let r = unsafe { geom_stats_open() };
-        if r != 0 {
-            Err(Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    };
-}
+static GEOM_STATS: LazyLock<io::Result<()>> = LazyLock::new(|| {
+    let r = unsafe { geom_stats_open() };
+    if r != 0 {
+        Err(Error::last_os_error())
+    } else {
+        Ok(())
+    }
+});
 
 /// Describes the stats of a single geom element as part of a [`Snapshot`].
 #[derive(Debug, Copy, Clone)]
@@ -255,7 +250,7 @@ impl<'a> Iterator for SnapshotPairIter<'a> {
     }
 }
 
-impl<'a> Drop for SnapshotPairIter<'a> {
+impl Drop for SnapshotPairIter<'_> {
     fn drop(&mut self) {
         self.cur.reset();
         if let Some(prev) = self.prev.as_mut() {
@@ -335,7 +330,7 @@ impl<'a> Iterator for SnapshotIter<'a> {
     }
 }
 
-impl<'a> Drop for SnapshotIter<'a> {
+impl Drop for SnapshotIter<'_> {
     fn drop(&mut self) {
         self.0.reset();
     }

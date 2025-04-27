@@ -18,6 +18,58 @@ use crate::it::Itertools;
 use core::iter;
 use itertools as it;
 
+#[allow(dead_code)]
+fn get_esi_then_esi<I: ExactSizeIterator + Clone>(it: I) {
+    fn is_esi(_: impl ExactSizeIterator) {}
+    is_esi(it.clone().get(1..4));
+    is_esi(it.clone().get(1..=4));
+    is_esi(it.clone().get(1..));
+    is_esi(it.clone().get(..4));
+    is_esi(it.clone().get(..=4));
+    is_esi(it.get(..));
+}
+
+#[allow(dead_code)]
+fn get_dei_esi_then_dei_esi<I: DoubleEndedIterator + ExactSizeIterator + Clone>(it: I) {
+    fn is_dei_esi(_: impl DoubleEndedIterator + ExactSizeIterator) {}
+    is_dei_esi(it.clone().get(1..4));
+    is_dei_esi(it.clone().get(1..=4));
+    is_dei_esi(it.clone().get(1..));
+    is_dei_esi(it.clone().get(..4));
+    is_dei_esi(it.clone().get(..=4));
+    is_dei_esi(it.get(..));
+}
+
+#[test]
+fn get_1_max() {
+    let mut it = (0..5).get(1..=usize::MAX);
+    assert_eq!(it.next(), Some(1));
+    assert_eq!(it.next_back(), Some(4));
+}
+
+#[test]
+#[should_panic]
+fn get_full_range_inclusive() {
+    let _it = (0..5).get(0..=usize::MAX);
+}
+
+#[test]
+fn product0() {
+    let mut prod = iproduct!();
+    assert_eq!(prod.next(), Some(()));
+    assert!(prod.next().is_none());
+}
+
+#[test]
+fn iproduct1() {
+    let s = "αβ";
+
+    let mut prod = iproduct!(s.chars());
+    assert_eq!(prod.next(), Some(('α',)));
+    assert_eq!(prod.next(), Some(('β',)));
+    assert!(prod.next().is_none());
+}
+
 #[test]
 fn product2() {
     let s = "αβ";
@@ -155,15 +207,6 @@ fn test_intersperse_with() {
     it::assert_equal(it, ys.iter());
 }
 
-#[allow(deprecated)]
-#[test]
-fn foreach() {
-    let xs = [1i32, 2, 3];
-    let mut sum = 0;
-    xs.iter().foreach(|elt| sum += *elt);
-    assert!(sum == 6);
-}
-
 #[test]
 fn dropping() {
     let xs = [1, 2, 3];
@@ -197,18 +240,9 @@ fn test_put_back() {
     it::assert_equal(pb, xs.iter().cloned());
 }
 
-#[allow(deprecated)]
-#[test]
-fn step() {
-    it::assert_equal((0..10).step(1), 0..10);
-    it::assert_equal((0..10).step(2), (0..10).filter(|x: &i32| *x % 2 == 0));
-    it::assert_equal((0..10).step(10), 0..1);
-}
-
-#[allow(deprecated)]
 #[test]
 fn merge() {
-    it::assert_equal((0..10).step(2).merge((1..10).step(2)), 0..10);
+    it::assert_equal((0..10).step_by(2).merge((1..10).step_by(2)), 0..10);
 }
 
 #[test]
@@ -279,9 +313,9 @@ fn part() {
 }
 
 #[test]
-fn tree_fold1() {
+fn tree_reduce() {
     for i in 0..100 {
-        assert_eq!((0..i).tree_fold1(|x, y| x + y), (0..i).fold1(|x, y| x + y));
+        assert_eq!((0..i).tree_reduce(|x, y| x + y), (0..i).fold1(|x, y| x + y));
     }
 }
 

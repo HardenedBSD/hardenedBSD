@@ -12,33 +12,57 @@
 [package]
 edition = "2018"
 name = "strum"
-version = "0.25.0"
+version = "0.26.3"
 authors = ["Peter Glotfelty <peter.glotfelty@microsoft.com>"]
+build = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Helpful macros for working with enums and strings"
 homepage = "https://github.com/Peternator7/strum"
 documentation = "https://docs.rs/strum"
-readme = "../README.md"
-keywords = ["enum", "string", "macros", "proc-macros"]
-categories = ["development-tools::procedural-macro-helpers", "parsing"]
+readme = "README.md"
+keywords = [
+    "enum",
+    "string",
+    "macros",
+    "proc-macros",
+]
+categories = [
+    "development-tools::procedural-macro-helpers",
+    "parsing",
+]
 license = "MIT"
 repository = "https://github.com/Peternator7/strum"
+
 [package.metadata.docs.rs]
 features = ["derive"]
-rustdoc-args = ["--cfg", "docsrs"]
+rustdoc-args = [
+    "--cfg",
+    "docsrs",
+]
+
+[lib]
+name = "strum"
+path = "src/lib.rs"
+
 [dependencies.phf]
 version = "0.10"
 features = ["macros"]
 optional = true
 
 [dependencies.strum_macros]
-version = "0.25"
+version = "0.26.3"
 optional = true
+
 [dev-dependencies.strum_macros]
-version = "0.25"
+version = "0.26"
 
 [features]
 default = ["std"]
 derive = ["strum_macros"]
 std = []
+
 [badges.travis-ci]
 repository = "Peternator7/strum"

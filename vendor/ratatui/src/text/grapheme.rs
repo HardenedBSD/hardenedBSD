@@ -1,4 +1,4 @@
-use crate::style::{Style, Styled};
+use crate::{prelude::*, style::Styled};
 
 /// A grapheme associated to a style.
 /// Note that, although `StyledGrapheme` is the smallest divisible unit of text,
@@ -12,20 +12,27 @@ pub struct StyledGrapheme<'a> {
 }
 
 impl<'a> StyledGrapheme<'a> {
-    pub fn new(symbol: &'a str, style: Style) -> StyledGrapheme<'a> {
-        StyledGrapheme { symbol, style }
+    /// Creates a new `StyledGrapheme` with the given symbol and style.
+    ///
+    /// `style` accepts any type that is convertible to [`Style`] (e.g. [`Style`], [`Color`], or
+    /// your own type that implements [`Into<Style>`]).
+    pub fn new<S: Into<Style>>(symbol: &'a str, style: S) -> Self {
+        Self {
+            symbol,
+            style: style.into(),
+        }
     }
 }
 
 impl<'a> Styled for StyledGrapheme<'a> {
-    type Item = StyledGrapheme<'a>;
+    type Item = Self;
 
     fn style(&self) -> Style {
         self.style
     }
 
-    fn set_style(mut self, style: Style) -> Self::Item {
-        self.style = style;
+    fn set_style<S: Into<Style>>(mut self, style: S) -> Self::Item {
+        self.style = style.into();
         self
     }
 }
@@ -33,7 +40,6 @@ impl<'a> Styled for StyledGrapheme<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn new() {

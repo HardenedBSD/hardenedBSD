@@ -1,12 +1,38 @@
+//! # [Ratatui] Layout example
+//!
+//! The latest version of this example is available in the [examples] folder in the repository.
+//!
+//! Please note that the examples are designed to be run against the `main` branch of the Github
+//! repository. This means that you may not be able to compile with the latest release version on
+//! crates.io, or the one that you have installed locally.
+//!
+//! See the [examples readme] for more information on finding examples that match the version of the
+//! library you are using.
+//!
+//! [Ratatui]: https://github.com/ratatui-org/ratatui
+//! [examples]: https://github.com/ratatui-org/ratatui/blob/main/examples
+//! [examples readme]: https://github.com/ratatui-org/ratatui/blob/main/examples/README.md
+
 use std::{error::Error, io};
 
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 use itertools::Itertools;
-use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    crossterm::{
+        event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    },
+    layout::{
+        Constraint,
+        Constraint::{Length, Max, Min, Percentage, Ratio},
+        Layout, Rect,
+    },
+    style::{Color, Style, Stylize},
+    terminal::{Frame, Terminal},
+    text::Line,
+    widgets::{Block, Paragraph},
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // setup terminal
@@ -40,64 +66,58 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         terminal.draw(ui)?;
 
         if let Event::Key(key) = event::read()? {
-            if let KeyCode::Char('q') = key.code {
+            if key.code == KeyCode::Char('q') {
                 return Ok(());
             }
         }
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn ui(frame: &mut Frame) {
-    let main_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Length(4),  // text
-            Length(50), // examples
-            Min(0),     // fills remaining space
-        ])
-        .split(frame.size());
+    let vertical = Layout::vertical([
+        Length(4),  // text
+        Length(50), // examples
+        Min(0),     // fills remaining space
+    ]);
+    let [text_area, examples_area, _] = vertical.areas(frame.size());
 
     // title
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from("Horizontal Layout Example. Press q to quit".dark_gray())
-                .alignment(Alignment::Center),
+            Line::from("Horizontal Layout Example. Press q to quit".dark_gray()).centered(),
             Line::from("Each line has 2 constraints, plus Min(0) to fill the remaining space."),
             Line::from("E.g. the second line of the Len/Min box is [Length(2), Min(2), Min(0)]"),
             Line::from("Note: constraint labels that don't fit are truncated"),
         ]),
-        main_layout[0],
+        text_area,
     );
 
-    let example_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Length(9),
-            Length(9),
-            Length(9),
-            Length(9),
-            Length(9),
-            Min(0), // fills remaining space
-        ])
-        .split(main_layout[1]);
+    let example_rows = Layout::vertical([
+        Length(9),
+        Length(9),
+        Length(9),
+        Length(9),
+        Length(9),
+        Min(0), // fills remaining space
+    ])
+    .split(examples_area);
     let example_areas = example_rows
         .iter()
         .flat_map(|area| {
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Length(14),
-                    Length(14),
-                    Length(14),
-                    Length(14),
-                    Length(14),
-                    Min(0), // fills remaining space
-                ])
-                .split(*area)
-                .iter()
-                .copied()
-                .take(5) // ignore Min(0)
-                .collect_vec()
+            Layout::horizontal([
+                Length(14),
+                Length(14),
+                Length(14),
+                Length(14),
+                Length(14),
+                Min(0), // fills remaining space
+            ])
+            .split(*area)
+            .iter()
+            .copied()
+            .take(5) // ignore Min(0)
+            .collect_vec()
         })
         .collect_vec();
 
@@ -175,19 +195,15 @@ fn render_example_combination(
     title: &str,
     constraints: Vec<(Constraint, Constraint)>,
 ) {
-    let block = Block::default()
+    let block = Block::bordered()
         .title(title.gray())
         .style(Style::reset())
-        .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Length(1); constraints.len() + 1])
-        .split(inner);
-    for (i, (a, b)) in constraints.iter().enumerate() {
-        render_single_example(frame, layout[i], vec![*a, *b, Min(0)]);
+    let layout = Layout::vertical(vec![Length(1); constraints.len() + 1]).split(inner);
+    for (i, (a, b)) in constraints.into_iter().enumerate() {
+        render_single_example(frame, layout[i], vec![a, b, Min(0)]);
     }
     // This is to make it easy to visually see the alignment of the examples
     // with the constraints.
@@ -199,21 +215,20 @@ fn render_single_example(frame: &mut Frame, area: Rect, constraints: Vec<Constra
     let red = Paragraph::new(constraint_label(constraints[0])).on_red();
     let blue = Paragraph::new(constraint_label(constraints[1])).on_blue();
     let green = Paragraph::new("·".repeat(12)).on_green();
-    let layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(area);
-    frame.render_widget(red, layout[0]);
-    frame.render_widget(blue, layout[1]);
-    frame.render_widget(green, layout[2]);
+    let horizontal = Layout::horizontal(constraints);
+    let [r, b, g] = horizontal.areas(area);
+    frame.render_widget(red, r);
+    frame.render_widget(blue, b);
+    frame.render_widget(green, g);
 }
 
 fn constraint_label(constraint: Constraint) -> String {
     match constraint {
-        Length(n) => format!("{n}"),
-        Min(n) => format!("{n}"),
-        Max(n) => format!("{n}"),
-        Percentage(n) => format!("{n}"),
-        Ratio(a, b) => format!("{a}:{b}"),
+        Constraint::Ratio(a, b) => format!("{a}:{b}"),
+        Constraint::Length(n)
+        | Constraint::Min(n)
+        | Constraint::Max(n)
+        | Constraint::Percentage(n)
+        | Constraint::Fill(n) => format!("{n}"),
     }
 }

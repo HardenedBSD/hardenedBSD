@@ -18,6 +18,9 @@ default = ["call", "std", "redox_syscall"]
 mkns = ["ioslice"]
 std = []
 
+[lib]
+path = "src/lib.rs"
+
 [package]
 authors = ["4lDO2 <4lDO2@protonmail.com>"]
 description = "Redox stable ABI"

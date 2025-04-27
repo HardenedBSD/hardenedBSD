@@ -8,7 +8,7 @@ repository = "https://github.com/asomers/gstat-rs"
 description = "Rust bindings to FreeBSD's libgeom library"
 categories = ["api-bindings", "os::freebsd-apis"]
 keywords = ["freebsd"]
-rust-version = "1.70"
+rust-version = "1.80"
 
 [package.metadata.docs.rs]
 targets = [
@@ -23,7 +23,6 @@ pre-release-replacements = [
 
 [dependencies]
 freebsd-libgeom-sys = { version = "=0.1.6", path = "../freebsd-libgeom-sys" }
-lazy_static = "1.4"
 
 [dev-dependencies]
 approx = "0.5.0"

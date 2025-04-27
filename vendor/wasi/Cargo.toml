@@ -1,5 +1,6 @@
 [badges.maintenance]
 status = "experimental"
+
 [dependencies.compiler_builtins]
 optional = true
 version = "0.1"
@@ -17,6 +18,9 @@ version = "1.0"
 default = ["std"]
 rustc-dep-of-std = ["compiler_builtins", "core", "rustc-std-workspace-alloc"]
 std = []
+
+[lib]
+path = "src/lib.rs"
 
 [package]
 authors = ["The Cranelift Project Developers"]

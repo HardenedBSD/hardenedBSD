@@ -275,7 +275,7 @@ fn all_equal() {
     assert!("A".chars().all_equal());
     assert!(!"AABBCCC".chars().all_equal());
     assert!("AAAAAAA".chars().all_equal());
-    for (_key, mut sub) in &"AABBCCC".chars().group_by(|&x| x) {
+    for (_key, mut sub) in &"AABBCCC".chars().chunk_by(|&x| x) {
         assert!(sub.all_equal());
     }
 }
@@ -360,7 +360,6 @@ fn test_rciter() {
     assert_eq!(z.next(), Some((0, 1)));
 }
 
-#[allow(deprecated)]
 #[test]
 fn trait_pointers() {
     struct ByRef<'r, I: ?Sized>(&'r mut I);
@@ -379,7 +378,6 @@ fn trait_pointers() {
     assert_eq!(it.next(), Some(0));
 
     {
-        /* make sure foreach works on non-Sized */
         let jt: &mut dyn Iterator<Item = i32> = &mut *it;
         assert_eq!(jt.next(), Some(1));
 
@@ -389,7 +387,7 @@ fn trait_pointers() {
         }
 
         assert_eq!(jt.find_position(|x| *x == 4), Some((1, 4)));
-        jt.foreach(|_| ());
+        jt.for_each(|_| ());
     }
 }
 
@@ -423,18 +421,16 @@ fn merge_by_btree() {
     it::assert_equal(results, expected);
 }
 
-#[allow(deprecated)]
 #[test]
 fn kmerge() {
-    let its = (0..4).map(|s| (s..10).step(4));
+    let its = (0..4).map(|s| (s..10).step_by(4));
 
     it::assert_equal(its.kmerge(), 0..10);
 }
 
-#[allow(deprecated)]
 #[test]
 fn kmerge_2() {
-    let its = vec![3, 2, 1, 0].into_iter().map(|s| (s..10).step(4));
+    let its = vec![3, 2, 1, 0].into_iter().map(|s| (s..10).step_by(4));
 
     it::assert_equal(its.kmerge(), 0..10);
 }
@@ -496,23 +492,40 @@ fn sorted_by() {
 }
 
 qc::quickcheck! {
-    fn k_smallest_range(n: u64, m: u16, k: u16) -> () {
+    fn k_smallest_range(n: i64, m: u16, k: u16) -> () {
         // u16 is used to constrain k and m to 0..2¹⁶,
         //  otherwise the test could use too much memory.
-        let (k, m) = (k as u64, m as u64);
+        let (k, m) = (k as usize, m as u64);
 
+        let mut v: Vec<_> = (n..n.saturating_add(m as _)).collect();
         // Generate a random permutation of n..n+m
-        let i = {
-            let mut v: Vec<u64> = (n..n.saturating_add(m)).collect();
-            v.shuffle(&mut thread_rng());
-            v.into_iter()
-        };
+        v.shuffle(&mut thread_rng());
 
-        // Check that taking the k smallest elements yields n..n+min(k, m)
-        it::assert_equal(
-            i.k_smallest(k as usize),
-            n..n.saturating_add(min(k, m))
-        );
+        // Construct the right answers for the top and bottom elements
+        let mut sorted = v.clone();
+        sorted.sort();
+        // how many elements are we checking
+        let num_elements = min(k, m as _);
+
+        // Compute the top and bottom k in various combinations
+        let sorted_smallest = sorted[..num_elements].iter().cloned();
+        let smallest = v.iter().cloned().k_smallest(k);
+        let smallest_by = v.iter().cloned().k_smallest_by(k, Ord::cmp);
+        let smallest_by_key = v.iter().cloned().k_smallest_by_key(k, |&x| x);
+
+        let sorted_largest = sorted[sorted.len() - num_elements..].iter().rev().cloned();
+        let largest = v.iter().cloned().k_largest(k);
+        let largest_by = v.iter().cloned().k_largest_by(k, Ord::cmp);
+        let largest_by_key = v.iter().cloned().k_largest_by_key(k, |&x| x);
+
+        // Check the variations produce the same answers and that they're right
+        it::assert_equal(smallest, sorted_smallest.clone());
+        it::assert_equal(smallest_by, sorted_smallest.clone());
+        it::assert_equal(smallest_by_key, sorted_smallest);
+
+        it::assert_equal(largest, sorted_largest.clone());
+        it::assert_equal(largest_by, sorted_largest.clone());
+        it::assert_equal(largest_by_key, sorted_largest);
     }
 }
 
@@ -562,6 +575,17 @@ where
     it::assert_equal(i.k_smallest(k), j.sorted().take(k))
 }
 
+// Similar to `k_smallest_sort` but for our custom heap implementation.
+fn k_smallest_by_sort<I>(i: I, k: u16)
+where
+    I: Iterator + Clone,
+    I::Item: Ord + Debug,
+{
+    let j = i.clone();
+    let k = k as usize;
+    it::assert_equal(i.k_smallest_by(k, Ord::cmp), j.sorted().take(k))
+}
+
 macro_rules! generic_test {
     ($f:ident, $($t:ty),+) => {
         $(paste::item! {
@@ -575,6 +599,7 @@ macro_rules! generic_test {
 }
 
 generic_test!(k_smallest_sort, u8, u16, u32, u64, i8, i16, i32, i64);
+generic_test!(k_smallest_by_sort, u8, u16, u32, u64, i8, i16, i32, i64);
 
 #[test]
 fn sorted_by_key() {
@@ -797,14 +822,14 @@ fn pad_using() {
 }
 
 #[test]
-fn group_by() {
-    for (ch1, sub) in &"AABBCCC".chars().group_by(|&x| x) {
+fn chunk_by() {
+    for (ch1, sub) in &"AABBCCC".chars().chunk_by(|&x| x) {
         for ch2 in sub {
             assert_eq!(ch1, ch2);
         }
     }
 
-    for (ch1, sub) in &"AAABBBCCCCDDDD".chars().group_by(|&x| x) {
+    for (ch1, sub) in &"AAABBBCCCCDDDD".chars().chunk_by(|&x| x) {
         for ch2 in sub {
             assert_eq!(ch1, ch2);
             if ch1 == 'C' {
@@ -817,8 +842,8 @@ fn group_by() {
 
     // try all possible orderings
     for indices in permutohedron::Heap::new(&mut [0, 1, 2, 3]) {
-        let groups = "AaaBbbccCcDDDD".chars().group_by(&toupper);
-        let mut subs = groups.into_iter().collect_vec();
+        let chunks = "AaaBbbccCcDDDD".chars().chunk_by(&toupper);
+        let mut subs = chunks.into_iter().collect_vec();
 
         for &idx in &indices[..] {
             let (key, text) = match idx {
@@ -833,8 +858,8 @@ fn group_by() {
         }
     }
 
-    let groups = "AAABBBCCCCDDDD".chars().group_by(|&x| x);
-    let mut subs = groups.into_iter().map(|(_, g)| g).collect_vec();
+    let chunks = "AAABBBCCCCDDDD".chars().chunk_by(|&x| x);
+    let mut subs = chunks.into_iter().map(|(_, g)| g).collect_vec();
 
     let sd = subs.pop().unwrap();
     let sc = subs.pop().unwrap();
@@ -851,7 +876,7 @@ fn group_by() {
     {
         let mut ntimes = 0;
         let text = "AABCCC";
-        for (_, sub) in &text.chars().group_by(|&x| {
+        for (_, sub) in &text.chars().chunk_by(|&x| {
             ntimes += 1;
             x
         }) {
@@ -863,7 +888,7 @@ fn group_by() {
     {
         let mut ntimes = 0;
         let text = "AABCCC";
-        for _ in &text.chars().group_by(|&x| {
+        for _ in &text.chars().chunk_by(|&x| {
             ntimes += 1;
             x
         }) {}
@@ -872,81 +897,80 @@ fn group_by() {
 
     {
         let text = "ABCCCDEEFGHIJJKK";
-        let gr = text.chars().group_by(|&x| x);
+        let gr = text.chars().chunk_by(|&x| x);
         it::assert_equal(gr.into_iter().flat_map(|(_, sub)| sub), text.chars());
     }
 }
 
 #[test]
-fn group_by_lazy_2() {
+fn chunk_by_lazy_2() {
     let data = [0, 1];
-    let groups = data.iter().group_by(|k| *k);
-    let gs = groups.into_iter().collect_vec();
+    let chunks = data.iter().chunk_by(|k| *k);
+    let gs = chunks.into_iter().collect_vec();
     it::assert_equal(data.iter(), gs.into_iter().flat_map(|(_k, g)| g));
 
     let data = [0, 1, 1, 0, 0];
-    let groups = data.iter().group_by(|k| *k);
-    let mut gs = groups.into_iter().collect_vec();
+    let chunks = data.iter().chunk_by(|k| *k);
+    let mut gs = chunks.into_iter().collect_vec();
     gs[1..].reverse();
     it::assert_equal(&[0, 0, 0, 1, 1], gs.into_iter().flat_map(|(_, g)| g));
 
-    let grouper = data.iter().group_by(|k| *k);
-    let mut groups = Vec::new();
-    for (k, group) in &grouper {
+    let grouper = data.iter().chunk_by(|k| *k);
+    let mut chunks = Vec::new();
+    for (k, chunk) in &grouper {
         if *k == 1 {
-            groups.push(group);
+            chunks.push(chunk);
         }
     }
-    it::assert_equal(&mut groups[0], &[1, 1]);
+    it::assert_equal(&mut chunks[0], &[1, 1]);
 
     let data = [0, 0, 0, 1, 1, 0, 0, 2, 2, 3, 3];
-    let grouper = data.iter().group_by(|k| *k);
-    let mut groups = Vec::new();
-    for (i, (_, group)) in grouper.into_iter().enumerate() {
+    let grouper = data.iter().chunk_by(|k| *k);
+    let mut chunks = Vec::new();
+    for (i, (_, chunk)) in grouper.into_iter().enumerate() {
         if i < 2 {
-            groups.push(group);
+            chunks.push(chunk);
         } else if i < 4 {
-            for _ in group {}
+            for _ in chunk {}
         } else {
-            groups.push(group);
+            chunks.push(chunk);
         }
     }
-    it::assert_equal(&mut groups[0], &[0, 0, 0]);
-    it::assert_equal(&mut groups[1], &[1, 1]);
-    it::assert_equal(&mut groups[2], &[3, 3]);
+    it::assert_equal(&mut chunks[0], &[0, 0, 0]);
+    it::assert_equal(&mut chunks[1], &[1, 1]);
+    it::assert_equal(&mut chunks[2], &[3, 3]);
 
-    // use groups as chunks
     let data = [0, 0, 0, 1, 1, 0, 0, 2, 2, 3, 3];
     let mut i = 0;
-    let grouper = data.iter().group_by(move |_| {
+    let grouper = data.iter().chunk_by(move |_| {
         let k = i / 3;
         i += 1;
         k
     });
-    for (i, group) in &grouper {
+    for (i, chunk) in &grouper {
         match i {
-            0 => it::assert_equal(group, &[0, 0, 0]),
-            1 => it::assert_equal(group, &[1, 1, 0]),
-            2 => it::assert_equal(group, &[0, 2, 2]),
-            3 => it::assert_equal(group, &[3, 3]),
+            0 => it::assert_equal(chunk, &[0, 0, 0]),
+            1 => it::assert_equal(chunk, &[1, 1, 0]),
+            2 => it::assert_equal(chunk, &[0, 2, 2]),
+            3 => it::assert_equal(chunk, &[3, 3]),
             _ => unreachable!(),
         }
     }
 }
 
 #[test]
-fn group_by_lazy_3() {
-    // test consuming each group on the lap after it was produced
+fn chunk_by_lazy_3() {
+    // test consuming each chunk on the lap after it was produced
     let data = [0, 0, 0, 1, 1, 0, 0, 1, 1, 2, 2];
-    let grouper = data.iter().group_by(|elt| *elt);
+    let grouper = data.iter().chunk_by(|elt| *elt);
     let mut last = None;
-    for (key, group) in &grouper {
+    for (key, chunk) in &grouper {
         if let Some(gr) = last.take() {
             for elt in gr {
                 assert!(elt != key && i32::abs(elt - key) == 1);
             }
         }
-        last = Some(group);
+        last = Some(chunk);
     }
 }
 
@@ -1297,7 +1321,7 @@ fn extrema_set() {
     assert_eq!(Some(1u32).iter().min_set(), vec![&1]);
     assert_eq!(Some(1u32).iter().max_set(), vec![&1]);
 
-    let data = vec![Val(0, 1), Val(2, 0), Val(0, 2), Val(1, 0), Val(2, 1)];
+    let data = [Val(0, 1), Val(2, 0), Val(0, 2), Val(1, 0), Val(2, 1)];
 
     let min_set = data.iter().min_set();
     assert_eq!(min_set, vec![&Val(0, 1), &Val(0, 2)]);
@@ -1347,7 +1371,7 @@ fn minmax() {
 
     assert_eq!(Some(1u32).iter().minmax(), MinMaxResult::OneElement(&1));
 
-    let data = vec![Val(0, 1), Val(2, 0), Val(0, 2), Val(1, 0), Val(2, 1)];
+    let data = [Val(0, 1), Val(2, 0), Val(0, 2), Val(1, 0), Val(2, 1)];
 
     let minmax = data.iter().minmax();
     assert_eq!(minmax, MinMaxResult::MinMax(&Val(0, 1), &Val(2, 1)));
@@ -1389,7 +1413,6 @@ fn while_some() {
     it::assert_equal(ns, vec![1, 2, 3, 4]);
 }
 
-#[allow(deprecated)]
 #[test]
 fn fold_while() {
     let mut iterations = 0;
@@ -1411,7 +1434,7 @@ fn fold_while() {
 }
 
 #[test]
-fn tree_fold1() {
+fn tree_reduce() {
     let x = [
         "",
         "0",
@@ -1438,7 +1461,7 @@ fn tree_fold1() {
             Some(s.to_string())
         };
         let num_strings = (0..i).map(|x| x.to_string());
-        let actual = num_strings.tree_fold1(|a, b| format!("{} {} x", a, b));
+        let actual = num_strings.tree_reduce(|a, b| format!("{} {} x", a, b));
         assert_eq!(actual, expected);
     }
 }

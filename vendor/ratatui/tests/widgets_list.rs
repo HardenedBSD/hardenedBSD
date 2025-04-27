@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState},
     Terminal,
 };
+use rstest::rstest;
 
 #[test]
 fn list_should_shows_the_length() {
@@ -45,7 +46,47 @@ fn widgets_list_should_highlight_the_selected_item() {
             f.render_stateful_widget(list, size, &mut state);
         })
         .unwrap();
-    let mut expected = Buffer::with_lines(vec!["   Item 1 ", ">> Item 2 ", "   Item 3 "]);
+    #[rustfmt::skip]
+    let mut expected = Buffer::with_lines([
+        "   Item 1 ",
+        ">> Item 2 ",
+        "   Item 3 ",
+    ]);
+    for x in 0..10 {
+        expected.get_mut(x, 1).set_bg(Color::Yellow);
+    }
+    terminal.backend().assert_buffer(&expected);
+}
+
+#[test]
+fn widgets_list_should_highlight_the_selected_item_wide_symbol() {
+    let backend = TestBackend::new(10, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut state = ListState::default();
+
+    let wide_symbol = "▶  ";
+
+    state.select(Some(1));
+    terminal
+        .draw(|f| {
+            let size = f.size();
+            let items = vec![
+                ListItem::new("Item 1"),
+                ListItem::new("Item 2"),
+                ListItem::new("Item 3"),
+            ];
+            let list = List::new(items)
+                .highlight_style(Style::default().bg(Color::Yellow))
+                .highlight_symbol(wide_symbol);
+            f.render_stateful_widget(list, size, &mut state);
+        })
+        .unwrap();
+    #[rustfmt::skip]
+    let mut expected = Buffer::with_lines([
+        "   Item 1 ",
+        "▶  Item 2 ",
+        "   Item 3 ",
+    ]);
     for x in 0..10 {
         expected.get_mut(x, 1).set_bg(Color::Yellow);
     }
@@ -54,16 +95,16 @@ fn widgets_list_should_highlight_the_selected_item() {
 
 #[test]
 fn widgets_list_should_truncate_items() {
-    let backend = TestBackend::new(10, 2);
-    let mut terminal = Terminal::new(backend).unwrap();
-
     struct TruncateTestCase<'a> {
         selected: Option<usize>,
         items: Vec<ListItem<'a>>,
         expected: Buffer,
     }
 
-    let cases = vec![
+    let backend = TestBackend::new(10, 2);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let cases = [
         // An item is selected
         TruncateTestCase {
             selected: Some(0),
@@ -71,7 +112,7 @@ fn widgets_list_should_truncate_items() {
                 ListItem::new("A very long line"),
                 ListItem::new("A very long line"),
             ],
-            expected: Buffer::with_lines(vec![
+            expected: Buffer::with_lines([
                 format!(">> A ve{}  ", symbols::line::VERTICAL),
                 format!("   A ve{}  ", symbols::line::VERTICAL),
             ]),
@@ -83,7 +124,7 @@ fn widgets_list_should_truncate_items() {
                 ListItem::new("A very long line"),
                 ListItem::new("A very long line"),
             ],
-            expected: Buffer::with_lines(vec![
+            expected: Buffer::with_lines([
                 format!("A very {}  ", symbols::line::VERTICAL),
                 format!("A very {}  ", symbols::line::VERTICAL),
             ]),
@@ -95,7 +136,7 @@ fn widgets_list_should_truncate_items() {
         terminal
             .draw(|f| {
                 let list = List::new(case.items.clone())
-                    .block(Block::default().borders(Borders::RIGHT))
+                    .block(Block::new().borders(Borders::RIGHT))
                     .highlight_symbol(">> ");
                 f.render_stateful_widget(list, Rect::new(0, 0, 8, 2), &mut state);
             })
@@ -127,8 +168,12 @@ fn widgets_list_should_clamp_offset_if_items_are_removed() {
             f.render_stateful_widget(list, size, &mut state);
         })
         .unwrap();
-    let expected = Buffer::with_lines(vec!["   Item 2 ", "   Item 3 ", "   Item 4 ", ">> Item 5 "]);
-    terminal.backend().assert_buffer(&expected);
+    terminal.backend().assert_buffer_lines([
+        "   Item 2 ",
+        "   Item 3 ",
+        "   Item 4 ",
+        ">> Item 5 ",
+    ]);
 
     // render again with 1 items => check offset is clamped to 1
     state.select(Some(1));
@@ -140,8 +185,12 @@ fn widgets_list_should_clamp_offset_if_items_are_removed() {
             f.render_stateful_widget(list, size, &mut state);
         })
         .unwrap();
-    let expected = Buffer::with_lines(vec!["   Item 3 ", "          ", "          ", "          "]);
-    terminal.backend().assert_buffer(&expected);
+    terminal.backend().assert_buffer_lines([
+        ">> Item 3 ",
+        "          ",
+        "          ",
+        "          ",
+    ]);
 }
 
 #[test]
@@ -164,7 +213,7 @@ fn widgets_list_should_display_multiline_items() {
             f.render_stateful_widget(list, size, &mut state);
         })
         .unwrap();
-    let mut expected = Buffer::with_lines(vec![
+    let mut expected = Buffer::with_lines([
         "   Item 1 ",
         "   Item 1a",
         ">> Item 2 ",
@@ -200,7 +249,7 @@ fn widgets_list_should_repeat_highlight_symbol() {
             f.render_stateful_widget(list, size, &mut state);
         })
         .unwrap();
-    let mut expected = Buffer::with_lines(vec![
+    let mut expected = Buffer::with_lines([
         "   Item 1 ",
         "   Item 1a",
         ">> Item 2 ",
@@ -219,7 +268,6 @@ fn widgets_list_should_repeat_highlight_symbol() {
 fn widget_list_should_not_ignore_empty_string_items() {
     let backend = TestBackend::new(6, 4);
     let mut terminal = Terminal::new(backend).unwrap();
-
     terminal
         .draw(|f| {
             let items = vec![
@@ -236,133 +284,98 @@ fn widget_list_should_not_ignore_empty_string_items() {
             f.render_widget(list, f.size());
         })
         .unwrap();
-
-    let expected = Buffer::with_lines(vec!["Item 1", "", "", "Item 4"]);
-
-    terminal.backend().assert_buffer(&expected);
+    terminal
+        .backend()
+        .assert_buffer_lines(["Item 1", "", "", "Item 4"]);
 }
 
-#[test]
-fn widgets_list_enable_always_highlight_spacing() {
-    let test_case = |state: &mut ListState, space: HighlightSpacing, expected: Buffer| {
-        let backend = TestBackend::new(30, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|f| {
-                let size = f.size();
-                let table = List::new(vec![
-                    ListItem::new(vec![Line::from("Item 1"), Line::from("Item 1a")]),
-                    ListItem::new(vec![Line::from("Item 2"), Line::from("Item 2b")]),
-                    ListItem::new(vec![Line::from("Item 3"), Line::from("Item 3c")]),
-                ])
-                .block(Block::default().borders(Borders::ALL))
-                .highlight_symbol(">> ")
-                .highlight_spacing(space);
-                f.render_stateful_widget(table, size, state);
-            })
-            .unwrap();
-        terminal.backend().assert_buffer(&expected);
-    };
-
-    assert_eq!(HighlightSpacing::default(), HighlightSpacing::WhenSelected);
-
-    let mut state = ListState::default();
-    // no selection, "WhenSelected" should only allocate if selected
-    test_case(
-        &mut state,
-        HighlightSpacing::default(),
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│Item 1                      │",
-            "│Item 1a                     │",
-            "│Item 2                      │",
-            "│Item 2b                     │",
-            "│Item 3                      │",
-            "│Item 3c                     │",
-            "└────────────────────────────┘",
-        ]),
-    );
-
-    // no selection, "Always" should allocate regardless if selected or not
-    test_case(
-        &mut state,
-        HighlightSpacing::Always,
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│   Item 1                   │",
-            "│   Item 1a                  │",
-            "│   Item 2                   │",
-            "│   Item 2b                  │",
-            "│   Item 3                   │",
-            "│   Item 3c                  │",
-            "└────────────────────────────┘",
-        ]),
-    );
-
-    // no selection, "Never" should never allocate regadless if selected or not
-    test_case(
-        &mut state,
-        HighlightSpacing::Never,
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│Item 1                      │",
-            "│Item 1a                     │",
-            "│Item 2                      │",
-            "│Item 2b                     │",
-            "│Item 3                      │",
-            "│Item 3c                     │",
-            "└────────────────────────────┘",
-        ]),
-    );
-
-    // select first, "WhenSelected" should only allocate if selected
-    state.select(Some(0));
-    test_case(
-        &mut state,
-        HighlightSpacing::default(),
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│>> Item 1                   │",
-            "│   Item 1a                  │",
-            "│   Item 2                   │",
-            "│   Item 2b                  │",
-            "│   Item 3                   │",
-            "│   Item 3c                  │",
-            "└────────────────────────────┘",
-        ]),
-    );
-
-    // select first, "Always" should allocate regardless if selected or not
-    state.select(Some(0));
-    test_case(
-        &mut state,
-        HighlightSpacing::Always,
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│>> Item 1                   │",
-            "│   Item 1a                  │",
-            "│   Item 2                   │",
-            "│   Item 2b                  │",
-            "│   Item 3                   │",
-            "│   Item 3c                  │",
-            "└────────────────────────────┘",
-        ]),
-    );
-
-    // select first, "Never" should never allocate regadless if selected or not
-    state.select(Some(0));
-    test_case(
-        &mut state,
-        HighlightSpacing::Never,
-        Buffer::with_lines(vec![
-            "┌────────────────────────────┐",
-            "│Item 1                      │",
-            "│Item 1a                     │",
-            "│Item 2                      │",
-            "│Item 2b                     │",
-            "│Item 3                      │",
-            "│Item 3c                     │",
-            "└────────────────────────────┘",
-        ]),
-    );
+#[rstest]
+#[case::none_when_selected(None, HighlightSpacing::WhenSelected, [
+    "┌─────────────┐",
+    "│Item 1       │",
+    "│Item 1a      │",
+    "│Item 2       │",
+    "│Item 2b      │",
+    "│Item 3       │",
+    "│Item 3c      │",
+    "└─────────────┘",
+])]
+#[case::none_always(None, HighlightSpacing::Always, [
+    "┌─────────────┐",
+    "│   Item 1    │",
+    "│   Item 1a   │",
+    "│   Item 2    │",
+    "│   Item 2b   │",
+    "│   Item 3    │",
+    "│   Item 3c   │",
+    "└─────────────┘",
+])]
+#[case::none_never(None, HighlightSpacing::Never, [
+    "┌─────────────┐",
+    "│Item 1       │",
+    "│Item 1a      │",
+    "│Item 2       │",
+    "│Item 2b      │",
+    "│Item 3       │",
+    "│Item 3c      │",
+    "└─────────────┘",
+])]
+#[case::first_when_selected(Some(0), HighlightSpacing::WhenSelected, [
+    "┌─────────────┐",
+    "│>> Item 1    │",
+    "│   Item 1a   │",
+    "│   Item 2    │",
+    "│   Item 2b   │",
+    "│   Item 3    │",
+    "│   Item 3c   │",
+    "└─────────────┘",
+])]
+#[case::first_always(Some(0), HighlightSpacing::Always, [
+    "┌─────────────┐",
+    "│>> Item 1    │",
+    "│   Item 1a   │",
+    "│   Item 2    │",
+    "│   Item 2b   │",
+    "│   Item 3    │",
+    "│   Item 3c   │",
+    "└─────────────┘",
+])]
+#[case::first_never(Some(0), HighlightSpacing::Never, [
+    "┌─────────────┐",
+    "│Item 1       │",
+    "│Item 1a      │",
+    "│Item 2       │",
+    "│Item 2b      │",
+    "│Item 3       │",
+    "│Item 3c      │",
+    "└─────────────┘",
+])]
+fn widgets_list_enable_always_highlight_spacing<'line, Lines>(
+    #[case] selected: Option<usize>,
+    #[case] space: HighlightSpacing,
+    #[case] expected: Lines,
+) where
+    Lines: IntoIterator,
+    Lines::Item: Into<Line<'line>>,
+{
+    let mut state = ListState::default().with_selected(selected);
+    let backend = TestBackend::new(15, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let size = f.size();
+            let table = List::new(vec![
+                ListItem::new(vec![Line::from("Item 1"), Line::from("Item 1a")]),
+                ListItem::new(vec![Line::from("Item 2"), Line::from("Item 2b")]),
+                ListItem::new(vec![Line::from("Item 3"), Line::from("Item 3c")]),
+            ])
+            .block(Block::bordered())
+            .highlight_symbol(">> ")
+            .highlight_spacing(space);
+            f.render_stateful_widget(table, size, &mut state);
+        })
+        .unwrap();
+    terminal
+        .backend()
+        .assert_buffer(&Buffer::with_lines(expected));
 }

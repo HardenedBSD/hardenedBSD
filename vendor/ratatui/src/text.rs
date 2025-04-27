@@ -25,40 +25,37 @@
 //! // Converted to Line(vec![
 //! //   Span { content: Cow::Borrowed("My title"), style: Style { .. } }
 //! // ])
-//! let block = Block::default().title("My title");
+//! let block = Block::new().title("My title");
 //!
 //! // A simple string with a unique style.
 //! // Converted to Line(vec![
 //! //   Span { content: Cow::Borrowed("My title"), style: Style { fg: Some(Color::Yellow), .. }
 //! // ])
-//! let block =
-//!     Block::default().title(Span::styled("My title", Style::default().fg(Color::Yellow)));
+//! let block = Block::new().title(Span::styled("My title", Style::default().fg(Color::Yellow)));
 //!
 //! // A string with multiple styles.
 //! // Converted to Line(vec![
 //! //   Span { content: Cow::Borrowed("My"), style: Style { fg: Some(Color::Yellow), .. } },
 //! //   Span { content: Cow::Borrowed(" title"), .. }
 //! // ])
-//! let block = Block::default().title(vec![
+//! let block = Block::new().title(vec![
 //!     Span::styled("My", Style::default().fg(Color::Yellow)),
 //!     Span::raw(" title"),
 //! ]);
 //! ```
 
-use crate::style::Style;
-
 mod grapheme;
 pub use grapheme::StyledGrapheme;
 
 mod line;
-pub use line::Line;
+pub use line::{Line, ToLine};
 
 mod masked;
 pub use masked::Masked;
 
 mod span;
-pub use span::Span;
+pub use span::{Span, ToSpan};
 
 #[allow(clippy::module_inception)]
 mod text;
-pub use text::Text;
+pub use text::{Text, ToText};

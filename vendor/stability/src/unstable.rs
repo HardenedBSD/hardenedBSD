@@ -1,13 +1,31 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
+use syn::meta::ParseNestedMeta;
+use syn::parse::Result;
 use syn::{parse_quote, Visibility};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct UnstableAttribute {
     feature: Option<String>,
+    issue: Option<String>,
 }
 
 impl UnstableAttribute {
+    pub(crate) fn parse(&mut self, meta: ParseNestedMeta) -> Result<()> {
+        if meta.path.is_ident("feature") {
+            match meta.value()?.parse()? {
+                syn::Lit::Str(s) => self.feature = Some(s.value()),
+                _ => panic!(),
+            }
+        } else if meta.path.is_ident("issue") {
+            match meta.value()?.parse()? {
+                syn::Lit::Str(s) => self.issue = Some(s.value()),
+                _ => panic!(),
+            }
+        }
+        Ok(())
+    }
+
     fn crate_feature_name(&self) -> String {
         if let Some(name) = self.feature.as_deref() {
             format!("unstable-{}", name)
@@ -21,24 +39,42 @@ impl UnstableAttribute {
         if item.is_public() {
             let feature_name = self.crate_feature_name();
 
-            let doc_addendum = format!(
-                "\n\
-                # Availability\n\
-                \n\
-                **This API is marked as unstable** and is only available when \
-                the `{}` crate feature is enabled. This comes with no stability \
-                guarantees, and could be changed or removed at any time.\
-            ",
-                feature_name
-            );
-            item.push_attr(parse_quote! {
-                #[doc = #doc_addendum]
-            });
+            if let Some(issue) = &self.issue {
+                let doc_addendum = format!(
+                    "\n\
+                    # Availability\n\
+                    \n\
+                    **This API is marked as unstable** and is only available when \
+                    the `{}` crate feature is enabled. This comes with no stability \
+                    guarantees, and could be changed or removed at any time.\
+                    \n\
+                    The tracking issue is: `{}`\
+                ",
+                    feature_name, issue
+                );
+                item.push_attr(parse_quote! {
+                    #[doc = #doc_addendum]
+                });
+            } else {
+                let doc_addendum = format!(
+                    "\n\
+                    # Availability\n\
+                    \n\
+                    **This API is marked as unstable** and is only available when \
+                    the `{}` crate feature is enabled. This comes with no stability \
+                    guarantees, and could be changed or removed at any time.\
+                ",
+                    feature_name
+                );
+                item.push_attr(parse_quote! {
+                    #[doc = #doc_addendum]
+                });
+            }
 
             let mut hidden_item = item.clone();
-            *hidden_item.visibility_mut() = parse_quote! {
+            hidden_item.set_visibility(parse_quote! {
                 pub(crate)
-            };
+            });
 
             TokenStream::from(quote! {
                 #[cfg(feature = #feature_name)]
@@ -54,28 +90,6 @@ impl UnstableAttribute {
     }
 }
 
-impl From<syn::AttributeArgs> for UnstableAttribute {
-    fn from(args: syn::AttributeArgs) -> Self {
-        let mut feature = None;
-
-        for arg in args {
-            match arg {
-                syn::NestedMeta::Meta(syn::Meta::NameValue(name_value)) => {
-                    if name_value.path.is_ident("feature") {
-                        match name_value.lit {
-                            syn::Lit::Str(s) => feature = Some(s.value()),
-                            _ => panic!(),
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        Self { feature }
-    }
-}
-
 pub(crate) trait ItemLike {
     fn attrs(&self) -> &[syn::Attribute];
 
@@ -83,7 +97,7 @@ pub(crate) trait ItemLike {
 
     fn visibility(&self) -> &Visibility;
 
-    fn visibility_mut(&mut self) -> &mut Visibility;
+    fn set_visibility(&mut self, visibility: Visibility);
 
     fn is_public(&self) -> bool {
         matches!(self.visibility(), Visibility::Public(_))
@@ -106,8 +120,8 @@ macro_rules! impl_has_visibility {
                     &self.vis
                 }
 
-                fn visibility_mut(&mut self) -> &mut Visibility {
-                    &mut self.vis
+                fn set_visibility(&mut self, visibility: Visibility) {
+                    self.vis = visibility;
                 }
             }
         )*
@@ -117,10 +131,35 @@ macro_rules! impl_has_visibility {
 impl_has_visibility!(
     syn::ItemType,
     syn::ItemEnum,
-    syn::ItemStruct,
     syn::ItemFn,
     syn::ItemMod,
     syn::ItemTrait,
     syn::ItemConst,
     syn::ItemStatic,
+    syn::ItemUse,
 );
+
+impl ItemLike for syn::ItemStruct {
+    fn attrs(&self) -> &[syn::Attribute] {
+        &self.attrs
+    }
+
+    fn push_attr(&mut self, attr: syn::Attribute) {
+        self.attrs.push(attr);
+    }
+
+    fn visibility(&self) -> &Visibility {
+        &self.vis
+    }
+
+    fn set_visibility(&mut self, visibility: Visibility) {
+        // Also constrain visibility of all fields to be at most the given
+        // item visibility.
+        self.fields
+            .iter_mut()
+            .filter(|field| matches!(&field.vis, Visibility::Public(_)))
+            .for_each(|field| field.vis = visibility.clone());
+
+        self.vis = visibility;
+    }
+}

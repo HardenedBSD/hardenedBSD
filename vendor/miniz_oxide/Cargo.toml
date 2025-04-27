@@ -29,7 +29,7 @@ std = []
 with-alloc = []
 
 [lib]
-name = "miniz_oxide"
+path = "src/lib.rs"
 
 [package]
 authors = ["Frommi <daniil.liferenko@gmail.com>", "oyvindln <oyvindln@users.noreply.github.com>"]

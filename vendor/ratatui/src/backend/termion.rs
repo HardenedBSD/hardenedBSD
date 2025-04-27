@@ -9,13 +9,12 @@ use std::{
     io::{self, Write},
 };
 
-use termion::{color as tcolor, style as tstyle};
-
 use crate::{
     backend::{Backend, ClearType, WindowSize},
     buffer::Cell,
     prelude::Rect,
     style::{Color, Modifier, Style},
+    termion::{self, color as tcolor, color::Color as _, style as tstyle},
 };
 
 /// A [`Backend`] implementation that uses [Termion] to render to the terminal.
@@ -40,8 +39,10 @@ use crate::{
 /// ```rust,no_run
 /// use std::io::{stderr, stdout};
 ///
-/// use ratatui::prelude::*;
-/// use termion::{raw::IntoRawMode, screen::IntoAlternateScreen};
+/// use ratatui::{
+///     prelude::*,
+///     termion::{raw::IntoRawMode, screen::IntoAlternateScreen},
+/// };
 ///
 /// let writer = stdout().into_raw_mode()?.into_alternate_screen()?;
 /// let mut backend = TermionBackend::new(writer);
@@ -82,8 +83,28 @@ where
     /// # use ratatui::prelude::*;
     /// let backend = TermionBackend::new(stdout());
     /// ```
-    pub fn new(writer: W) -> TermionBackend<W> {
-        TermionBackend { writer }
+    pub const fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    /// Gets the writer.
+    #[stability::unstable(
+        feature = "backend-writer",
+        issue = "https://github.com/ratatui-org/ratatui/pull/991"
+    )]
+    pub const fn writer(&self) -> &W {
+        &self.writer
+    }
+
+    /// Gets the writer as a mutable reference.
+    /// Note: writing to the writer may cause incorrect output after the write. This is due to the
+    /// way that the Terminal implements diffing Buffers.
+    #[stability::unstable(
+        feature = "backend-writer",
+        issue = "https://github.com/ratatui-org/ratatui/pull/991"
+    )]
+    pub fn writer_mut(&mut self) -> &mut W {
+        &mut self.writer
     }
 }
 
@@ -198,7 +219,7 @@ where
         Ok(Rect::new(0, 0, terminal.0, terminal.1))
     }
 
-    fn window_size(&mut self) -> Result<WindowSize, io::Error> {
+    fn window_size(&mut self) -> io::Result<WindowSize> {
         Ok(WindowSize {
             columns_rows: termion::terminal_size()?.into(),
             pixels: termion::terminal_size_pixels()?.into(),
@@ -209,16 +230,13 @@ where
         self.writer.flush()
     }
 }
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 struct Fg(Color);
 
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 struct Bg(Color);
 
 /// The `ModifierDiff` struct is used to calculate the difference between two `Modifier`
 /// values. This is useful when updating the terminal display, as it allows for more
 /// efficient updates by only sending the necessary changes.
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
 struct ModifierDiff {
     from: Modifier,
     to: Modifier,
@@ -226,7 +244,6 @@ struct ModifierDiff {
 
 impl fmt::Display for Fg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use termion::color::Color as TermionColor;
         match self.0 {
             Color::Reset => termion::color::Reset.write_fg(f),
             Color::Black => termion::color::Black.write_fg(f),
@@ -252,7 +269,6 @@ impl fmt::Display for Fg {
 }
 impl fmt::Display for Bg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use termion::color::Color as TermionColor;
         match self.0 {
             Color::Reset => termion::color::Reset.write_bg(f),
             Color::Black => termion::color::Black.write_bg(f),
@@ -278,7 +294,7 @@ impl fmt::Display for Bg {
 }
 
 macro_rules! from_termion_for_color {
-    ($termion_color:ident, $color: ident) => {
+    ($termion_color:ident, $color:ident) => {
         impl From<tcolor::$termion_color> for Color {
             fn from(_: tcolor::$termion_color) -> Self {
                 Color::$color
@@ -319,37 +335,37 @@ from_termion_for_color!(LightWhite, White);
 
 impl From<tcolor::AnsiValue> for Color {
     fn from(value: tcolor::AnsiValue) -> Self {
-        Color::Indexed(value.0)
+        Self::Indexed(value.0)
     }
 }
 
 impl From<tcolor::Bg<tcolor::AnsiValue>> for Style {
     fn from(value: tcolor::Bg<tcolor::AnsiValue>) -> Self {
-        Style::default().bg(Color::Indexed(value.0 .0))
+        Self::default().bg(Color::Indexed(value.0 .0))
     }
 }
 
 impl From<tcolor::Fg<tcolor::AnsiValue>> for Style {
     fn from(value: tcolor::Fg<tcolor::AnsiValue>) -> Self {
-        Style::default().fg(Color::Indexed(value.0 .0))
+        Self::default().fg(Color::Indexed(value.0 .0))
     }
 }
 
 impl From<tcolor::Rgb> for Color {
     fn from(value: tcolor::Rgb) -> Self {
-        Color::Rgb(value.0, value.1, value.2)
+        Self::Rgb(value.0, value.1, value.2)
     }
 }
 
 impl From<tcolor::Bg<tcolor::Rgb>> for Style {
     fn from(value: tcolor::Bg<tcolor::Rgb>) -> Self {
-        Style::default().bg(Color::Rgb(value.0 .0, value.0 .1, value.0 .2))
+        Self::default().bg(Color::Rgb(value.0 .0, value.0 .1, value.0 .2))
     }
 }
 
 impl From<tcolor::Fg<tcolor::Rgb>> for Style {
     fn from(value: tcolor::Fg<tcolor::Rgb>) -> Self {
-        Style::default().fg(Color::Rgb(value.0 .0, value.0 .1, value.0 .2))
+        Self::default().fg(Color::Rgb(value.0 .0, value.0 .1, value.0 .2))
     }
 }
 
@@ -419,7 +435,7 @@ impl fmt::Display for ModifierDiff {
 }
 
 macro_rules! from_termion_for_modifier {
-    ($termion_modifier:ident, $modifier: ident) => {
+    ($termion_modifier:ident, $modifier:ident) => {
         impl From<tstyle::$termion_modifier> for Modifier {
             fn from(_: tstyle::$termion_modifier) -> Self {
                 Modifier::$modifier
@@ -438,7 +454,7 @@ from_termion_for_modifier!(Blink, SLOW_BLINK);
 
 impl From<termion::style::Reset> for Modifier {
     fn from(_: termion::style::Reset) -> Self {
-        Modifier::empty()
+        Self::empty()
     }
 }
 

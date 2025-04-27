@@ -1,5 +1,5 @@
 // vim: tw=80
-use std::{error::Error, io, num::NonZeroUsize, time::Duration};
+use std::{error::Error, io, time::Duration};
 
 use clap::Parser;
 use crossterm::event::KeyCode;
@@ -29,7 +29,7 @@ struct Cli {
     children: bool,
     /// display datasets no more than this many levels deep.
     #[clap(short = 'd', long = "depth")]
-    depth:    Option<NonZeroUsize>,
+    depth:    Option<usize>,
     /// only display datasets with names matching filter, as a regex.
     #[clap(short = 'f', value_parser = Regex::new, long = "filter")]
     filter:   Option<Regex>,
@@ -109,15 +109,16 @@ mod ui {
     }
 
     pub fn draw(f: &mut Frame, app: &mut App) {
-        let hstyle = Style::default().fg(Color::Red);
+        let hstyle = Style::default()
+            .fg(Color::LightYellow)
+            .add_modifier(Modifier::BOLD);
         let sstyle = hstyle.add_modifier(Modifier::REVERSED);
         let hcells = [
             Cell::from("   r/s"),
             Cell::from(" kB/s r"),
             Cell::from("   w/s"),
             Cell::from(" kB/s w"),
-            Cell::from("   d/s"),
-            Cell::from("kB/s d"),
+            Cell::from("unlink/s"),
             Cell::from("Dataset"),
         ]
         .into_iter()
@@ -139,8 +140,7 @@ mod ui {
                     Cell::from(format!("{:>7.0}", elem.r_s / 1024.0)),
                     Cell::from(format!("{:>6.0}", elem.ops_w)),
                     Cell::from(format!("{:>7.0}", elem.w_s / 1024.0)),
-                    Cell::from(format!("{:>6.0}", elem.ops_d)),
-                    Cell::from(format!("{:>6.0}", elem.d_s / 1024.0)),
+                    Cell::from(format!("{:>8.0}", elem.ops_unlink)),
                     Cell::from(elem.name),
                 ])
             })
@@ -150,14 +150,13 @@ mod ui {
             Constraint::Length(8),
             Constraint::Length(7),
             Constraint::Length(8),
-            Constraint::Length(7),
-            Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Min(6),
         ];
         let t = Table::new(rows, widths)
             .header(header)
             .block(Block::default())
-            .segment_size(ratatui::layout::SegmentSize::LastTakesRemainder);
+            .flex(ratatui::layout::Flex::Legacy);
         f.render_widget(t, f.size());
     }
 
@@ -182,9 +181,8 @@ mod ui {
             "kB/s r" => Some(1),
             "w/s" => Some(2),
             "kB/s w" => Some(3),
-            "d/s" => Some(4),
-            "kB/s d" => Some(5),
-            "Dataset" => Some(6),
+            "unlink/s" => Some(4),
+            "Dataset" => Some(5),
             _ => None,
         }
     }
