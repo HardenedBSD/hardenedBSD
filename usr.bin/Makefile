@@ -43,6 +43,7 @@ SUBDIR=	alias \
 	find \
 	fmt \
 	fold \
+	freebsd-geom-exporter \
 	fstat \
 	fsync \
 	gcore \
@@ -59,6 +60,7 @@ SUBDIR=	alias \
 	ident \
 	ipcrm \
 	ipcs \
+	jail_exporter \
 	join \
 	jot \
 	killall \
@@ -98,6 +100,7 @@ SUBDIR=	alias \
 	ncurses \
 	netstat \
 	newgrp \
+	nfs-exporter \
 	nfsstat \
 	nice \
 	nl \

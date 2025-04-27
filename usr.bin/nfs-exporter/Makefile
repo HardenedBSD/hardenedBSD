@@ -1,5 +1,5 @@
 PACKAGE=	base-rust-utils
-PROG=		jail_exporter
+PROG=		nfs-exporter
 
 .include "../Makefile.inc"
 

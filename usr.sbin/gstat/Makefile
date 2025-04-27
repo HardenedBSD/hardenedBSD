@@ -1,5 +1,5 @@
 PACKAGE=	base-rust-utils
-PROG=		jail_exporter
+PROG=		gstat
 
 .include "../Makefile.inc"
 
