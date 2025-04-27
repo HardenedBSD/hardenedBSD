@@ -5,12 +5,12 @@
 .if !target(__<bsd.rust.mk>__)
 __<bsd.rust.mk>__:	.NOTMAIN
 
-.if defined(OPTIONAL_TOOLCHAIN) && ${OPTIONAL_TOOLCHAIN} == "rust-cargo"
+.if defined(OPTIONAL_TOOLCHAINS) && ${OPTIONAL_TOOLCHAINS:Mrust-cargo}
 
 LOCALBASE?=		/usr/local
 
 .if !defined(TAGS) || ! ${TAGS:Mpackage=*}
-TAGS+=		package=${PACKAGE:Uutilities}
+TAGS+=		package=${PACKAGE:Ubase-rust-utils}
 .endif
 TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
 
