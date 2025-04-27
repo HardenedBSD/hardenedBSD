@@ -28,6 +28,10 @@ CARGO_PROFILE?=		release
 CARGO_FLAGS+=		--offline
 CARGO_FLAGS+=		--profile ${CARGO_PROFILE}
 
+.if !exists(${CARGO}) || !exists(${RUSTC})
+.error Rust compiler toolchain not found
+.endif
+
 all:
 	env -C ${.CURDIR} ${CARGO} build ${CARGO_FLAGS}
 
