@@ -52,6 +52,9 @@ clean:
 
 cleandir: clean
 
+check: all
+	env -C ${.CURDIR} ${CARGO} test --bin ${PROG} --tests
+
 .include <bsd.obj.mk>
 .include <bsd.incs.mk>
 .include <bsd.sys.mk>
