@@ -13,10 +13,12 @@ __<bsd.rust.mk>__:	.NOTMAIN
 
 LOCALBASE?=		/usr/local
 
+.if defined(NO_ROOT)
 .if !defined(TAGS) || ! ${TAGS:Mpackage=*}
 TAGS+=		package=${PACKAGE:Ubase-rust-utils}
 .endif
 TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
+.endif
 
 CARGO?=			${LOCALBASE}/bin/cargo
 RUSTC?=			${LOCALBASE}/bin/rustc
@@ -27,6 +29,7 @@ CARGO_TARGET_DIR?=	${OBJROOT}${TARGET}.${TARGET_ARCH}/rust-cargo
 CARGO_PROFILE?=		release
 CARGO_FLAGS+=		--offline
 CARGO_FLAGS+=		--profile ${CARGO_PROFILE}
+CARGO_FLAGS+=		--bin ${PROG}
 
 .if !exists(${CARGO}) || !exists(${RUSTC})
 .error Rust compiler toolchain not found
