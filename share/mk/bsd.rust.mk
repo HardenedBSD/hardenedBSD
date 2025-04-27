@@ -26,6 +26,7 @@ CARGO_TARGET_DIR?=	${OBJROOT}${TARGET}.${TARGET_ARCH}/rust-cargo
 .export CARGO_TARGET_DIR
 .export RUSTC
 
+#MSRV=			+1.83.0
 CARGO_PROFILE?=		release
 CARGO_FLAGS+=		--offline
 CARGO_FLAGS+=		--profile ${CARGO_PROFILE}
@@ -36,7 +37,7 @@ CARGO_FLAGS+=		--bin ${PROG}
 .endif
 
 all:
-	env -C ${.CURDIR} ${CARGO} build ${CARGO_FLAGS}
+	env -C ${.CURDIR} ${CARGO} ${MSRV} build ${CARGO_FLAGS}
 
 install:
 	${INSTALL} \
