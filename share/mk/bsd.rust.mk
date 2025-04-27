@@ -5,18 +5,14 @@
 .if !target(__<bsd.rust.mk>__)
 __<bsd.rust.mk>__:	.NOTMAIN
 
-all:
-clean:
-cleandir:
-depend:
-includes:
-install:
-installconfig:
-obj:
-
 .if defined(OPTIONAL_TOOLCHAIN) && ${OPTIONAL_TOOLCHAIN} == "rust-cargo"
 
 LOCALBASE?=		/usr/local
+
+.if !defined(TAGS) || ! ${TAGS:Mpackage=*}
+TAGS+=		package=${PACKAGE:Uutilities}
+.endif
+TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
 
 CARGO?=			${LOCALBASE}/bin/cargo
 CARGO_TARGET_DIR?=	${OBJROOT}${TARGET}.${TARGET_ARCH}/rust-cargo
@@ -44,6 +40,7 @@ all:
 install:
 .if defined(PROG)
 	${INSTALL} \
+		${TAG_ARGS} \
 		-o ${BINOWN} \
 		-g ${BINGRP} \
 		-m ${BINMODE} \
@@ -60,8 +57,16 @@ cleandir: clean
 .include <bsd.incs.mk>
 .include <bsd.sys.mk>
 
-.endif
+.else
 
+all:
+clean:
+cleandir:
+depend:
 includes:
+install:
+installconfig:
+obj:
 
+.endif
 .endif
