@@ -7,6 +7,10 @@ __<bsd.rust.mk>__:	.NOTMAIN
 
 .if defined(OPTIONAL_TOOLCHAINS) && ${OPTIONAL_TOOLCHAINS:Mrust-cargo}
 
+.if !defined(PROG)
+.error Rust-in-base support only targets applications
+.endif
+
 LOCALBASE?=		/usr/local
 
 .if !defined(TAGS) || ! ${TAGS:Mpackage=*}
@@ -22,15 +26,6 @@ RUSTC?=			${LOCALBASE}/bin/rustc
 .export RUSTC
 
 CARGO_PROFILE?=		release
-
-.if defined(PROG)
-CARGO_INSTALL_FLAGS+=	--root ${DESTDIR}${BINDIR}/${PROG}
-.elif defined(LIB)
-.error Building Rust library crates not currently required/supported.
-#CARGO_INSTALL_FLAGS+=	--root ${DESTDIR}${LIBDIR}/${LIB}
-.else
-.error Can only build application crates
-.endif
 
 CARGO_FLAGS+=		--offline
 
