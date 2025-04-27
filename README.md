@@ -10,10 +10,10 @@ Building
 --------
 
 To build everything, including C and Rust programs, do `env
-OPTIONAL_TOOLCHAIN=rust-cargo make buildworld` like usual.
+OPTIONAL_TOOLCHAINS=rust-cargo make buildworld` like usual.
 
 To build just a single Rust program, cd into its subdirectory and do
-`env OPTIONAL_TOOLCHAIN=rust-cargo make build`
+`env OPTIONAL_TOOLCHAINS=rust-cargo make build`
 
 How to Develop
 ==============
