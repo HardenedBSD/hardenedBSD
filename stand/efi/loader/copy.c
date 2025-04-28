@@ -220,11 +220,10 @@ command_copy_staging(int argc, char *argv[])
 		[COPY_STAGING_DISABLE] = "disable",
 		[COPY_STAGING_AUTO] = "auto",
 	};
-	int prev, res;
+	int prev;
 
-	res = CMD_OK;
 	if (argc > 2) {
-		res = CMD_ERROR;
+		goto usage;
 	} else if (argc == 2) {
 		prev = copy_staging;
 		if (strcmp(argv[1], "enable") == 0)
@@ -233,11 +232,9 @@ command_copy_staging(int argc, char *argv[])
 			copy_staging = COPY_STAGING_DISABLE;
 		else if (strcmp(argv[1], "auto") == 0)
 			copy_staging = COPY_STAGING_AUTO;
-		else {
-			printf("usage: copy_staging enable|disable|auto\n");
-			res = CMD_ERROR;
-		}
-		if (res == CMD_OK && prev != copy_staging) {
+		else
+			goto usage;
+		if (prev != copy_staging) {
 			printf("changed copy_staging, unloading kernel\n");
 			unload();
 			efi_copy_free();
@@ -246,7 +243,11 @@ command_copy_staging(int argc, char *argv[])
 	} else {
 		printf("copy staging: %s\n", mode[copy_staging]);
 	}
-	return (res);
+	return (CMD_OK);
+
+usage:
+	command_errmsg = "usage: copy_staging enable|disable|auto";
+	return (CMD_ERROR);
 }
 COMMAND_SET(copy_staging, "copy_staging", "copy staging", command_copy_staging);
 #endif
@@ -256,19 +257,17 @@ command_staging_slop(int argc, char *argv[])
 {
 	char *endp;
 	u_long new, prev;
-	int res;
 
-	res = CMD_OK;
 	if (argc > 2) {
-		res = CMD_ERROR;
+		goto err;
 	} else if (argc == 2) {
 		new = strtoul(argv[1], &endp, 0);
-		if (*endp != '\0') {
-			printf("invalid slop value\n");
-			res = CMD_ERROR;
-		}
-		if (res == CMD_OK && staging_slop != new) {
+		if (*endp != '\0')
+			goto err;
+		if (staging_slop != new) {
+			staging_slop = new;
 			printf("changed slop, unloading kernel\n");
+
 			unload();
 			efi_copy_free();
 			efi_copy_init();
@@ -276,7 +275,11 @@ command_staging_slop(int argc, char *argv[])
 	} else {
 		printf("staging slop %#lx\n", staging_slop);
 	}
-	return (res);
+	return (CMD_OK);
+
+err:
+	command_errmsg = "invalid slop value";
+	return (CMD_ERROR);
 }
 COMMAND_SET(staging_slop, "staging_slop", "set staging slop",
     command_staging_slop);
