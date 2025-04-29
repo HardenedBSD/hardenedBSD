@@ -107,6 +107,10 @@ SYSCTL_NODE(_compat_linuxkpi, OID_AUTO, 80211, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
 static bool lkpi_hwcrypto = false;
 SYSCTL_BOOL(_compat_linuxkpi_80211, OID_AUTO, hw_crypto, CTLFLAG_RDTUN,
     &lkpi_hwcrypto, 0, "Enable LinuxKPI 802.11 hardware crypto offload");
+
+static bool lkpi_hwcrypto_tkip = false;
+SYSCTL_BOOL(_compat_linuxkpi_80211, OID_AUTO, tkip, CTLFLAG_RDTUN,
+    &lkpi_hwcrypto_tkip, 0, "Enable LinuxKPI 802.11 TKIP crypto offload");
 #endif
 
 /* Keep public for as long as header files are using it too. */
@@ -777,9 +781,7 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 	sta->deflink.bandwidth = IEEE80211_STA_RX_BW_20;
 	sta->deflink.rx_nss = 1;
 
-	wiphy_lock(hw->wiphy);
 	lkpi_sta_sync_from_ni(hw, vif, sta, ni, false);
-	wiphy_unlock(hw->wiphy);
 
 	IMPROVE("he, eht, bw_320, ... smps_mode, ..");
 
@@ -789,6 +791,8 @@ lkpi_lsta_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN],
 	for (i = 1; i < nitems(sta->link); i++) {
 		IMPROVE("more links; only link[0] = deflink currently.");
 	}
+	IMPROVE("11be");
+	sta->mlo = false;
 
 	/* Deferred TX path. */
 	LKPI_80211_LSTA_TXQ_LOCK_INIT(lsta);
@@ -963,68 +967,68 @@ lkpi_opmode_to_vif_type(enum ieee80211_opmode opmode)
 static const char *
 lkpi_cipher_suite_to_name(uint32_t wlan_cipher_suite)
 {
-
 	switch (wlan_cipher_suite) {
 	case WLAN_CIPHER_SUITE_WEP40:
 		return ("WEP40");
+	case WLAN_CIPHER_SUITE_WEP104:
+		return ("WEP104");
 	case WLAN_CIPHER_SUITE_TKIP:
 		return ("TKIP");
 	case WLAN_CIPHER_SUITE_CCMP:
 		return ("CCMP");
-	case WLAN_CIPHER_SUITE_WEP104:
-		return ("WEP104");
-	case WLAN_CIPHER_SUITE_AES_CMAC:
-		return ("AES_CMAC");
+	case WLAN_CIPHER_SUITE_CCMP_256:
+		return ("CCMP_256");
 	case WLAN_CIPHER_SUITE_GCMP:
 		return ("GCMP");
 	case WLAN_CIPHER_SUITE_GCMP_256:
 		return ("GCMP_256");
-	case WLAN_CIPHER_SUITE_CCMP_256:
-		return ("CCMP_256");
+	case WLAN_CIPHER_SUITE_AES_CMAC:
+		return ("AES_CMAC");
+	case WLAN_CIPHER_SUITE_BIP_CMAC_256:
+		return ("BIP_CMAC_256");
 	case WLAN_CIPHER_SUITE_BIP_GMAC_128:
 		return ("BIP_GMAC_128");
 	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
 		return ("BIP_GMAC_256");
-	case WLAN_CIPHER_SUITE_BIP_CMAC_256:
-		return ("BIP_CMAC_256");
 	default:
 		return ("??");
 	}
 }
 
 static uint32_t
-lkpi_l80211_to_net80211_cyphers(uint32_t wlan_cipher_suite)
+lkpi_l80211_to_net80211_cyphers(struct ieee80211com *ic,
+    uint32_t wlan_cipher_suite)
 {
-
 	switch (wlan_cipher_suite) {
 	case WLAN_CIPHER_SUITE_WEP40:
+		return (IEEE80211_CRYPTO_WEP);
+	case WLAN_CIPHER_SUITE_WEP104:
 		return (IEEE80211_CRYPTO_WEP);
 	case WLAN_CIPHER_SUITE_TKIP:
 		return (IEEE80211_CRYPTO_TKIP);
 	case WLAN_CIPHER_SUITE_CCMP:
 		return (IEEE80211_CRYPTO_AES_CCM);
-	case WLAN_CIPHER_SUITE_WEP104:
-		return (IEEE80211_CRYPTO_WEP);
-	case WLAN_CIPHER_SUITE_AES_CMAC:
-	case WLAN_CIPHER_SUITE_GCMP:
-	case WLAN_CIPHER_SUITE_GCMP_256:
 	case WLAN_CIPHER_SUITE_CCMP_256:
-	case WLAN_CIPHER_SUITE_BIP_GMAC_128:
-	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
+		return (IEEE80211_CRYPTO_AES_CCM_256);
+	case WLAN_CIPHER_SUITE_GCMP:
+		return (IEEE80211_CRYPTO_AES_GCM_128);
+	case WLAN_CIPHER_SUITE_GCMP_256:
+		return (IEEE80211_CRYPTO_AES_GCM_256);
+	case WLAN_CIPHER_SUITE_AES_CMAC:
+		return (IEEE80211_CRYPTO_BIP_CMAC_128);
 	case WLAN_CIPHER_SUITE_BIP_CMAC_256:
-		printf("%s: unsupported WLAN Cipher Suite %#08x | %u (%s)\n",
-		    __func__,
-		    wlan_cipher_suite >> 8, wlan_cipher_suite & 0xff,
-		    lkpi_cipher_suite_to_name(wlan_cipher_suite));
-		break;
+		return (IEEE80211_CRYPTO_BIP_CMAC_256);
+	case WLAN_CIPHER_SUITE_BIP_GMAC_128:
+		return (IEEE80211_CRYPTO_BIP_GMAC_128);
+	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
+		return (IEEE80211_CRYPTO_BIP_GMAC_256);
 	default:
-		printf("%s: unknown WLAN Cipher Suite %#08x | %u (%s)\n",
+		ic_printf(ic, "%s: unknown WLAN Cipher Suite %#08x | %u (%s)\n",
 		    __func__,
 		    wlan_cipher_suite >> 8, wlan_cipher_suite & 0xff,
 		    lkpi_cipher_suite_to_name(wlan_cipher_suite));
+		return (0);
 	}
-
-	return (0);
 }
 
 static uint32_t
@@ -1032,18 +1036,37 @@ lkpi_net80211_to_l80211_cipher_suite(uint32_t cipher, uint8_t keylen)
 {
 
 	switch (cipher) {
-	case IEEE80211_CIPHER_TKIP:
-		return (WLAN_CIPHER_SUITE_TKIP);
-	case IEEE80211_CIPHER_AES_CCM:
-		return (WLAN_CIPHER_SUITE_CCMP);
 	case IEEE80211_CIPHER_WEP:
 		if (keylen < 8)
 			return (WLAN_CIPHER_SUITE_WEP40);
 		else
 			return (WLAN_CIPHER_SUITE_WEP104);
 		break;
+	case IEEE80211_CIPHER_TKIP:
+		return (WLAN_CIPHER_SUITE_TKIP);
+	case IEEE80211_CIPHER_AES_CCM:
+		return (WLAN_CIPHER_SUITE_CCMP);
+	case IEEE80211_CIPHER_AES_CCM_256:
+		return (WLAN_CIPHER_SUITE_CCMP_256);
+	case IEEE80211_CIPHER_AES_GCM_128:
+		return (WLAN_CIPHER_SUITE_GCMP);
+	case IEEE80211_CIPHER_AES_GCM_256:
+		return (WLAN_CIPHER_SUITE_GCMP_256);
+	case IEEE80211_CIPHER_BIP_CMAC_128:
+		return (WLAN_CIPHER_SUITE_AES_CMAC);
+	case IEEE80211_CIPHER_BIP_CMAC_256:
+		return (WLAN_CIPHER_SUITE_BIP_CMAC_256);
+	case IEEE80211_CIPHER_BIP_GMAC_128:
+		return (WLAN_CIPHER_SUITE_BIP_GMAC_128);
+	case IEEE80211_CIPHER_BIP_GMAC_256:
+		return (WLAN_CIPHER_SUITE_BIP_GMAC_256);
+
 	case IEEE80211_CIPHER_AES_OCB:
 	case IEEE80211_CIPHER_TKIPMIC:
+		/*
+		 * TKIP w/ hw MIC support
+		 * (gone wrong; should really be a crypto flag in net80211).
+		 */
 	case IEEE80211_CIPHER_CKIP:
 	case IEEE80211_CIPHER_NONE:
 		printf("%s: unsupported cipher %#010x\n", __func__, cipher);
@@ -1186,6 +1209,14 @@ lkpi_sta_del_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 			continue;
 		kc = lsta->kc[keyix];
 
+#ifdef LINUXKPI_DEBUG_80211
+		if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
+			ic_printf(lsta->ni->ni_ic, "%s: running set_key cmd %d(%s) for "
+			    "sta %6D: keyidx %u hw_key_idx %u flags %b\n",
+			    __func__, DISABLE_KEY, "DISABLE", lsta->sta.addr, ":",
+			    kc->keyidx, kc->hw_key_idx, kc->flags, IEEE80211_KEY_FLAG_BITS);
+#endif
+
 		err = lkpi_80211_mo_set_key(hw, DISABLE_KEY, vif,
 		    LSTA_TO_STA(lsta), kc);
 		if (err != 0) {
@@ -1204,9 +1235,9 @@ lkpi_sta_del_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 #ifdef LINUXKPI_DEBUG_80211
 		if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
 			ic_printf(lsta->ni->ni_ic, "%s: set_key cmd %d(%s) for "
-			    "sta %6D succeeded: keyidx %u hw_key_idx %u flags %#10x\n",
+			    "sta %6D succeeded: keyidx %u hw_key_idx %u flags %b\n",
 			    __func__, DISABLE_KEY, "DISABLE", lsta->sta.addr, ":",
-			    kc->keyidx, kc->hw_key_idx, kc->flags);
+			    kc->keyidx, kc->hw_key_idx, kc->flags, IEEE80211_KEY_FLAG_BITS);
 #endif
 
 		lsta->kc[keyix] = NULL;
@@ -1216,8 +1247,10 @@ lkpi_sta_del_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	return (error);
 }
 
+/* XXX-BZ one day we should replace this iterating over VIFs, or node list? */
+/* See also lkpi_sta_del_keys() these days. */
 static int
-_lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
+lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
 {
 	struct ieee80211com *ic;
 	struct lkpi_hw *lhw;
@@ -1231,16 +1264,18 @@ _lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
 	int error;
 
 	ic = vap->iv_ic;
-	lhw = ic->ic_softc;
-	hw = LHW_TO_HW(lhw);
-	lvif = VAP_TO_LVIF(vap);
-	vif = LVIF_TO_VIF(lvif);
+	if (IEEE80211_KEY_UNDEFINED(k)) {
+		ic_printf(ic, "%s: vap %p key %p is undefined: %p %u\n",
+		    __func__, vap, k, k->wk_cipher, k->wk_keyix);
+		return (0);
+	}
 
 	if (vap->iv_bss == NULL) {
 		ic_printf(ic, "%s: iv_bss %p for vap %p is NULL\n",
 		    __func__, vap->iv_bss, vap);
 		return (0);
 	}
+
 	ni = ieee80211_ref_node(vap->iv_bss);
 	lsta = ni->ni_drv_data;
 	if (lsta == NULL) {
@@ -1275,6 +1310,18 @@ _lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
 		goto out;
 	}
 
+#ifdef LINUXKPI_DEBUG_80211
+	if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
+		ic_printf(ic, "%s: running  set_key cmd %d(%s) for sta %6D: "
+		    "keyidx %u hw_key_idx %u flags %b\n", __func__,
+		    DISABLE_KEY, "DISABLE", sta->addr, ":",
+		    kc->keyidx, kc->hw_key_idx, kc->flags, IEEE80211_KEY_FLAG_BITS);
+#endif
+
+	lhw = ic->ic_softc;
+	hw = LHW_TO_HW(lhw);
+	lvif = VAP_TO_LVIF(vap);
+	vif = LVIF_TO_VIF(lvif);
 	error = lkpi_80211_mo_set_key(hw, DISABLE_KEY, vif, sta, kc);
 	if (error != 0) {
 		ic_printf(ic, "%s: set_key cmd %d(%s) for sta %6D failed: %d\n",
@@ -1286,9 +1333,9 @@ _lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
 		ic_printf(ic, "%s: set_key cmd %d(%s) for sta %6D succeeded: "
-		    "keyidx %u hw_key_idx %u flags %#10x\n", __func__,
+		    "keyidx %u hw_key_idx %u flags %b\n", __func__,
 		    DISABLE_KEY, "DISABLE", sta->addr, ":",
-		    kc->keyidx, kc->hw_key_idx, kc->flags);
+		    kc->keyidx, kc->hw_key_idx, kc->flags, IEEE80211_KEY_FLAG_BITS);
 #endif
 	lsta->kc[k->wk_keyix] = NULL;
 	free(kc, M_LKPI80211);
@@ -1299,16 +1346,7 @@ out:
 }
 
 static int
-lkpi_iv_key_delete(struct ieee80211vap *vap, const struct ieee80211_key *k)
-{
-
-	/* XXX-BZ one day we should replace this iterating over VIFs, or node list? */
-	/* See also lkpi_sta_del_keys() these days. */
-	return (_lkpi_iv_key_delete(vap, k));
-}
-
-static int
-_lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
+lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 {
 	struct ieee80211com *ic;
 	struct lkpi_hw *lhw;
@@ -1320,13 +1358,16 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 	struct ieee80211_node *ni;
 	struct ieee80211_key_conf *kc;
 	uint32_t lcipher;
+	uint16_t exp_flags;
+	uint8_t keylen;
 	int error;
 
 	ic = vap->iv_ic;
-	lhw = ic->ic_softc;
-	hw = LHW_TO_HW(lhw);
-	lvif = VAP_TO_LVIF(vap);
-	vif = LVIF_TO_VIF(lvif);
+	if (IEEE80211_KEY_UNDEFINED(k)) {
+		ic_printf(ic, "%s: vap %p key %p is undefined: %p %u\n",
+		    __func__, vap, k, k->wk_cipher, k->wk_keyix);
+		return (0);
+	}
 
 	if (vap->iv_bss == NULL) {
 		ic_printf(ic, "%s: iv_bss %p for vap %p is NULL\n",
@@ -1343,6 +1384,23 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 	}
 	sta = LSTA_TO_STA(lsta);
 
+	keylen = k->wk_keylen;
+	lcipher = lkpi_net80211_to_l80211_cipher_suite(
+	    k->wk_cipher->ic_cipher, k->wk_keylen);
+	switch (lcipher) {
+	case WLAN_CIPHER_SUITE_CCMP:
+		break;
+	case WLAN_CIPHER_SUITE_TKIP:
+		keylen += 2 * k->wk_cipher->ic_miclen;
+		break;
+	default:
+		ic_printf(ic, "%s: CIPHER SUITE %#x (%s) not supported\n",
+		    __func__, lcipher, lkpi_cipher_suite_to_name(lcipher));
+		IMPROVE();
+		ieee80211_free_node(ni);
+		return (0);
+	}
+
 	if (lsta->kc[k->wk_keyix] != NULL) {
 		IMPROVE("Still in firmware? Del first. Can we assert this cannot happen?");
 		ic_printf(ic, "%s: sta %6D found with key information\n",
@@ -1353,23 +1411,8 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 		kc = NULL;	/* safeguard */
 	}
 
-	lcipher = lkpi_net80211_to_l80211_cipher_suite(
-	    k->wk_cipher->ic_cipher, k->wk_keylen);
-	switch (lcipher) {
-	case WLAN_CIPHER_SUITE_CCMP:
-		break;
-	case WLAN_CIPHER_SUITE_TKIP:
-	default:
-		ic_printf(ic, "%s: CIPHER SUITE %#x (%s) not supported\n",
-		    __func__, lcipher, lkpi_cipher_suite_to_name(lcipher));
-		IMPROVE();
-		ieee80211_free_node(ni);
-		return (0);
-	}
-
-	kc = malloc(sizeof(*kc) + k->wk_keylen, M_LKPI80211, M_WAITOK | M_ZERO);
+	kc = malloc(sizeof(*kc) + keylen, M_LKPI80211, M_WAITOK | M_ZERO);
 	kc->_k = k;		/* Save the pointer to net80211. */
-	atomic64_set(&kc->tx_pn, k->wk_keytsc);
 	kc->cipher = lcipher;
 	kc->keyidx = k->wk_keyix;
 #if 0
@@ -1390,6 +1433,11 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 		kc->icv_len = k->wk_cipher->ic_trailer;
 		break;
 	case WLAN_CIPHER_SUITE_TKIP:
+		memcpy(kc->key + NL80211_TKIP_DATA_OFFSET_TX_MIC_KEY, k->wk_txmic, k->wk_cipher->ic_miclen);
+		memcpy(kc->key + NL80211_TKIP_DATA_OFFSET_RX_MIC_KEY, k->wk_rxmic, k->wk_cipher->ic_miclen);
+		kc->iv_len = k->wk_cipher->ic_header;
+		kc->icv_len = k->wk_cipher->ic_trailer;
+		break;
 	default:
 		/* currently UNREACH */
 		IMPROVE();
@@ -1397,6 +1445,18 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 	};
 	lsta->kc[k->wk_keyix] = kc;
 
+#ifdef LINUXKPI_DEBUG_80211
+	if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
+		ic_printf(ic, "%s: running set_key cmd %d(%s) for sta %6D: "
+		    "kc %p keyidx %u hw_key_idx %u keylen %u flags %b\n", __func__,
+		    SET_KEY, "SET", sta->addr, ":", kc, kc->keyidx, kc->hw_key_idx,
+		    kc->keylen, kc->flags, IEEE80211_KEY_FLAG_BITS);
+#endif
+
+	lhw = ic->ic_softc;
+	hw = LHW_TO_HW(lhw);
+	lvif = VAP_TO_LVIF(vap);
+	vif = LVIF_TO_VIF(lvif);
 	error = lkpi_80211_mo_set_key(hw, SET_KEY, vif, sta, kc);
 	if (error != 0) {
 		ic_printf(ic, "%s: set_key cmd %d(%s) for sta %6D failed: %d\n",
@@ -1410,20 +1470,60 @@ _lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_HW_CRYPTO)
 		ic_printf(ic, "%s: set_key cmd %d(%s) for sta %6D succeeded: "
-		    "kc %p keyidx %u hw_key_idx %u flags %#010x\n", __func__,
+		    "kc %p keyidx %u hw_key_idx %u flags %b\n", __func__,
 		    SET_KEY, "SET", sta->addr, ":",
-		    kc, kc->keyidx, kc->hw_key_idx, kc->flags);
+		    kc, kc->keyidx, kc->hw_key_idx, kc->flags, IEEE80211_KEY_FLAG_BITS);
+#endif
+
+	exp_flags = 0;
+	switch (kc->cipher) {
+	case WLAN_CIPHER_SUITE_TKIP:
+		exp_flags = (IEEE80211_KEY_FLAG_PAIRWISE |
+			IEEE80211_KEY_FLAG_PUT_IV_SPACE |
+			IEEE80211_KEY_FLAG_GENERATE_MMIC |
+			IEEE80211_KEY_FLAG_PUT_MIC_SPACE);
+#define	TKIP_INVAL_COMBINATION						\
+     (IEEE80211_KEY_FLAG_PUT_MIC_SPACE|IEEE80211_KEY_FLAG_GENERATE_MMIC)
+		if ((kc->flags & TKIP_INVAL_COMBINATION) == TKIP_INVAL_COMBINATION) {
+			ic_printf(ic, "%s: SET_KEY for %s returned invalid "
+			    "combination %b\n", __func__,
+			    lkpi_cipher_suite_to_name(kc->cipher),
+			    kc->flags, IEEE80211_KEY_FLAG_BITS);
+		}
+#undef	TKIP_INVAL_COMBINATION
+#ifdef __notyet__
+		/* Do flags surgery; special see linuxkpi_ieee80211_ifattach(). */
+		if ((kc->flags & IEEE80211_KEY_FLAG_GENERATE_MMIC) != 0) {
+			k->wk_flags &= ~(IEEE80211_KEY_NOMICMGT|IEEE80211_KEY_NOMIC);
+			k->wk_flags |= IEEE80211_KEY_SWMIC;
+			ic->ic_cryptocaps &= ~IEEE80211_CRYPTO_TKIPMIC
+		}
+#endif
+		break;
+	case WLAN_CIPHER_SUITE_CCMP:
+		exp_flags = (IEEE80211_KEY_FLAG_PAIRWISE |
+		    IEEE80211_KEY_FLAG_PUT_IV_SPACE |
+		    IEEE80211_KEY_FLAG_GENERATE_IV |
+		    IEEE80211_KEY_FLAG_GENERATE_IV_MGMT |	/* Only needs IV geeration for MGMT frames. */
+		    IEEE80211_KEY_FLAG_SW_MGMT_TX);		/* MFP in software */
+		break;
+	}
+	if ((kc->flags & ~exp_flags) != 0)
+		ic_printf(ic, "%s: SET_KEY for %s returned unexpected key flags: "
+		    " %#06x & ~%#06x = %b\n", __func__,
+		    lkpi_cipher_suite_to_name(kc->cipher), kc->flags, exp_flags,
+		    (kc->flags & ~exp_flags), IEEE80211_KEY_FLAG_BITS);
+
+#ifdef __notyet__
+	/* Do flags surgery. */
+	if ((kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV_MGMT) == 0)
+		k->wk_flags |= IEEE80211_KEY_NOIVMGT;
+	if ((kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV) == 0)
+		k->wk_flags |= IEEE80211_KEY_NOIV;
 #endif
 
 	ieee80211_free_node(ni);
 	return (1);
-}
-
-static  int
-lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
-{
-
-	return (_lkpi_iv_key_set(vap, k));
 }
 
 static void
@@ -1434,6 +1534,7 @@ lkpi_iv_key_update_begin(struct ieee80211vap *vap)
 	struct lkpi_hw *lhw;
 	struct ieee80211_hw *hw;
 	struct lkpi_vif *lvif;
+	struct ieee80211_node *ni;
 	bool icislocked, ntislocked;
 
 	ic = vap->iv_ic;
@@ -1454,13 +1555,26 @@ lkpi_iv_key_update_begin(struct ieee80211vap *vap)
 		    lvif->ic_unlocked, lvif->nt_unlocked);
 #endif
 
-	/* This is inconsistent net80211 locking to be fixed one day. */
+	/*
+	 * This is inconsistent net80211 locking to be fixed one day.
+	 */
+	/* Try to make sure the node does not go away while possibly unlocked. */
+	ni = NULL;
+	if (icislocked || ntislocked) {
+		if (vap->iv_bss != NULL)
+			ni = ieee80211_ref_node(vap->iv_bss);
+	}
+
 	if (icislocked)
 		IEEE80211_UNLOCK(ic);
 	if (ntislocked)
 		IEEE80211_NODE_UNLOCK(nt);
 
 	wiphy_lock(hw->wiphy);
+
+	KASSERT(lvif->key_update_iv_bss == NULL, ("%s: key_update_iv_bss not NULL %p",
+	    __func__, lvif->key_update_iv_bss));
+	lvif->key_update_iv_bss = ni;
 
 	/*
 	 * ic/nt_unlocked could be a bool given we are under the lock and there
@@ -1511,6 +1625,12 @@ lkpi_iv_key_update_end(struct ieee80211vap *vap)
 	 */
 	icislocked = refcount_release_if_last(&lvif->ic_unlocked);
 	ntislocked = refcount_release_if_last(&lvif->nt_unlocked);
+
+	if (lvif->key_update_iv_bss != NULL) {
+		ieee80211_free_node(lvif->key_update_iv_bss);
+		lvif->key_update_iv_bss = NULL;
+	}
+
 	wiphy_unlock(hw->wiphy);
 
 	/*
@@ -4591,15 +4711,122 @@ lkpi_ic_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 }
 
 #ifdef LKPI_80211_HW_CRYPTO
+/*
+ * This is a bit of a hack given we know we are operating on a
+ * single frame and we know that hardware will deal with it.
+ * But otherwise the enmic bit and the encrypt bit need to be
+ * decoupled.
+ */
+static int
+lkpi_hw_crypto_prepare_tkip(struct ieee80211_key *k,
+    struct ieee80211_key_conf *kc, struct sk_buff *skb)
+{
+	struct ieee80211_hdr *hdr;
+	uint32_t hlen, hdrlen;
+	uint8_t *p;
+
+	/*
+	 * TKIP only happens on data.
+	 */
+	hdr = (void *)skb->data;
+	if (!ieee80211_is_data_present(hdr->frame_control))
+		return (0);
+
+	/*
+	 * "enmic" (though we do not do that).
+	 */
+	/* any conditions to not apply this? */
+	if (skb_tailroom(skb) < k->wk_cipher->ic_miclen)
+		return (ENOBUFS);
+
+	p = skb_put(skb, k->wk_cipher->ic_miclen);
+	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_MIC_SPACE) != 0)
+		goto encrypt;
+
+	/*
+	 * (*enmic) which we hopefully do not have to do with hw accel.
+	 * That means if we make it here we have a problem.
+	 */
+	TODO("(*enmic)");
+	return (ENXIO);
+
+encrypt:
+	/*
+	 * "encrypt" (though we do not do that).
+	 */
+	/*
+	 * Check if we have anything to do as requested by driver
+	 * or if we are done?
+	 */
+	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) == 0 &&
+	    (kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV) == 0)
+			return (0);
+
+	hlen = k->wk_cipher->ic_header;
+	if (skb_headroom(skb) < hlen)
+		return (ENOBUFS);
+
+	hdr = (void *)skb->data;
+	hdrlen = ieee80211_hdrlen(hdr->frame_control);
+	p = skb_push(skb, hlen);
+	memmove(p, p + hlen, hdrlen);
+
+	/* If driver request space only we are done. */
+	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) != 0)
+		return (0);
+
+	p += hdrlen;
+	k->wk_cipher->ic_setiv(k, p);
+
+	/* If we make it hear we do sw encryption. */
+	TODO("sw encrypt");
+	return (ENXIO);
+}
+static int
+lkpi_hw_crypto_prepare_ccmp(struct ieee80211_key *k,
+    struct ieee80211_key_conf *kc, struct sk_buff *skb)
+{
+	struct ieee80211_hdr *hdr;
+	uint32_t hlen, hdrlen;
+	uint8_t *p;
+
+	hdr = (void *)skb->data;
+
+	/*
+	 * Check if we have anythig to do as requested by driver
+	 * or if we are done?
+	 */
+	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) == 0 &&
+	    (kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV) == 0 &&
+	    /* MFP */
+	    !((kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV_MGMT) != 0 &&
+		ieee80211_is_mgmt(hdr->frame_control)))
+			return (0);
+
+	hlen = k->wk_cipher->ic_header;
+	if (skb_headroom(skb) < hlen)
+		return (ENOBUFS);
+
+	hdrlen = ieee80211_hdrlen(hdr->frame_control);
+	p = skb_push(skb, hlen);
+	memmove(p, p + hlen, hdrlen);
+
+	/* If driver request space only we are done. */
+	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) != 0)
+		return (0);
+
+	p += hdrlen;
+	k->wk_cipher->ic_setiv(k, p);
+
+	return (0);
+}
+
 static int
 lkpi_hw_crypto_prepare(struct lkpi_sta *lsta, struct ieee80211_key *k,
     struct sk_buff *skb)
 {
 	struct ieee80211_tx_info *info;
 	struct ieee80211_key_conf *kc;
-	struct ieee80211_hdr *hdr;
-	uint32_t hlen, hdrlen;
-	uint8_t *p;
 
 	KASSERT(lsta != NULL, ("%s: lsta is NULL", __func__));
 	KASSERT(k != NULL, ("%s: key is NULL", __func__));
@@ -4617,37 +4844,40 @@ lkpi_hw_crypto_prepare(struct lkpi_sta *lsta, struct ieee80211_key *k,
 		return (ENXIO);
 	}
 
+	switch (kc->cipher) {
+	case WLAN_CIPHER_SUITE_TKIP:
+		return (lkpi_hw_crypto_prepare_tkip(k, kc, skb));
+	case WLAN_CIPHER_SUITE_CCMP:
+		return (lkpi_hw_crypto_prepare_ccmp(k, kc, skb));
+	case WLAN_CIPHER_SUITE_WEP40:
+	case WLAN_CIPHER_SUITE_WEP104:
+	case WLAN_CIPHER_SUITE_CCMP_256:
+	case WLAN_CIPHER_SUITE_GCMP:
+	case WLAN_CIPHER_SUITE_GCMP_256:
+	case WLAN_CIPHER_SUITE_AES_CMAC:
+	case WLAN_CIPHER_SUITE_BIP_CMAC_256:
+	case WLAN_CIPHER_SUITE_BIP_GMAC_128:
+	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
+	default:
+		ic_printf(lsta->ni->ni_ic, "%s: lsta %p k %p kc %p skb %p, "
+		    "unsupported cipher suite %u (%s)\n", __func__, lsta, k, kc,
+		    skb, kc->cipher, lkpi_cipher_suite_to_name(kc->cipher));
+		return (EOPNOTSUPP);
+	}
+}
 
-	IMPROVE("the following should be WLAN_CIPHER_SUITE specific");
-	/* We currently only support CCMP so we hardcode things here. */
+static uint8_t
+lkpi_hw_crypto_tailroom(struct lkpi_sta *lsta, struct ieee80211_key *k)
+{
+	struct ieee80211_key_conf *kc;
 
-	hdr = (void *)skb->data;
-
-	/*
-	 * Check if we have anythig to do as requested by driver
-	 * or if we are done?
-	 */
-	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) == 0 &&
-	    (kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV) == 0 &&
-	    /* MFP */
-	    !((kc->flags & IEEE80211_KEY_FLAG_GENERATE_IV_MGMT) != 0 &&
-		ieee80211_is_mgmt(hdr->frame_control)))
-			return (0);
-
-	hlen = k->wk_cipher->ic_header;
-	if (skb_headroom(skb) < hlen)
-		return (ENOSPC);
-
-	hdrlen = ieee80211_hdrlen(hdr->frame_control);
-	p = skb_push(skb, hlen);
-	memmove(p, p + hlen, hdrlen);
-
-	/* If driver request space only we are done. */
-	if ((kc->flags & IEEE80211_KEY_FLAG_PUT_IV_SPACE) != 0)
+	kc = lsta->kc[k->wk_keyix];
+	if (kc == NULL)
 		return (0);
 
-	p += hdrlen;
-	k->wk_cipher->ic_setiv(k, p);
+	IMPROVE("which other flags need tailroom?");
+	if (kc->flags & (IEEE80211_KEY_FLAG_PUT_MIC_SPACE))
+		return (32);	/* Large enough to hold everything and pow2. */
 
 	return (0);
 }
@@ -4673,7 +4903,7 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 	struct lkpi_txq *ltxq;
 	void *buf;
 	ieee80211_keyix keyix;
-	uint8_t ac, tid;
+	uint8_t ac, tid, tailroom;
 
 	M_ASSERTPKTHDR(m);
 #ifdef LINUXKPI_DEBUG_80211
@@ -4731,13 +4961,20 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 		ieee80211_radiotap_tx(ni->ni_vap, m);
 	}
 
+#ifdef LKPI_80211_HW_CRYPTO
+	if (lkpi_hwcrypto && keyix != IEEE80211_KEYIX_NONE)
+		tailroom = lkpi_hw_crypto_tailroom(lsta, k);
+	else
+#endif
+		tailroom = 0;
+
 	/*
 	 * net80211 should handle hw->extra_tx_headroom.
 	 * Though for as long as we are copying we don't mind.
 	 * XXX-BZ rtw88 asks for too much headroom for ipv6+tcp:
 	 * https://lists.freebsd.org/archives/freebsd-transport/2022-February/000012.html
 	 */
-	skb = dev_alloc_skb(hw->extra_tx_headroom + m->m_pkthdr.len);
+	skb = dev_alloc_skb(hw->extra_tx_headroom + tailroom + m->m_pkthdr.len);
 	if (skb == NULL) {
 		static uint8_t skb_alloc_failures = 0;
 
@@ -5825,9 +6062,44 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 	ic->ic_cryptocaps = 0;
 #ifdef LKPI_80211_HW_CRYPTO
 	if (lkpi_hwcrypto && hw->wiphy->n_cipher_suites > 0) {
-		for (i = 0; i < hw->wiphy->n_cipher_suites; i++)
-			ic->ic_cryptocaps |= lkpi_l80211_to_net80211_cyphers(
-			    hw->wiphy->cipher_suites[i]);
+		uint32_t hwciphers;
+
+		hwciphers = 0;
+		for (i = 0; i < hw->wiphy->n_cipher_suites; i++) {
+			uint32_t cs;
+
+			cs = lkpi_l80211_to_net80211_cyphers(
+			    ic, hw->wiphy->cipher_suites[i]);
+			if (cs == IEEE80211_CRYPTO_TKIP) {
+				/*
+				 * We do set this here.  We will only find out
+				 * when doing a SET_KEY operation depending on
+				 * what the driver returns.
+				 * net80211::ieee80211_crypto_newkey()
+				 * checks this so we will have to do flags
+				 * surgery later.
+				 */
+				cs |= IEEE80211_CRYPTO_TKIPMIC;
+			}
+			hwciphers |= cs;
+		}
+		/*
+		 * (20250415) nothing anywhere in the path checks we actually
+		 * support all these in net80211.
+		 * net80211 supports _256 variants but the ioctl does not.
+		 */
+		IMPROVE("as net80211 grows more support, enable them");
+		hwciphers &= (IEEE80211_CRYPTO_WEP |
+		    IEEE80211_CRYPTO_TKIP | IEEE80211_CRYPTO_TKIPMIC |
+		    IEEE80211_CRYPTO_AES_CCM | IEEE80211_CRYPTO_AES_GCM_128);
+		/*
+		 * We only support CCMP here, so further filter.
+		 * Also permit TKIP if turned on.
+		 */
+		hwciphers &= (IEEE80211_CRYPTO_AES_CCM |
+		    (lkpi_hwcrypto_tkip ? (IEEE80211_CRYPTO_TKIP |
+		    IEEE80211_CRYPTO_TKIPMIC) : 0));
+		ieee80211_set_hardware_ciphers(ic, hwciphers);
 	}
 #endif
 
@@ -6467,14 +6739,16 @@ lkpi_convert_rx_status(struct ieee80211_hw *hw, struct lkpi_sta *lsta,
 		if (rx_status->flag & RX_FLAG_PN_VALIDATED)
 			rx_stats->c_pktflags |= IEEE80211_RX_F_PN_VALIDATED;
 	}
+	if (rx_status->flag & RX_FLAG_IV_STRIPPED)
+		rx_stats->c_pktflags |= IEEE80211_RX_F_IV_STRIP;
+	if (rx_status->flag & RX_FLAG_ICV_STRIPPED)
+		rx_stats->c_pktflags |= IEEE80211_RX_F_ICV_STRIP;
+	if (rx_status->flag & RX_FLAG_MIC_STRIPPED)
+		rx_stats->c_pktflags |= IEEE80211_RX_F_MIC_STRIP;
 	if (rx_status->flag & RX_FLAG_MMIC_STRIPPED)
 		rx_stats->c_pktflags |= IEEE80211_RX_F_MMIC_STRIP;
 	if (rx_status->flag & RX_FLAG_MMIC_ERROR)
 		rx_stats->c_pktflags |= IEEE80211_RX_F_FAIL_MMIC;
-	if (rx_status->flag & RX_FLAG_MIC_STRIPPED)
-		rx_stats->c_pktflags |= IEEE80211_RX_F_MIC_STRIP;
-	if (rx_status->flag & RX_FLAG_IV_STRIPPED)
-		rx_stats->c_pktflags |= IEEE80211_RX_F_IV_STRIP;
 	if (rx_status->flag & RX_FLAG_FAILED_FCS_CRC)
 		rx_stats->c_pktflags |= IEEE80211_RX_F_FAIL_FCSCRC;
 #endif
@@ -6545,9 +6819,9 @@ linuxkpi_ieee80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb,
 		goto no_trace_beacons;
 
 	if (linuxkpi_debug_80211 & D80211_TRACE_RX)
-		printf("TRACE-RX: %s: skb %p a/l/d/t-len (%u/%u/%u/%u) "
+		printf("TRACE-RX: %s: skb %p l/d/t-len (%u/%u/%u) "
 		    "h %p d %p t %p e %p sh %p (%u) m %p plen %u len %u%s\n",
-		    __func__, skb, skb->_alloc_len, skb->len, skb->data_len,
+		    __func__, skb, skb->len, skb->data_len,
 		    skb->truesize, skb->head, skb->data, skb->tail, skb->end,
 		    shinfo, shinfo->nr_frags,
 		    m, m->m_pkthdr.len, m->m_len, is_beacon ? " beacon" : "");
