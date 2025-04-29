@@ -1,5 +1,5 @@
 PACKAGE=	base-rust-utils
-PROG=		freebsd-geom-exporter
+PROG=		geom-exporter
 
 .include "../Makefile.inc"
 
