@@ -1,7 +1,7 @@
 /*
- * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2016-2023, Broadcom Inc. All rights reserved.
+ * Copyright (c) 2016-2025, Broadcom Inc. All rights reserved.
  * Support: <fbsd-storage-driver.pdl@broadcom.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -106,9 +106,11 @@ typedef struct _MPI3_TOOL_ISTWI_READ_WRITE_REQUEST
 /**** Bitfield definitions for Flags field ****/
 #define MPI3_TOOLBOX_ISTWI_FLAGS_AUTO_RESERVE_RELEASE       (0x80)
 #define MPI3_TOOLBOX_ISTWI_FLAGS_ADDRESS_MODE_MASK          (0x04)
+#define MPI3_TOOLBOX_ISTWI_FLAGS_ADDRESS_MODE_SHIFT         (2)
 #define MPI3_TOOLBOX_ISTWI_FLAGS_ADDRESS_MODE_DEVINDEX      (0x00)
 #define MPI3_TOOLBOX_ISTWI_FLAGS_ADDRESS_MODE_DEVICE_FIELD  (0x04)
 #define MPI3_TOOLBOX_ISTWI_FLAGS_PAGE_ADDRESS_MASK          (0x03)
+#define MPI3_TOOLBOX_ISTWI_FLAGS_PAGE_ADDRESS_SHIFT         (0)
 
 /**** Definitions for the Action field ****/
 #define MPI3_TOOLBOX_ISTWI_ACTION_RESERVE_BUS               (0x00)
@@ -366,6 +368,7 @@ typedef struct _MPI3_DIAG_BUFFER_POST_REQUEST
 #define MPI3_DIAG_BUFFER_TYPE_FW                            (0x02)
 #define MPI3_DIAG_BUFFER_TYPE_DRIVER                        (0x10)
 #define MPI3_DIAG_BUFFER_TYPE_FDL                           (0x20)
+#define MPI3_DIAG_BUFFER_TYPE_TTY                           (0x30)
 #define MPI3_DIAG_BUFFER_MIN_PRODUCT_SPECIFIC               (0xF0)
 #define MPI3_DIAG_BUFFER_MAX_PRODUCT_SPECIFIC               (0xFF)
 
@@ -388,11 +391,12 @@ typedef struct _MPI3_DRIVER_BUFFER_HEADER
 } MPI3_DRIVER_BUFFER_HEADER, MPI3_POINTER PTR_MPI3_DRIVER_BUFFER_HEADER,
   Mpi3DriverBufferHeader_t, MPI3_POINTER pMpi3DriverBufferHeader_t;
 
-/**** Defines for the Type field ****/
+/**** Defines for the Signature field ****/
 #define MPI3_DRIVER_DIAG_BUFFER_HEADER_SIGNATURE_CIRCULAR                (0x43495243)
 
 /**** Defines for the Flags field ****/
 #define MPI3_DRIVER_DIAG_BUFFER_HEADER_FLAGS_CIRCULAR_BUF_FORMAT_MASK    (0x00000003)
+#define MPI3_DRIVER_DIAG_BUFFER_HEADER_FLAGS_CIRCULAR_BUF_FORMAT_SHIFT   (0)
 #define MPI3_DRIVER_DIAG_BUFFER_HEADER_FLAGS_CIRCULAR_BUF_FORMAT_ASCII   (0x00000000)
 #define MPI3_DRIVER_DIAG_BUFFER_HEADER_FLAGS_CIRCULAR_BUF_FORMAT_RTTRACE (0x00000001)
 
@@ -449,6 +453,7 @@ typedef struct _MPI3_DIAG_BUFFER_UPLOAD_REQUEST
 
 /**** Defined for the Flags field ****/
 #define MPI3_DIAG_BUFFER_UPLOAD_FLAGS_FORMAT_MASK           (0x01)
+#define MPI3_DIAG_BUFFER_UPLOAD_FLAGS_FORMAT_SHIFT          (0)
 #define MPI3_DIAG_BUFFER_UPLOAD_FLAGS_FORMAT_DECODED        (0x00)
 #define MPI3_DIAG_BUFFER_UPLOAD_FLAGS_FORMAT_ENCODED        (0x01)
 

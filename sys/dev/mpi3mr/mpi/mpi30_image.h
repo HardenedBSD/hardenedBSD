@@ -1,7 +1,7 @@
 /*
- * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2016-2023, Broadcom Inc. All rights reserved.
+ * Copyright (c) 2016-2025, Broadcom Inc. All rights reserved.
  * Support: <fbsd-storage-driver.pdl@broadcom.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -119,13 +119,23 @@ typedef struct _MPI3_COMPONENT_IMAGE_HEADER
 #define MPI3_IMAGE_HEADER_SIGNATURE1_RMC                      (0x20434D52)  /* string "RMC "  */
 #define MPI3_IMAGE_HEADER_SIGNATURE1_SMM                      (0x204D4D53)  /* string "SMM "  */
 #define MPI3_IMAGE_HEADER_SIGNATURE1_PSW                      (0x20575350)  /* string "PSW "  */
-
+#define MPI3_IMAGE_HEADER_SIGNATURE1_CSW                      (0x20575343)  /* string "CSW "  */
 
 /**** Definitions for Signature2 field ****/
 #define MPI3_IMAGE_HEADER_SIGNATURE2_VALUE                    (0x50584546)
 
 /**** Definitions for Flags field ****/
+#define MPI3_IMAGE_HEADER_FLAGS_SIGNED_UEFI_MASK              (0x00000300)
+#define MPI3_IMAGE_HEADER_FLAGS_SIGNED_UEFI_SHIFT             (8)
+#define MPI3_IMAGE_HEADER_FLAGS_SIGNED_UEFI_UNSPECIFIED       (0x00000000)
+#define MPI3_IMAGE_HEADER_FLAGS_SIGNED_UEFI_NOT_SIGNED        (0x00000100)
+#define MPI3_IMAGE_HEADER_FLAGS_SIGNED_UEFI_MICROSOFT_SIGNED  (0x00000200)
+#define MPI3_IMAGE_HEADER_FLAGS_CERT_CHAIN_FORMAT_MASK        (0x000000C0)
+#define MPI3_IMAGE_HEADER_FLAGS_CERT_CHAIN_FORMAT_SHIFT       (6)
+#define MPI3_IMAGE_HEADER_FLAGS_CERT_CHAIN_FORMAT_DEVICE_CERT (0x00000000)
+#define MPI3_IMAGE_HEADER_FLAGS_CERT_CHAIN_FORMAT_ALIAS_CERT  (0x00000040)
 #define MPI3_IMAGE_HEADER_FLAGS_DEVICE_KEY_BASIS_MASK         (0x00000030)
+#define MPI3_IMAGE_HEADER_FLAGS_DEVICE_KEY_BASIS_SHIFT        (4)
 #define MPI3_IMAGE_HEADER_FLAGS_DEVICE_KEY_BASIS_CDI          (0x00000000)
 #define MPI3_IMAGE_HEADER_FLAGS_DEVICE_KEY_BASIS_DI           (0x00000010)
 #define MPI3_IMAGE_HEADER_FLAGS_SIGNED_NVDATA                 (0x00000008)
@@ -216,12 +226,14 @@ typedef struct _MPI3_CI_MANIFEST_MPI
 
 /* defines for the ReleaseLevel field */
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_DEV                        (0x00)
+#define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_PRE_PRODUCTION             (0x08)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_PREALPHA                   (0x10)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_ALPHA                      (0x20)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_BETA                       (0x30)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_RC                         (0x40)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_GCA                        (0x50)
 #define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_POINT                      (0x60)
+#define MPI3_CI_MANIFEST_MPI_RELEASE_LEVEL_DIAG                       (0xF0)
 
 /* defines for the Flags field */
 #define MPI3_CI_MANIFEST_MPI_FLAGS_DIAG_AUTHORIZATION                 (0x01)
@@ -314,9 +326,9 @@ typedef struct _MPI3_SUPPORTED_DEVICES_DATA
 } MPI3_SUPPORTED_DEVICES_DATA, MPI3_POINTER PTR_MPI3_SUPPORTED_DEVICES_DATA,
   Mpi3SupportedDevicesData_t, MPI3_POINTER pMpi3SupportedDevicesData_t;
 
-#ifndef MPI3_ENCRYPTED_HASH_MAX
-#define MPI3_ENCRYPTED_HASH_MAX                      (1)
-#endif  /* MPI3_ENCRYPTED_HASH_MAX */
+#ifndef MPI3_PUBLIC_KEY_MAX
+#define MPI3_PUBLIC_KEY_MAX                          (1)
+#endif  /* MPI3_PUBLIC_KEY_MAX */
 
 /* Encrypted Hash Entry Format */
 typedef struct _MPI3_ENCRYPTED_HASH_ENTRY
@@ -324,24 +336,30 @@ typedef struct _MPI3_ENCRYPTED_HASH_ENTRY
     U8                      HashImageType;                                  /* 0x00 */
     U8                      HashAlgorithm;                                  /* 0x01 */
     U8                      EncryptionAlgorithm;                            /* 0x02 */
-    U8                      Reserved03;                                     /* 0x03 */
-    U32                     Reserved04;                                     /* 0x04 */
-    U32                     EncryptedHash[MPI3_ENCRYPTED_HASH_MAX];         /* 0x08 */   /* variable length */
+    U8                      Flags;                                          /* 0x03 */
+    U16                     PublicKeySize;                                  /* 0x04 */
+    U16                     SignatureSize;                                  /* 0x06 */
+    U32                     PublicKey[MPI3_PUBLIC_KEY_MAX];                 /* 0x08 */     /* variable length */
+    /*                      Signature     - offset of this field must be calculated */     /* variable length */
 } MPI3_ENCRYPTED_HASH_ENTRY, MPI3_POINTER PTR_MPI3_ENCRYPTED_HASH_ENTRY,
   Mpi3EncryptedHashEntry_t, MPI3_POINTER pMpi3EncryptedHashEntry_t;
 
 
 /* defines for the HashImageType field */
-#define MPI3_HASH_IMAGE_TYPE_KEY_WITH_SIGNATURE      (0x03)
+#define MPI3_HASH_IMAGE_TYPE_KEY_WITH_HASH           (0x03)
+#define MPI3_HASH_IMAGE_TYPE_KEY_WITH_HASH_1_OF_2    (0x04)
+#define MPI3_HASH_IMAGE_TYPE_KEY_WITH_HASH_2_OF_2    (0x05)
 
 /* defines for the HashAlgorithm field */
 #define MPI3_HASH_ALGORITHM_VERSION_MASK             (0xE0)
+#define MPI3_HASH_ALGORITHM_VERSION_SHIFT            (5)
 #define MPI3_HASH_ALGORITHM_VERSION_NONE             (0x00)
 #define MPI3_HASH_ALGORITHM_VERSION_SHA1             (0x20)   /* Obsolete */
 #define MPI3_HASH_ALGORITHM_VERSION_SHA2             (0x40)
 #define MPI3_HASH_ALGORITHM_VERSION_SHA3             (0x60)
 
 #define MPI3_HASH_ALGORITHM_SIZE_MASK                (0x1F)
+#define MPI3_HASH_ALGORITHM_SIZE_SHIFT               (0)
 #define MPI3_HASH_ALGORITHM_SIZE_UNUSED              (0x00)
 #define MPI3_HASH_ALGORITHM_SIZE_SHA256              (0x01)
 #define MPI3_HASH_ALGORITHM_SIZE_SHA512              (0x02)
@@ -358,24 +376,15 @@ typedef struct _MPI3_ENCRYPTED_HASH_ENTRY
 #define MPI3_ENCRYPTION_ALGORITHM_ECDSA_P256         (0x07)   /* NIST secp256r1 curve */
 #define MPI3_ENCRYPTION_ALGORITHM_ECDSA_P384         (0x08)   /* NIST secp384r1 curve */
 #define MPI3_ENCRYPTION_ALGORITHM_ECDSA_P521         (0x09)   /* NIST secp521r1 curve */
+#define MPI3_ENCRYPTION_ALGORITHM_LMS_HSS            (0x0A)   /* Leighton-Micali Signature (LMS) */
+							      /* Hierarchical Signature System (HSS) */
+#define MPI3_ENCRYPTION_ALGORITHM_ML_DSA_87          (0x0B)   /* Module-Lattice-Based Sig Algo - Category 5 */
+#define MPI3_ENCRYPTION_ALGORITHM_ML_DSA_65          (0x0C)   /* Module-Lattice-Based Sig Algo - Category 3 */
+#define MPI3_ENCRYPTION_ALGORITHM_ML_DSA_44          (0x0D)   /* Module-Lattice-Based Sig Algo - Category 2 */
 
-
-#ifndef MPI3_PUBLIC_KEY_MAX
-#define MPI3_PUBLIC_KEY_MAX                          (1)
-#endif  /* MPI3_PUBLIC_KEY_MAX */
-
-/* Encrypted Key with Hash Entry Format */
-typedef struct _MPI3_ENCRYPTED_KEY_WITH_HASH_ENTRY
-{
-    U8                      HashImageType;                                  /* 0x00 */
-    U8                      HashAlgorithm;                                  /* 0x01 */
-    U8                      EncryptionAlgorithm;                            /* 0x02 */
-    U8                      Reserved03;                                     /* 0x03 */
-    U32                     Reserved04;                                     /* 0x04 */
-    U32                     PublicKey[MPI3_PUBLIC_KEY_MAX];                 /* 0x08 */     /* variable length */
-    /*                      EncryptedHash - offset of this field must be calculated */     /* variable length */
-} MPI3_ENCRYPTED_KEY_WITH_HASH_ENTRY, MPI3_POINTER PTR_MPI3_ENCRYPTED_KEY_WITH_HASH_ENTRY,
-  Mpi3EncryptedKeyWithHashEntry_t, MPI3_POINTER pMpi3EncryptedKeyWithHashEntry_t;
+/* defines for the Flags field */
+#define MPI3_ENCRYPTED_HASH_ENTRY_FLAGS_PAIRED_KEY_MASK   (0x0F)
+#define MPI3_ENCRYPTED_HASH_ENTRY_FLAGS_PAIRED_KEY_SHIFT  (0)
 
 #ifndef MPI3_ENCRYPTED_HASH_ENTRY_MAX
 #define MPI3_ENCRYPTED_HASH_ENTRY_MAX               (1)

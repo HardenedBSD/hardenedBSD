@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2020-2023, Broadcom Inc. All rights reserved.
+ * Copyright (c) 2020-2025, Broadcom Inc. All rights reserved.
  * Support: <fbsd-storage-driver.pdl@broadcom.com>
  *
  * Authors: Sumit Saxena <sumit.saxena@broadcom.com>
@@ -88,18 +88,19 @@
 #include <sys/kthread.h>
 #include "mpi/mpi30_api.h"
 
-#define MPI3MR_DRIVER_VERSION	"8.6.0.2.0"
-#define MPI3MR_DRIVER_RELDATE	"17th May 2023"
+#define MPI3MR_DRIVER_VERSION	"8.14.0.2.0"
+#define MPI3MR_DRIVER_RELDATE	"9th Apr 2025"
 
 #define MPI3MR_DRIVER_NAME	"mpi3mr"
 
 #define MPI3MR_NAME_LENGTH	32
 #define IOCNAME			"%s: "
 
+#define MPI3MR_DEFAULT_MAX_IO_SIZE	(1 * 1024 * 1024)
+
 #define SAS4116_CHIP_REV_A0	0
 #define SAS4116_CHIP_REV_B0	1
 
-#define MPI3MR_SG_DEPTH		(MPI3MR_4K_PGSZ/sizeof(Mpi3SGESimple_t))
 #define MPI3MR_MAX_SECTORS	2048
 #define MPI3MR_MAX_CMDS_LUN	7
 #define MPI3MR_MAX_CDB_LENGTH	16
@@ -110,7 +111,12 @@
 #define MPI3MR_RAID_QDEPTH	128
 #define MPI3MR_NVME_QDEPTH	128
 
+/* Definitions for internal SGL and Chain SGL buffers */
 #define MPI3MR_4K_PGSZ 		4096
+#define MPI3MR_PAGE_SIZE_4K		4096
+#define MPI3MR_DEFAULT_SGL_ENTRIES	256
+#define MPI3MR_MAX_SGL_ENTRIES		2048
+
 #define MPI3MR_AREQQ_SIZE	(2 * MPI3MR_4K_PGSZ)
 #define MPI3MR_AREPQ_SIZE	(4 * MPI3MR_4K_PGSZ)
 #define MPI3MR_AREQ_FRAME_SZ	128
@@ -124,7 +130,7 @@
 #define MPI3MR_OP_REP_Q_QD		1024
 #define MPI3MR_OP_REP_Q_QD_A0		4096
 
-#define MPI3MR_CHAINSGE_SIZE	MPI3MR_4K_PGSZ
+#define MPI3MR_THRESHOLD_REPLY_COUNT	100
 
 #define MPI3MR_SGEFLAGS_SYSTEM_SIMPLE_END_OF_LIST	\
 	(MPI3_SGE_FLAGS_ELEMENT_TYPE_SIMPLE | MPI3_SGE_FLAGS_DLAS_SYSTEM | \
@@ -136,10 +142,14 @@
 #define MPI3MR_HOSTTAG_PELABORT         3
 #define MPI3MR_HOSTTAG_PELWAIT          4
 #define MPI3MR_HOSTTAG_TMS		5
+#define MPI3MR_HOSTTAG_CFGCMDS		6
 
 #define MAX_MGMT_ADAPTERS 8
 #define MPI3MR_WAIT_BEFORE_CTRL_RESET 5
 
+#define MPI3MR_RESET_REASON_OSTYPE_FREEBSD        0x4
+#define MPI3MR_RESET_REASON_OSTYPE_SHIFT	  28
+#define MPI3MR_RESET_REASON_IOCNUM_SHIFT          20
 
 struct mpi3mr_mgmt_info {
 	uint16_t count;
@@ -155,7 +165,7 @@ extern char fmt_os_ver[16];
 								raw_os_ver[3], raw_os_ver[4], raw_os_ver[5],\
 								raw_os_ver[6]);
 #define MPI3MR_NUM_DEVRMCMD             1
-#define MPI3MR_HOSTTAG_DEVRMCMD_MIN     (MPI3MR_HOSTTAG_TMS + 1)
+#define MPI3MR_HOSTTAG_DEVRMCMD_MIN     (MPI3MR_HOSTTAG_CFGCMDS + 1)
 #define MPI3MR_HOSTTAG_DEVRMCMD_MAX     (MPI3MR_HOSTTAG_DEVRMCMD_MIN + \
                                                 MPI3MR_NUM_DEVRMCMD - 1)
 #define MPI3MR_INTERNALCMDS_RESVD       MPI3MR_HOSTTAG_DEVRMCMD_MAX
@@ -226,6 +236,10 @@ extern char fmt_os_ver[16];
 #define MPI3MR_PELCMDS_RETRYCOUNT 3
 
 #define MPI3MR_PERIODIC_DELAY	1	/* 1 second heartbeat/watchdog check */
+
+#define	WRITE_SAME_32	0x0d
+
+#define MPI3MR_TSUPDATE_INTERVAL	900
 
 struct completion {
 	unsigned int done;
@@ -303,6 +317,7 @@ enum mpi3mr_reset_reason {
 	MPI3MR_RESET_FROM_SCSIIO_TIMEOUT = 26,
 	MPI3MR_RESET_FROM_FIRMWARE = 27,
 	MPI3MR_DEFAULT_RESET_REASON = 28,
+	MPI3MR_RESET_FROM_CFG_REQ_TIMEOUT = 29,
 	MPI3MR_RESET_REASON_COUNT,
 };
 
@@ -329,6 +344,7 @@ struct mpi3mr_ioc_facts
         U16 max_perids;
         U16 max_pds;
         U16 max_sasexpanders;
+        U32 max_data_length;
         U16 max_sasinitiators;
         U16 max_enclosures;
         U16 max_pcieswitches;
@@ -447,8 +463,7 @@ enum mpi3mr_cmd_state {
 
 enum mpi3mr_target_state {
 	MPI3MR_DEV_CREATED = 1,
-	MPI3MR_DEV_REMOVE_HS_STARTED = 2,
-	MPI3MR_DEV_DELETED = 3,
+	MPI3MR_DEV_REMOVE_HS_COMPLETED = 2,
 };
 
 struct mpi3mr_cmd {
@@ -545,6 +560,7 @@ struct mpi3mr_softc {
 	char driver_name[MPI3MR_NAME_LENGTH];
 	int bars;
 	bus_addr_t dma_loaddr;
+	bus_addr_t dma_hiaddr;
 	u_int mpi3mr_debug;
 	struct mpi3mr_reset reset;
 	int max_msix_vectors;
@@ -666,6 +682,7 @@ struct mpi3mr_softc {
 	struct mtx target_lock;
 	
 	U16 max_host_ios;
+	U32 max_sgl_entries;
 	bus_dma_tag_t	chain_sgl_list_tag;
 	struct mpi3mr_chain *chain_sgl_list;
 	U16  chain_bitmap_sz;
@@ -677,6 +694,7 @@ struct mpi3mr_softc {
 	struct mpi3mr_drvr_cmd host_tm_cmds;
 	struct mpi3mr_drvr_cmd dev_rmhs_cmds[MPI3MR_NUM_DEVRMCMD];
 	struct mpi3mr_drvr_cmd evtack_cmds[MPI3MR_NUM_EVTACKCMD];
+	struct mpi3mr_drvr_cmd cfg_cmds;
 
 	U16 devrem_bitmap_sz;
 	void *devrem_bitmap;
@@ -754,6 +772,10 @@ struct mpi3mr_softc {
 	struct dma_memory_desc ioctl_chain_sge;
 	struct dma_memory_desc ioctl_resp_sge;
 	bool ioctl_sges_allocated;
+	struct proc *timestamp_thread_proc;
+	void   *timestamp_chan;
+	u_int8_t timestamp_thread_active;
+	U32 ts_update_interval;
 };
 
 static __inline uint64_t
@@ -961,11 +983,12 @@ void mpi3mr_cleanup_event_taskq(struct mpi3mr_softc *sc);
 void
 mpi3mr_hexdump(void *buf, int sz, int format);
 int mpi3mr_soft_reset_handler(struct mpi3mr_softc *sc,
-	U32 reset_reason, bool snapdump);
+	U16 reset_reason, bool snapdump);
 void
 mpi3mrsas_release_simq_reinit(struct mpi3mr_cam_softc *cam_sc);
 void
 mpi3mr_watchdog_thread(void *arg);
+void mpi3mr_timestamp_thread(void *arg);
 void mpi3mr_add_device(struct mpi3mr_softc *sc, U16 per_id);
 int mpi3mr_remove_device(struct mpi3mr_softc *sc, U16 handle);
 int
@@ -983,6 +1006,7 @@ void mpi3mr_set_io_divert_for_all_vd_in_tg(struct mpi3mr_softc *sc,
 enum mpi3mr_iocstate mpi3mr_get_iocstate(struct mpi3mr_softc *sc);
 void mpi3mr_poll_pend_io_completions(struct mpi3mr_softc *sc);
 void int_to_lun(unsigned int lun, U8 *req_lun);
-void trigger_reset_from_watchdog(struct mpi3mr_softc *sc, U8 reset_type, U32 reset_reason);
+void trigger_reset_from_watchdog(struct mpi3mr_softc *sc, U8 reset_type, U16 reset_reason);
 void mpi3mr_alloc_ioctl_dma_memory(struct mpi3mr_softc *sc);
+int mpi3mr_cfg_get_driver_pg1(struct mpi3mr_softc *sc);
 #endif /*MPI3MR_H_INCLUDED*/

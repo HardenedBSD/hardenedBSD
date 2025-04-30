@@ -1,7 +1,7 @@
 /*
- * SPDX-License-Identifier: BSD-2-Clause
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2016-2023, Broadcom Inc. All rights reserved.
+ * Copyright (c) 2016-2025, Broadcom Inc. All rights reserved.
  * Support: <fbsd-storage-driver.pdl@broadcom.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -76,17 +76,20 @@ typedef struct _MPI3_IOC_INIT_REQUEST
   Mpi3IOCInitRequest_t, MPI3_POINTER pMpi3IOCInitRequest_t;
 
 /**** Defines for the MsgFlags field ****/
-#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_MASK          (0x03)
-#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_NOT_USED      (0x00)
-#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_SEPARATED     (0x01)
-#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_INLINE        (0x02)
-#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_BOTH          (0x03)
+#define MPI3_IOCINIT_MSGFLAGS_WRITESAMEDIVERT_SUPPORTED     (0x08)
+#define MPI3_IOCINIT_MSGFLAGS_SCSIIOSTATUSREPLY_SUPPORTED   (0x04)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_MASK             (0x03)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_SHIFT            (0)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_NOT_USED         (0x00)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_SEPARATED        (0x01)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_INLINE           (0x02)
+#define MPI3_IOCINIT_MSGFLAGS_HOSTMETADATA_BOTH             (0x03)
 
 /**** Defines for the WhoInit field ****/
-#define MPI3_WHOINIT_NOT_INITIALIZED                     (0x00)
-#define MPI3_WHOINIT_ROM_BIOS                            (0x02)
-#define MPI3_WHOINIT_HOST_DRIVER                         (0x03)
-#define MPI3_WHOINIT_MANUFACTURER                        (0x04)
+#define MPI3_WHOINIT_NOT_INITIALIZED                        (0x00)
+#define MPI3_WHOINIT_ROM_BIOS                               (0x02)
+#define MPI3_WHOINIT_HOST_DRIVER                            (0x03)
+#define MPI3_WHOINIT_MANUFACTURER                           (0x04)
 
 /**** Defines for the DriverInformationAddress field */
 typedef struct _MPI3_DRIVER_INFO_LAYOUT
@@ -101,6 +104,13 @@ typedef struct _MPI3_DRIVER_INFO_LAYOUT
     U32             DriverCapabilities;                 /* 0x74 */
 } MPI3_DRIVER_INFO_LAYOUT, MPI3_POINTER PTR_MPI3_DRIVER_INFO_LAYOUT,
   Mpi3DriverInfoLayout_t, MPI3_POINTER pMpi3DriverInfoLayout_t;
+
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_MASK              (0x00000003)
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_SHIFT             (0)
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_NO_GUIDANCE       (0x00000000)
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_NO_SPECIAL        (0x00000001)
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_REPORT_AS_HDD     (0x00000002)
+#define MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_REPORT_AS_SSD     (0x00000003)
 
 /*****************************************************************************
  *              IOCFacts Request Message                                     *
@@ -173,23 +183,27 @@ typedef struct _MPI3_IOC_FACTS_DATA
     U16                     MaxIOThrottleGroup;                 /* 0x62 */
     U16                     IOThrottleLow;                      /* 0x64 */
     U16                     IOThrottleHigh;                     /* 0x66 */
+    U32                     DiagFdlSize;                        /* 0x68 */
+    U32                     DiagTtySize;                        /* 0x6C */
 } MPI3_IOC_FACTS_DATA, MPI3_POINTER PTR_MPI3_IOC_FACTS_DATA,
   Mpi3IOCFactsData_t, MPI3_POINTER pMpi3IOCFactsData_t;
 
 /**** Defines for the IOCCapabilities field ****/
 #define MPI3_IOCFACTS_CAPABILITY_NON_SUPERVISOR_MASK          (0x80000000)
+#define MPI3_IOCFACTS_CAPABILITY_NON_SUPERVISOR_SHIFT         (31)
 #define MPI3_IOCFACTS_CAPABILITY_SUPERVISOR_IOC               (0x00000000)
 #define MPI3_IOCFACTS_CAPABILITY_NON_SUPERVISOR_IOC           (0x80000000)
 #define MPI3_IOCFACTS_CAPABILITY_INT_COALESCE_MASK            (0x00000600)
+#define MPI3_IOCFACTS_CAPABILITY_INT_COALESCE_SHIFT           (9)
 #define MPI3_IOCFACTS_CAPABILITY_INT_COALESCE_FIXED_THRESHOLD (0x00000000)
 #define MPI3_IOCFACTS_CAPABILITY_INT_COALESCE_OUTSTANDING_IO  (0x00000200)
-#define MPI3_IOCFACTS_CAPABILITY_COMPLETE_RESET_CAPABLE       (0x00000100)
-#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_TRACE_ENABLED       (0x00000080)
-#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_FW_ENABLED          (0x00000040)
-#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_DRIVER_ENABLED      (0x00000020)
-#define MPI3_IOCFACTS_CAPABILITY_ADVANCED_HOST_PD_ENABLED     (0x00000010)
-#define MPI3_IOCFACTS_CAPABILITY_RAID_CAPABLE                 (0x00000008)
-#define MPI3_IOCFACTS_CAPABILITY_MULTIPATH_ENABLED            (0x00000002)
+#define MPI3_IOCFACTS_CAPABILITY_COMPLETE_RESET_SUPPORTED     (0x00000100)
+#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_TRACE_SUPPORTED     (0x00000080)
+#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_FW_SUPPORTED        (0x00000040)
+#define MPI3_IOCFACTS_CAPABILITY_SEG_DIAG_DRIVER_SUPPORTED    (0x00000020)
+#define MPI3_IOCFACTS_CAPABILITY_ADVANCED_HOST_PD_SUPPORTED   (0x00000010)
+#define MPI3_IOCFACTS_CAPABILITY_RAID_SUPPORTED               (0x00000008)
+#define MPI3_IOCFACTS_CAPABILITY_MULTIPATH_SUPPORTED          (0x00000002)
 #define MPI3_IOCFACTS_CAPABILITY_COALESCE_CTRL_SUPPORTED      (0x00000001)
 
 /**** WhoInit values are defined under IOCInit Request Message definition ****/
@@ -207,6 +221,7 @@ typedef struct _MPI3_IOC_FACTS_DATA
 #define MPI3_IOCFACTS_EXCEPT_SAS_DISABLED                     (0x1000)
 #define MPI3_IOCFACTS_EXCEPT_SAFE_MODE                        (0x0800)
 #define MPI3_IOCFACTS_EXCEPT_SECURITY_KEY_MASK                (0x0700)
+#define MPI3_IOCFACTS_EXCEPT_SECURITY_KEY_SHIFT               (8)
 #define MPI3_IOCFACTS_EXCEPT_SECURITY_KEY_NONE                (0x0000)
 #define MPI3_IOCFACTS_EXCEPT_SECURITY_KEY_LOCAL_VIA_MGMT      (0x0100)
 #define MPI3_IOCFACTS_EXCEPT_SECURITY_KEY_EXT_VIA_MGMT        (0x0200)
@@ -219,7 +234,10 @@ typedef struct _MPI3_IOC_FACTS_DATA
 #define MPI3_IOCFACTS_EXCEPT_MANUFACT_CHECKSUM_FAIL           (0x0020)
 #define MPI3_IOCFACTS_EXCEPT_FW_CHECKSUM_FAIL                 (0x0010)
 #define MPI3_IOCFACTS_EXCEPT_CONFIG_CHECKSUM_FAIL             (0x0008)
+#define MPI3_IOCFACTS_EXCEPT_BLOCKING_BOOT_EVENT              (0x0004)
+#define MPI3_IOCFACTS_EXCEPT_SECURITY_SELFTEST_FAILURE        (0x0002)
 #define MPI3_IOCFACTS_EXCEPT_BOOTSTAT_MASK                    (0x0001)
+#define MPI3_IOCFACTS_EXCEPT_BOOTSTAT_SHIFT                   (0)
 #define MPI3_IOCFACTS_EXCEPT_BOOTSTAT_PRIMARY                 (0x0000)
 #define MPI3_IOCFACTS_EXCEPT_BOOTSTAT_SECONDARY               (0x0001)
 
@@ -234,22 +252,31 @@ typedef struct _MPI3_IOC_FACTS_DATA
 #define MPI3_IOCFACTS_MAX_DATA_LENGTH_NOT_REPORTED            (0x0000)
 
 /**** Defines for the Flags field ****/
-#define MPI3_IOCFACTS_FLAGS_SIGNED_NVDATA_REQUIRED            (0x00010000)
-#define MPI3_IOCFACTS_FLAGS_DMA_ADDRESS_WIDTH_MASK            (0x0000FF00)
-#define MPI3_IOCFACTS_FLAGS_DMA_ADDRESS_WIDTH_SHIFT           (8)
-#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_MASK          (0x00000030)
-#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_NOT_STARTED   (0x00000000)
-#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_IN_PROGRESS   (0x00000010)
-#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_COMPLETE      (0x00000020)
-#define MPI3_IOCFACTS_FLAGS_PERSONALITY_MASK                  (0x0000000F)
-#define MPI3_IOCFACTS_FLAGS_PERSONALITY_EHBA                  (0x00000000)
-#define MPI3_IOCFACTS_FLAGS_PERSONALITY_RAID_DDR              (0x00000002)
+#define MPI3_IOCFACTS_FLAGS_SIGNED_NVDATA_REQUIRED             (0x00010000)
+#define MPI3_IOCFACTS_FLAGS_DMA_ADDRESS_WIDTH_MASK             (0x0000FF00)
+#define MPI3_IOCFACTS_FLAGS_DMA_ADDRESS_WIDTH_SHIFT            (8)
+#define MPI3_IOCFACTS_FLAGS_MAX_REQ_PER_REPLY_QUEUE_LIMIT      (0x00000040)
+#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_MASK           (0x00000030)
+#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_SHIFT          (4)
+#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_NOT_STARTED    (0x00000000)
+#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_IN_PROGRESS    (0x00000010)
+#define MPI3_IOCFACTS_FLAGS_INITIAL_PORT_ENABLE_COMPLETE       (0x00000020)
+#define MPI3_IOCFACTS_FLAGS_PERSONALITY_MASK                   (0x0000000F)
+#define MPI3_IOCFACTS_FLAGS_PERSONALITY_SHIFT                  (0)
+#define MPI3_IOCFACTS_FLAGS_PERSONALITY_EHBA                   (0x00000000)
+#define MPI3_IOCFACTS_FLAGS_PERSONALITY_RAID_DDR               (0x00000002)
 
 /**** Defines for the IOThrottleDataLength field ****/
-#define MPI3_IOCFACTS_IO_THROTTLE_DATA_LENGTH_NOT_REQUIRED    (0x0000)
+#define MPI3_IOCFACTS_IO_THROTTLE_DATA_LENGTH_NOT_REQUIRED     (0x0000)
 
-/**** Defines for the IOThrottleDataLength field ****/
-#define MPI3_IOCFACTS_MAX_IO_THROTTLE_GROUP_NOT_REQUIRED      (0x0000)
+/**** Defines for the MaxIOThrottleGroup field ****/
+#define MPI3_IOCFACTS_MAX_IO_THROTTLE_GROUP_NOT_REQUIRED       (0x0000)
+
+/**** Defines for the DiagFdlSize field ****/
+#define MPI3_IOCFACTS_DIAGFDLSIZE_NOT_SUPPORTED                (0x00000000)
+
+/**** Defines for the DiagTtySize field ****/
+#define MPI3_IOCFACTS_DIAGTTYSIZE_NOT_SUPPORTED                (0x00000000)
 
 /*****************************************************************************
  *              Management Passthrough Request Message                      *
@@ -295,6 +322,7 @@ typedef struct _MPI3_CREATE_REQUEST_QUEUE_REQUEST
 
 /**** Defines for the Flags field ****/
 #define MPI3_CREATE_REQUEST_QUEUE_FLAGS_SEGMENTED_MASK          (0x80)
+#define MPI3_CREATE_REQUEST_QUEUE_FLAGS_SEGMENTED_SHIFT         (7)
 #define MPI3_CREATE_REQUEST_QUEUE_FLAGS_SEGMENTED_SEGMENTED     (0x80)
 #define MPI3_CREATE_REQUEST_QUEUE_FLAGS_SEGMENTED_CONTIGUOUS    (0x00)
 
@@ -343,10 +371,12 @@ typedef struct _MPI3_CREATE_REPLY_QUEUE_REQUEST
 
 /**** Defines for the Flags field ****/
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_SEGMENTED_MASK            (0x80)
+#define MPI3_CREATE_REPLY_QUEUE_FLAGS_SEGMENTED_SHIFT           (7)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_SEGMENTED_SEGMENTED       (0x80)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_SEGMENTED_CONTIGUOUS      (0x00)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_COALESCE_DISABLE          (0x02)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_INT_ENABLE_MASK           (0x01)
+#define MPI3_CREATE_REPLY_QUEUE_FLAGS_INT_ENABLE_SHIFT          (0)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_INT_ENABLE_DISABLE        (0x00)
 #define MPI3_CREATE_REPLY_QUEUE_FLAGS_INT_ENABLE_ENABLE         (0x01)
 
@@ -440,9 +470,9 @@ typedef struct _MPI3_EVENT_NOTIFICATION_REQUEST
 } MPI3_EVENT_NOTIFICATION_REQUEST, MPI3_POINTER PTR_MPI3_EVENT_NOTIFICATION_REQUEST,
   Mpi3EventNotificationRequest_t, MPI3_POINTER pMpi3EventNotificationRequest_t;
 
-/**** Defines for the SASBroadcastPrimitiveMasks field - use MPI3_EVENT_PRIMITIVE_ values ****/
+/**** Defines for the SASBroadcastPrimitiveMasks field - use MPI3_EVENT_BROADCAST_PRIMITIVE_ values ****/
 
-/**** Defines for the SASNotifyPrimitiveMasks field - use MPI3_EVENT_NOTIFY_ values ****/
+/**** Defines for the SASNotifyPrimitiveMasks field - use MPI3_EVENT_NOTIFY_PRIMITIVE_ values ****/
 
 /**** Defines for the EventMasks field - use MPI3_EVENT_ values ****/
 
@@ -470,9 +500,11 @@ typedef struct _MPI3_EVENT_NOTIFICATION_REPLY
 
 /**** Defines for the MsgFlags field ****/
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_ACK_MASK                        (0x01)
+#define MPI3_EVENT_NOTIFY_MSGFLAGS_ACK_SHIFT                       (0)
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_ACK_REQUIRED                    (0x01)
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_ACK_NOT_REQUIRED                (0x00)
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_EVENT_ORIGINALITY_MASK          (0x02)
+#define MPI3_EVENT_NOTIFY_MSGFLAGS_EVENT_ORIGINALITY_SHIFT         (1)
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_EVENT_ORIGINALITY_ORIGINAL      (0x00)
 #define MPI3_EVENT_NOTIFY_MSGFLAGS_EVENT_ORIGINALITY_REPLAY        (0x02)
 
@@ -716,7 +748,7 @@ typedef struct _MPI3_EVENT_SAS_TOPO_PHY_ENTRY
 {
     U16             AttachedDevHandle;      /* 0x00 */
     U8              LinkRate;               /* 0x02 */
-    U8              Status;                 /* 0x03 */
+    U8              PhyStatus;              /* 0x03 */
 } MPI3_EVENT_SAS_TOPO_PHY_ENTRY, MPI3_POINTER PTR_MPI3_EVENT_SAS_TOPO_PHY_ENTRY,
   Mpi3EventSasTopoPhyEntry_t, MPI3_POINTER pMpi3EventSasTopoPhyEntry_t;
 
@@ -743,6 +775,7 @@ typedef struct _MPI3_EVENT_SAS_TOPO_PHY_ENTRY
 #define MPI3_EVENT_SAS_TOPO_PHY_STATUS_NO_EXIST             (0x40)
 #define MPI3_EVENT_SAS_TOPO_PHY_STATUS_VACANT               (0x80)
 #define MPI3_EVENT_SAS_TOPO_PHY_RC_MASK                     (0x0F)
+#define MPI3_EVENT_SAS_TOPO_PHY_RC_SHIFT                    (0)
 #define MPI3_EVENT_SAS_TOPO_PHY_RC_TARG_NOT_RESPONDING      (0x02)
 #define MPI3_EVENT_SAS_TOPO_PHY_RC_PHY_CHANGED              (0x03)
 #define MPI3_EVENT_SAS_TOPO_PHY_RC_NO_CHANGE                (0x04)
@@ -873,6 +906,7 @@ typedef struct _MPI3_EVENT_PCIE_TOPO_PORT_ENTRY
 
 /**** Defines for the CurrentPortInfo and PreviousPortInfo field ****/
 #define MPI3_EVENT_PCIE_TOPO_PI_LANES_MASK              (0xF0)
+#define MPI3_EVENT_PCIE_TOPO_PI_LANES_SHIFT             (4)
 #define MPI3_EVENT_PCIE_TOPO_PI_LANES_UNKNOWN           (0x00)
 #define MPI3_EVENT_PCIE_TOPO_PI_LANES_1                 (0x10)
 #define MPI3_EVENT_PCIE_TOPO_PI_LANES_2                 (0x20)
@@ -881,6 +915,7 @@ typedef struct _MPI3_EVENT_PCIE_TOPO_PORT_ENTRY
 #define MPI3_EVENT_PCIE_TOPO_PI_LANES_16                (0x50)
 
 #define MPI3_EVENT_PCIE_TOPO_PI_RATE_MASK               (0x0F)
+#define MPI3_EVENT_PCIE_TOPO_PI_RATE_SHIFT              (0)
 #define MPI3_EVENT_PCIE_TOPO_PI_RATE_UNKNOWN            (0x00)
 #define MPI3_EVENT_PCIE_TOPO_PI_RATE_DISABLED           (0x01)
 #define MPI3_EVENT_PCIE_TOPO_PI_RATE_2_5                (0x02)
@@ -1369,6 +1404,7 @@ typedef struct _MPI3_PEL_REQ_ACTION_ACKNOWLEDGE
 
 /**** Definitions for the MsgFlags field ****/
 #define MPI3_PELACKNOWLEDGE_MSGFLAGS_SAFE_MODE_EXIT_MASK                     (0x03)
+#define MPI3_PELACKNOWLEDGE_MSGFLAGS_SAFE_MODE_EXIT_SHIFT                    (0)
 #define MPI3_PELACKNOWLEDGE_MSGFLAGS_SAFE_MODE_EXIT_NO_GUIDANCE              (0x00)
 #define MPI3_PELACKNOWLEDGE_MSGFLAGS_SAFE_MODE_EXIT_CONTINUE_OP              (0x01)
 #define MPI3_PELACKNOWLEDGE_MSGFLAGS_SAFE_MODE_EXIT_TRANSITION_TO_FAULT      (0x02)
@@ -1425,6 +1461,7 @@ typedef struct _MPI3_CI_DOWNLOAD_REQUEST
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_FORCE_FMC_ENABLE             (0x40)
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_SIGNED_NVDATA                (0x20)
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_WRITE_CACHE_FLUSH_MASK       (0x03)
+#define MPI3_CI_DOWNLOAD_MSGFLAGS_WRITE_CACHE_FLUSH_SHIFT      (0)
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_WRITE_CACHE_FLUSH_FAST       (0x00)
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_WRITE_CACHE_FLUSH_MEDIUM     (0x01)
 #define MPI3_CI_DOWNLOAD_MSGFLAGS_WRITE_CACHE_FLUSH_SLOW       (0x02)
@@ -1460,6 +1497,7 @@ typedef struct _MPI3_CI_DOWNLOAD_REPLY
 #define MPI3_CI_DOWNLOAD_FLAGS_OFFLINE_ACTIVATION_REQUIRED           (0x20)
 #define MPI3_CI_DOWNLOAD_FLAGS_KEY_UPDATE_PENDING                    (0x10)
 #define MPI3_CI_DOWNLOAD_FLAGS_ACTIVATION_STATUS_MASK                (0x0E)
+#define MPI3_CI_DOWNLOAD_FLAGS_ACTIVATION_STATUS_SHIFT               (1)
 #define MPI3_CI_DOWNLOAD_FLAGS_ACTIVATION_STATUS_NOT_NEEDED          (0x00)
 #define MPI3_CI_DOWNLOAD_FLAGS_ACTIVATION_STATUS_AWAITING            (0x02)
 #define MPI3_CI_DOWNLOAD_FLAGS_ACTIVATION_STATUS_ONLINE_PENDING      (0x04)
@@ -1490,9 +1528,11 @@ typedef struct _MPI3_CI_UPLOAD_REQUEST
 
 /**** Defines for the MsgFlags field ****/
 #define MPI3_CI_UPLOAD_MSGFLAGS_LOCATION_MASK                        (0x01)
+#define MPI3_CI_UPLOAD_MSGFLAGS_LOCATION_SHIFT                       (0)
 #define MPI3_CI_UPLOAD_MSGFLAGS_LOCATION_PRIMARY                     (0x00)
 #define MPI3_CI_UPLOAD_MSGFLAGS_LOCATION_SECONDARY                   (0x01)
 #define MPI3_CI_UPLOAD_MSGFLAGS_FORMAT_MASK                          (0x02)
+#define MPI3_CI_UPLOAD_MSGFLAGS_FORMAT_SHIFT                         (1)
 #define MPI3_CI_UPLOAD_MSGFLAGS_FORMAT_FLASH                         (0x00)
 #define MPI3_CI_UPLOAD_MSGFLAGS_FORMAT_EXECUTABLE                    (0x02)
 

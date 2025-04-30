@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2016-2023, Broadcom Inc. All rights reserved.
+ * Copyright (c) 2016-2025, Broadcom Inc. All rights reserved.
  * Support: <fbsd-storage-driver.pdl@broadcom.com>
  *
  * Authors: Sumit Saxena <sumit.saxena@broadcom.com>
@@ -84,7 +84,7 @@ static void mpi3mr_port_enable_complete(struct mpi3mr_softc *sc,
 	struct mpi3mr_drvr_cmd *drvrcmd);
 static void mpi3mr_flush_io(struct mpi3mr_softc *sc);
 static int mpi3mr_issue_reset(struct mpi3mr_softc *sc, U16 reset_type,
-	U32 reset_reason);
+	U16 reset_reason);
 static void mpi3mr_dev_rmhs_send_tm(struct mpi3mr_softc *sc, U16 handle,
 	struct mpi3mr_drvr_cmd *cmdparam, U8 iou_rc);
 static void mpi3mr_dev_rmhs_complete_iou(struct mpi3mr_softc *sc,
@@ -187,7 +187,7 @@ poll_for_command_completion(struct mpi3mr_softc *sc,
  * Return:  None.
  */
 static void
-mpi3mr_trigger_snapdump(struct mpi3mr_softc *sc, U32 reason_code)
+mpi3mr_trigger_snapdump(struct mpi3mr_softc *sc, U16 reason_code)
 {
 	U32 host_diagnostic, timeout = MPI3_SYSIF_DIAG_SAVE_TIMEOUT * 10;
 	
@@ -222,7 +222,7 @@ mpi3mr_trigger_snapdump(struct mpi3mr_softc *sc, U32 reason_code)
  *
  * Return:  None.
  */
-static void mpi3mr_check_rh_fault_ioc(struct mpi3mr_softc *sc, U32 reason_code)
+static void mpi3mr_check_rh_fault_ioc(struct mpi3mr_softc *sc, U16 reason_code)
 {
 	U32 ioc_status;
 
@@ -1148,7 +1148,7 @@ enum mpi3mr_iocstate mpi3mr_get_iocstate(struct mpi3mr_softc *sc)
 	return MRIOC_STATE_RESET_REQUESTED;
 }
 
-static inline void mpi3mr_clear_resethistory(struct mpi3mr_softc *sc)
+static inline void mpi3mr_clear_reset_history(struct mpi3mr_softc *sc)
 {
         U32 ioc_status;
 
@@ -1168,9 +1168,9 @@ static inline void mpi3mr_clear_resethistory(struct mpi3mr_softc *sc)
  *
  * Return: 0 on success, -1 on failure.
  */
-static int mpi3mr_mur_ioc(struct mpi3mr_softc *sc, U32 reset_reason)
+static int mpi3mr_mur_ioc(struct mpi3mr_softc *sc, U16 reset_reason)
 {
-        U32 ioc_config, timeout, ioc_status;
+	U32 ioc_config, timeout, ioc_status, scratch_pad0;
         int retval = -1;
 
         mpi3mr_dprint(sc, MPI3MR_INFO, "Issuing Message Unit Reset(MUR)\n");
@@ -1178,8 +1178,13 @@ static int mpi3mr_mur_ioc(struct mpi3mr_softc *sc, U32 reset_reason)
                 mpi3mr_dprint(sc, MPI3MR_ERROR, "IOC is unrecoverable MUR not issued\n");
                 return retval;
         }
-        mpi3mr_clear_resethistory(sc);
-	mpi3mr_regwrite(sc, MPI3_SYSIF_SCRATCHPAD0_OFFSET, reset_reason);
+	mpi3mr_clear_reset_history(sc);
+
+	scratch_pad0 = ((MPI3MR_RESET_REASON_OSTYPE_FREEBSD <<
+			MPI3MR_RESET_REASON_OSTYPE_SHIFT) |
+			(sc->facts.ioc_num <<
+			MPI3MR_RESET_REASON_IOCNUM_SHIFT) | reset_reason);
+	mpi3mr_regwrite(sc, MPI3_SYSIF_SCRATCHPAD0_OFFSET, scratch_pad0);
 	ioc_config = mpi3mr_regread(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET);
         ioc_config &= ~MPI3_SYSIF_IOC_CONFIG_ENABLE_IOC;
 	mpi3mr_regwrite(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET, ioc_config);
@@ -1188,7 +1193,7 @@ static int mpi3mr_mur_ioc(struct mpi3mr_softc *sc, U32 reset_reason)
         do {
 		ioc_status = mpi3mr_regread(sc, MPI3_SYSIF_IOC_STATUS_OFFSET);
                 if ((ioc_status & MPI3_SYSIF_IOC_STATUS_RESET_HISTORY)) {
-                        mpi3mr_clear_resethistory(sc);
+			mpi3mr_clear_reset_history(sc);
 			ioc_config =
 				mpi3mr_regread(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET);
                         if (!((ioc_status & MPI3_SYSIF_IOC_STATUS_READY) ||
@@ -1218,24 +1223,44 @@ static int mpi3mr_mur_ioc(struct mpi3mr_softc *sc, U32 reset_reason)
  *
  * Return: 0 on success, appropriate error on failure.
  */
-static int mpi3mr_bring_ioc_ready(struct mpi3mr_softc *sc)
+static int mpi3mr_bring_ioc_ready(struct mpi3mr_softc *sc,
+				  U64 *start_time)
 {
-        U32 ioc_config, timeout;
-        enum mpi3mr_iocstate current_state;
+	enum mpi3mr_iocstate current_state;
+	U32 ioc_status;
+	int retval;
 
-	ioc_config = mpi3mr_regread(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET);
-        ioc_config |= MPI3_SYSIF_IOC_CONFIG_ENABLE_IOC;
+	U32 ioc_config = mpi3mr_regread(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET);
+	ioc_config |= MPI3_SYSIF_IOC_CONFIG_ENABLE_IOC;
 	mpi3mr_regwrite(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET, ioc_config);
 
-        timeout = sc->ready_timeout * 10;
-        do {
-                current_state = mpi3mr_get_iocstate(sc);
-                if (current_state == MRIOC_STATE_READY)
-                        return 0;
-                DELAY(100 * 1000);
-        } while (--timeout);
+	if (*start_time == 0)
+		*start_time = ticks;
 
-        return -1;
+	do {
+		ioc_status = mpi3mr_regread(sc, MPI3_SYSIF_IOC_STATUS_OFFSET);
+		if (ioc_status & (MPI3_SYSIF_IOC_STATUS_FAULT | MPI3_SYSIF_IOC_STATUS_RESET_HISTORY)) {
+		    if (ioc_status & MPI3_SYSIF_IOC_STATUS_FAULT) {
+			    mpi3mr_print_fault_info(sc);
+			    retval = mpi3mr_issue_reset(sc, MPI3_SYSIF_HOST_DIAG_RESET_ACTION_SOFT_RESET, MPI3MR_RESET_FROM_BRINGUP);
+			    if (retval) {
+				    mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Failed to soft reset the IOC, error 0x%d\n", __func__, retval);
+				    return -1;
+			    }
+		    }
+		    mpi3mr_clear_reset_history(sc);
+		    return EAGAIN;
+		}
+
+		current_state = mpi3mr_get_iocstate(sc);
+		if (current_state == MRIOC_STATE_READY)
+			return 0;
+
+		DELAY(100 * 1000);
+
+	} while (((ticks - *start_time) / hz) < sc->ready_timeout);
+
+	return -1;
 }
 
 static const struct {
@@ -1314,6 +1339,7 @@ static const struct {
 		"diagnostic buffer post timeout"
 	},
 	{ MPI3MR_RESET_FROM_FIRMWARE, "firmware asynchronus reset" },
+	{ MPI3MR_RESET_FROM_CFG_REQ_TIMEOUT, "configuration request timeout" },
 	{ MPI3MR_RESET_REASON_COUNT, "Reset reason count" },
 };
 
@@ -1404,14 +1430,10 @@ mpi3mr_soft_reset_success(U32 ioc_status, U32 ioc_config)
 static inline bool mpi3mr_diagfault_success(struct mpi3mr_softc *sc,
 	U32 ioc_status)
 {
-	U32 fault;
-
 	if (!(ioc_status & MPI3_SYSIF_IOC_STATUS_FAULT))
 		return false;
-	fault = mpi3mr_regread(sc, MPI3_SYSIF_FAULT_OFFSET) & MPI3_SYSIF_FAULT_CODE_MASK;
-	if (fault == MPI3_SYSIF_FAULT_CODE_DIAG_FAULT_RESET)
-		return true;
-	return false;
+	mpi3mr_print_fault_info(sc);
+	return true;
 }
 
 /**
@@ -1617,6 +1639,7 @@ static int mpi3mr_process_factsdata(struct mpi3mr_softc *sc,
                 (facts_data->MaxPCIeSwitches);
         sc->facts.max_sasexpanders =
                 (facts_data->MaxSASExpanders);
+        sc->facts.max_data_length = facts_data->MaxDataLength;
         sc->facts.max_sasinitiators =
                 (facts_data->MaxSASInitiators);
         sc->facts.max_enclosures = (facts_data->MaxEnclosures);
@@ -1651,6 +1674,10 @@ static int mpi3mr_process_factsdata(struct mpi3mr_softc *sc,
 	sc->facts.io_throttle_low = facts_data->IOThrottleLow;
 	sc->facts.io_throttle_high = facts_data->IOThrottleHigh;
 
+	if (sc->facts.max_data_length == MPI3_IOCFACTS_MAX_DATA_LENGTH_NOT_REPORTED)
+		sc->facts.max_data_length = MPI3MR_DEFAULT_MAX_IO_SIZE;
+	else
+		sc->facts.max_data_length *= MPI3MR_PAGE_SIZE_4K;
 	/*Store in 512b block count*/
 	if (sc->facts.io_throttle_data_length)
 		sc->io_throttle_data_length =
@@ -1886,6 +1913,15 @@ static int mpi3mr_reply_alloc(struct mpi3mr_softc *sc)
 	
 	if (!sc->init_cmds.reply) {
 		printf(IOCNAME "Cannot allocate memory for init_cmds.reply\n",
+		    sc->name);
+		goto out_failed;
+	}
+
+	sc->cfg_cmds.reply = malloc(sc->reply_sz,
+		M_MPI3MR, M_NOWAIT | M_ZERO);
+
+	if (!sc->cfg_cmds.reply) {
+		printf(IOCNAME "Cannot allocate memory for cfg_cmds.reply\n",
 		    sc->name);
 		goto out_failed;
 	}
@@ -2140,7 +2176,7 @@ static int mpi3mr_issue_iocinit(struct mpi3mr_softc *sc)
 	strcpy(drvr_info->DriverName, MPI3MR_DRIVER_NAME);
 	strcpy(drvr_info->DriverVersion, MPI3MR_DRIVER_VERSION);
 	strcpy(drvr_info->DriverReleaseDate, MPI3MR_DRIVER_RELDATE);
-	drvr_info->DriverCapabilities = 0;
+	drvr_info->DriverCapabilities = MPI3_IOCINIT_DRIVERCAP_OSEXPOSURE_NO_SPECIAL;
 	memcpy((U8 *)&sc->driver_info, (U8 *)drvr_info, sizeof(sc->driver_info));
 
 	memset(&iocinit_req, 0, sizeof(iocinit_req));
@@ -2175,6 +2211,8 @@ static int mpi3mr_issue_iocinit(struct mpi3mr_softc *sc)
 	getmicrotime(&now);
 	time_in_msec = (now.tv_sec * 1000 + now.tv_usec/1000);
 	iocinit_req.TimeStamp = htole64(time_in_msec);
+
+	iocinit_req.MsgFlags |= MPI3_IOCINIT_MSGFLAGS_WRITESAMEDIVERT_SUPPORTED;
 
 	init_completion(&sc->init_cmds.completion);
 	retval = mpi3mr_submit_admin_cmd(sc, &iocinit_req,
@@ -2268,7 +2306,7 @@ mpi3mr_display_ioc_info(struct mpi3mr_softc *sc)
         printf("Capabilities=(");
 
         if (sc->facts.ioc_capabilities &
-            MPI3_IOCFACTS_CAPABILITY_RAID_CAPABLE) {
+	    MPI3_IOCFACTS_CAPABILITY_RAID_SUPPORTED) {
                 printf("RAID");
                 i++;
         }
@@ -2509,7 +2547,9 @@ static int mpi3mr_alloc_chain_bufs(struct mpi3mr_softc *sc)
 		goto out_failed;
 	}
 
-	sz = MPI3MR_CHAINSGE_SIZE;
+	if (sc->max_sgl_entries > sc->facts.max_data_length / PAGE_SIZE)
+		sc->max_sgl_entries = sc->facts.max_data_length / PAGE_SIZE;
+	sz = sc->max_sgl_entries * sizeof(Mpi3SGESimple_t);
 
         if (bus_dma_tag_create(sc->mpi3mr_parent_dmat,  /* parent */
 				4096, 0,		/* algnmnt, boundary */
@@ -2708,14 +2748,16 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 {
 	int retval = 0;
 	enum mpi3mr_iocstate ioc_state;
-	U64 ioc_info;
+	U64 ioc_info, start_ticks = 0;
 	U32 ioc_status, ioc_control, i, timeout;
 	Mpi3IOCFactsData_t facts_data;
 	char str[32];
 	U32 size;
+	U8 retry = 0;
 
 	sc->cpu_count = mp_ncpus;
 
+retry_init:
 	ioc_status = mpi3mr_regread(sc, MPI3_SYSIF_IOC_STATUS_OFFSET);
 	ioc_control = mpi3mr_regread(sc, MPI3_SYSIF_IOC_CONFIG_OFFSET);
 	ioc_info = mpi3mr_regread64(sc, MPI3_SYSIF_IOC_INFO_LOW_OFFSET);
@@ -2723,28 +2765,25 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 	mpi3mr_dprint(sc, MPI3MR_INFO, "SOD ioc_status: 0x%x ioc_control: 0x%x "
 	    "ioc_info: 0x%lx\n", ioc_status, ioc_control, ioc_info);
 
-        /*The timeout value is in 2sec unit, changing it to seconds*/
+	/*The timeout value is in 2sec unit, changing it to seconds*/
 	sc->ready_timeout =
                 ((ioc_info & MPI3_SYSIF_IOC_INFO_LOW_TIMEOUT_MASK) >>
                     MPI3_SYSIF_IOC_INFO_LOW_TIMEOUT_SHIFT) * 2;
 
 	ioc_state = mpi3mr_get_iocstate(sc);
-	
 	mpi3mr_dprint(sc, MPI3MR_INFO, "IOC state: %s   IOC ready timeout: %d\n",
 	    mpi3mr_iocstate_name(ioc_state), sc->ready_timeout);
 
-	if (ioc_state == MRIOC_STATE_BECOMING_READY ||
-	    ioc_state == MRIOC_STATE_RESET_REQUESTED) {
-		timeout = sc->ready_timeout * 10;
-		do {
-			DELAY(1000 * 100);
-		} while (--timeout);
-
+	timeout = sc->ready_timeout * 10;
+	do {
 		ioc_state = mpi3mr_get_iocstate(sc);
-		mpi3mr_dprint(sc, MPI3MR_INFO,
-			"IOC in %s state after waiting for reset time\n",
-			mpi3mr_iocstate_name(ioc_state));
-	}
+
+		if (ioc_state != MRIOC_STATE_BECOMING_READY &&
+		    ioc_state != MRIOC_STATE_RESET_REQUESTED)
+			break;
+
+		DELAY(1000 * 100);
+	} while (--timeout);
 
 	if (ioc_state == MRIOC_STATE_READY) {
                 retval = mpi3mr_mur_ioc(sc, MPI3MR_RESET_FROM_BRINGUP);
@@ -2756,53 +2795,75 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
         }
 
         if (ioc_state != MRIOC_STATE_RESET) {
-                mpi3mr_print_fault_info(sc);
-		 mpi3mr_dprint(sc, MPI3MR_ERROR, "issuing soft reset to bring to reset state\n");
-                 retval = mpi3mr_issue_reset(sc,
-                     MPI3_SYSIF_HOST_DIAG_RESET_ACTION_SOFT_RESET,
-                     MPI3MR_RESET_FROM_BRINGUP);
-                if (retval) {
-                        mpi3mr_dprint(sc, MPI3MR_ERROR,
-                            "%s :Failed to soft reset IOC, error 0x%d\n",
-                            __func__, retval);
-                        goto out_failed;
-                }
-        }
-        
+		if (ioc_state == MRIOC_STATE_FAULT) {
+			mpi3mr_print_fault_info(sc);
+
+			U32 fault = mpi3mr_regread(sc, MPI3_SYSIF_FAULT_OFFSET) &
+						   MPI3_SYSIF_FAULT_CODE_MASK;
+			if (fault == MPI3_SYSIF_FAULT_CODE_INSUFFICIENT_PCI_SLOT_POWER)
+				mpi3mr_dprint(sc, MPI3MR_INFO,
+					      "controller faulted due to insufficient power, try by connecting it in a different slot\n");
+				goto err;
+
+			U32 host_diagnostic;
+			timeout = MPI3_SYSIF_DIAG_SAVE_TIMEOUT * 10;
+			do {
+				host_diagnostic = mpi3mr_regread(sc, MPI3_SYSIF_HOST_DIAG_OFFSET);
+				if (!(host_diagnostic & MPI3_SYSIF_HOST_DIAG_SAVE_IN_PROGRESS))
+					break;
+				DELAY(100 * 1000);
+			} while (--timeout);
+		}
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "issuing soft reset to bring to reset state\n");
+		retval = mpi3mr_issue_reset(sc,
+		     MPI3_SYSIF_HOST_DIAG_RESET_ACTION_SOFT_RESET,
+		     MPI3MR_RESET_FROM_BRINGUP);
+		if (retval) {
+			mpi3mr_dprint(sc, MPI3MR_ERROR,
+			    "%s :Failed to soft reset IOC, error 0x%d\n",
+			    __func__, retval);
+			goto err_retry;
+		}
+	}
+
 	ioc_state = mpi3mr_get_iocstate(sc);
 
         if (ioc_state != MRIOC_STATE_RESET) {
 		mpi3mr_dprint(sc, MPI3MR_ERROR, "Cannot bring IOC to reset state\n");
-		goto out_failed;
+		goto err_retry;
         }
 
 	retval = mpi3mr_setup_admin_qpair(sc);
 	if (retval) {
 		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to setup Admin queues, error 0x%x\n",
 		    retval);
-		goto out_failed;
+		if (retval == ENOMEM)
+			goto err;
+		goto err_retry;
 	}
-	
-	retval = mpi3mr_bring_ioc_ready(sc);
+
+	retval = mpi3mr_bring_ioc_ready(sc, &start_ticks);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to bring IOC ready, error 0x%x\n",
-		    retval);
-		goto out_failed;
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to bring IOC ready, error 0x%x\n", retval);
+		if (retval == EAGAIN)
+			goto err_retry;
+		goto err;
 	}
+
 
 	if (init_type == MPI3MR_INIT_TYPE_INIT) {
 		retval = mpi3mr_alloc_interrupts(sc, 1);
 		if (retval) {
 			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocate interrupts, error 0x%x\n",
 			    retval);
-			goto out_failed;
+			goto err;
 		}
-	
+
 		retval = mpi3mr_setup_irqs(sc);
 		if (retval) {
 			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to setup ISR, error 0x%x\n",
 			    retval);
-			goto out_failed;
+			goto err;
 		}
 	}
 
@@ -2825,6 +2886,12 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 		sc->init_cmds.state = MPI3MR_CMD_NOTUSED;
 		sc->init_cmds.dev_handle = MPI3MR_INVALID_DEV_HANDLE;
 		sc->init_cmds.host_tag = MPI3MR_HOSTTAG_INITCMDS;
+
+		mtx_init(&sc->cfg_cmds.completion.lock, "CFG commands lock", NULL, MTX_DEF);
+		sc->cfg_cmds.reply = NULL;
+		sc->cfg_cmds.state = MPI3MR_CMD_NOTUSED;
+		sc->cfg_cmds.dev_handle = MPI3MR_INVALID_DEV_HANDLE;
+		sc->cfg_cmds.host_tag = MPI3MR_HOSTTAG_CFGCMDS;
 
 		mtx_init(&sc->ioctl_cmds.completion.lock, "IOCTL commands lock", NULL, MTX_DEF);
 		sc->ioctl_cmds.reply = NULL;
@@ -2862,25 +2929,30 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 
 	retval = mpi3mr_issue_iocfacts(sc, &facts_data);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to Issue IOC Facts, retval: 0x%x\n",
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to Issue IOC Facts, error: 0x%x\n",
 		    retval);
-		goto out_failed;
+		if (retval == ENOMEM)
+			goto err;
+		goto err_retry;
 	}
 
 	retval = mpi3mr_process_factsdata(sc, &facts_data);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "IOC Facts data processing failedi, retval: 0x%x\n",
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "IOC Facts data processing failed, error: 0x%x\n",
 		    retval);
-		goto out_failed;
+		goto err_retry;
 	}
 
 	sc->num_io_throttle_group = sc->facts.max_io_throttle_group;
 	mpi3mr_atomic_set(&sc->pend_large_data_sz, 0);
-	
+
 	if (init_type == MPI3MR_INIT_TYPE_RESET) {
 		retval = mpi3mr_validate_fw_update(sc);
-		if (retval)
-			goto out_failed;
+		if (retval) {
+			if (retval == ENOMEM)
+				goto err;
+			goto err_retry;
+		}
 	} else {
 		sc->reply_sz = sc->facts.reply_sz;
 	}
@@ -2889,25 +2961,27 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 
 	retval = mpi3mr_reply_alloc(sc);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocated reply and sense buffers, retval: 0x%x\n",
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocated reply and sense buffers, error: 0x%x\n",
 		    retval);
-		goto out_failed;
+		goto err;
 	}
-	
+
 	if (init_type == MPI3MR_INIT_TYPE_INIT) {
 		retval = mpi3mr_alloc_chain_bufs(sc);
 		if (retval) {
-			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocated chain buffers, retval: 0x%x\n",
-			    retval);
-			goto out_failed;
+			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocated chain buffers, error: 0x%x\n",
+				      retval);
+			goto err;
 		}
 	}
-	
+
 	retval = mpi3mr_issue_iocinit(sc);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to Issue IOC Init, retval: 0x%x\n",
-		    retval);
-		goto out_failed;
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to Issue IOC Init, error: 0x%x\n",
+			      retval);
+		if (retval == ENOMEM)
+			goto err;
+		goto err_retry;
 	}
 
 	mpi3mr_print_fw_pkg_ver(sc);
@@ -2915,77 +2989,87 @@ int mpi3mr_initialize_ioc(struct mpi3mr_softc *sc, U8 init_type)
 	sc->reply_free_q_host_index = sc->num_reply_bufs;
 	mpi3mr_regwrite(sc, MPI3_SYSIF_REPLY_FREE_HOST_INDEX_OFFSET,
 		sc->reply_free_q_host_index);
-	
+
 	sc->sense_buf_q_host_index = sc->num_sense_bufs;
-	
+
 	mpi3mr_regwrite(sc, MPI3_SYSIF_SENSE_BUF_FREE_HOST_INDEX_OFFSET,
 		sc->sense_buf_q_host_index);
 
 	if (init_type == MPI3MR_INIT_TYPE_INIT) {
 		retval = mpi3mr_alloc_interrupts(sc, 0);
 		if (retval) {
-			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocate interrupts, retval: 0x%x\n",
+			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocate interrupts, error: 0x%x\n",
 			    retval);
-			goto out_failed;
+			goto err;
 		}
 
 		retval = mpi3mr_setup_irqs(sc);
 		if (retval) {
-			printf(IOCNAME "Failed to setup ISR, error: 0x%x\n",
-			    sc->name, retval);
-			goto out_failed;
+			mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to setup ISR, error: 0x%x\n", retval);
+			goto err;
 		}
 
 		mpi3mr_enable_interrupts(sc);
 
 	} else
 		mpi3mr_enable_interrupts(sc);
-	
-	retval = mpi3mr_create_op_queues(sc);
 
+	retval = mpi3mr_create_op_queues(sc);
 	if (retval) {
 		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to create operational queues, error: %d\n",
 		    retval);
-		goto out_failed;
+		if (retval == ENOMEM)
+			goto err;
+		goto err_retry;
 	}
 
 	if (!sc->throttle_groups && sc->num_io_throttle_group) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "allocating memory for throttle groups\n");
 		size = sizeof(struct mpi3mr_throttle_group_info);
 		sc->throttle_groups = (struct mpi3mr_throttle_group_info *)
 					  malloc(sc->num_io_throttle_group *
 					      size, M_MPI3MR, M_NOWAIT | M_ZERO);
-		if (!sc->throttle_groups)
-			goto out_failed;
+		if (!sc->throttle_groups) {
+			mpi3mr_dprint(sc, MPI3MR_ERROR, "throttle groups memory allocation failed\n");
+			goto err;
+		}
 	}
 
 	if (init_type == MPI3MR_INIT_TYPE_RESET) {
-		mpi3mr_dprint(sc, MPI3MR_INFO, "Re-register events\n");
+		mpi3mr_dprint(sc, MPI3MR_XINFO, "Re-register events\n");
 		retval = mpi3mr_register_events(sc);
 		if (retval) {
-			mpi3mr_dprint(sc, MPI3MR_INFO, "Failed to re-register events, retval: 0x%x\n",
+			mpi3mr_dprint(sc, MPI3MR_INFO, "Failed to re-register events, error: 0x%x\n",
 			    retval);
-			goto out_failed;
+			goto err_retry;
 		}
 
 		mpi3mr_dprint(sc, MPI3MR_INFO, "Issuing Port Enable\n");
 		retval = mpi3mr_issue_port_enable(sc, 0);
 		if (retval) {
-			mpi3mr_dprint(sc, MPI3MR_INFO, "Failed to issue port enable, retval: 0x%x\n",
+			mpi3mr_dprint(sc, MPI3MR_INFO, "Failed to issue port enable, error: 0x%x\n",
 			    retval);
-			goto out_failed;
+			goto err_retry;
 		}
 	}
 	retval = mpi3mr_pel_alloc(sc);
 	if (retval) {
-		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocate memory for PEL, retval: 0x%x\n",
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to allocate memory for PEL, error: 0x%x\n",
 		    retval);
-		goto out_failed;
+		goto err;
 	}
-	
+
+	if (mpi3mr_cfg_get_driver_pg1(sc) != 0)
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Failed to get the cfg driver page1\n");
+
 	return retval;
 
-out_failed:
+err_retry:
+	if ((retry++ < 2) && (((ticks - start_ticks) / hz) < (sc->ready_timeout - 60))) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Retrying controller initialization,"
+			      "retry_count: %d\n", retry);
+		goto retry_init;
+	}
+err:
 	retval = -1;
 	return retval;
 }
@@ -3054,6 +3138,115 @@ out:
 	return retval;
 }
 
+static int mpi3mr_timestamp_sync(struct mpi3mr_softc *sc)
+{
+	int retval = 0;
+	struct timeval current_time;
+	int64_t time_in_msec;
+	Mpi3IoUnitControlRequest_t iou_ctrl = {0};
+
+	mtx_lock(&sc->init_cmds.completion.lock);
+	if (sc->init_cmds.state & MPI3MR_CMD_PENDING) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Issue timestamp sync: command is in use\n");
+		mtx_unlock(&sc->init_cmds.completion.lock);
+		return -1;
+	}
+
+	sc->init_cmds.state = MPI3MR_CMD_PENDING;
+	sc->init_cmds.is_waiting = 1;
+	sc->init_cmds.callback = NULL;
+	iou_ctrl.HostTag = htole64(MPI3MR_HOSTTAG_INITCMDS);
+	iou_ctrl.Function = MPI3_FUNCTION_IO_UNIT_CONTROL;
+	iou_ctrl.Operation = MPI3_CTRL_OP_UPDATE_TIMESTAMP;
+	getmicrotime(&current_time);
+	time_in_msec = (int64_t)current_time.tv_sec * 1000 + current_time.tv_usec/1000;
+	iou_ctrl.Param64[0] = htole64(time_in_msec);
+
+	init_completion(&sc->init_cmds.completion);
+
+	retval = mpi3mr_submit_admin_cmd(sc, &iou_ctrl, sizeof(iou_ctrl));
+	if (retval) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "timestamp sync: Admin Post failed\n");
+		goto out_unlock;
+	}
+
+	wait_for_completion_timeout(&sc->init_cmds.completion,
+				    (MPI3MR_INTADMCMD_TIMEOUT));
+
+	if (!(sc->init_cmds.state & MPI3MR_CMD_COMPLETE)) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Issue timestamp sync: command timed out\n");
+		sc->init_cmds.is_waiting = 0;
+
+		if (!(sc->init_cmds.state & MPI3MR_CMD_RESET))
+			mpi3mr_check_rh_fault_ioc(sc, MPI3MR_RESET_FROM_TSU_TIMEOUT);
+
+		retval = -1;
+		goto out_unlock;
+	}
+
+	if (((sc->init_cmds.ioc_status & MPI3_IOCSTATUS_STATUS_MASK) != MPI3_IOCSTATUS_SUCCESS) &&
+	     (sc->init_cmds.ioc_status != MPI3_IOCSTATUS_SUPERVISOR_ONLY)) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Issue timestamp sync: Failed IOCStatus(0x%04x) Loginfo(0x%08x)\n",
+			      (sc->init_cmds.ioc_status & MPI3_IOCSTATUS_STATUS_MASK), sc->init_cmds.ioc_loginfo);
+		retval = -1;
+	}
+
+out_unlock:
+	sc->init_cmds.state = MPI3MR_CMD_NOTUSED;
+	mtx_unlock(&sc->init_cmds.completion.lock);
+
+	return retval;
+}
+
+void
+mpi3mr_timestamp_thread(void *arg)
+{
+	struct mpi3mr_softc *sc = (struct mpi3mr_softc *)arg;
+	U64 elapsed_time = 0;
+
+	sc->timestamp_thread_active = 1;
+	mtx_lock(&sc->reset_mutex);
+	while (1) {
+
+		if (sc->mpi3mr_flags & MPI3MR_FLAGS_SHUTDOWN ||
+		    (sc->unrecoverable == 1)) {
+			mpi3mr_dprint(sc, MPI3MR_INFO,
+				      "Exit due to %s from %s\n",
+				      sc->mpi3mr_flags & MPI3MR_FLAGS_SHUTDOWN ? "Shutdown" :
+				      "Hardware critical error", __func__);
+			break;
+		}
+		mtx_unlock(&sc->reset_mutex);
+
+		while (sc->reset_in_progress) {
+			if (elapsed_time)
+				elapsed_time = 0;
+			if (sc->unrecoverable)
+				break;
+			pause("mpi3mr_timestamp_thread", hz / 5);
+		}
+
+		if (elapsed_time++ >= sc->ts_update_interval * 60) {
+			mpi3mr_timestamp_sync(sc);
+			elapsed_time = 0;
+		}
+
+		/*
+		 * Sleep for 1 second if we're not exiting, then loop to top
+		 * to poll exit status and hardware health.
+		 */
+		mtx_lock(&sc->reset_mutex);
+		if (((sc->mpi3mr_flags & MPI3MR_FLAGS_SHUTDOWN) == 0) &&
+		    (!sc->unrecoverable) && (!sc->reset_in_progress)) {
+			msleep(&sc->timestamp_chan, &sc->reset_mutex, PRIBIO,
+			       "mpi3mr_timestamp", 1 * hz);
+		}
+	}
+	mtx_unlock(&sc->reset_mutex);
+	sc->timestamp_thread_active = 0;
+	kproc_exit(0);
+}
+
 void
 mpi3mr_watchdog_thread(void *arg)
 {
@@ -3119,6 +3312,14 @@ mpi3mr_watchdog_thread(void *arg)
 				sc->unrecoverable = 1;
 				break;
 			}
+
+			if (fault == MPI3_SYSIF_FAULT_CODE_INSUFFICIENT_PCI_SLOT_POWER) {
+				mpi3mr_dprint(sc, MPI3MR_INFO,
+					      "controller faulted due to insufficient power, marking controller as unrecoverable\n");
+				sc->unrecoverable = 1;
+				break;
+			}
+
 			if ((fault == MPI3_SYSIF_FAULT_CODE_DIAG_FAULT_RESET)
 			    || (fault == MPI3_SYSIF_FAULT_CODE_SOFT_RESET_IN_PROGRESS)
 			    || (sc->reset_in_progress))
@@ -3339,6 +3540,19 @@ void mpi3mr_update_device(struct mpi3mr_softc *sc,
 		break;
 	}
 
+	switch (flags & MPI3_DEVICE0_FLAGS_MAX_WRITE_SAME_MASK) {
+	case MPI3_DEVICE0_FLAGS_MAX_WRITE_SAME_256_LB:
+		tgtdev->ws_len = 256;
+		break;
+	case MPI3_DEVICE0_FLAGS_MAX_WRITE_SAME_2048_LB:
+		tgtdev->ws_len = 2048;
+		break;
+	case MPI3_DEVICE0_FLAGS_MAX_WRITE_SAME_NO_LIMIT:
+	default:
+		tgtdev->ws_len = 0;
+		break;
+	}
+
 	switch (tgtdev->dev_type) {
 	case MPI3_DEVICE_DEVFORM_SAS_SATA:
 	{
@@ -3478,6 +3692,7 @@ static void mpi3mr_dev_rmhs_complete_iou(struct mpi3mr_softc *sc,
 {
 	U16 cmd_idx = drv_cmd->host_tag - MPI3MR_HOSTTAG_DEVRMCMD_MIN;
 	struct delayed_dev_rmhs_node *delayed_dev_rmhs = NULL;
+	struct mpi3mr_target *tgtdev = NULL;
 
 	mpi3mr_dprint(sc, MPI3MR_EVENT,
 	    "%s :dev_rmhs_iouctrl_complete:handle(0x%04x), ioc_status(0x%04x), loginfo(0x%08x)\n",
@@ -3498,6 +3713,13 @@ static void mpi3mr_dev_rmhs_complete_iou(struct mpi3mr_softc *sc,
 		    "%s :dev removal handshake failed after all retries: handle(0x%04x)\n",
 		    __func__, drv_cmd->dev_handle);
 	} else {
+		mtx_lock_spin(&sc->target_lock);
+		TAILQ_FOREACH(tgtdev, &sc->cam_sc->tgt_list, tgt_next) {
+		       if (tgtdev->dev_handle == drv_cmd->dev_handle)
+			       tgtdev->state = MPI3MR_DEV_REMOVE_HS_COMPLETED;
+		}
+		mtx_unlock_spin(&sc->target_lock);
+
 		mpi3mr_dprint(sc, MPI3MR_INFO,
 		    "%s :dev removal handshake completed successfully: handle(0x%04x)\n",
 		    __func__, drv_cmd->dev_handle);
@@ -3605,18 +3827,7 @@ static void mpi3mr_dev_rmhs_send_tm(struct mpi3mr_softc *sc, U16 handle,
 	U8 retrycount = 5;
 	struct mpi3mr_drvr_cmd *drv_cmd = cmdparam;
 	struct delayed_dev_rmhs_node *delayed_dev_rmhs = NULL;
-	struct mpi3mr_target *tgtdev = NULL;
 	
-	mtx_lock_spin(&sc->target_lock);
-	TAILQ_FOREACH(tgtdev, &sc->cam_sc->tgt_list, tgt_next) {
-		if ((tgtdev->dev_handle == handle) &&
-		    (iou_rc == MPI3_CTRL_OP_REMOVE_DEVICE)) {
-			tgtdev->state = MPI3MR_DEV_REMOVE_HS_STARTED;
-			break;
-		}
-	}
-	mtx_unlock_spin(&sc->target_lock);
-
 	if (drv_cmd)
 		goto issue_cmd;
 	do {
@@ -3891,7 +4102,7 @@ static void mpi3mr_sastopochg_evt_th(struct mpi3mr_softc *sc,
 		handle = le16toh(topo_evt->PhyEntry[i].AttachedDevHandle);
 		if (!handle)
 			continue;
-		reason_code = topo_evt->PhyEntry[i].Status &
+		reason_code = topo_evt->PhyEntry[i].PhyStatus &
 		    MPI3_EVENT_SAS_TOPO_PHY_RC_MASK;
 		tgtdev = mpi3mr_find_target_by_dev_handle(sc->cam_sc, handle);
 		switch (reason_code) {
@@ -4171,9 +4382,14 @@ static void mpi3mr_process_events(struct mpi3mr_softc *sc,
 		break;
 	}
 	case MPI3_EVENT_DEVICE_INFO_CHANGED:
-	case MPI3_EVENT_LOG_DATA:
 	{
 		process_evt_bh = 1;
+		break;
+	}
+	case MPI3_EVENT_LOG_DATA:
+	{
+		mpi3mr_app_save_logdata(sc, (char*)event_reply->EventData,
+					le16toh(event_reply->EventDataLength) * 4);
 		break;
 	}
 	case MPI3_EVENT_ENERGY_PACK_CHANGE:
@@ -4282,10 +4498,9 @@ static void mpi3mr_process_admin_reply_desc(struct mpi3mr_softc *sc,
 		status_desc = (Mpi3StatusReplyDescriptor_t *)reply_desc;
 		host_tag = status_desc->HostTag;
 		ioc_status = status_desc->IOCStatus;
-		if (ioc_status &
-		    MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_LOGINFOAVAIL)
+		if (ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
 			ioc_loginfo = status_desc->IOCLogInfo;
-		ioc_status &= MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_STATUS_MASK;
+		ioc_status &= MPI3_IOCSTATUS_STATUS_MASK;
 		break;
 	case MPI3_REPLY_DESCRIPT_FLAGS_TYPE_ADDRESS_REPLY:
 		addr_desc = (Mpi3AddressReplyDescriptor_t *)reply_desc;
@@ -4295,10 +4510,9 @@ static void mpi3mr_process_admin_reply_desc(struct mpi3mr_softc *sc,
 			goto out;
 		host_tag = def_reply->HostTag;
 		ioc_status = def_reply->IOCStatus;
-		if (ioc_status &
-		    MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_LOGINFOAVAIL)
+		if (ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
 			ioc_loginfo = def_reply->IOCLogInfo;
-		ioc_status &= MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_STATUS_MASK;
+		ioc_status &= MPI3_IOCSTATUS_STATUS_MASK;
 		if (def_reply->Function == MPI3_FUNCTION_SCSI_IO) {
 			scsi_reply = (Mpi3SCSIIOReply_t *)def_reply;
 			sense_buf = mpi3mr_get_sensebuf_virt_addr(sc,
@@ -4315,6 +4529,9 @@ static void mpi3mr_process_admin_reply_desc(struct mpi3mr_softc *sc,
 	switch (host_tag) {
 	case MPI3MR_HOSTTAG_INITCMDS:
 		cmdptr = &sc->init_cmds;
+		break;
+	case MPI3MR_HOSTTAG_CFGCMDS:
+		cmdptr = &sc->cfg_cmds;
 		break;
 	case MPI3MR_HOSTTAG_IOCTLCMDS:
 		cmdptr = &sc->ioctl_cmds;
@@ -4392,6 +4609,7 @@ static int mpi3mr_complete_admin_cmd(struct mpi3mr_softc *sc)
 	U32 num_adm_reply = 0;
 	U64 reply_dma = 0;
 	Mpi3DefaultReplyDescriptor_t *reply_desc;
+	U16 threshold_comps = 0;
 	
 	mtx_lock_spin(&sc->admin_reply_lock);
 	if (sc->admin_in_use == false) {
@@ -4429,6 +4647,11 @@ static int mpi3mr_complete_admin_cmd(struct mpi3mr_softc *sc)
 		if ((reply_desc->ReplyFlags &
 		     MPI3_REPLY_DESCRIPT_FLAGS_PHASE_MASK) != exp_phase)
 			break;
+
+		if (++threshold_comps == MPI3MR_THRESHOLD_REPLY_COUNT) {
+			mpi3mr_regwrite(sc, MPI3_SYSIF_ADMIN_REPLY_Q_CI_OFFSET, adm_reply_ci);
+			threshold_comps = 0;
+		}
 	} while (1);
 
 	mpi3mr_regwrite(sc, MPI3_SYSIF_ADMIN_REPLY_Q_CI_OFFSET, adm_reply_ci);
@@ -4493,10 +4716,9 @@ void mpi3mr_process_op_reply_desc(struct mpi3mr_softc *sc,
 		status_desc = (Mpi3StatusReplyDescriptor_t *)reply_desc;
 		host_tag = status_desc->HostTag;
 		ioc_status = status_desc->IOCStatus;
-		if (ioc_status &
-		    MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_LOGINFOAVAIL)
+		if (ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
 			ioc_loginfo = status_desc->IOCLogInfo;
-		ioc_status &= MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_STATUS_MASK;
+		ioc_status &= MPI3_IOCSTATUS_STATUS_MASK;
 		break;
 	case MPI3_REPLY_DESCRIPT_FLAGS_TYPE_ADDRESS_REPLY:
 		addr_desc = (Mpi3AddressReplyDescriptor_t *)reply_desc;
@@ -4520,10 +4742,9 @@ void mpi3mr_process_op_reply_desc(struct mpi3mr_softc *sc,
 		resp_data = scsi_reply->ResponseData;
 		sense_buf = mpi3mr_get_sensebuf_virt_addr(sc,
 		    scsi_reply->SenseDataBufferAddress);
-		if (ioc_status &
-		    MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_LOGINFOAVAIL)
+		if (ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
 			ioc_loginfo = scsi_reply->IOCLogInfo;
-		ioc_status &= MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_STATUS_MASK;
+		ioc_status &= MPI3_IOCSTATUS_STATUS_MASK;
 		if (sense_state == MPI3_SCSI_STATE_SENSE_BUFF_Q_EMPTY)
 			mpi3mr_dprint(sc, MPI3MR_ERROR, "Ran out of sense buffers\n");
 
@@ -4725,7 +4946,7 @@ void mpi3mr_process_op_reply_desc(struct mpi3mr_softc *sc,
 		csio->resid = cm->length - le32toh(xfer_count);
 	case MPI3_IOCSTATUS_SCSI_RECOVERED_ERROR:
 	case MPI3_IOCSTATUS_SUCCESS:
-		if ((scsi_reply->IOCStatus & MPI3_REPLY_DESCRIPT_STATUS_IOCSTATUS_STATUS_MASK) ==
+		if ((scsi_reply->IOCStatus & MPI3_IOCSTATUS_STATUS_MASK) ==
 		    MPI3_IOCSTATUS_SCSI_RECOVERED_ERROR)
 			mpi3mr_dprint(sc, MPI3MR_XINFO, "func: %s line: %d recovered error\n",  __func__, __LINE__);
 
@@ -4841,7 +5062,7 @@ int mpi3mr_complete_io_cmd(struct mpi3mr_softc *sc,
 	U32 num_op_replies = 0;
 	U64 reply_dma = 0;
 	Mpi3DefaultReplyDescriptor_t *reply_desc;
-	U16 req_qid = 0;
+	U16 req_qid = 0, threshold_comps = 0;
 
 	mtx_lock_spin(&op_reply_q->q_lock);
 	if (op_reply_q->in_use == false) {
@@ -4886,6 +5107,12 @@ int mpi3mr_complete_io_cmd(struct mpi3mr_softc *sc,
 		if ((reply_desc->ReplyFlags &
 		     MPI3_REPLY_DESCRIPT_FLAGS_PHASE_MASK) != exp_phase)
 			break;
+
+		if (++threshold_comps == MPI3MR_THRESHOLD_REPLY_COUNT) {
+			mpi3mr_regwrite(sc, MPI3_SYSIF_OPER_REPLY_Q_N_CI_OFFSET(op_reply_q->qid), reply_ci);
+			threshold_comps = 0;
+		}
+
 	} while (1);
 
 
@@ -4941,7 +5168,7 @@ mpi3mr_alloc_requests(struct mpi3mr_softc *sc)
 	struct mpi3mr_cmd *cmd;
 	int i, j, nsegs, ret;
 	
-	nsegs = MPI3MR_SG_DEPTH;
+	nsegs = sc->max_sgl_entries;
 	ret = bus_dma_tag_create( sc->mpi3mr_parent_dmat,    /* parent */
 				1, 0,			/* algnmnt, boundary */
 				sc->dma_loaddr,		/* lowaddr */
@@ -5211,6 +5438,184 @@ out_failed:
 	mpi3mr_free_ioctl_dma_memory(sc);
 }
 
+static void inline
+mpi3mr_free_dma_mem(struct mpi3mr_softc *sc,
+		    struct dma_memory_desc *mem_desc)
+{
+	if (mem_desc->dma_addr)
+		bus_dmamap_unload(mem_desc->tag, mem_desc->dmamap);
+
+	if (mem_desc->addr != NULL) {
+		bus_dmamem_free(mem_desc->tag, mem_desc->addr, mem_desc->dmamap);
+		mem_desc->addr = NULL;
+	}
+
+	if (mem_desc->tag != NULL)
+		bus_dma_tag_destroy(mem_desc->tag);
+}
+
+static int
+mpi3mr_alloc_dma_mem(struct mpi3mr_softc *sc,
+		     struct dma_memory_desc *mem_desc)
+{
+	int retval;
+
+	if (bus_dma_tag_create(sc->mpi3mr_parent_dmat,  /* parent */
+				4, 0,			/* algnmnt, boundary */
+				sc->dma_loaddr,		/* lowaddr */
+				sc->dma_hiaddr,		/* highaddr */
+				NULL, NULL,		/* filter, filterarg */
+				mem_desc->size,		/* maxsize */
+				1,			/* nsegments */
+				mem_desc->size,		/* maxsize */
+				0,			/* flags */
+				NULL, NULL,		/* lockfunc, lockarg */
+				&mem_desc->tag)) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Cannot allocate DMA tag\n", __func__);
+		return ENOMEM;
+	}
+
+	if (bus_dmamem_alloc(mem_desc->tag, (void **)&mem_desc->addr,
+			     BUS_DMA_NOWAIT, &mem_desc->dmamap)) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Cannot allocate DMA memory\n", __func__);
+		retval = ENOMEM;
+		goto out;
+	}
+
+	bzero(mem_desc->addr, mem_desc->size);
+
+	bus_dmamap_load(mem_desc->tag, mem_desc->dmamap, mem_desc->addr, mem_desc->size,
+			mpi3mr_memaddr_cb, &mem_desc->dma_addr, BUS_DMA_NOWAIT);
+
+	if (!mem_desc->addr) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Cannot load DMA map\n", __func__);
+		retval = ENOMEM;
+		goto out;
+	}
+	return 0;
+out:
+	mpi3mr_free_dma_mem(sc, mem_desc);
+	return retval;
+}
+
+static int
+mpi3mr_post_cfg_req(struct mpi3mr_softc *sc, Mpi3ConfigRequest_t *cfg_req)
+{
+	int retval;
+
+	mtx_lock(&sc->cfg_cmds.completion.lock);
+	if (sc->cfg_cmds.state & MPI3MR_CMD_PENDING) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Issue cfg request: cfg command is in use\n");
+		mtx_unlock(&sc->cfg_cmds.completion.lock);
+		return -1;
+	}
+
+	sc->cfg_cmds.state = MPI3MR_CMD_PENDING;
+	sc->cfg_cmds.is_waiting = 1;
+	sc->cfg_cmds.callback = NULL;
+	sc->cfg_cmds.ioc_status = 0;
+	sc->cfg_cmds.ioc_loginfo = 0;
+
+	cfg_req->HostTag = htole16(MPI3MR_HOSTTAG_CFGCMDS);
+	cfg_req->Function = MPI3_FUNCTION_CONFIG;
+	cfg_req->PageType = MPI3_CONFIG_PAGETYPE_DRIVER;
+	cfg_req->PageNumber = 1;
+	cfg_req->PageAddress = 0;
+
+	init_completion(&sc->cfg_cmds.completion);
+
+	retval = mpi3mr_submit_admin_cmd(sc, cfg_req, sizeof(*cfg_req));
+	if (retval) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "Issue cfg request: Admin Post failed\n");
+		goto out;
+	}
+
+	wait_for_completion_timeout(&sc->cfg_cmds.completion,
+				   (MPI3MR_INTADMCMD_TIMEOUT));
+
+	if (!(sc->cfg_cmds.state & MPI3MR_CMD_COMPLETE)) {
+		if (!(sc->cfg_cmds.state & MPI3MR_CMD_RESET)) {
+			mpi3mr_dprint(sc, MPI3MR_ERROR, "config request command timed out\n");
+			mpi3mr_check_rh_fault_ioc(sc, MPI3MR_RESET_FROM_CFG_REQ_TIMEOUT);
+		}
+		retval = -1;
+		sc->cfg_cmds.is_waiting = 0;
+		goto out;
+	}
+
+	if ((sc->cfg_cmds.ioc_status & MPI3_IOCSTATUS_STATUS_MASK) !=
+	     MPI3_IOCSTATUS_SUCCESS ) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "config request failed, IOCStatus(0x%04x) "
+			      " Loginfo(0x%08x) \n",(sc->cfg_cmds.ioc_status &
+			      MPI3_IOCSTATUS_STATUS_MASK), sc->cfg_cmds.ioc_loginfo);
+		retval = -1;
+	}
+
+out:
+	sc->cfg_cmds.state = MPI3MR_CMD_NOTUSED;
+	mtx_unlock(&sc->cfg_cmds.completion.lock);
+	return retval;
+}
+
+static int mpi3mr_process_cfg_req(struct mpi3mr_softc *sc,
+				  Mpi3ConfigRequest_t *cfg_req,
+				  Mpi3ConfigPageHeader_t *cfg_hdr,
+				  void *cfg_buf, U32 cfg_buf_sz)
+{
+	int retval;
+	struct dma_memory_desc mem_desc = {0};
+
+	if (cfg_req->Action == MPI3_CONFIG_ACTION_PAGE_HEADER)
+		mem_desc.size = sizeof(Mpi3ConfigPageHeader_t);
+	else {
+		mem_desc.size = le16toh(cfg_hdr->PageLength) * 4;
+		cfg_req->PageLength = cfg_hdr->PageLength;
+		cfg_req->PageVersion = cfg_hdr->PageVersion;
+	}
+
+	retval = mpi3mr_alloc_dma_mem(sc, &mem_desc);
+	if (retval) {
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Failed to allocate DMA memory\n", __func__);
+		return retval;
+	}
+
+	mpi3mr_add_sg_single(&cfg_req->SGL, MPI3MR_SGEFLAGS_SYSTEM_SIMPLE_END_OF_LIST,
+			     mem_desc.size, mem_desc.dma_addr);
+
+	retval = mpi3mr_post_cfg_req(sc, cfg_req);
+	if (retval)
+		mpi3mr_dprint(sc, MPI3MR_ERROR, "%s: Failed to post config request\n", __func__);
+	else
+		memcpy(cfg_buf, mem_desc.addr, min(mem_desc.size, cfg_buf_sz));
+
+	mpi3mr_free_dma_mem(sc, &mem_desc);
+	return retval;
+}
+
+int mpi3mr_cfg_get_driver_pg1(struct mpi3mr_softc *sc)
+{
+	int retval;
+	Mpi3DriverPage1_t driver_pg1 = {0};
+	Mpi3ConfigPageHeader_t cfg_hdr = {0};
+	Mpi3ConfigRequest_t cfg_req = {0};
+
+	cfg_req.Action = MPI3_CONFIG_ACTION_PAGE_HEADER;
+	retval = mpi3mr_process_cfg_req(sc, &cfg_req, NULL, &cfg_hdr, sizeof(cfg_hdr));
+	if (retval)
+		goto error;
+
+	cfg_req.Action = MPI3_CONFIG_ACTION_READ_CURRENT;
+	retval = mpi3mr_process_cfg_req(sc, &cfg_req, &cfg_hdr, &driver_pg1, sizeof(driver_pg1));
+
+error:
+	if (!retval && driver_pg1.TimeStampUpdate)
+		sc->ts_update_interval = driver_pg1.TimeStampUpdate;
+	else
+		sc->ts_update_interval = MPI3MR_TSUPDATE_INTERVAL;
+
+	return retval;
+}
+
 void
 mpi3mr_destory_mtx(struct mpi3mr_softc *sc)
 {
@@ -5242,6 +5647,9 @@ mpi3mr_destory_mtx(struct mpi3mr_softc *sc)
 	if (mtx_initialized(&sc->init_cmds.completion.lock))
 		mtx_destroy(&sc->init_cmds.completion.lock);
 	
+	if (mtx_initialized(&sc->cfg_cmds.completion.lock))
+		mtx_destroy(&sc->cfg_cmds.completion.lock);
+
 	if (mtx_initialized(&sc->ioctl_cmds.completion.lock))
 		mtx_destroy(&sc->ioctl_cmds.completion.lock);
 	
@@ -5420,6 +5828,11 @@ mpi3mr_free_mem(struct mpi3mr_softc *sc)
 		sc->init_cmds.reply = NULL;
 	}
 	
+	if (sc->cfg_cmds.reply) {
+		free(sc->cfg_cmds.reply, M_MPI3MR);
+		sc->cfg_cmds.reply = NULL;
+	}
+
 	if (sc->ioctl_cmds.reply) {
 		free(sc->ioctl_cmds.reply, M_MPI3MR);
 		sc->ioctl_cmds.reply = NULL;
@@ -5537,6 +5950,9 @@ static void mpi3mr_flush_drv_cmds(struct mpi3mr_softc *sc)
 	cmdptr = &sc->init_cmds;
 	mpi3mr_drv_cmd_comp_reset(sc, cmdptr);
 
+	cmdptr = &sc->cfg_cmds;
+	mpi3mr_drv_cmd_comp_reset(sc, cmdptr);
+
 	cmdptr = &sc->ioctl_cmds;
 	mpi3mr_drv_cmd_comp_reset(sc, cmdptr);
 
@@ -5580,6 +5996,7 @@ static void mpi3mr_memset_buffers(struct mpi3mr_softc *sc)
 	memset(sc->admin_reply, 0, sc->admin_reply_q_sz);
 
 	memset(sc->init_cmds.reply, 0, sc->reply_sz);
+	memset(sc->cfg_cmds.reply, 0, sc->reply_sz);
 	memset(sc->ioctl_cmds.reply, 0, sc->reply_sz);
 	memset(sc->host_tm_cmds.reply, 0, sc->reply_sz);
 	memset(sc->pel_cmds.reply, 0, sc->reply_sz);
@@ -5643,6 +6060,7 @@ static void mpi3mr_invalidate_devhandles(struct mpi3mr_softc *sc)
 			target->io_throttle_enabled = 0;
 			target->io_divert = 0;
 			target->throttle_group = NULL;
+			target->ws_len = 0;
 		}
 	}
 	mtx_unlock_spin(&sc->target_lock);
@@ -5669,6 +6087,8 @@ static void mpi3mr_rfresh_tgtdevs(struct mpi3mr_softc *sc)
 			if (target->exposed_to_os)
 				mpi3mr_remove_device_from_os(sc, target->dev_handle);
 			mpi3mr_remove_device_from_list(sc, target, true);
+		} else if (target->is_hidden && target->exposed_to_os) {
+				mpi3mr_remove_device_from_os(sc, target->dev_handle);
 		}
 	}
 
@@ -5694,6 +6114,8 @@ static void mpi3mr_flush_io(struct mpi3mr_softc *sc)
 			if (cmd->callout_owner) {
 				ccb = (union ccb *)(cmd->ccb);
 				ccb->ccb_h.status = CAM_SCSI_BUS_RESET;
+				mpi3mr_atomic_dec(&sc->fw_outstanding);
+				mpi3mr_atomic_dec(&cmd->targ->outstanding);
 				mpi3mr_cmd_done(sc, cmd);
 			} else {
 				cmd->ccb = NULL;
@@ -5701,23 +6123,6 @@ static void mpi3mr_flush_io(struct mpi3mr_softc *sc)
 			}
 		}
 	}
-}
-/**
- * mpi3mr_clear_reset_history - Clear reset history
- * @sc: Adapter instance reference
- *
- * Write the reset history bit in IOC Status to clear the bit,
- * if it is already set.
- *
- * Return: Nothing.
- */
-static inline void mpi3mr_clear_reset_history(struct mpi3mr_softc *sc)
-{
-	U32 ioc_status;
-
-	ioc_status = mpi3mr_regread(sc, MPI3_SYSIF_IOC_STATUS_OFFSET);
-	if (ioc_status & MPI3_SYSIF_IOC_STATUS_RESET_HISTORY)
-		mpi3mr_regwrite(sc, MPI3_SYSIF_IOC_STATUS_OFFSET, ioc_status);
 }
 
 /**
@@ -5753,11 +6158,11 @@ static inline void mpi3mr_set_diagsave(struct mpi3mr_softc *sc)
  * Return: 0 on success, non-zero on failure.
  */
 static int mpi3mr_issue_reset(struct mpi3mr_softc *sc, U16 reset_type,
-	U32 reset_reason)
+	U16 reset_reason)
 {
 	int retval = -1;
 	U8 unlock_retry_count = 0;
-	U32 host_diagnostic, ioc_status, ioc_config;
+	U32 host_diagnostic, ioc_status, ioc_config, scratch_pad0;
 	U32 timeout = MPI3MR_RESET_ACK_TIMEOUT * 10;
 
 	if ((reset_type != MPI3_SYSIF_HOST_DIAG_RESET_ACTION_SOFT_RESET) &&
@@ -5811,7 +6216,14 @@ static int mpi3mr_issue_reset(struct mpi3mr_softc *sc, U16 reset_type,
 		    unlock_retry_count, host_diagnostic);
 	} while (!(host_diagnostic & MPI3_SYSIF_HOST_DIAG_DIAG_WRITE_ENABLE));
 
-	mpi3mr_regwrite(sc, MPI3_SYSIF_SCRATCHPAD0_OFFSET, reset_reason);
+	if (reset_type == MPI3_SYSIF_HOST_DIAG_RESET_ACTION_DIAG_FAULT)
+		mpi3mr_set_diagsave(sc);
+
+	scratch_pad0 = ((MPI3MR_RESET_REASON_OSTYPE_FREEBSD <<
+			MPI3MR_RESET_REASON_OSTYPE_SHIFT) |
+			(sc->facts.ioc_num <<
+			MPI3MR_RESET_REASON_IOCNUM_SHIFT) | reset_reason);
+	mpi3mr_regwrite(sc, MPI3_SYSIF_SCRATCHPAD0_OFFSET, scratch_pad0);
 	mpi3mr_regwrite(sc, MPI3_SYSIF_HOST_DIAG_OFFSET, host_diagnostic | reset_type);
 	
 	if (reset_type == MPI3_SYSIF_HOST_DIAG_RESET_ACTION_SOFT_RESET) {
@@ -5890,7 +6302,7 @@ inline void mpi3mr_cleanup_event_taskq(struct mpi3mr_softc *sc)
  * Return: 0 on success, non-zero on failure.
  */
 int mpi3mr_soft_reset_handler(struct mpi3mr_softc *sc,
-	U32 reset_reason, bool snapdump)
+	U16 reset_reason, bool snapdump)
 {
 	int retval = 0, i = 0;
 	enum mpi3mr_iocstate ioc_state;
@@ -5929,6 +6341,9 @@ int mpi3mr_soft_reset_handler(struct mpi3mr_softc *sc,
 
 	sc->reset_in_progress = 1;
 	sc->block_ioctls = 1;
+
+	if (sc->timestamp_thread_active)
+		wakeup(&sc->timestamp_chan);
 
 	while (mpi3mr_atomic_read(&sc->pend_ioctls) && (i < PEND_IOCTLS_COMP_WAIT_TIME)) {
 		ioc_state = mpi3mr_get_iocstate(sc);
@@ -5997,10 +6412,14 @@ out:
 			mpi3mr_app_send_aen(sc);
 		}
 	} else {
-		mpi3mr_issue_reset(sc,
-		    MPI3_SYSIF_HOST_DIAG_RESET_ACTION_DIAG_FAULT, reset_reason);
+		ioc_state = mpi3mr_get_iocstate(sc);
+		if (ioc_state != MRIOC_STATE_FAULT)
+			mpi3mr_issue_reset(sc,
+			    MPI3_SYSIF_HOST_DIAG_RESET_ACTION_DIAG_FAULT, reset_reason);
+
 		sc->unrecoverable = 1;
 		sc->reset_in_progress = 0;
+		sc->block_ioctls = 0;
 	}
 
 	mpi3mr_dprint(sc, MPI3MR_INFO, "Soft Reset: %s\n", ((retval == 0) ? "SUCCESS" : "FAILED"));
