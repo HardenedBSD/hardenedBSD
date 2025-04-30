@@ -90,7 +90,6 @@ struct pcicfg_vpd {
 struct pcicfg_msi {
     uint16_t	msi_ctrl;	/* Message Control */
     uint8_t	msi_location;	/* Offset of MSI capability registers. */
-    uint8_t	msi_msgnum;	/* Number of messages */
     int		msi_alloc;	/* Number of allocated messages. */
     uint64_t	msi_addr;	/* Contents of address register. */
     uint16_t	msi_data;	/* Contents of data register. */
@@ -111,14 +110,13 @@ struct msix_table_entry {
 
 struct pcicfg_msix {
     uint16_t	msix_ctrl;	/* Message Control */
-    uint16_t	msix_msgnum;	/* Number of messages */
     uint8_t	msix_location;	/* Offset of MSI-X capability registers. */
     uint8_t	msix_table_bar;	/* BAR containing vector table. */
     uint8_t	msix_pba_bar;	/* BAR containing PBA. */
     uint32_t	msix_table_offset;
     uint32_t	msix_pba_offset;
-    int		msix_alloc;	/* Number of allocated vectors. */
-    int		msix_table_len;	/* Length of virtual table. */
+    u_int	msix_alloc;	/* Number of allocated vectors. */
+    u_int	msix_table_len;	/* Length of virtual table. */
     struct msix_table_entry *msix_table; /* Virtual table. */
     struct msix_vector *msix_vectors;	/* Array of allocated vectors. */
     struct resource *msix_table_res;	/* Resource containing vector table. */
@@ -687,6 +685,9 @@ void	pci_restore_state(device_t dev);
 void	pci_save_state(device_t dev);
 int	pci_set_max_read_req(device_t dev, int size);
 int	pci_power_reset(device_t dev);
+void	pci_clear_pme(device_t dev);
+void	pci_enable_pme(device_t dev);
+bool	pci_has_pm(device_t dev);
 uint32_t pcie_read_config(device_t dev, int reg, int width);
 void	pcie_write_config(device_t dev, int reg, uint32_t value, int width);
 uint32_t pcie_adjust_config(device_t dev, int reg, uint32_t mask,
