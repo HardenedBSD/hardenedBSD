@@ -31,9 +31,12 @@
 #ifndef _SYS_KASSERT_H_
 #define	_SYS_KASSERT_H_
 
+#include <sys/_types.h>
 #include <sys/cdefs.h>
 
 #ifdef _KERNEL
+#include <sys/types.h>		/* for bool */
+
 extern const char *panicstr;	/* panic message */
 extern bool panicked;
 #define	KERNEL_PANICKED()	__predict_false(panicked)
