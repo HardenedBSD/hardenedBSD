@@ -141,7 +141,6 @@ BADHDRS= \
 	sys/vdso.h \
 	sys/vmmeter.h \
 	sys/vnode.h \
-	net/bpf.h \
 	net/bpf_buffer.h \
 	net/bpf_jitter.h \
 	net/bpf_zerocopy.h \
@@ -257,7 +256,6 @@ BADHDRS= \
 	netinet/in_pcb.h \
 	netinet/in_pcb_var.h \
 	netinet/in_rss.h \
-	netinet/in_systm.h \
 	netinet/in_var.h \
 	netinet/ip.h \
 	netinet/ip6.h \
