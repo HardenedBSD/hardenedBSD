@@ -511,8 +511,7 @@ SYSCTL_INT(_debug, OID_AUTO, vfscache, CTLFLAG_RW, &doingcache, 0,
 #endif
 
 /* Export size information to userland */
-SYSCTL_INT(_debug_sizeof, OID_AUTO, namecache, CTLFLAG_RD, SYSCTL_NULL_INT_PTR,
-    sizeof(struct namecache), "sizeof(struct namecache)");
+SYSCTL_SIZEOF_STRUCT(namecache);
 
 /*
  * The new name cache statistics
@@ -2686,7 +2685,7 @@ nchinit(void *dummy __unused)
 
 	ncsize = desiredvnodes * ncsizefactor;
 	cache_recalc_neg_min();
-	nchashtbl = nchinittbl(desiredvnodes * 2, &nchash);
+	nchashtbl = nchinittbl(ncsize, &nchash);
 	ncbuckethash = cache_roundup_2(mp_ncpus * mp_ncpus) - 1;
 	if (ncbuckethash < 7) /* arbitrarily chosen to avoid having one lock */
 		ncbuckethash = 7;
