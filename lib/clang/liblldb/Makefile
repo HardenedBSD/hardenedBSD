@@ -2,13 +2,7 @@
 .include <bsd.init.mk>
 .include "../lldb.pre.mk"
 
-PACKAGE=	lldb
-SHLIB_CXX=	lldb
-SHLIB_MAJOR=	19
-PRIVATELIB=
-
-SHARED_CXXFLAGS+=	-UPIC # To avoid compile errors
-
+LIB=		lldb
 SRCDIR=		lldb/source
 
 CFLAGS+=	-I${LLDB_SRCS}/include
@@ -751,19 +745,6 @@ SRCS+=		Utility/VMRange.cpp
 SRCS+=		Utility/XcodeSDK.cpp
 SRCS+=		Version/Version.cpp
 
-LIBDEPS+=	clang
-LIBDEPS+=	llvm
-
-LIBPRIV=	private
-LIBEXT=		so
-
-.for lib in ${LIBDEPS}
-DPADD+=		${OBJTOP}/lib/clang/lib${lib}/lib${LIBPRIV}${lib}.${LIBEXT}
-LDADD+=		${OBJTOP}/lib/clang/lib${lib}/lib${LIBPRIV}${lib}.${LIBEXT}
-.endfor
-
-LIBADD+=	kvm
-
 LLDB_TBLGEN?=	lldb-tblgen
 
 CommandOptions.inc: ${LLDB_SRCS}/source/Commands/Options.td
@@ -798,6 +779,8 @@ DPSRCS+=	${TGHDRS}
 CLEANFILES+=	${TGHDRS} ${TGHDRS:C/$/.d/}
 
 .include "../clang.build.mk"
+
+INTERNALLIB=
 
 # Building lldb's bindings requires swig, but we do not want to include it in
 # the FreeBSD base system (as a build tool) because it has non-trivial
