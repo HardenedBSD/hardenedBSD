@@ -2215,17 +2215,31 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 	}
 
 	pf_mv_kpool(&V_pf_pabuf[0], &rule->nat.list);
-	pf_mv_kpool(&V_pf_pabuf[1], &rule->rdr.list);
-	pf_mv_kpool(&V_pf_pabuf[2], &rule->route.list);
-	if (((((rule->action == PF_NAT) || (rule->action == PF_RDR) ||
-	    (rule->action == PF_BINAT)) && rule->anchor == NULL) ||
-	    (rule->rt > PF_NOPFROUTE)) &&
-	    (TAILQ_FIRST(&rule->rdr.list) == NULL &&
-	     TAILQ_FIRST(&rule->route.list) == NULL))
-		error = EINVAL;
 
-	if (rule->action == PF_PASS && rule->rdr.opts & PF_POOL_STICKYADDR &&
-	    !rule->keep_state) {
+	/*
+	 * Old version of pfctl provide route redirection pools in single
+	 * common redirection pool rdr. New versions use rdr only for
+	 * rdr-to rules.
+	 */
+	if (rule->rt > PF_NOPFROUTE && TAILQ_EMPTY(&V_pf_pabuf[2])) {
+		pf_mv_kpool(&V_pf_pabuf[1], &rule->route.list);
+	} else {
+		pf_mv_kpool(&V_pf_pabuf[1], &rule->rdr.list);
+		pf_mv_kpool(&V_pf_pabuf[2], &rule->route.list);
+	}
+
+	if (((rule->action == PF_NAT) || (rule->action == PF_RDR) ||
+	    (rule->action == PF_BINAT))	&& rule->anchor == NULL &&
+	    TAILQ_FIRST(&rule->rdr.list) == NULL) {
+		error = EINVAL;
+	}
+
+	if (rule->rt > PF_NOPFROUTE && (TAILQ_FIRST(&rule->route.list) == NULL)) {
+		error = EINVAL;
+	}
+
+	if (rule->action == PF_PASS && (rule->rdr.opts & PF_POOL_STICKYADDR ||
+	    rule->nat.opts & PF_POOL_STICKYADDR) && !rule->keep_state) {
 		error = EINVAL;
 	}
 
@@ -2523,7 +2537,8 @@ pf_ioctl_set_limit(int index, unsigned int limit, unsigned int *old_limit)
 		PF_RULES_WUNLOCK();
 		return (EINVAL);
 	}
-	uma_zone_set_max(V_pf_limits[index].zone, limit);
+	uma_zone_set_max(V_pf_limits[index].zone,
+	    limit == 0 ? INT_MAX : limit);
 	if (old_limit != NULL)
 		*old_limit = V_pf_limits[index].limit;
 	V_pf_limits[index].limit = limit;
@@ -6376,9 +6391,9 @@ shutdown_pf(void)
 			for (rs_num = 0; rs_num < PF_RULESET_MAX; ++rs_num) {
 				if ((error = pf_begin_rules(&t[rs_num], rs_num,
 				    anchor->path)) != 0) {
-					DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: "
+					DPFPRINTF(PF_DEBUG_MISC, ("%s: "
 					    "anchor.path=%s rs_num=%d\n",
-					    anchor->path, rs_num));
+					    __func__, anchor->path, rs_num));
 					goto error;	/* XXX: rollback? */
 				}
 			}
@@ -6400,8 +6415,9 @@ shutdown_pf(void)
 				eth_anchor->refcnt = 1;
 			if ((error = pf_begin_eth(&t[0], eth_anchor->path))
 			    != 0) {
-				DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: eth "
-				    "anchor.path=%s\n", eth_anchor->path));
+				DPFPRINTF(PF_DEBUG_MISC, ("%s: eth "
+				    "anchor.path=%s\n", __func__,
+				    eth_anchor->path));
 				goto error;
 			}
 			error = pf_commit_eth(t[0], eth_anchor->path);
@@ -6410,27 +6426,27 @@ shutdown_pf(void)
 
 		if ((error = pf_begin_rules(&t[0], PF_RULESET_SCRUB, &nn))
 		    != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: SCRUB\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: SCRUB\n", __func__));
 			break;
 		}
 		if ((error = pf_begin_rules(&t[1], PF_RULESET_FILTER, &nn))
 		    != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: FILTER\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: FILTER\n", __func__));
 			break;		/* XXX: rollback? */
 		}
 		if ((error = pf_begin_rules(&t[2], PF_RULESET_NAT, &nn))
 		    != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: NAT\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: NAT\n", __func__));
 			break;		/* XXX: rollback? */
 		}
 		if ((error = pf_begin_rules(&t[3], PF_RULESET_BINAT, &nn))
 		    != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: BINAT\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: BINAT\n", __func__));
 			break;		/* XXX: rollback? */
 		}
 		if ((error = pf_begin_rules(&t[4], PF_RULESET_RDR, &nn))
 		    != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: RDR\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: RDR\n", __func__));
 			break;		/* XXX: rollback? */
 		}
 
@@ -6449,7 +6465,7 @@ shutdown_pf(void)
 			break;
 
 		if ((error = pf_begin_eth(&t[0], &nn)) != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: eth\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: eth\n", __func__));
 			break;
 		}
 		error = pf_commit_eth(t[0], &nn);
@@ -6457,7 +6473,7 @@ shutdown_pf(void)
 
 #ifdef ALTQ
 		if ((error = pf_begin_altq(&t[0])) != 0) {
-			DPFPRINTF(PF_DEBUG_MISC, ("shutdown_pf: ALTQ\n"));
+			DPFPRINTF(PF_DEBUG_MISC, ("%s: ALTQ\n", __func__));
 			break;
 		}
 		pf_commit_altq(t[0]);

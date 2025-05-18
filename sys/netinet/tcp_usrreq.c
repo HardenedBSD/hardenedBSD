@@ -146,7 +146,7 @@ tcp_bblog_pru(struct tcpcb *tp, uint32_t pru, int error)
 }
 
 /*
- * TCP attaches to socket via pru_attach(), reserving space,
+ * TCP attaches to socket via pr_attach(), reserving space,
  * and an internet control block.
  */
 static int
@@ -907,8 +907,8 @@ out:
 /*
  * Do a send by putting data in output queue and updating urgent
  * marker if URG set.  Possibly send more data.  Unlike the other
- * pru_*() routines, the mbuf chains are our responsibility.  We
- * must either enqueue them or free them.  The other pru_* routines
+ * pr_*() routines, the mbuf chains are our responsibility.  We
+ * must either enqueue them or free them.  The other pr_*() routines
  * generally are caller-frees.
  */
 static int
@@ -1419,6 +1419,7 @@ struct protosw tcp_protosw = {
 	.pr_rcvd =		tcp_usr_rcvd,
 	.pr_rcvoob =		tcp_usr_rcvoob,
 	.pr_send =		tcp_usr_send,
+	.pr_sendfile_wait =	sendfile_wait_generic,
 	.pr_ready =		tcp_usr_ready,
 	.pr_shutdown =		tcp_usr_shutdown,
 	.pr_sockaddr =		in_getsockaddr,
@@ -1447,6 +1448,7 @@ struct protosw tcp6_protosw = {
 	.pr_rcvd =		tcp_usr_rcvd,
 	.pr_rcvoob =		tcp_usr_rcvoob,
 	.pr_send =		tcp_usr_send,
+	.pr_sendfile_wait =	sendfile_wait_generic,
 	.pr_ready =		tcp_usr_ready,
 	.pr_shutdown =		tcp_usr_shutdown,
 	.pr_sockaddr =		in6_mapped_sockaddr,

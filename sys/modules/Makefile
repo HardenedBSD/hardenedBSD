@@ -102,13 +102,14 @@ SUBDIR=	\
 	dummymbuf \
 	dummynet \
 	${_dwwdt} \
-	${_e6000sw} \
+	e6000sw \
 	${_efirt} \
 	${_em} \
 	${_ena} \
 	${_enic} \
 	${_enetc} \
 	${_et} \
+	etherswitch \
 	evdev \
 	${_exca} \
 	ext2fs \
@@ -251,6 +252,7 @@ SUBDIR=	\
 	mem \
 	mfi \
 	mii \
+	miiproxy \
 	mlx \
 	mlxfw \
 	${_mlx4} \
@@ -710,7 +712,6 @@ _rockchip=	rockchip
 .if !empty(OPT_FDT)
 _sdhci_fdt=	sdhci_fdt
 .endif
-_e6000sw=	e6000sw
 _neta=		neta
 .endif
 

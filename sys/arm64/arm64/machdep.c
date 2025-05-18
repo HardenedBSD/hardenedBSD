@@ -38,7 +38,6 @@
 #include <sys/cons.h>
 #include <sys/cpu.h>
 #include <sys/csan.h>
-#include <sys/devmap.h>
 #include <sys/efi.h>
 #include <sys/efi_map.h>
 #include <sys/exec.h>
@@ -513,7 +512,7 @@ static void
 exclude_efi_memreserve(vm_paddr_t efi_systbl_phys)
 {
 	struct efi_systbl *systbl;
-	struct uuid efi_memreserve = LINUX_EFI_MEMRESERVE_TABLE;
+	efi_guid_t efi_memreserve = LINUX_EFI_MEMRESERVE_TABLE;
 
 	systbl = (struct efi_systbl *)PHYS_TO_DMAP(efi_systbl_phys);
 	if (systbl == NULL) {
@@ -542,7 +541,7 @@ exclude_efi_memreserve(vm_paddr_t efi_systbl_phys)
 		cfgtbl = efi_early_map(systbl->st_cfgtbl + i * sizeof(*cfgtbl));
 		if (cfgtbl == NULL)
 			panic("Can't map the config table entry %d\n", i);
-		if (memcmp(&cfgtbl->ct_uuid, &efi_memreserve, sizeof(struct uuid)) != 0)
+		if (memcmp(&cfgtbl->ct_guid, &efi_memreserve, sizeof(efi_guid_t)) != 0)
 			continue;
 
 		/*
@@ -851,8 +850,6 @@ initarm(struct arm64_bootparams *abp)
 #endif
 
 	physmem_init_kernel_globals();
-
-	devmap_bootstrap();
 
 	valid = bus_probe();
 

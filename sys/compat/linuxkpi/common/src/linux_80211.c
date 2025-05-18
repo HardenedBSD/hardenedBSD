@@ -1504,7 +1504,8 @@ lkpi_iv_key_set(struct ieee80211vap *vap, const struct ieee80211_key *k)
 		exp_flags = (IEEE80211_KEY_FLAG_PAIRWISE |
 		    IEEE80211_KEY_FLAG_PUT_IV_SPACE |
 		    IEEE80211_KEY_FLAG_GENERATE_IV |
-		    IEEE80211_KEY_FLAG_GENERATE_IV_MGMT);	/* Only needs IV geeration for MGMT frames. */
+		    IEEE80211_KEY_FLAG_GENERATE_IV_MGMT |	/* Only needs IV geeration for MGMT frames. */
+		    IEEE80211_KEY_FLAG_SW_MGMT_TX);		/* MFP in software */
 		break;
 	}
 	if ((kc->flags & ~exp_flags) != 0)
@@ -2020,6 +2021,7 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	struct ieee80211_prep_tx_info prep_tx_info;
 	uint32_t changed;
 	int error;
+	bool synched;
 
 	/*
 	 * In here we use vap->iv_bss until lvif->lvif_bss is set.
@@ -2210,14 +2212,6 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	    __func__, ni, ni->ni_drv_data));
 	lsta = ni->ni_drv_data;
 
-	/*
-	 * Make sure in case the sta did not change and we re-add it,
-	 * that we can tx again.
-	 */
-	LKPI_80211_LSTA_TXQ_LOCK(lsta);
-	lsta->txq_ready = true;
-	LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
-
 	/* Insert the [l]sta into the list of known stations. */
 	list_add_tail(&lsta->lsta_list, &lvif->lsta_list);
 
@@ -2291,10 +2285,10 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 	ieee80211_ref_node(lsta->ni);
 	lvif->lvif_bss = lsta;
 	if (lsta->ni == vap->iv_bss) {
-		lvif->lvif_bss_synched = true;
+		lvif->lvif_bss_synched = synched = true;
 	} else {
 		/* Set to un-synched no matter what. */
-		lvif->lvif_bss_synched = false;
+		lvif->lvif_bss_synched = synched = false;
 		/*
 		 * We do not error as someone has to take us down.
 		 * If we are followed by a 2nd, new net80211::join1() going to
@@ -2304,9 +2298,20 @@ lkpi_sta_scan_to_auth(struct ieee80211vap *vap, enum ieee80211_state nstate, int
 		 * to net80211 as we never used the node beyond alloc()/free()
 		 * and we do not hold an extra reference for that anymore given
 		 * ni : lsta == 1:1.
+		 * Problem is if we do not error a MGMT/AUTH frame will be
+		 * sent from net80211::sta_newstate(); disable lsta queue below.
 		 */
 	}
 	LKPI_80211_LVIF_UNLOCK(lvif);
+	/*
+	 * Make sure in case the sta did not change and we re-added it,
+	 * that we can tx again but only if the vif/iv_bss are in sync.
+	 * Otherwise this should prevent the MGMT/AUTH frame from being
+	 * sent triggering a warning in iwlwifi.
+	 */
+	LKPI_80211_LSTA_TXQ_LOCK(lsta);
+	lsta->txq_ready = synched;
+	LKPI_80211_LSTA_TXQ_UNLOCK(lsta);
 	goto out_relocked;
 
 out:
@@ -5090,11 +5095,11 @@ lkpi_80211_txq_tx_one(struct lkpi_sta *lsta, struct mbuf *m)
 	skb_queue_tail(&ltxq->skbq, skb);
 #ifdef LINUXKPI_DEBUG_80211
 	if (linuxkpi_debug_80211 & D80211_TRACE_TX)
-		printf("%s:%d mo_wake_tx_queue :: %d %u lsta %p sta %p "
+		printf("%s:%d mo_wake_tx_queue :: %d %lu lsta %p sta %p "
 		    "ni %p %6D skb %p lxtq %p { qlen %u, ac %d tid %u } "
 		    "WAKE_TX_Q ac %d prio %u qmap %u\n",
 		    __func__, __LINE__,
-		    curthread->td_tid, (unsigned int)ticks,
+		    curthread->td_tid, jiffies,
 		    lsta, sta, ni, ni->ni_macaddr, ":", skb, ltxq,
 		    skb_queue_len(&ltxq->skbq), ltxq->txq.ac,
 		    ltxq->txq.tid, ac, skb->priority, skb->qmap);

@@ -1071,9 +1071,9 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 
 		if (coder->tell_any_check)
 			return LZMA_GET_CHECK;
-	}
 
-	// Fall through
+		FALLTHROUGH;
+	}
 
 	case SEQ_BLOCK_HEADER: {
 		const size_t in_old = *in_pos;
@@ -1208,9 +1208,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 		}
 
 		coder->sequence = SEQ_BLOCK_INIT;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_BLOCK_INIT: {
 		// Check if decoding is possible at all with the current
@@ -1297,9 +1296,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 		}
 
 		coder->sequence = SEQ_BLOCK_THR_INIT;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_BLOCK_THR_INIT: {
 		// We need to wait for a multiple conditions to become true
@@ -1502,9 +1500,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 		}
 
 		coder->sequence = SEQ_BLOCK_THR_RUN;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_BLOCK_THR_RUN: {
 		if (action == LZMA_FINISH && coder->fail_fast) {
@@ -1543,10 +1540,17 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 		// Read output from the output queue. Just like in
 		// SEQ_BLOCK_HEADER, we wait to fill the output buffer
 		// only if waiting_allowed was set to true in the beginning
-		// of this function (see the comment there).
+		// of this function (see the comment there) and there is
+		// no input available. In SEQ_BLOCK_HEADER, there is never
+		// input available when read_output_and_wait() is called,
+		// but here there can be when LZMA_FINISH is used, thus we
+		// need to check if *in_pos == in_size. Otherwise we would
+		// wait here instead of using the available input to start
+		// a new thread.
 		return_if_error(read_output_and_wait(coder, allocator,
 				out, out_pos, out_size,
-				NULL, waiting_allowed,
+				NULL,
+				waiting_allowed && *in_pos == in_size,
 				&wait_abs, &has_blocked));
 
 		if (coder->pending_error != LZMA_OK) {
@@ -1611,9 +1615,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 		coder->mem_direct_mode = coder->mem_next_filters;
 
 		coder->sequence = SEQ_BLOCK_DIRECT_RUN;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_BLOCK_DIRECT_RUN: {
 		const size_t in_old = *in_pos;
@@ -1650,8 +1653,7 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 			return LZMA_OK;
 
 		coder->sequence = SEQ_INDEX_DECODE;
-
-	// Fall through
+		FALLTHROUGH;
 
 	case SEQ_INDEX_DECODE: {
 		// If we don't have any input, don't call
@@ -1670,9 +1672,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 			return ret;
 
 		coder->sequence = SEQ_STREAM_FOOTER;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_STREAM_FOOTER: {
 		// Copy the Stream Footer to the internal buffer.
@@ -1712,9 +1713,8 @@ stream_decode_mt(void *coder_ptr, const lzma_allocator *allocator,
 			return LZMA_STREAM_END;
 
 		coder->sequence = SEQ_STREAM_PADDING;
+		FALLTHROUGH;
 	}
-
-	// Fall through
 
 	case SEQ_STREAM_PADDING:
 		assert(coder->concatenated);

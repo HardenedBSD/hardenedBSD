@@ -1087,6 +1087,8 @@
         ..
         col
         ..
+        column
+        ..
         comm
         ..
         compress
@@ -1164,6 +1166,8 @@
         lorder
         ..
         m4
+        ..
+        mail
         ..
         mkimg
         ..
@@ -1274,6 +1278,10 @@
         sa
         ..
         syslogd
+        ..
+        sysrc
+        ..
+        traceroute
         ..
     ..
 ..

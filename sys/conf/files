@@ -2465,6 +2465,11 @@ dev/mrsas/mrsas.c		optional mrsas
 dev/mrsas/mrsas_cam.c		optional mrsas
 dev/mrsas/mrsas_ioctl.c		optional mrsas
 dev/mrsas/mrsas_fp.c		optional mrsas
+dev/mpi3mr/mpi3mr.c		optional mpi3mr
+dev/mpi3mr/mpi3mr_pci.c		optional mpi3mr
+dev/mpi3mr/mpi3mr_app.c		optional mpi3mr
+dev/mpi3mr/mpi3mr_cam.c		optional mpi3mr \
+	compile-with "${LINUXKPI_C}"
 dev/msk/if_msk.c		optional msk
 dev/mvs/mvs.c			optional mvs
 dev/mvs/mvs_if.m		optional mvs
@@ -4598,6 +4603,8 @@ compat/linuxkpi/common/src/linux_dmi.c		optional compat_linuxkpi \
 compat/linuxkpi/common/src/linux_domain.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_firmware.c	optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_folio.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_fpu.c		optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
