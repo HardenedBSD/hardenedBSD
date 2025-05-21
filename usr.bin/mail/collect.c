@@ -85,16 +85,20 @@ collect(struct header *hp, int printheaders)
 	 * until we're in the main loop.
 	 */
 	(void)sigemptyset(&nset);
-	(void)sigaddset(&nset, SIGINT);
-	(void)sigaddset(&nset, SIGHUP);
+	if (value("interactive") != NULL) {
+		(void)sigaddset(&nset, SIGINT);
+		(void)sigaddset(&nset, SIGHUP);
+	}
 	(void)sigprocmask(SIG_BLOCK, &nset, NULL);
-	if ((saveint = signal(SIGINT, SIG_IGN)) != SIG_IGN)
-		(void)signal(SIGINT, collint);
-	if ((savehup = signal(SIGHUP, SIG_IGN)) != SIG_IGN)
-		(void)signal(SIGHUP, collhup);
-	savetstp = signal(SIGTSTP, collstop);
-	savettou = signal(SIGTTOU, collstop);
-	savettin = signal(SIGTTIN, collstop);
+	if (value("interactive") != NULL) {
+		if ((saveint = signal(SIGINT, SIG_IGN)) != SIG_IGN)
+			(void)signal(SIGINT, collint);
+		if ((savehup = signal(SIGHUP, SIG_IGN)) != SIG_IGN)
+			(void)signal(SIGHUP, collhup);
+		savetstp = signal(SIGTSTP, collstop);
+		savettou = signal(SIGTTOU, collstop);
+		savettin = signal(SIGTTIN, collstop);
+	}
 	if (setjmp(collabort) || setjmp(colljmp)) {
 		(void)rm(tempname);
 		goto err;
@@ -479,11 +483,13 @@ out:
 		rewind(collf);
 	noreset--;
 	(void)sigprocmask(SIG_BLOCK, &nset, NULL);
-	(void)signal(SIGINT, saveint);
-	(void)signal(SIGHUP, savehup);
-	(void)signal(SIGTSTP, savetstp);
-	(void)signal(SIGTTOU, savettou);
-	(void)signal(SIGTTIN, savettin);
+	if (value("interactive") != NULL) {
+		(void)signal(SIGINT, saveint);
+		(void)signal(SIGHUP, savehup);
+		(void)signal(SIGTSTP, savetstp);
+		(void)signal(SIGTTOU, savettou);
+		(void)signal(SIGTTIN, savettin);
+	}
 	(void)sigprocmask(SIG_UNBLOCK, &nset, NULL);
 	return (collf);
 }
@@ -698,7 +704,7 @@ collint(int s __unused)
 
 /*ARGSUSED*/
 void
-collhup(int s __unused)
+collhup(int signo)
 {
 	rewind(collf);
 	savedeadletter(collf);
@@ -706,7 +712,8 @@ collhup(int s __unused)
 	 * Let's pretend nobody else wants to clean up,
 	 * a true statement at this time.
 	 */
-	exit(1);
+	signal(signo, SIG_DFL);
+	raise(signo);
 }
 
 void
