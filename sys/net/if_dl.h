@@ -76,17 +76,19 @@ struct sockaddr_dl {
 #ifdef _KERNEL
 
 struct ifnet;
-struct sockaddr_dl *link_alloc_sdl(size_t, int);
+struct sockaddr_dl *link_alloc_sdl(size_t size, int flags);
 void link_free_sdl(struct sockaddr *sa);
-struct sockaddr_dl *link_init_sdl(struct ifnet *, struct sockaddr *, u_char);
+struct sockaddr_dl *link_init_sdl(struct ifnet *ifp, struct sockaddr *paddr,
+    u_char iftypes);
 
 #else /* !_KERNEL */
 
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-void	link_addr(const char *, struct sockaddr_dl *);
+int	link_addr(const char *, struct sockaddr_dl *);
 char	*link_ntoa(const struct sockaddr_dl *);
+int	link_ntoa_r(const struct sockaddr_dl *, char *, size_t *);
 __END_DECLS
 
 #endif /* !_KERNEL */
