@@ -229,6 +229,7 @@ static struct bool_flags pr_flag_allow[NBBY * NBPW] = {
 #ifdef VIMAGE
 	{"allow.nfsd", "allow.nonfsd", PR_ALLOW_NFSD},
 #endif
+	{"allow.routing", "allow.norouting", PR_ALLOW_ROUTING},
 };
 static unsigned pr_allow_all = PR_ALLOW_ALL_STATIC;
 const size_t pr_flag_allow_size = sizeof(pr_flag_allow);
@@ -4163,18 +4164,30 @@ prison_priv_check(struct ucred *cred, int priv)
 			return (0);
 		return (EPERM);
 
+<<<<<<< HEAD
 	case PRIV_VFS_EXTATTR_SYSTEM:
 		if (cred->cr_prison->pr_allow & PR_ALLOW_EXTATTR)
+=======
+		/*
+		 * Conditionally allow privileged process in the jail to modify
+		 * the routing table.
+		 */
+	case PRIV_NET_ROUTE:
+		if (cred->cr_prison->pr_allow & PR_ALLOW_ROUTING)
+>>>>>>> origin/freebsd/14-stable/main
 			return (0);
 		else
 			return (EPERM);
 
+<<<<<<< HEAD
 	case PRIV_KENV_DUMP:
 	case PRIV_KENV_GET:
 	case PRIV_KENV_SET:
 	case PRIV_KENV_UNSET:
 		return (EPERM);
 
+=======
+>>>>>>> origin/freebsd/14-stable/main
 	default:
 		/*
 		 * In all remaining cases, deny the privilege request.  This
@@ -4639,6 +4652,8 @@ SYSCTL_JAIL_PARAM(_allow, suser, CTLTYPE_INT | CTLFLAG_RW,
 SYSCTL_JAIL_PARAM(_allow, nfsd, CTLTYPE_INT | CTLFLAG_RW,
     "B", "Mountd/nfsd may run in the jail");
 #endif
+SYSCTL_JAIL_PARAM(_allow, routing, CTLTYPE_INT | CTLFLAG_RW,
+    "B", "Jail may modify routing table");
 
 SYSCTL_JAIL_PARAM_SUBNODE(allow, mount, "Jail mount/unmount permission flags");
 SYSCTL_JAIL_PARAM(_allow_mount, , CTLTYPE_INT | CTLFLAG_RW,

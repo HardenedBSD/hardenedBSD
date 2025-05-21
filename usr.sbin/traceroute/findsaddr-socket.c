@@ -35,18 +35,11 @@
 
 /* XXX Yes this is WAY too complicated */
 
-#ifndef lint
-static const char rcsid[] =
-    "@(#) $Id: findsaddr-socket.c,v 1.1 2000/11/23 20:17:12 leres Exp $ (LBL)";
-#endif
-
 #include <sys/param.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-#ifdef HAVE_SYS_SOCKIO_H
 #include <sys/sockio.h>
-#endif
 #include <sys/time.h>				/* concession to AIX */
 
 #if __STDC__
@@ -66,17 +59,11 @@ struct rtentry;
 #include <unistd.h>
 
 #include "gnuc.h"
-#ifdef HAVE_OS_PROTO_H
 #include "os-proto.h"
-#endif
 
 #include "findsaddr.h"
 
-#ifdef HAVE_SOCKADDR_SA_LEN
 #define SALEN(sa) ((sa)->sa_len)
-#else
-#define SALEN(sa) salen(sa)
-#endif
 
 #ifndef roundup
 #define roundup(x, y)   ((((x)+((y)-1))/(y))*(y))  /* to any y */
@@ -93,10 +80,6 @@ static struct rtmsg rtmsg = {
 	RTA_DST | RTA_IFA, 0, 0, 0, 0, 0, { 0 } },
 	{ 0 }
 };
-
-#ifndef HAVE_SOCKADDR_SA_LEN
-static int salen(struct sockaddr *);
-#endif
 
 /*
  * Return the source address for the given destination address
@@ -201,21 +184,3 @@ findsaddr(register const struct sockaddr_in *to,
 
 	return ("failed!");
 }
-
-#ifndef HAVE_SOCKADDR_SA_LEN
-static int
-salen(struct sockaddr *sa)
-{
-	switch (sa->sa_family) {
-
-	case AF_INET:
-		return (sizeof(struct sockaddr_in));
-
-	case AF_LINK:
-		return (sizeof(struct sockaddr_dl));
-
-	default:
-		return (sizeof(struct sockaddr));
-	}
-}
-#endif

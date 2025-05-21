@@ -88,6 +88,7 @@
 #include <net/if_var.h>
 #include <net/if_private.h>
 #include <net/if_types.h>
+#include <net/if_bridgevar.h>
 #include <net/route.h>
 #include <net/route/route_ctl.h>
 #include <net/route/nhop.h>
@@ -589,7 +590,7 @@ in6_control_ioctl(u_long cmd, void *data,
 #endif
 		error = in6_addifaddr(ifp, ifra, ia);
 		ia = NULL;
-		break;
+		goto out;
 
 	case SIOCDIFADDR_IN6:
 		in6_purgeifaddr(ia);
@@ -1235,6 +1236,13 @@ in6_addifaddr(struct ifnet *ifp, struct in6_aliasreq *ifra, struct in6_ifaddr *i
 	struct nd_prefix *pr;
 	int carp_attached = 0;
 	int error;
+
+	/* Check if this interface is a bridge member */
+	if (ifp->if_bridge && bridge_member_ifaddrs_p &&
+	    !bridge_member_ifaddrs_p()) {
+		error = EINVAL;
+		goto out;
+	}
 
 	/*
 	 * first, make or update the interface address structure,
