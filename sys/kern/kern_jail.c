@@ -4164,30 +4164,27 @@ prison_priv_check(struct ucred *cred, int priv)
 			return (0);
 		return (EPERM);
 
-<<<<<<< HEAD
 	case PRIV_VFS_EXTATTR_SYSTEM:
 		if (cred->cr_prison->pr_allow & PR_ALLOW_EXTATTR)
-=======
+			return (0);
+		else
+			return (EPERM);
 		/*
 		 * Conditionally allow privileged process in the jail to modify
 		 * the routing table.
 		 */
 	case PRIV_NET_ROUTE:
 		if (cred->cr_prison->pr_allow & PR_ALLOW_ROUTING)
->>>>>>> origin/freebsd/14-stable/main
 			return (0);
 		else
 			return (EPERM);
 
-<<<<<<< HEAD
 	case PRIV_KENV_DUMP:
 	case PRIV_KENV_GET:
 	case PRIV_KENV_SET:
 	case PRIV_KENV_UNSET:
 		return (EPERM);
 
-=======
->>>>>>> origin/freebsd/14-stable/main
 	default:
 		/*
 		 * In all remaining cases, deny the privilege request.  This
