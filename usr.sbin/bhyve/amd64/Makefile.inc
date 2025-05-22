@@ -7,6 +7,7 @@ SRCS+=	\
 	inout.c		\
 	ioapic.c	\
 	kernemu_dev.c	\
+	mem_x86.c	\
 	mptbl.c		\
 	pci_ahci.c	\
 	pci_e82545.c	\
