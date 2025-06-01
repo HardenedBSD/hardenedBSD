@@ -206,6 +206,8 @@ static uint32_t gnu_hash(const char *);
 static bool matched_symbol(SymLook *, const Obj_Entry *, Sym_Match_Result *,
     const unsigned long);
 #ifdef HARDENEDBSD
+static int rtld_sysctlnametomib(const char *, int *, size_t *);
+int rtld_sysctlbyname(const char *, void *, size_t *);
 static bool cache_harden_rtld(void);
 #endif
 
@@ -337,6 +339,37 @@ const char *ld_env_prefix = LD_;
 static void (*rtld_exit_ptr)(void);
 
 #ifdef HARDENEDBSD
+/* Adapted from lib/libc/gen/sysctlnametomib.c */
+static int
+rtld_sysctlnametomib(const char *name, int *mibp, size_t *sizep)
+{
+	int oid[2];
+	int error;
+
+	oid[0] = CTL_SYSCTL;
+	oid[1] = CTL_SYSCTL_NAME2OID;
+
+	*sizep *= sizeof(int);
+	error = sysctl(oid, 2, mibp, sizep, name, strlen(name));
+	*sizep /= sizeof(int);
+	return (error);
+}
+
+int
+rtld_sysctlbyname(const char *name, void *oldp, size_t *oldlenp)
+{
+	int oid[2];
+	size_t sz;
+	int err;
+
+	sz = nitems(oid);
+	err = rtld_sysctlnametomib(name, oid, &sz);
+	if (err) {
+		return (err);
+	}
+	return (sysctl(oid, nitems(oid), oldp, oldlenp, NULL, 0));
+}
+
 static bool
 cache_harden_rtld(void)
 {
@@ -344,7 +377,7 @@ cache_harden_rtld(void)
     size_t sz;
 
     sz = sizeof(int);
-    err = sysctlbyname("hardening.harden_rtld", &res, &sz, NULL, 0);
+    err = rtld_sysctlbyname("hardening.harden_rtld", &res, &sz);
     if (err == 0) {
         harden_rtld = res;
     } else {
