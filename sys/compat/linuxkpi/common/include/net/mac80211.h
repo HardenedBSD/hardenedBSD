@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2020-2025 The FreeBSD Foundation
- * Copyright (c) 2020-2022 Bjoern A. Zeeb
+ * Copyright (c) 2020-2025 Bjoern A. Zeeb
  *
  * This software was developed by Björn Zeeb under sponsorship from
  * the FreeBSD Foundation.
@@ -411,11 +411,6 @@ struct ieee80211_ftm_responder_params {
 	uint8_t					*civicloc;
 	int					lci_len;
 	int					civicloc_len;
-};
-
-struct ieee80211_he_mu_edca_param_ac_rec {
-	/* TODO FIXME */
-	int		aifsn, ecw_min_max, mu_edca_timer;
 };
 
 struct ieee80211_conf {
@@ -1452,6 +1447,13 @@ ieee80211_handle_wake_tx_queue(struct ieee80211_hw *hw,
     struct ieee80211_txq *txq)
 {
 	linuxkpi_ieee80211_handle_wake_tx_queue(hw, txq);
+}
+
+static inline void
+ieee80211_purge_tx_queue(struct ieee80211_hw *hw,
+    struct sk_buff_head *skbs)
+{
+	TODO();
 }
 
 /* -------------------------------------------------------------------------- */
