@@ -210,6 +210,8 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	regs->tf_fs = _ufssel;
 	regs->tf_gs = _ugssel;
 	regs->tf_flags = TF_HASSEGS;
+	if ((pcb->pcb_flags & PCB_TLSBASE) != 0)
+		pcb->pcb_fsbase = pcb->pcb_tlsbase;
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
 }
@@ -380,9 +382,9 @@ exec_setregs(struct thread *td, struct image_params *imgp, uintptr_t stack)
 		user_ldt_free(td);
 
 	update_pcb_bases(pcb);
-	pcb->pcb_fsbase = 0;
+	pcb->pcb_fsbase = pcb->pcb_tlsbase = 0;
 	pcb->pcb_gsbase = 0;
-	clear_pcb_flags(pcb, PCB_32BIT);
+	clear_pcb_flags(pcb, PCB_32BIT | PCB_TLSBASE);
 	pcb->pcb_initial_fpucw = __INITIAL_FPUCW__;
 
 	saved_rflags = regs->tf_rflags & PSL_T;
@@ -634,6 +636,8 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int flags)
 	mcp->mc_gsbase = pcb->pcb_gsbase;
 	mcp->mc_xfpustate = 0;
 	mcp->mc_xfpustate_len = 0;
+	mcp->mc_tlsbase = (pcb->pcb_flags & PCB_TLSBASE) != 0 ?
+	    pcb->pcb_tlsbase : 0;
 	bzero(mcp->mc_spare, sizeof(mcp->mc_spare));
 	return (0);
 }
@@ -707,6 +711,10 @@ set_mcontext(struct thread *td, mcontext_t *mcp)
 	if (mcp->mc_flags & _MC_HASBASES) {
 		pcb->pcb_fsbase = mcp->mc_fsbase;
 		pcb->pcb_gsbase = mcp->mc_gsbase;
+	}
+	if ((mcp->mc_flags & _MC_HASTLSBASE) != 0) {
+		pcb->pcb_tlsbase = mcp->mc_tlsbase;
+		set_pcb_flags(pcb, PCB_TLSBASE);
 	}
 	return (0);
 }
