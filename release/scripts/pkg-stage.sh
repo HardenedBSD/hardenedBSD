@@ -13,13 +13,9 @@ export PKGCMD="/usr/sbin/pkg -d --rootdir ${ROOTDIR}"
 export PORTSDIR="${PORTSDIR:-/usr/ports}"
 
 _DVD_PACKAGES="
-<<<<<<< HEAD
 archivers/unzip
 devel/git@lite
 graphics/drm-kmod
-=======
-devel/git@lite
->>>>>>> origin/freebsd/14-stable/main
 misc/freebsd-doc-all
 net/mpd5
 net/rsync
