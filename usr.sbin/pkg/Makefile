@@ -5,7 +5,11 @@ PROG=	pkg
 SRCS=	pkg.c rsa.c dns_utils.c config.c ecc.c hash.c
 MAN=	pkg.7
 
-CONFS=		HardenedBSD.conf HardenedBSD.pkgbase.conf HardenedBSD.tor.conf
+CONFS=		HardenedBSD.conf
+CONFS+=		HardenedBSD.pkgbase.conf
+CONFS+=		HardenedBSD.pkgbase.tor.conf
+CONFS+=		HardenedBSD.tor.conf
+
 PKGCONF?=	HardenedBSD.conf
 CONFSDIR=	/etc/pkg
 CONFSMODE=	644
