@@ -6,7 +6,7 @@
 
 local nuage = require("nuage")
 local ucl = require("ucl")
-local yaml = require("yaml")
+local yaml = require("lyaml")
 local sys_stat = require("posix.sys.stat")
 
 if #arg ~= 2 then
@@ -188,6 +188,25 @@ local function install_packages(packages)
 	end
 end
 
+local function write_files(files, defer)
+	if not files then
+		return
+	end
+	for n, file in pairs(files) do
+		local r, errstr = nuage.addfile(file, defer)
+		if not r then
+			nuage.warn("Skipping write_files entry number " .. n .. ": " .. errstr)
+		end
+	end
+end
+
+local function write_files_not_defered(obj)
+	write_files(obj.write_files, false)
+end
+
+local function write_files_defered(obj)
+	write_files(obj.write_files, true)
+end
 -- Set network configuration from user_data
 local function network_config(obj)
 	if obj.network == nil then return end
@@ -408,7 +427,7 @@ elseif citype == "nocloud" then
 	if err then
 		nuage.err("error parsing nocloud meta-data: " .. err)
 	end
-	local obj = yaml.eval(f:read("*a"))
+	local obj = yaml.load(f:read("*a"))
 	f:close()
 	if not obj then
 		nuage.err("error parsing nocloud meta-data")
@@ -456,17 +475,19 @@ if line == "#cloud-config" then
 		ssh_authorized_keys,
 		network_config,
 		ssh_pwauth,
-		runcmd
+		runcmd,
+		write_files_not_defered,
 	}
 
 	local post_network_calls = {
 		packages,
 		users,
-		chpasswd
+		chpasswd,
+		write_files_defered,
 	}
 
 	f = io.open(ni_path .. "/" .. ud)
-	local obj = yaml.eval(f:read("*a"))
+	local obj = yaml.load(f:read("*a"))
 	f:close()
 	if not obj then
 		nuage.err("error parsing cloud-config file: " .. ud)

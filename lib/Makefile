@@ -108,6 +108,7 @@ SUBDIR=	${SUBDIR_BOOTSTRAP} \
 	libwrap \
 	libxo \
 	liby \
+	libyaml \
 	libz \
 	libzstd \
 	ncurses \
@@ -148,11 +149,6 @@ SUBDIR_DEPEND_liblzma= libthr
 SUBDIR_DEPEND_libpcap= ofed
 .endif
 SUBDIR_DEPEND_nss_tacplus= libtacplus
-
-.if !defined(COMPAT_LIBCOMPAT)
-SUBDIR+=	flua
-SUBDIR_DEPEND_flua=	libjail
-.endif
 
 # NB: keep these sorted by MK_* knobs
 
