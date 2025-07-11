@@ -162,6 +162,11 @@ static struct harvest_context {
 	} hc_entropy_fast_accumulator;
 } harvest_context;
 
+#define	RANDOM_HARVEST_INIT_LOCK()	mtx_init(&harvest_context.hc_mtx, \
+					    "entropy harvest mutex", NULL, MTX_SPIN)
+#define	RANDOM_HARVEST_LOCK()		mtx_lock_spin(&harvest_context.hc_mtx)
+#define	RANDOM_HARVEST_UNLOCK()		mtx_unlock_spin(&harvest_context.hc_mtx)
+
 static struct kproc_desc random_proc_kp = {
 	"rand_harvestq",
 	random_kthread,
@@ -213,9 +218,10 @@ random_kthread(void)
 	kproc_exit(0);
 	/* NOTREACHED */
 }
-/* This happens well after SI_SUB_RANDOM */
 SYSINIT(random_device_h_proc, SI_SUB_KICK_SCHEDULER, SI_ORDER_ANY, kproc_start,
     &random_proc_kp);
+_Static_assert(SI_SUB_KICK_SCHEDULER > SI_SUB_RANDOM,
+    "random kthread starting before subsystem initialization");
 
 static void
 rs_epoch_init(void *dummy __unused)
@@ -306,7 +312,6 @@ random_sources_feed(void)
 	explicit_bzero(entropy, sizeof(entropy));
 }
 
-/* ARGSUSED */
 static int
 random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
 {
@@ -337,7 +342,6 @@ SYSCTL_PROC(_kern_random_harvest, OID_AUTO, mask,
     random_check_uint_harvestmask, "IU",
     "Entropy harvesting mask");
 
-/* ARGSUSED */
 static int
 random_print_harvestmask(SYSCTL_HANDLER_ARGS)
 {
@@ -390,7 +394,6 @@ static const char *random_source_descr[ENTROPYSOURCE] = {
 	/* "ENTROPYSOURCE" */
 };
 
-/* ARGSUSED */
 static int
 random_print_harvestmask_symbolic(SYSCTL_HANDLER_ARGS)
 {
@@ -423,7 +426,6 @@ SYSCTL_PROC(_kern_random_harvest, OID_AUTO, mask_symbolic,
     random_print_harvestmask_symbolic, "A",
     "Entropy harvesting mask (symbolic)");
 
-/* ARGSUSED */
 static void
 random_harvestq_init(void *unused __unused)
 {
@@ -453,7 +455,7 @@ random_early_prime(char *entropy, size_t len)
 		return (0);
 
 	for (i = 0; i < len; i += sizeof(event.he_entropy)) {
-		event.he_somecounter = (uint32_t)get_cyclecount();
+		event.he_somecounter = random_get_cyclecount();
 		event.he_size = sizeof(event.he_entropy);
 		event.he_source = RANDOM_CACHED;
 		event.he_destination =
@@ -493,7 +495,6 @@ random_prime_loader_file(const char *type)
  * known to the kernel, and inserting it directly into the hashing
  * module, currently Fortuna.
  */
-/* ARGSUSED */
 static void
 random_harvestq_prime(void *unused __unused)
 {
@@ -522,7 +523,6 @@ random_harvestq_prime(void *unused __unused)
 }
 SYSINIT(random_device_prime, SI_SUB_RANDOM, SI_ORDER_MIDDLE, random_harvestq_prime, NULL);
 
-/* ARGSUSED */
 static void
 random_harvestq_deinit(void *unused __unused)
 {
@@ -560,7 +560,7 @@ random_harvest_queue_(const void *entropy, u_int size, enum random_entropy_sourc
 	if (ring_in != harvest_context.hc_entropy_ring.out) {
 		/* The ring is not full */
 		event = harvest_context.hc_entropy_ring.ring + ring_in;
-		event->he_somecounter = (uint32_t)get_cyclecount();
+		event->he_somecounter = random_get_cyclecount();
 		event->he_source = origin;
 		event->he_destination = harvest_context.hc_destination[origin]++;
 		if (size <= sizeof(event->he_entropy)) {
@@ -589,7 +589,8 @@ random_harvest_fast_(const void *entropy, u_int size)
 	u_int pos;
 
 	pos = harvest_context.hc_entropy_fast_accumulator.pos;
-	harvest_context.hc_entropy_fast_accumulator.buf[pos] ^= jenkins_hash(entropy, size, (uint32_t)get_cyclecount());
+	harvest_context.hc_entropy_fast_accumulator.buf[pos] ^=
+	    jenkins_hash(entropy, size, random_get_cyclecount());
 	harvest_context.hc_entropy_fast_accumulator.pos = (pos + 1)%RANDOM_ACCUM_MAX;
 }
 
@@ -606,7 +607,7 @@ random_harvest_direct_(const void *entropy, u_int size, enum random_entropy_sour
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
 	size = MIN(size, sizeof(event.he_entropy));
-	event.he_somecounter = (uint32_t)get_cyclecount();
+	event.he_somecounter = random_get_cyclecount();
 	event.he_size = size;
 	event.he_source = origin;
 	event.he_destination = harvest_context.hc_destination[origin]++;
