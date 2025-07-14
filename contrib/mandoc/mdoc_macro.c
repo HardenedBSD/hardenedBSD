@@ -1,7 +1,7 @@
-/*	$Id: mdoc_macro.c,v 1.234 2020/01/19 18:02:00 schwarze Exp $ */
+/* $Id: mdoc_macro.c,v 1.237 2025/06/13 14:24:56 schwarze Exp $ */
 /*
+ * Copyright (c) 2010, 2012-2021 Ingo Schwarze <schwarze@openbsd.org>
  * Copyright (c) 2008-2012 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010, 2012-2020 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -26,6 +26,9 @@
 #include <string.h>
 #include <time.h>
 
+#if DEBUG_MEMORY
+#include "mandoc_dbg.h"
+#endif
 #include "mandoc.h"
 #include "roff.h"
 #include "mdoc.h"
@@ -89,7 +92,7 @@ static const struct mdoc_macro mdoc_macros[MDOC_MAX - MDOC_Dd] = {
 	{ in_line_eoln, 0 }, /* Fd */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Fl */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Fn */
-	{ in_line, MDOC_CALLABLE | MDOC_PARSED }, /* Ft */
+	{ in_line, MDOC_CALLABLE | MDOC_PARSED | MDOC_JOIN }, /* Ft */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED | MDOC_JOIN }, /* Ic */
 	{ in_line_argn, MDOC_CALLABLE | MDOC_PARSED }, /* In */
 	{ in_line, MDOC_CALLABLE | MDOC_PARSED | MDOC_JOIN }, /* Li */
@@ -445,8 +448,7 @@ dword(struct roff_man *mdoc, int line, int col, const char *p,
 	if (d == DELIM_MAX)
 		d = mdoc_isdelim(p);
 
-	if (may_append &&
-	    ! (mdoc->flags & (MDOC_SYNOPSIS | MDOC_KEEP | MDOC_SMOFF)) &&
+	if (may_append && ! (mdoc->flags & (MDOC_KEEP | MDOC_SMOFF)) &&
 	    d == DELIM_NONE && mdoc->last->type == ROFFT_TEXT &&
 	    mdoc_isdelim(mdoc->last->string) == DELIM_NONE) {
 		roff_word_append(mdoc, p);
@@ -1510,6 +1512,11 @@ in_line_eoln(MACRO_PROT_ARGS)
 		if (n->tok == MDOC_Nm)
 			rew_last(mdoc, n->parent);
 	}
+
+#if DEBUG_MEMORY
+	if (tok == MDOC_Dt)
+		mandoc_dbg_name(buf);
+#endif
 
 	if (buf[*pos] == '\0' &&
 	    (tok == MDOC_Fd || *roff_name[tok] == '%')) {

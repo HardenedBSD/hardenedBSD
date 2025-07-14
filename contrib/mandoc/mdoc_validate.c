@@ -1,6 +1,6 @@
-/* $Id: mdoc_validate.c,v 1.389 2021/07/18 11:41:23 schwarze Exp $ */
+/* $Id: mdoc_validate.c,v 1.393 2025/06/05 12:38:26 schwarze Exp $ */
 /*
- * Copyright (c) 2010-2020 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010-2022, 2025 Ingo Schwarze <schwarze@openbsd.org>
  * Copyright (c) 2008-2012 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2010 Joerg Sonnenberger <joerg@netbsd.org>
  *
@@ -991,18 +991,39 @@ post_ex(POST_ARGS)
 static void
 post_lb(POST_ARGS)
 {
-	struct roff_node	*n;
-	const char		*p;
+	struct roff_node	*n, *nch;
+	const char		*ccp;
+	char			*cp;
 
 	post_delim_nb(mdoc);
 
 	n = mdoc->last;
-	assert(n->child->type == ROFFT_TEXT);
+	nch = n->child;
+	assert(nch->type == ROFFT_TEXT);
 	mdoc->next = ROFF_NEXT_CHILD;
 
-	if ((p = mdoc_a2lib(n->child->string)) != NULL) {
+	if (n->sec == SEC_SYNOPSIS) {
+		roff_word_alloc(mdoc, n->line, n->pos, "/*");
+		mdoc->last->flags = NODE_NOSRC;
+		while (nch != NULL) {
+			roff_word_alloc(mdoc, n->line, n->pos, "-l");
+			mdoc->last->flags = NODE_DELIMO | NODE_NOSRC;
+			mdoc->last = nch;
+			assert(nch->type == ROFFT_TEXT);
+			cp = nch->string;
+ 			if (strncmp(cp, "lib", 3) == 0)
+				memmove(cp, cp + 3, strlen(cp) - 3 + 1);
+			nch = nch->next;
+		}
+		roff_word_alloc(mdoc, n->line, n->pos, "*/");
+		mdoc->last->flags = NODE_NOSRC;
+		mdoc->last = n;
+		return;
+	}
+
+	if ((ccp = mdoc_a2lib(n->child->string)) != NULL) {
 		n->child->flags |= NODE_NOPRT;
-		roff_word_alloc(mdoc, n->line, n->pos, p);
+		roff_word_alloc(mdoc, n->line, n->pos, ccp);
 		mdoc->last->flags = NODE_NOSRC;
 		mdoc->last = n;
 		return;
@@ -1113,7 +1134,8 @@ post_tg(POST_ARGS)
 	/* Find the next node. */
 	n = mdoc->last;
 	for (nn = n; nn != NULL; nn = nn->parent) {
-		if (nn->next != NULL) {
+		if (nn->type != ROFFT_HEAD && nn->type != ROFFT_BODY &&
+		    nn->type != ROFFT_TAIL && nn->next != NULL) {
 			nn = nn->next;
 			break;
 		}
@@ -2916,7 +2938,6 @@ post_os(POST_ARGS)
 {
 #ifndef OSNAME
 	struct utsname	  utsname;
-	static char	 *defbuf;
 #endif
 	struct roff_node *n;
 
@@ -2953,15 +2974,15 @@ post_os(POST_ARGS)
 #ifdef OSNAME
 	mdoc->meta.os = mandoc_strdup(OSNAME);
 #else /*!OSNAME */
-	if (defbuf == NULL) {
+	if (mdoc->os_r == NULL) {
 		if (uname(&utsname) == -1) {
 			mandoc_msg(MANDOCERR_OS_UNAME, n->line, n->pos, "Os");
-			defbuf = mandoc_strdup("UNKNOWN");
+			mdoc->os_r = mandoc_strdup("UNKNOWN");
 		} else
-			mandoc_asprintf(&defbuf, "%s %s",
+			mandoc_asprintf(&mdoc->os_r, "%s %s",
 			    utsname.sysname, utsname.release);
 	}
-	mdoc->meta.os = mandoc_strdup(defbuf);
+	mdoc->meta.os = mandoc_strdup(mdoc->os_r);
 #endif /*!OSNAME*/
 
 out:
@@ -3101,6 +3122,6 @@ macro2len(enum roff_tok macro)
 		return 10;
 	default:
 		break;
-	};
+	}
 	return 0;
 }

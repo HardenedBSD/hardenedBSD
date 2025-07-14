@@ -1,6 +1,6 @@
-/*	$Id: mdoc_man.c,v 1.137 2021/07/04 15:38:26 schwarze Exp $ */
+/* $Id: mdoc_man.c,v 1.139 2025/01/24 22:37:24 schwarze Exp $ */
 /*
- * Copyright (c) 2011-2021 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2011-2021, 2025 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -796,6 +796,9 @@ post_percent(DECL_ARGS)
 	if (mdoc_man_act(n->tok)->pre == pre_em)
 		font_pop();
 
+	if (n->parent == NULL || n->parent->tok != MDOC_Rs)
+		return;
+
 	if ((nn = roff_node_next(n)) != NULL) {
 		np = roff_node_prev(n);
 		nnn = nn == NULL ? NULL : roff_node_next(nn);
@@ -1518,7 +1521,7 @@ mid_it(void)
 	    Bl_stack[Bl_stack_len - 1]);
 	print_word(buf);
 
-	/* Remeber to close out this .RS block later. */
+	/* Remember to close out this .RS block later. */
 	Bl_stack_post[Bl_stack_len - 1] = 1;
 }
 
