@@ -30,6 +30,8 @@
  * Author : David C Somayajulu, Cavium, Inc., San Jose, CA 95131.
  */
 
+#include "opt_inet.h"
+
 #include <sys/cdefs.h>
 #include "qlnx_os.h"
 #include "bcm_osal.h"
@@ -2339,9 +2341,6 @@ qlnx_init_ifnet(device_t dev, qlnx_host_t *ha)
 		ha->primary_mac[5] = (rnd >> 16) & 0xFF;
 	}
 
-	ether_ifattach(ifp, ha->primary_mac);
-	bcopy(if_getlladdr(ha->ifp), ha->primary_mac, ETHER_ADDR_LEN);
-
 	if_setcapabilities(ifp, IFCAP_HWCSUM);
 	if_setcapabilitiesbit(ifp, IFCAP_JUMBO_MTU, 0);
 
@@ -2395,6 +2394,9 @@ qlnx_init_ifnet(device_t dev, qlnx_host_t *ha)
         ifmedia_add(&ha->media, (IFM_ETHER | IFM_AUTO), 0, NULL);
 
         ifmedia_set(&ha->media, (IFM_ETHER | IFM_AUTO));
+
+	ether_ifattach(ifp, ha->primary_mac);
+	bcopy(if_getlladdr(ha->ifp), ha->primary_mac, ETHER_ADDR_LEN);
 
         QL_DPRINT2(ha, "exit\n");
 
@@ -2776,7 +2778,7 @@ qlnx_ioctl(if_t ifp, u_long cmd, caddr_t data)
 
 		if (!p_ptt) {
 			QL_DPRINT1(ha, "ecore_ptt_acquire failed\n");
-			ret = -1;
+			ret = ERESTART;
 			break;
 		}
 
@@ -2787,7 +2789,7 @@ qlnx_ioctl(if_t ifp, u_long cmd, caddr_t data)
 		ecore_ptt_release(p_hwfn, p_ptt);
 
 		if (ret) {
-			ret = -1;
+			ret = ENODEV;
 			break;
 		}
 
