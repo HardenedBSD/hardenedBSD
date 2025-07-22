@@ -2014,20 +2014,12 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		tty_info(tp);
 		return (0);
 	case TIOCSTI:
-<<<<<<< HEAD
 		if (pax_harden_tty(td)) {
 			return (EPERM);
 		}
-		if ((fflag & FREAD) == 0 && priv_check(td, PRIV_TTY_STI))
-			return (EPERM);
-		if (!tty_is_ctty(tp, td->td_proc) &&
-		    priv_check(td, PRIV_TTY_STI))
-			return (EACCES);
-=======
 		error = tty_sti_check(tp, fflag, td);
 		if (error != 0)
 			return (error);
->>>>>>> origin/freebsd/14-stable/main
 		ttydisc_rint(tp, *(char *)data, 0);
 		ttydisc_rint_done(tp);
 		return (0);
