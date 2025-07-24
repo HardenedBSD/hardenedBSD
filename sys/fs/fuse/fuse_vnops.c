@@ -797,6 +797,9 @@ fuse_vnop_close(struct vop_close_args *ap)
 	if (fflag & IO_NDELAY)
 		return 0;
 
+	if (cred == NULL)
+		cred = td->td_ucred;
+
 	err = fuse_flush(vp, cred, pid, fflag);
 	if (err == 0 && (fvdat->flag & FN_ATIMECHANGE) && !vfs_isrdonly(mp)) {
 		struct vattr vap;
@@ -1937,10 +1940,8 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 	if (fuse_isdeadfs(vp)) {
 		return ENXIO;
 	}
-	if (				/* XXXIP ((uio_iovcnt(uio) > 1)) || */
-	    (uio_resid(uio) < sizeof(struct dirent))) {
+	if (uio_resid(uio) < sizeof(struct dirent))
 		return EINVAL;
-	}
 
 	tresid = uio->uio_resid;
 	err = fuse_filehandle_get_dir(vp, &fufh, cred, pid);
