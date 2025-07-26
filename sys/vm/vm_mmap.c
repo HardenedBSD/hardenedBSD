@@ -215,6 +215,9 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 #ifdef PAX_ASLR
 	int pax_aslr_done;
 #endif
+#ifdef PAX
+	char *pathbuf, *freebuf;
+#endif
 
 	orig_addr = addr = mrp->mr_hint;
 	len = mrp->mr_len;
@@ -423,6 +426,26 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 		error = fget_mmap(td, fd, &rights, &cap_maxprot, &fp);
 		if (error != 0)
 			goto done;
+#ifdef PAX
+		if ((prot & PROT_EXEC) == PROT_EXEC && fp->f_vnode != NULL) {
+			pathbuf = freebuf = NULL;
+			error = vn_fullpath(fp->f_vnode, &pathbuf, &freebuf);
+			if (error != 0 || pathbuf == NULL) {
+				free(freebuf, M_TEMP);
+				goto done;
+			}
+			error = pax_enforce_tpe(td, fp->f_vnode, pathbuf);
+			if (error != 0) {
+				pax_log_internal(td->td_proc,
+				    PAX_LOG_P_COMM | PAX_LOG_NO_P_PAX,
+				    "uid=%u,gid=%u: TPE violation during mmap(PROT_EXEC)",
+				    td->td_ucred->cr_uid, td->td_ucred->cr_gid);
+				free(freebuf, M_TEMP);
+				goto done;
+			}
+			free(freebuf, M_TEMP);
+		}
+#endif
 		if ((flags & (MAP_SHARED | MAP_PRIVATE)) == 0 &&
 		    p->p_osrel >= P_OSREL_MAP_FSTRICT) {
 			error = EINVAL;
