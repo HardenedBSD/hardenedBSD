@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2024 by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2025, by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -244,12 +244,23 @@ bool pax_ptrace_capsicum_prohibit(struct proc *p);
 int pax_ptrace_syscall_prohibit(struct thread *td);
 int pax_harden_tty(struct thread *td);
 int pax_harden_shm(struct thread *td);
-int pax_enforce_tpe(struct thread *, struct vnode *, const char *);
 pax_flag_t pax_hardening_setup_flags(struct image_params *, struct thread *,
     pax_flag_t);
 
 bool pax_insecure_kmod(void);
 bool pax_kmod_load_disabled(void);
+
+/*
+ * Trusted Path Execution (TPE)
+ */
+#ifdef PAX_HARDENING
+int pax_tpe_init_prison(struct prison *pr, struct vfsoptlist *opts);
+#else
+#define	pax_tpe_init_prison(pr, opts)	({ 0; })
+#endif
+int pax_enforce_tpe(struct thread *, struct vnode *, const char *);
+pax_flag_t pax_tpe_setup_flags(struct image_params *, struct thread *,
+    pax_flag_t);
 
 #endif /* _KERNEL */
 

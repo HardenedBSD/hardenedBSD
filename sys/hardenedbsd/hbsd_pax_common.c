@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2006 Elad Efrat <elad@NetBSD.org>
  * Copyright (c) 2013-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
- * Copyright (c) 2014-2023, by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2025, by Shawn Webb <shawn.webb@hardenedbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -298,6 +298,7 @@ pax_elf(struct thread *td, struct image_params *imgp)
 
 #ifdef PAX_HARDENING
 	flags |= pax_hardening_setup_flags(imgp, td, mode);
+	flags |= pax_tpe_setup_flags(imgp, td, mode);
 #endif
 
 	CTR3(KTR_PAX, "%s : flags = %x mode = %x",
@@ -415,6 +416,11 @@ pax_init_prison(struct prison *pr, struct vfsoptlist *opts)
 #endif
 
 	if (pax_log_init_prison(pr, opts) != 0) {
+		ret = false;
+		goto out;
+	}
+
+	if (pax_tpe_init_prison(pr, opts) != 0) {
 		ret = false;
 		goto out;
 	}

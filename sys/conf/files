@@ -3715,6 +3715,7 @@ fs/ext2fs/ext2_subr.c		optional ext2fs
 fs/ext2fs/ext2_vfsops.c		optional ext2fs
 fs/ext2fs/ext2_vnops.c		optional ext2fs
 #
+hardenedbsd/hbsd_grsec_tpe.c		optional pax pax_hardening
 hardenedbsd/hbsd_pax_common.c		optional pax
 hardenedbsd/hbsd_pax_log.c		optional pax
 hardenedbsd/hbsd_pax_aslr.c		optional pax pax_aslr
