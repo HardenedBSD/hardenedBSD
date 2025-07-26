@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2014-2023, by Shawn Webb <shawn.webb@hardenedbsd.org>
+ * Copyright (c) 2014-2025, by Shawn Webb <shawn.webb@hardenedbsd.org>
  * Copyright (c) 2014-2017, by Oliver Pinter <oliver.pinter@hardenedbsd.org>
  * All rights reserved.
  *
@@ -54,10 +54,6 @@
 #include "hbsd_pax_internal.h"
 
 FEATURE(hbsd_hardening, "Various hardening features.");
-
-#if __FreeBSD_version < 1100000
-#define	kern_unsetenv	unsetenv
-#endif
 
 #ifdef PAX_HARDENING
 static int pax_procfs_harden_global = PAX_FEATURE_SIMPLE_ENABLED;
