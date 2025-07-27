@@ -56,14 +56,11 @@ struct hbsd_features {
 	struct hbsd_hardening {
 		pax_state_t	 procfs_harden;		/* (p) Harden procfs */
 		pax_state_t	 tpe;			/* (p) Trusted Path Execution */
-		/*
-		 * tpe_gid, tpe_all, tpe_negate, and tpe_root_owned are
-		 * unused, but planned.
-		 */
 		int		 tpe_gid;
 		int		 tpe_all;
 		int		 tpe_negate;
 		int		 tpe_root_owned;
+		int		 tpe_user_owned;
 		pax_state_t	 harden_rtld;
 		pax_state_t	 prohibit_ptrace_capsicum;
 		pax_state_t	 prohibit_ptrace_syscall;
