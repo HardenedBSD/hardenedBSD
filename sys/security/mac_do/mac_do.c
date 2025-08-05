@@ -1943,6 +1943,10 @@ mac_do_priv_grant(struct ucred *cred, int priv)
 	if (priv != PRIV_CRED_SETCRED)
 		return (EPERM);
 
+	if ((curproc->p_flag2 & P2_NO_NEW_PRIVS) == P2_NO_NEW_PRIVS) {
+		return (EPERM);
+	}
+
 	/*
 	 * Do we have to do something?
 	 */
