@@ -516,6 +516,7 @@ pax_segvguard_check(struct thread *td, struct vnode *v, const char *name)
 {
 	struct pax_segvguard_entry *se;
 	sbintime_t sbt;
+	int error;
 
 	if (pax_segvguard_active(td->td_proc) == false)
 		return (0);
@@ -525,7 +526,12 @@ pax_segvguard_check(struct thread *td, struct vnode *v, const char *name)
 
 	sbt = sbinuptime();
 
+	error = VOP_LOCK(v, LK_SHARED);
+	if (error) {
+		return (error);
+	}
 	se = pax_segvguard_lookup(td, v);
+	VOP_UNLOCK(v);
 
 	if (se != NULL) {
 		if (se->se_expiry < sbt && se->se_suspended <= sbt) {
