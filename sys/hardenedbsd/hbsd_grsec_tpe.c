@@ -73,20 +73,35 @@ SYSCTL_NODE(_hardening_pax, OID_AUTO, tpe, CTLFLAG_RD, 0,
 SYSCTL_HBSD_4STATE(pax_tpe_global, pr_hbsd.hardening.tpe,
     _hardening_pax_tpe, status,
     CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE);
-SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, gid,
-    CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, &pax_tpe_gid, 0,
+
+static int sysctl_pax_tpe_gid(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax_tpe, OID_AUTO, gid,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON, NULL, 0,
+    sysctl_pax_tpe_gid, "I",
     "Untrusted TPE GID");
-SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, negate,
-    CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, &pax_tpe_negate, 0,
+
+static int sysctl_pax_tpe_negate(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax_tpe, OID_AUTO, negate,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON, NULL, 0,
+    sysctl_pax_tpe_negate, "I",
     "Negate TPE GID logic");
-SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, all,
-    CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, &pax_tpe_all, 0,
+
+static int sysctl_pax_tpe_all(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax_tpe, OID_AUTO, all,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON, NULL, 0,
+    sysctl_pax_tpe_all, "I",
     "Apply TPE to all users");
-SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, root_owned,
-    CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, &pax_tpe_root_owned, 0,
+
+static int sysctl_pax_tpe_root_owned(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax_tpe, OID_AUTO, root_owned,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON, NULL, 0,
+    sysctl_pax_tpe_root_owned, "I",
     "Ensure directory is root-owned");
-SYSCTL_INT(_hardening_pax_tpe, OID_AUTO, user_owned,
-    CTLFLAG_RWTUN|CTLFLAG_PRISON|CTLFLAG_SECURE, &pax_tpe_user_owned, 0,
+
+static int sysctl_pax_tpe_user_owned(SYSCTL_HANDLER_ARGS);
+SYSCTL_PROC(_hardening_pax_tpe, OID_AUTO, user_owned,
+    CTLTYPE_INT|CTLFLAG_RWTUN|CTLFLAG_PRISON, NULL, 0,
+    sysctl_pax_tpe_user_owned, "I",
     "Ensure directory is user-owned");
 #endif
 
@@ -101,6 +116,7 @@ SYSCTL_JAIL_PARAM(_hardening_pax_tpe, status,
 #endif
 
 static bool _pax_tpe_active(struct thread *);
+static int _pax_tpe_vap(struct thread *, struct prison *, struct vattr *);
 
 int
 pax_tpe_init_prison(struct prison *pr, struct vfsoptlist *opts)
@@ -214,8 +230,29 @@ pax_enforce_tpe(struct thread *td, struct vnode *vn, const char *path)
 	    M_WAITOK | M_ZERO);
 	strncpy(parent_path, path, tmp - path);
 
+	error = VOP_LOCK(vn, LK_SHARED);
+	if (error) {
+		free(parent_path, M_TEMP);
+		return (error);
+	}
+
+	memset(&vap, 0, sizeof(vap));
+	error = VOP_GETATTR(vn, &vap, td->td_ucred);
+	if (error) {
+		free(parent_path, M_TEMP);
+		return (error);
+	}
+
+	VOP_UNLOCK(vn);
+
+	error = _pax_tpe_vap(td, pr, &vap);
+	if (error) {
+		free(parent_path, M_TEMP);
+		return (error);
+	}
+
 	memset(&nd, 0, sizeof(nd));
-	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, parent_path);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, parent_path);
 	nd.ni_debugflags |= NAMEI_DBG_INITED;
 	error = namei(&nd);
 	if (error) {
@@ -224,31 +261,19 @@ pax_enforce_tpe(struct thread *td, struct vnode *vn, const char *path)
 		return (error);
 	}
 
+	memset(&vap, 0, sizeof(vap));
 	error = VOP_GETATTR(nd.ni_vp, &vap, td->td_ucred);
 	if (error) {
 		goto end;
 	}
 
-	if (pr->pr_hbsd.hardening.tpe_root_owned) {
-		if (vap.va_uid != 0) {
-			error = EPERM;
-			goto end;
-		}
-	}
-
-	if (pr->pr_hbsd.hardening.tpe_user_owned && td->td_ucred->cr_uid != 0) {
-		if (vap.va_uid != 0 && vap.va_uid != td->td_ucred->cr_uid) {
-			error = EPERM;
-			goto end;
-		}
-	}
-
-	if ((vap.va_mode & (S_IWGRP | S_IWOTH)) != 0) {
-		error = EPERM;
+	error = _pax_tpe_vap(td, pr, &vap);
+	if (error) {
 		goto end;
 	}
 
 end:
+	VOP_UNLOCK(nd.ni_vp);
 	NDFREE_PNBUF(&nd);
 	free(parent_path, M_TEMP);
 	return (error);
@@ -276,3 +301,137 @@ _pax_tpe_active(struct thread *td)
 
 	return (pr->pr_hbsd.hardening.tpe_negate != 0);
 }
+
+static int
+_pax_tpe_vap(struct thread *td, struct prison *pr, struct vattr *vap)
+{
+	if (pr->pr_hbsd.hardening.tpe_root_owned) {
+		if (vap->va_uid != 0) {
+			return (EPERM);
+		}
+	}
+
+	if (pr->pr_hbsd.hardening.tpe_user_owned && td->td_ucred->cr_uid != 0) {
+		if (vap->va_uid != 0 && vap->va_uid != td->td_ucred->cr_uid) {
+			return (EPERM);
+		}
+	}
+
+	if ((vap->va_mode & (S_IWGRP | S_IWOTH)) != 0) {
+		return EPERM;
+	}
+
+	return (0);
+}
+
+#ifdef PAX_SYSCTLS
+static int
+sysctl_pax_tpe_gid(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int err, val;
+
+	pr = pax_get_prison_td(req->td);
+	val = pr->pr_hbsd.hardening.tpe_gid;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pr == &prison0) {
+		pax_tpe_gid = val;
+	}
+
+	pr->pr_hbsd.hardening.tpe_gid = val;
+
+	return (0);
+}
+
+static int
+sysctl_pax_tpe_negate(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int err, val;
+
+	pr = pax_get_prison_td(req->td);
+	val = pr->pr_hbsd.hardening.tpe_negate;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pr == &prison0) {
+		pax_tpe_negate = val;
+	}
+
+	pr->pr_hbsd.hardening.tpe_negate = val;
+
+	return (0);
+}
+
+static int
+sysctl_pax_tpe_all(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int err, val;
+
+	pr = pax_get_prison_td(req->td);
+	val = pr->pr_hbsd.hardening.tpe_all;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pr == &prison0) {
+		pax_tpe_all = val;
+	}
+
+	pr->pr_hbsd.hardening.tpe_all = val;
+
+	return (0);
+}
+
+static int
+sysctl_pax_tpe_root_owned(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int err, val;
+
+	pr = pax_get_prison_td(req->td);
+	val = pr->pr_hbsd.hardening.tpe_root_owned;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pr == &prison0) {
+		pax_tpe_root_owned = val;
+	}
+
+	pr->pr_hbsd.hardening.tpe_root_owned = val;
+
+	return (0);
+}
+
+static int
+sysctl_pax_tpe_user_owned(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int err, val;
+
+	pr = pax_get_prison_td(req->td);
+	val = pr->pr_hbsd.hardening.tpe_user_owned;
+	err = sysctl_handle_int(oidp, &val, sizeof(int), req);
+	if (err || req->newptr == NULL) {
+		return (err);
+	}
+
+	if (pr == &prison0) {
+		pax_tpe_user_owned = val;
+	}
+
+	pr->pr_hbsd.hardening.tpe_user_owned = val;
+
+	return (0);
+}
+#endif /* PAX_SYSCTLS */

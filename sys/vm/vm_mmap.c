@@ -57,6 +57,7 @@
 #include <sys/elf.h>
 #include <sys/filedesc.h>
 #include <sys/pax.h>
+#include <sys/jail.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/procctl.h>
@@ -438,7 +439,8 @@ kern_mmap(struct thread *td, const struct mmap_req *mrp)
 			if (error != 0) {
 				pax_log_internal(td->td_proc,
 				    PAX_LOG_P_COMM | PAX_LOG_NO_P_PAX,
-				    "uid=%u,gid=%u: TPE violation during mmap(PROT_EXEC)",
+				    "jail=%d,uid=%u,gid=%u: TPE violation during mmap(PROT_EXEC)",
+				    td->td_ucred->cr_prison->pr_id,
 				    td->td_ucred->cr_uid, td->td_ucred->cr_gid);
 				free(freebuf, M_TEMP);
 				goto done;
