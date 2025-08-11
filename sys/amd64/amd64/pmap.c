@@ -6049,17 +6049,18 @@ pmap_demote_pde_mpte(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	if (mpte == NULL) {
 		/*
 		 * Invalidate the 2MB page mapping and return "failure" if the
-		 * mapping was never accessed.
+		 * mapping was never accessed and not wired.
 		 */
 		if ((oldpde & PG_A) == 0) {
-			KASSERT((oldpde & PG_W) == 0,
-		    ("pmap_demote_pde: a wired mapping is missing PG_A"));
-			pmap_demote_pde_abort(pmap, va, pde, oldpde, lockp);
-			return (FALSE);
-		}
-
-		mpte = pmap_remove_pt_page(pmap, va);
-		if (mpte == NULL) {
+			if ((oldpde & PG_W) == 0) {
+				pmap_demote_pde_abort(pmap, va, pde, oldpde,
+				    lockp);
+				return (false);
+			}
+			mpte = pmap_remove_pt_page(pmap, va);
+			/* Fill the PTP with PTEs that have PG_A cleared. */
+			mpte->valid = 0;
+		} else if ((mpte = pmap_remove_pt_page(pmap, va)) == NULL) {
 			KASSERT((oldpde & PG_W) == 0,
     ("pmap_demote_pde: page table page for a wired mapping is missing"));
 
@@ -6111,7 +6112,7 @@ pmap_demote_pde_mpte(pmap_t pmap, pd_entry_t *pde, vm_offset_t va,
 	/*
 	 * If the PTP is not leftover from an earlier promotion or it does not
 	 * have PG_A set in every PTE, then fill it.  The new PTEs will all
-	 * have PG_A set.
+	 * have PG_A set, unless this is a wired mapping with PG_A clear.
 	 */
 	if (!vm_page_all_valid(mpte))
 		pmap_fill_ptp(firstpte, newpte);
@@ -7506,6 +7507,9 @@ pmap_enter_pde(pmap_t pmap, vm_offset_t va, pd_entry_t newpde, u_int flags,
 	PG_RW = pmap_rw_bit(pmap);
 	KASSERT((newpde & (pmap_modified_bit(pmap) | PG_RW)) != PG_RW,
 	    ("pmap_enter_pde: newpde is missing PG_M"));
+	KASSERT((flags & (PMAP_ENTER_NOREPLACE | PMAP_ENTER_NORECLAIM)) !=
+	    PMAP_ENTER_NORECLAIM,
+	    ("pmap_enter_pde: flags is missing PMAP_ENTER_NOREPLACE"));
 	PG_V = pmap_valid_bit(pmap);
 	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 
@@ -7635,6 +7639,14 @@ pmap_enter_pde(pmap_t pmap, vm_offset_t va, pd_entry_t newpde, u_int flags,
 		if (!pmap_pv_insert_pde(pmap, va, newpde, flags, lockp)) {
 			if (pdpg != NULL)
 				pmap_abort_ptp(pmap, va, pdpg);
+			else {
+				KASSERT(va >= VM_MAXUSER_ADDRESS &&
+				    (*pde & (PG_PS | PG_V)) == PG_V,
+				    ("pmap_enter_pde: invalid kernel PDE"));
+				mt = pmap_remove_pt_page(pmap, va);
+				KASSERT(mt != NULL,
+				    ("pmap_enter_pde: missing kernel PTP"));
+			}
 			if (uwptpg != NULL) {
 				mt = pmap_remove_pt_page(pmap, va);
 				KASSERT(mt == uwptpg,
