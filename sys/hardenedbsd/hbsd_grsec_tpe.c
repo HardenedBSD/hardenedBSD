@@ -113,6 +113,21 @@ SYSCTL_JAIL_PARAM_SUBNODE(hardening_pax, tpe, "TPE");
 SYSCTL_JAIL_PARAM(_hardening_pax_tpe, status,
     CTLTYPE_INT | CTLFLAG_RD, "I",
     "TPE status");
+SYSCTL_JAIL_PARAM(_hardening_pax_tpe, gid,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Untrusted TPE GID");
+SYSCTL_JAIL_PARAM(_hardening_pax_tpe, negate,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Negate TPE GID logic");
+SYSCTL_JAIL_PARAM(_hardening_pax_tpe, all,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Apply TPE to all users");
+SYSCTL_JAIL_PARAM(_hardening_pax_tpe, root_only,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Ensure directory is root-owned");
+SYSCTL_JAIL_PARAM(_hardening_pax_tpe, user_only,
+    CTLTYPE_INT | CTLFLAG_RD, "I",
+    "Ensure directory is user-owned");
 #endif
 
 static bool _pax_tpe_active(struct thread *);
@@ -122,6 +137,7 @@ int
 pax_tpe_init_prison(struct prison *pr, struct vfsoptlist *opts)
 {
 	struct prison *pr_p;
+	int error;
 
 	if (pr == &prison0) {
 		pr->pr_hbsd.hardening.tpe = pax_tpe_global;
@@ -138,6 +154,37 @@ pax_tpe_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		pr->pr_hbsd.hardening.tpe_all = pr_p->pr_hbsd.hardening.tpe_all;
 		pr->pr_hbsd.hardening.tpe_root_owned = pr_p->pr_hbsd.hardening.tpe_root_owned;
 		pr->pr_hbsd.hardening.tpe_user_owned = pr_p->pr_hbsd.hardening.tpe_user_owned;
+
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.status",
+		    &(pr->pr_hbsd.hardening.tpe));
+		if (error != 0) {
+			return (error);
+		}
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.gid",
+		    &(pr->pr_hbsd.hardening.tpe_gid));
+		if (error != 0) {
+			return (error);
+		}
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.negate",
+		    &(pr->pr_hbsd.hardening.tpe_negate));
+		if (error != 0) {
+			return (error);
+		}
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.all",
+		    &(pr->pr_hbsd.hardening.tpe_all));
+		if (error != 0) {
+			return (error);
+		}
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.root_owned",
+		    &(pr->pr_hbsd.hardening.tpe_root_owned));
+		if (error != 0) {
+			return (error);
+		}
+		error = pax_handle_prison_param(opts, "hardening.pax.tpe.user_owned",
+		    &(pr->pr_hbsd.hardening.tpe_user_owned));
+		if (error != 0) {
+			return (error);
+		}
 	}
 
 	return (0);
