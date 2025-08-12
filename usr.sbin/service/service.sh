@@ -27,34 +27,39 @@
 #  SUCH DAMAGE.
 
 . /etc/rc.subr
-load_rc_config 'XXX'
+load_rc_config
 
 usage () {
 	echo ''
 	echo 'Usage:'
 	echo "${0##*/} [-j <jail name or id>] -e"
-	echo "${0##*/} [-j <jail name or id>] -R"
-	echo "${0##*/} [-j <jail name or id>] [-v] -l | -r"
-	echo "${0##*/} [-j <jail name or id>] [-v] [-E var=value] <rc.d script> start|stop|etc."
+	echo "${0##*/} [-j <jail name or id>] [-q] -R"
+	echo "${0##*/} [-j <jail name or id>] [-v] -l"
+	echo "${0##*/} [-j <jail name or id>] [-v] -r"
+	echo "${0##*/} [-j <jail name or id>] [-dqv] [-E var=value] <rc.d script> start|stop|etc."
 	echo "${0##*/} -h"
 	echo ''
+	echo "-d                Enable debugging of rc.d scripts"
 	echo "-j		Perform actions within the named jail"
 	echo "-E n=val	Set variable n to val before executing the rc.d script"
 	echo '-e		Show services that are enabled'
 	echo "-R		Stop and start enabled $local_startup services"
 	echo "-l		List all scripts in /etc/rc.d and $local_startup"
 	echo '-r		Show the results of boot time rcorder'
+	echo '-q		quiet'
 	echo '-v		Verbose'
 	echo ''
 }
 
-while getopts 'j:E:ehlrRv' COMMAND_LINE_ARGUMENT ; do
+while getopts 'dE:ehj:lqrRv' COMMAND_LINE_ARGUMENT ; do
 	case "${COMMAND_LINE_ARGUMENT}" in
-	j)	JAIL="${OPTARG}" ;;
+	d)	DEBUG=dopt ;;
 	E)	VARS="${VARS} ${OPTARG}" ;;
 	e)	ENABLED=eopt ;;
 	h)	usage ; exit 0 ;;
+	j)	JAIL="${OPTARG}" ;;
 	l)	LIST=lopt ;;
+	q)	QUIET=qopt ;;
 	r)	RCORDER=ropt ;;
 	R)	RESTART=Ropt ;;
 	v)	VERBOSE=vopt ;;
@@ -69,6 +74,7 @@ if [ -n "${JAIL}" ]; then
 	args=""
 	[ -n "${ENABLED}" ] && args="${args} -e"
 	[ -n "${LIST}" ] && args="${args} -l"
+	[ -n "${QUIET}" ] && args="${args} -q"
 	[ -n "${RCORDER}" ] && args="${args} -r"
 	[ -n "${RESTART}" ] && args="${args} -R"
 	[ -n "${VERBOSE}" ] && args="${args} -v"
@@ -80,6 +86,10 @@ if [ -n "${JAIL}" ]; then
 	# were left in $@
 	/usr/sbin/jexec -l "${JAIL}" /usr/sbin/service $args "$@"
 	exit $?
+fi
+
+if [ -n "$DEBUG" ]; then
+	VARS="${VARS} rc_debug=yes"
 fi
 
 if [ -n "$RESTART" ]; then
@@ -100,14 +110,22 @@ if [ -n "$RESTART" ]; then
 			if [ -n "$rcvar" ]; then
 				load_rc_config_var ${name} ${rcvar}
 			fi
-			checkyesno $rcvar 2>/dev/null && run_rc_script ${file} stop
+			if [ -n "$QUIET" ]; then
+				checkyesno $rcvar 2>/dev/null && run_rc_script ${file} stop >/dev/null 2>&1
+			else
+				checkyesno $rcvar 2>/dev/null && run_rc_script ${file} stop
+			fi
 		fi
 	done
 	for file in $files; do
 		if grep -q ^rcvar $file; then
 			eval `grep ^name= $file`
 			eval `grep ^rcvar $file`
-			checkyesno $rcvar 2>/dev/null && run_rc_script ${file} start
+			if [ -n "$QUIET" ]; then
+				checkyesno $rcvar 2>/dev/null && run_rc_script ${file} start >/dev/null 2>&1
+			else
+				checkyesno $rcvar 2>/dev/null && run_rc_script ${file} start
+			fi
 		fi
 	done
 
@@ -174,7 +192,11 @@ cd /
 for dir in /etc/rc.d $local_startup; do
 	if [ -x "$dir/$script" ]; then
 		[ -n "$VERBOSE" ] && echo "$script is located in $dir"
-		exec /usr/bin/env -i -L -/daemon HOME=/ PATH=/sbin:/bin:/usr/sbin:/usr/bin ${VARS} "$dir/$script" "$@"
+		if [ -n "$QUIET" ]; then
+			exec /usr/bin/env -i -L -/daemon HOME=/ PATH=/sbin:/bin:/usr/sbin:/usr/bin ${VARS} "$dir/$script" "$@" > /dev/null 2>&1
+		else
+			exec /usr/bin/env -i -L -/daemon HOME=/ PATH=/sbin:/bin:/usr/sbin:/usr/bin ${VARS} "$dir/$script" "$@"
+		fi
 	fi
 done
 
