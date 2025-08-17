@@ -878,8 +878,10 @@ fork1(struct thread *td, struct fork_req *fr)
 
 #ifdef PAX_SEGVGUARD
 	if (td->td_proc->p_pid != 0) {
+		VOP_LOCK(curthread->td_proc->p_textvp, LK_SHARED);
 		error = pax_segvguard_check(curthread, curthread->td_proc->p_textvp,
 				td->td_proc->p_comm);
+		VOP_UNLOCK(curthread->td_proc->p_textvp);
 		if (error)
 			return (error);
 	}
