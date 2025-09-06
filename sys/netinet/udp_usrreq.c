@@ -567,6 +567,12 @@ udp_input(struct mbuf **mp, int *offp, int proto)
 				    ip->ip_dst.s_addr, htonl((u_short)len +
 				    m->m_pkthdr.csum_data + proto));
 			uh_sum ^= 0xffff;
+		} else if (m->m_pkthdr.csum_flags & CSUM_IP_UDP) {
+			/*
+			 * Packet from local host (maybe from a VM).
+			 * Checksum not required.
+			 */
+			uh_sum = 0;
 		} else {
 			char b[offsetof(struct ipovly, ih_src)];
 			struct ipovly *ipov = (struct ipovly *)ip;
@@ -655,7 +661,11 @@ udp_input(struct mbuf **mp, int *offp, int proto)
 		else
 			UDP_PROBE(receive, NULL, NULL, ip, NULL, uh);
 		UDPSTAT_INC(udps_noport);
-		if (m->m_flags & (M_BCAST | M_MCAST)) {
+		if (m->m_flags & M_MCAST) {
+			UDPSTAT_INC(udps_noportmcast);
+			goto badunlocked;
+		}
+		if (m->m_flags & M_BCAST) {
 			UDPSTAT_INC(udps_noportbcast);
 			goto badunlocked;
 		}
