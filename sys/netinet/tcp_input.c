@@ -3437,7 +3437,7 @@ dropafterack:
 	return;
 
 dropwithreset:
-	tcp_dropwithreset(m, th, NULL, tlen);
+	tcp_dropwithreset(m, th, tp, tlen);
 	if (tp != NULL) {
 		INP_WUNLOCK(inp);
 	}
