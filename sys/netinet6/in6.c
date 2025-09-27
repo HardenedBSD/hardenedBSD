@@ -1238,8 +1238,8 @@ in6_addifaddr(struct ifnet *ifp, struct in6_aliasreq *ifra, struct in6_ifaddr *i
 	int error;
 
 	/* Check if this interface is a bridge member */
-	if (ifp->if_bridge && bridge_member_ifaddrs_p &&
-	    !bridge_member_ifaddrs_p()) {
+	if (ifp->if_bridge != NULL && ifp->if_type != IFT_GIF &&
+	    bridge_member_ifaddrs_p != NULL && !bridge_member_ifaddrs_p()) {
 		error = EINVAL;
 		goto out;
 	}
@@ -2619,6 +2619,8 @@ void
 in6_domifdetach(struct ifnet *ifp, void *aux)
 {
 	struct in6_ifextra *ext = (struct in6_ifextra *)aux;
+
+	MPASS(ifp->if_afdata[AF_INET6] == NULL);
 
 	mld_domifdetach(ifp);
 	scope6_ifdetach(ext->scope6_id);

@@ -1328,10 +1328,10 @@ bridge_ioctl_add(struct bridge_softc *sc, void *arg)
 #endif
 
 	/*
-	 * If member_ifaddrs is disabled, do not allow an interface with
-	 * assigned IP addresses to be added to a bridge.
+	 * If member_ifaddrs is disabled, do not allow an Ethernet-like
+	 * interface with assigned IP addresses to be added to a bridge.
 	 */
-	if (!V_member_ifaddrs) {
+	if (!V_member_ifaddrs && ifs->if_type != IFT_GIF) {
 		struct ifaddr *ifa;
 
 		CK_STAILQ_FOREACH(ifa, &ifs->if_addrhead, ifa_link) {
@@ -2140,6 +2140,12 @@ bridge_enqueue(struct bridge_softc *sc, struct ifnet *dst_ifp, struct mbuf *m)
 		}
 
 		M_ASSERTPKTHDR(m); /* We shouldn't transmit mbuf without pkthdr */
+		/*
+		 * XXXZL: gif(4) requires the af to be saved in csum_data field
+		 * so that gif_transmit() routine can pull it back.
+		 */
+		if (dst_ifp->if_type == IFT_GIF)
+			m->m_pkthdr.csum_data = AF_LINK;
 		if ((err = dst_ifp->if_transmit(dst_ifp, m))) {
 			int n;
 

@@ -785,10 +785,14 @@ fuse_vnop_close(struct vop_close_args *ap)
 	struct mount *mp = vnode_mount(vp);
 	struct ucred *cred = ap->a_cred;
 	int fflag = ap->a_fflag;
-	struct thread *td = ap->a_td;
-	pid_t pid = td->td_proc->p_pid;
+	struct thread *td;
 	struct fuse_vnode_data *fvdat = VTOFUD(vp);
+	pid_t pid;
 	int err = 0;
+
+	/* NB: a_td will be NULL from some async kernel contexts */
+	td = ap->a_td ? ap->a_td : curthread;
+	pid = td->td_proc->p_pid;
 
 	if (fuse_isdeadfs(vp))
 		return 0;
@@ -828,7 +832,7 @@ fuse_vnop_close(struct vop_close_args *ap)
 	}
 	/* TODO: close the file handle, if we're sure it's no longer used */
 	if ((fvdat->flag & FN_SIZECHANGE) != 0) {
-		fuse_vnode_savesize(vp, cred, td->td_proc->p_pid);
+		fuse_vnode_savesize(vp, cred, pid);
 	}
 	return err;
 }
@@ -1207,36 +1211,20 @@ fuse_vnop_getattr(struct vop_getattr_args *ap)
 	struct vattr *vap = ap->a_vap;
 	struct ucred *cred = ap->a_cred;
 	struct thread *td = curthread;
-
 	int err = 0;
-	int dataflags;
 
-	dataflags = fuse_get_mpdata(vnode_mount(vp))->dataflags;
-
-	/* Note that we are not bailing out on a dead file system just yet. */
-
-	if (!(dataflags & FSESS_INITED)) {
-		if (!vnode_isvroot(vp)) {
-			fdata_set_dead(fuse_get_mpdata(vnode_mount(vp)));
-			err = ENOTCONN;
-			return err;
-		} else {
-			goto fake;
-		}
-	}
 	err = fuse_internal_getattr(vp, vap, cred, td);
 	if (err == ENOTCONN && vnode_isvroot(vp)) {
-		/* see comment in fuse_vfsop_statfs() */
-		goto fake;
-	} else {
-		return err;
+		/*
+		 * We want to seem a legitimate fs even if the daemon is dead,
+		 * so that, eg., we can still do path based unmounting after
+		 * the daemon dies.
+		 */
+		err = 0;
+		bzero(vap, sizeof(*vap));
+		vap->va_type = vnode_vtype(vp);
 	}
-
-fake:
-	bzero(vap, sizeof(*vap));
-	vap->va_type = vnode_vtype(vp);
-
-	return 0;
+	return err;
 }
 
 /*
