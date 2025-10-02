@@ -76,11 +76,7 @@ __DEFAULT_NO_OPTIONS = \
     CTF \
     INSTALL_AS_USER \
     PROFILE \
-<<<<<<< HEAD
-=======
     REPRODUCIBLE_BUILD \
-    RETPOLINE \
->>>>>>> origin/freebsd/14-stable/main
     STALE_STAGED \
     UBSAN
 
