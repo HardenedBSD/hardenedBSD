@@ -217,13 +217,9 @@ __DEFAULT_NO_OPTIONS = \
     LOADER_VERBOSE \
     LOADER_VERIEXEC_PASS_MANIFEST \
     LLVM_FULL_DEBUGINFO \
-<<<<<<< HEAD
-    MALLOC_PRODUCTION \
     NETLINK \
     NETLINK_SUPPORT \
     OFED \
-=======
->>>>>>> origin/freebsd/14-stable/main
     OFED_EXTRA \
     OPENLDAP \
     REPRODUCIBLE_BUILD \
