@@ -86,10 +86,13 @@ mkdir_home_parents(int dfd, const char *dir)
 {
 	struct stat st;
 	char *dirs, *tmp;
+	mode_t pumask;
+
+	pumask = umask(0);
+	umask(pumask);
 
 	if (*dir != '/')
 		errx(EX_DATAERR, "invalid base directory for home '%s'", dir);
-
 	dir++;
 
 	if (fstatat(dfd, dir, &st, 0) != -1) {
@@ -115,7 +118,14 @@ mkdir_home_parents(int dfd, const char *dir)
 			*tmp = '\0';
 			if (fstatat(dfd, dirs, &st, 0) == -1) {
 				if (mkdirat(dfd, dirs, _DEF_DIRMODE) == -1)
-					err(EX_OSFILE,  "'%s' (home parent) is not a directory", dirs);
+					err(EX_OSFILE,
+				    "'%s' (home parent) is not a directory",
+					    dirs);
+				if (fchownat(dfd, dirs, 0, 0, 0) != 0)
+					warn("chown(%s)", dirs);
+				metalog_emit(dir,
+				    (_DEF_DIRMODE | S_IFDIR) & ~pumask, 0, 0,
+				    0);
 			}
 			*tmp = '/';
 		}
@@ -123,7 +133,9 @@ mkdir_home_parents(int dfd, const char *dir)
 	if (fstatat(dfd, dirs, &st, 0) == -1) {
 		if (mkdirat(dfd, dirs, _DEF_DIRMODE) == -1)
 			err(EX_OSFILE,  "'%s' (home parent) is not a directory", dirs);
-		fchownat(dfd, dirs, 0, 0, 0);
+		if (fchownat(dfd, dirs, 0, 0, 0) != 0)
+			warn("chown(%s)", dirs);
+		metalog_emit(dirs, (_DEF_DIRMODE | S_IFDIR) & ~pumask, 0, 0, 0);
 	}
 
 	free(dirs);
