@@ -1279,7 +1279,7 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			syncache_send_challenge_ack(sc, m);
 			SCH_UNLOCK(sch);
 			free(s, M_TCPLOG);
-			return (-1);  /* Do not send RST */;
+			return (-1);  /* Do not send RST */
 		}
 
 		/*
@@ -1292,7 +1292,8 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 				    "segment rejected\n",
 				    s, __func__, th->th_ack, sc->sc_iss + 1);
 			SCH_UNLOCK(sch);
-			goto failed;
+			free(s, M_TCPLOG);
+			return (0);  /* Do send RST, do not free sc. */
 		}
 
 		TAILQ_REMOVE(&sch->sch_bucket, sc, sc_hash);
