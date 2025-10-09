@@ -131,8 +131,16 @@ static STAILQ_HEAD(, mca_internal) mca_pending;
 static int mca_ticks = 300;
 static struct taskqueue *mca_tq;
 static struct task mca_resize_task;
+static struct task mca_postscan_task;
 static struct timeout_task mca_scan_task;
 static struct mtx mca_lock;
+static bool mca_startup_done = false;
+
+/* Statistics on number of MCA events by type, updated atomically. */
+static uint64_t mca_stats[MCA_T_COUNT];
+SYSCTL_OPAQUE(_hw_mca, OID_AUTO, stats, CTLFLAG_RD | CTLFLAG_SKIP,
+    mca_stats, MCA_T_COUNT * sizeof(mca_stats[0]),
+    "S", "Array of MCA events by type");
 
 static unsigned int
 mca_ia32_ctl_reg(int bank)
@@ -356,21 +364,27 @@ mca_error_request(uint16_t mca_error)
 }
 
 static const char *
-mca_error_mmtype(uint16_t mca_error)
+mca_error_mmtype(uint16_t mca_error, enum mca_stat_types *event_type)
 {
 
 	switch ((mca_error & 0x70) >> 4) {
 	case 0x0:
+		*event_type = MCA_T_MEMCONTROLLER_GEN;
 		return ("GEN");
 	case 0x1:
+		*event_type = MCA_T_MEMCONTROLLER_RD;
 		return ("RD");
 	case 0x2:
+		*event_type = MCA_T_MEMCONTROLLER_WR;
 		return ("WR");
 	case 0x3:
+		*event_type = MCA_T_MEMCONTROLLER_AC;
 		return ("AC");
 	case 0x4:
+		*event_type = MCA_T_MEMCONTROLLER_MS;
 		return ("MS");
 	}
+	*event_type = MCA_T_MEMCONTROLLER_OTHER;
 	return ("???");
 }
 
@@ -426,6 +440,7 @@ static void
 mca_log(const struct mca_record *rec)
 {
 	uint16_t mca_error;
+	enum mca_stat_types event_type;
 
 	if (mca_mute(rec))
 		return;
@@ -473,34 +488,44 @@ mca_log(const struct mca_record *rec)
 	if (rec->mr_status & MC_STATUS_OVER)
 		printf("OVER ");
 	mca_error = rec->mr_status & MC_STATUS_MCA_ERROR;
+	event_type = MCA_T_COUNT;
 	switch (mca_error) {
 		/* Simple error codes. */
 	case 0x0000:
 		printf("no error");
+		event_type = MCA_T_NONE;
 		break;
 	case 0x0001:
 		printf("unclassified error");
+		event_type = MCA_T_UNCLASSIFIED;
 		break;
 	case 0x0002:
 		printf("ucode ROM parity error");
+		event_type = MCA_T_UCODE_ROM_PARITY;
 		break;
 	case 0x0003:
 		printf("external error");
+		event_type = MCA_T_EXTERNAL;
 		break;
 	case 0x0004:
 		printf("FRC error");
+		event_type = MCA_T_FRC;
 		break;
 	case 0x0005:
 		printf("internal parity error");
+		event_type = MCA_T_INTERNAL_PARITY;
 		break;
 	case 0x0006:
 		printf("SMM handler code access violation");
+		event_type = MCA_T_SMM_HANDLER;
 		break;
 	case 0x0400:
 		printf("internal timer error");
+		event_type = MCA_T_INTERNAL_TIMER;
 		break;
 	case 0x0e0b:
 		printf("generic I/O error");
+		event_type = MCA_T_GENERIC_IO;
 		if (rec->mr_cpu_vendor_id == CPU_VENDOR_INTEL &&
 		    (rec->mr_status & MC_STATUS_MISCV)) {
 			printf(" (pci%d:%d:%d:%d)",
@@ -513,6 +538,7 @@ mca_log(const struct mca_record *rec)
 	default:
 		if ((mca_error & 0xfc00) == 0x0400) {
 			printf("internal error %x", mca_error & 0x03ff);
+			event_type = MCA_T_INTERNAL;
 			break;
 		}
 
@@ -521,6 +547,7 @@ mca_log(const struct mca_record *rec)
 		/* Memory hierarchy error. */
 		if ((mca_error & 0xeffc) == 0x000c) {
 			printf("%s memory error", mca_error_level(mca_error));
+			event_type = MCA_T_MEMORY;
 			break;
 		}
 
@@ -528,12 +555,14 @@ mca_log(const struct mca_record *rec)
 		if ((mca_error & 0xeff0) == 0x0010) {
 			printf("%sTLB %s error", mca_error_ttype(mca_error),
 			    mca_error_level(mca_error));
+			event_type = MCA_T_TLB;
 			break;
 		}
 
 		/* Memory controller error. */
 		if ((mca_error & 0xef80) == 0x0080) {
-			printf("%s channel ", mca_error_mmtype(mca_error));
+			printf("%s channel ", mca_error_mmtype(mca_error,
+			    &event_type));
 			if ((mca_error & 0x000f) != 0x000f)
 				printf("%d", mca_error & 0x000f);
 			else
@@ -548,12 +577,14 @@ mca_log(const struct mca_record *rec)
 			    mca_error_ttype(mca_error),
 			    mca_error_level(mca_error),
 			    mca_error_request(mca_error));
+			event_type = MCA_T_CACHE;
 			break;
 		}
 
 		/* Extended memory error. */
 		if ((mca_error & 0xef80) == 0x0280) {
-			printf("%s channel ", mca_error_mmtype(mca_error));
+			printf("%s channel ", mca_error_mmtype(mca_error,
+			    &event_type));
 			if ((mca_error & 0x000f) != 0x000f)
 				printf("%d", mca_error & 0x000f);
 			else
@@ -565,6 +596,7 @@ mca_log(const struct mca_record *rec)
 		/* Bus and/or Interconnect error. */
 		if ((mca_error & 0xe800) == 0x0800) {
 			printf("BUS%s ", mca_error_level(mca_error));
+			event_type = MCA_T_BUS;
 			switch ((mca_error & 0x0600) >> 9) {
 			case 0:
 				printf("Source");
@@ -600,6 +632,7 @@ mca_log(const struct mca_record *rec)
 		}
 
 		printf("unknown error %x", mca_error);
+		event_type = MCA_T_UNKNOWN;
 		break;
 	}
 	printf("\n");
@@ -615,6 +648,12 @@ mca_log(const struct mca_record *rec)
 	}
 	if (rec->mr_status & MC_STATUS_MISCV)
 		printf("MCA: Misc 0x%llx\n", (long long)rec->mr_misc);
+	if (event_type < 0 || event_type >= MCA_T_COUNT) {
+		KASSERT(0, ("%s: invalid event type (%d)", __func__,
+		    event_type));
+		event_type = MCA_T_UNKNOWN;
+	}
+	atomic_add_64(&mca_stats[event_type], 1);
 }
 
 static bool
@@ -979,6 +1018,16 @@ mca_process_records(enum scan_mode mode)
 {
 	struct mca_internal *mca;
 
+	/*
+	 * If in an interrupt context, defer the post-scan activities to a
+	 * task queue.
+	 */
+	if (mode != POLLED) {
+		if (mca_startup_done)
+			taskqueue_enqueue(mca_tq, &mca_postscan_task);
+		return;
+	}
+
 	mtx_lock_spin(&mca_lock);
 	while ((mca = STAILQ_FIRST(&mca_pending)) != NULL) {
 		STAILQ_REMOVE_HEAD(&mca_pending, link);
@@ -986,10 +1035,19 @@ mca_process_records(enum scan_mode mode)
 		mca_store_record(mca);
 	}
 	mtx_unlock_spin(&mca_lock);
-	if (mode == POLLED)
-		mca_resize_freelist();
-	else if (!cold)
-		taskqueue_enqueue(mca_tq, &mca_resize_task);
+	mca_resize_freelist();
+}
+
+/*
+ * Emit log entries and resize the free list. This is intended to be called
+ * from a task queue to handle work which does not need to be done (or cannot
+ * be done) in an interrupt context.
+ */
+static void
+mca_postscan(void *context __unused, int pending __unused)
+{
+
+	mca_process_records(POLLED);
 }
 
 /*
@@ -1060,7 +1118,7 @@ sysctl_mca_maxcount(SYSCTL_HANDLER_ARGS)
 			doresize = true;
 		}
 	mtx_unlock_spin(&mca_lock);
-	if (doresize && !cold)
+	if (doresize && mca_startup_done)
 		taskqueue_enqueue(mca_tq, &mca_resize_task);
 	return (error);
 }
@@ -1072,12 +1130,16 @@ mca_startup(void *dummy)
 	if (mca_banks <= 0)
 		return;
 
-	/* CMCIs during boot may have claimed items from the freelist. */
-	mca_resize_freelist();
-
 	taskqueue_start_threads(&mca_tq, 1, PI_SWI(SWI_TQ), "mca taskq");
 	taskqueue_enqueue_timeout_sbt(mca_tq, &mca_scan_task,
 	    mca_ticks * SBT_1S, 0, C_PREL(1));
+	mca_startup_done = true;
+
+	/*
+	 * CMCIs during boot may have recorded entries. Conduct the post-scan
+	 * activities now.
+	 */
+	mca_postscan(NULL, 0);
 }
 SYSINIT(mca_startup, SI_SUB_KICK_SCHEDULER, SI_ORDER_ANY, mca_startup, NULL);
 
@@ -1137,6 +1199,7 @@ mca_setup(uint64_t mcg_cap)
 	TIMEOUT_TASK_INIT(mca_tq, &mca_scan_task, 0, mca_scan_cpus, NULL);
 	STAILQ_INIT(&mca_freelist);
 	TASK_INIT(&mca_resize_task, 0, mca_resize, NULL);
+	TASK_INIT(&mca_postscan_task, 0, mca_postscan, NULL);
 	mca_resize_freelist();
 	SYSCTL_ADD_INT(NULL, SYSCTL_STATIC_CHILDREN(_hw_mca), OID_AUTO,
 	    "count", CTLFLAG_RD, (int *)(uintptr_t)&mca_count, 0,
@@ -1539,6 +1602,9 @@ mca_intr(void)
 
 		panic("Unrecoverable machine check exception");
 	}
+
+	if (count)
+		mca_process_records(MCE);
 
 	/* Clear MCIP. */
 	wrmsr(MSR_MCG_STATUS, mcg_status & ~MCG_STATUS_MCIP);
