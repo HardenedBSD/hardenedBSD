@@ -131,7 +131,8 @@ SYSCTL_JAIL_PARAM(_hardening_pax_tpe, user_only,
 #endif
 
 static bool _pax_tpe_active(struct thread *);
-static int _pax_tpe_vap(struct thread *, struct prison *, struct vattr *);
+static int _pax_tpe_vap(struct thread *, struct prison *, struct vattr *,
+    mode_t);
 
 int
 pax_tpe_init_prison(struct prison *pr, struct vfsoptlist *opts)
@@ -292,7 +293,7 @@ pax_enforce_tpe(struct thread *td, struct vnode *vn, const char *path)
 
 	VOP_UNLOCK(vn);
 
-	error = _pax_tpe_vap(td, pr, &vap);
+	error = _pax_tpe_vap(td, pr, &vap, S_IWGRP | S_IWOTH);
 	if (error) {
 		free(parent_path, M_TEMP);
 		return (error);
@@ -314,7 +315,7 @@ pax_enforce_tpe(struct thread *td, struct vnode *vn, const char *path)
 		goto end;
 	}
 
-	error = _pax_tpe_vap(td, pr, &vap);
+	error = _pax_tpe_vap(td, pr, &vap, S_IWGRP | S_IWOTH);
 	if (error) {
 		goto end;
 	}
@@ -350,7 +351,8 @@ _pax_tpe_active(struct thread *td)
 }
 
 static int
-_pax_tpe_vap(struct thread *td, struct prison *pr, struct vattr *vap)
+_pax_tpe_vap(struct thread *td, struct prison *pr, struct vattr *vap,
+    mode_t mode)
 {
 	if (pr->pr_hbsd.hardening.tpe_root_owned) {
 		if (vap->va_uid != 0) {
@@ -364,8 +366,12 @@ _pax_tpe_vap(struct thread *td, struct prison *pr, struct vattr *vap)
 		}
 	}
 
-	if ((vap->va_mode & (S_IWGRP | S_IWOTH)) != 0) {
-		return EPERM;
+	if (vap->va_uid != 0 && ((vap->va_mode & S_IWUSR) == S_IWUSR)) {
+		return (EPERM);
+	}
+
+	if ((vap->va_mode & mode) != 0) {
+		return (EPERM);
 	}
 
 	return (0);
