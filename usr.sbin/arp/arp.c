@@ -67,7 +67,6 @@ static char const sccsid[] = "@(#)from: arp.c	8.2 (Berkeley) 1/2/94";
 #include <arpa/inet.h>
 
 #include <ctype.h>
-#include <err.h>
 #include <errno.h>
 #include <netdb.h>
 #include <nlist.h>
@@ -156,7 +155,7 @@ main(int argc, char *argv[])
 	if (!func)
 		func = F_GET;
 	if (opts.rifname) {
-		if (func != F_GET && !(func == F_DELETE && opts.aflag))
+		if (func != F_GET && func != F_SET && !(func == F_DELETE && opts.aflag))
 			xo_errx(1, "-i not applicable to this operation");
 		if ((opts.rifindex = if_nametoindex(opts.rifname)) == 0) {
 			if (errno == ENXIO)
@@ -181,7 +180,8 @@ main(int argc, char *argv[])
 
 			xo_close_list("arp-cache");
 			xo_close_container("arp");
-			xo_finish();
+			if (xo_finish() < 0)
+				xo_err(1, "stdout");
 		} else {
 			if (argc != 1)
 				usage();
@@ -218,7 +218,7 @@ main(int argc, char *argv[])
 	if (ifnameindex != NULL)
 		if_freenameindex(ifnameindex);
 
-	return (rtn);
+	exit(rtn);
 }
 
 /*
@@ -387,7 +387,7 @@ set(int argc, char **argv)
 		}
 	}
 #ifndef WITHOUT_NETLINK
-	return (set_nl(0, dst, &sdl_m, host));
+	return (set_nl(opts.rifindex, dst, &sdl_m, host));
 #else
 	return (set_rtsock(dst, &sdl_m, host));
 #endif
@@ -458,7 +458,8 @@ get(char *host)
 
 	xo_close_list("arp-cache");
 	xo_close_container("arp");
-	xo_finish();
+	if (xo_finish() < 0)
+		xo_err(1, "stdout");
 
 	return (found == 0);
 }
@@ -735,7 +736,7 @@ nuke_entries(uint32_t ifindex, struct in_addr addr)
 static void
 usage(void)
 {
-	fprintf(stderr, "%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+	xo_error("%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 	    "usage: arp [-n] [-i interface] hostname",
 	    "       arp [-n] [-i interface] -a",
 	    "       arp -d hostname [pub]",
@@ -831,7 +832,7 @@ doit:
 
 /*
  * get_ether_addr - get the hardware address of an interface on the
- * the same subnet as ipaddr.
+ * same subnet as ipaddr.
  */
 static int
 get_ether_addr(in_addr_t ipaddr, struct ether_addr *hwaddr)
