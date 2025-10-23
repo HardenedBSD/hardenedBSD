@@ -167,10 +167,7 @@ __DEFAULT_YES_OPTIONS = \
     QUOTAS \
     RADIUS_SUPPORT \
     RBOOTD \
-<<<<<<< HEAD
     RELRO \
-=======
->>>>>>> origin/freebsd/14-stable/main
     RESCUE \
     ROUTED \
     SENDMAIL \
