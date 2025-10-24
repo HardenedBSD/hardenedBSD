@@ -258,7 +258,7 @@ null_bypass(struct vop_generic_args *ap)
 		 * that aren't.  (We must always map first vp or vclean fails.)
 		 */
 		if (i != 0 && (*this_vp_p == NULLVP ||
-		    (*this_vp_p)->v_op != &null_vnodeops)) {
+		    !null_is_nullfs_vnode(*this_vp_p))) {
 			old_vps[i] = NULLVP;
 		} else {
 			old_vps[i] = *this_vp_p;
@@ -1192,3 +1192,11 @@ struct vop_vector null_vnodeops = {
 	.vop_copy_file_range =	VOP_PANIC,
 };
 VFS_VOP_VECTOR_REGISTER(null_vnodeops);
+
+struct vop_vector null_vnodeops_no_unp_bypass = {
+	.vop_default =		&null_vnodeops,
+	.vop_unp_bind =		vop_stdunp_bind,
+	.vop_unp_connect =	vop_stdunp_connect,
+	.vop_unp_detach =	vop_stdunp_detach,
+};
+VFS_VOP_VECTOR_REGISTER(null_vnodeops_no_unp_bypass);
