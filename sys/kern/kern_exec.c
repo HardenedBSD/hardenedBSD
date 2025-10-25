@@ -1349,7 +1349,7 @@ exec_map_stack(struct image_params *imgp)
 	if (ssiz < imgp->stack_sz)
 		imgp->stack_sz = ssiz;
 	error = vm_map_find(map, NULL, 0, &stack_addr, (vm_size_t)ssiz,
-	    sv->sv_usrstack, VMFS_ANY_SPACE, stack_prot, stackmaxprot,
+	    sv->sv_usrstack, VMFS_NO_SPACE, stack_prot, stackmaxprot,
 	    MAP_STACK_AREA);
 	if (error != KERN_SUCCESS) {
 #ifdef PAX_ASLR
