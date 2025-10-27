@@ -127,8 +127,6 @@
         ..
         agp
         ..
-        an
-        ..
         ciss
         ..
         evdev
@@ -186,8 +184,6 @@
         vkbd
         ..
         wg
-        ..
-        wi
         ..
     ..
     devdctl
@@ -297,8 +293,6 @@
     net80211
     ..
     netgraph
-        atm
-        ..
         bluetooth
             include
             ..
