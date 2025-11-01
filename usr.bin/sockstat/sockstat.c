@@ -99,11 +99,13 @@ static int	 opt_U;		/* Show remote UDP encapsulation port number */
 static int	 opt_u;		/* Show Unix domain sockets */
 static int	 opt_v;		/* Verbose mode */
 static int	 opt_w;		/* Wide print area for addresses */
+static bool	 show_path_state = false;
 
 /*
  * Default protocols to use if no -P was defined.
  */
-static const char *default_protos[] = {"sctp", "tcp", "udp", "divert" };
+static const char *default_protos[] = {"sctp", "tcp", "udp", "udplite",
+    "divert" };
 static size_t	   default_numprotos = nitems(default_protos);
 
 static int	*protos;	/* protocols to use */
@@ -519,6 +521,7 @@ gather_sctp(void)
 				    ((xinpcb->flags & SCTP_PCB_FLAGS_UDPTYPE) ||
 				     (xstcb->last == 1))) {
 					RB_INSERT(socks_t, &socks, sock);
+					show_path_state = true;
 				} else {
 					free_socket(sock);
 				}
@@ -684,6 +687,10 @@ gather_inet(int proto)
 		varname = "net.inet.udp.pcblist";
 		protoname = "udp";
 		break;
+	case IPPROTO_UDPLITE:
+		varname = "net.inet.udplite.pcblist";
+		protoname = "udplite";
+		break;
 	case IPPROTO_DIVERT:
 		varname = "net.inet.divert.pcblist";
 		protoname = "div";
@@ -732,6 +739,7 @@ gather_inet(int proto)
 			protoname = xtp->t_flags & TF_TOE ? "toe" : "tcp";
 			break;
 		case IPPROTO_UDP:
+		case IPPROTO_UDPLITE:
 		case IPPROTO_DIVERT:
 			xip = (struct xinpcb *)xig;
 			if (!check_ksize(xip->xi_len, struct xinpcb))
@@ -1159,7 +1167,7 @@ displaysock(struct sock *s, int pos)
 	faddr = s->faddr;
 	first = 1;
 	while (laddr != NULL || faddr != NULL) {
-		offset = 37;
+		offset = 40;
 		while (pos < offset)
 			pos += xprintf(" ");
 		switch (s->family) {
@@ -1296,7 +1304,7 @@ displaysock(struct sock *s, int pos)
 			}
 			offset += 7;
 		}
-		if (opt_s) {
+		if (opt_s && show_path_state) {
 			if (faddr != NULL &&
 			    s->proto == IPPROTO_SCTP &&
 			    s->state != SCTP_CLOSED &&
@@ -1387,7 +1395,7 @@ display(void)
 	int n, pos;
 
 	if (opt_q != 1) {
-		printf("%-8s %-10s %-5s %-3s %-6s %-*s %-*s",
+		printf("%-8s %-10s %-5s %-3s %-9s %-*s %-*s",
 		    "USER", "COMMAND", "PID", "FD", "PROTO",
 		    opt_w ? 45 : 21, "LOCAL ADDRESS",
 		    opt_w ? 45 : 21, "FOREIGN ADDRESS");
@@ -1401,7 +1409,8 @@ display(void)
 		if (opt_U)
 			printf(" %-6s", "ENCAPS");
 		if (opt_s) {
-			printf(" %-12s", "PATH STATE");
+			if (show_path_state)
+				printf(" %-12s", "PATH STATE");
 			printf(" %-12s", "CONN STATE");
 		}
 		if (opt_b)

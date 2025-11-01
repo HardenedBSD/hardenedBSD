@@ -857,6 +857,11 @@ SYSCTL_PROC(_net_inet_udp, UDPCTL_PCBLIST, pcblist,
     udp_pcblist, "S,xinpcb",
     "List of active UDP sockets");
 
+SYSCTL_PROC(_net_inet_udplite, OID_AUTO, pcblist,
+    CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, IPPROTO_UDPLITE,
+    udp_pcblist, "S,xinpcb",
+    "List of active UDP-Lite sockets");
+
 #ifdef INET
 static int
 udp_getcred(SYSCTL_HANDLER_ARGS)
@@ -1146,7 +1151,19 @@ udp_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *addr,
 	else
 		INP_RLOCK(inp);
 	NET_EPOCH_ENTER(et);
+#ifdef INET6
+	if ((flags & PRUS_IPV6) != 0) {
+		if ((inp->in6p_outputopts != NULL) &&
+		    (inp->in6p_outputopts->ip6po_tclass != -1))
+			tos = (u_char)inp->in6p_outputopts->ip6po_tclass;
+		else
+			tos = 0;
+	} else {
+		tos = inp->inp_ip_tos;
+	}
+#else
 	tos = inp->inp_ip_tos;
+#endif
 	if (control != NULL) {
 		/*
 		 * XXX: Currently, we assume all the optional information is
@@ -1170,6 +1187,23 @@ udp_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *addr,
 			error = udp_v4mapped_pktinfo(cm, &src, inp, flags);
 			if (error != 0)
 				break;
+			if (((flags & PRUS_IPV6) != 0) &&
+			    (cm->cmsg_level == IPPROTO_IPV6) &&
+			    (cm->cmsg_type == IPV6_TCLASS)) {
+				int tclass;
+
+				if (cm->cmsg_len != CMSG_LEN(sizeof(int))) {
+					error = EINVAL;
+					break;
+				}
+				tclass = *(int *)CMSG_DATA(cm);
+				if (tclass < -1 || tclass > 255) {
+					error = EINVAL;
+					break;
+				}
+				if (tclass != -1)
+					tos = (u_char)tclass;
+			}
 #endif
 			if (cm->cmsg_level != IPPROTO_IP)
 				continue;

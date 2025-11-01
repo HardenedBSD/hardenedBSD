@@ -479,9 +479,9 @@ FreeBSD 5.2           |      |                 |                       |
  |     |              |      |                    |            DragonFly 6.4.1
  |     |              |      |                    |            DragonFly 6.4.2
  |  FreeBSD           |      |                    |                    |
- |   14.3             |      |                    |                    |
+ |   14.3             |      |                OpenBSD 7.8              |
  |                    |      |                    |                    |
-FreeBSD 15 -current   |  NetBSD -current   OpenBSD -current    DragonFly -current
+FreeBSD 16 -current   |  NetBSD -current   OpenBSD -current    DragonFly -current
  |                    |      |                    |                    |
  v                    v      v                    v                    v
 
@@ -926,6 +926,7 @@ OpenBSD 7.7		2025-04-28 [OBD]
 DragonFly 6.4.1		2025-04-30 [DFB]
 DragonFly 6.4.2		2025-05-09 [DFB]
 FreeBSD 14.3		2025-06-10 [FBD]
+OpenBSD 7.8		2025-10-22 [OBD]
 
 Bibliography
 ------------------------
@@ -981,6 +982,15 @@ URL: https://web.archive.org/web/20090427195917/http://ezine.daemonnews.org/2001
 ("what are the differences between FreeBSD, NetBSD, and OpenBSD?")
 
 
+End-of-Life (EOL)
+-----------------
+The FreeBSD family tree shows when a release was published.
+If you would like to know when the support ends, just look at
+https://www.freebsd.org/security/#sup and
+https://www.freebsd.org/security/unsupported
+For other operating systems, see https://endoflife.date
+
+
 Acknowledgments
 ---------------
 
@@ -990,5 +1000,5 @@ original BSD announcements from Usenet or tapes.
 Steven M. Schultz for providing 2.8BSD, 2.10BSD, 2.11BSD manual pages.
 
 --
-Copyright (c) 1997-2024 Wolfram Schneider <wosch@FreeBSD.org>
+Copyright (c) 1997-2025 Wolfram Schneider <wosch@FreeBSD.org>
 URL: https://cgit.freebsd.org/src/tree/share/misc/bsd-family-tree
