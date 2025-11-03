@@ -32,6 +32,7 @@
 #include <net/if.h>
 #include <net/pfvar.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 
@@ -188,6 +189,38 @@ ATF_TC_BODY(gettables, tc)
 }
 
 ATF_TC_CLEANUP(gettables, tc)
+{
+	COMMON_CLEANUP();
+}
+
+ATF_TC_WITH_CLEANUP(clrtables);
+ATF_TC_HEAD(clrtables, tc)
+{
+	atf_tc_set_md_var(tc, "require.user", "root");
+	atf_tc_set_md_var(tc, "require.kmods", "pf");
+}
+
+ATF_TC_BODY(clrtables, tc)
+{
+	struct pfioc_table io;
+	struct pfr_table tbl;
+	int flags;
+
+	COMMON_HEAD();
+
+	flags = 0;
+
+	memset(&io, '/', sizeof(io));
+	io.pfrio_flags = flags;
+	io.pfrio_buffer = &tbl;
+	io.pfrio_esize = 0;
+	io.pfrio_size = 1;
+
+	if (ioctl(dev, DIOCRCLRTABLES, &io) == 0)
+		atf_tc_fail("Request with unterminated anchor name succeeded");
+}
+
+ATF_TC_CLEANUP(clrtables, tc)
 {
 	COMMON_CLEANUP();
 }
@@ -894,11 +927,36 @@ ATF_TC_CLEANUP(rpool_mtx2, tc)
 }
 
 
+ATF_TC_WITH_CLEANUP(addstate);
+ATF_TC_HEAD(addstate, tc)
+{
+	atf_tc_set_md_var(tc, "require.user", "root");
+	atf_tc_set_md_var(tc, "require.kmods", "pfsync");
+}
+
+ATF_TC_BODY(addstate, tc)
+{
+	struct pfioc_state st;
+
+	COMMON_HEAD();
+
+	memset(&st, 'a', sizeof(st));
+	st.state.timeout = PFTM_TCP_FIRST_PACKET;
+
+	ATF_CHECK_ERRNO(EINVAL, ioctl(dev, DIOCADDSTATE, &st) == -1);
+}
+
+ATF_TC_CLEANUP(addstate, tc)
+{
+	COMMON_CLEANUP();
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 	ATF_TP_ADD_TC(tp, addtables);
 	ATF_TP_ADD_TC(tp, deltables);
 	ATF_TP_ADD_TC(tp, gettables);
+	ATF_TP_ADD_TC(tp, clrtables);
 	ATF_TP_ADD_TC(tp, getastats);
 	ATF_TP_ADD_TC(tp, gettstats);
 	ATF_TP_ADD_TC(tp, clrtstats);
@@ -918,6 +976,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, tag);
 	ATF_TP_ADD_TC(tp, rpool_mtx);
 	ATF_TP_ADD_TC(tp, rpool_mtx2);
+	ATF_TP_ADD_TC(tp, addstate);
 
 	return (atf_no_error());
 }
