@@ -20,74 +20,9 @@ PROG=	${PROG_CXX}
 MK_DEBUG_FILES=	no
 .endif
 
-<<<<<<< HEAD
 # LLD sensibly defaults to -znoexecstack, so do the same for BFD
 LDFLAGS.bfd+= -Wl,-znoexecstack
 
-=======
-# ELF hardening knobs
-.if ${MK_BIND_NOW} != "no"
-LDFLAGS+= -Wl,-znow
-.endif
-.if ${LINKER_TYPE} != "mac"
-.if ${MK_RELRO} == "no"
-LDFLAGS+= -Wl,-znorelro
-.else
-LDFLAGS+= -Wl,-zrelro
-.endif
-.endif
-# Static PIE is not yet supported/tested.
-.if ${MK_PIE} != "no" && (!defined(NO_SHARED) || ${NO_SHARED:tl} == "no")
-CFLAGS+= -fPIE
-CXXFLAGS+= -fPIE
-LDFLAGS+= -pie
-OBJ_EXT=pieo
-.else
-OBJ_EXT=o
-.endif
-.if ${MK_RETPOLINE} != "no"
-.if ${COMPILER_FEATURES:Mretpoline} && ${LINKER_FEATURES:Mretpoline}
-CFLAGS+= -mretpoline
-CXXFLAGS+= -mretpoline
-# retpolineplt is broken with static linking (PR 233336)
-.if !defined(NO_SHARED) || ${NO_SHARED:tl} == "no"
-LDFLAGS+= -Wl,-zretpolineplt
-.endif
-.else
-.if !defined(_NO_INCLUDE_COMPILERMK)
-.warning Retpoline requested but not supported by compiler or linker
-.endif
-.endif
-.endif
-# LLD sensibly defaults to -znoexecstack, so do the same for BFD
-LDFLAGS.bfd+= -Wl,-znoexecstack
-
-# Initialize stack variables on function entry
-.if ${MK_INIT_ALL_ZERO} == "yes"
-.if ${COMPILER_FEATURES:Minit-all}
-CFLAGS+= -ftrivial-auto-var-init=zero
-CXXFLAGS+= -ftrivial-auto-var-init=zero
-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} < 160000
-CFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
-CXXFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
-.endif
-.else
-.if !defined(_NO_INCLUDE_COMPILERMK)
-.warning InitAll (zeros) requested but not supported by compiler
-.endif
-.endif
-.elif ${MK_INIT_ALL_PATTERN} == "yes"
-.if ${COMPILER_FEATURES:Minit-all}
-CFLAGS+= -ftrivial-auto-var-init=pattern
-CXXFLAGS+= -ftrivial-auto-var-init=pattern
-.else
-.if !defined(_NO_INCLUDE_COMPILERMK)
-.warning InitAll (pattern) requested but not supported by compiler
-.endif
-.endif
-.endif
-
->>>>>>> origin/freebsd/14-stable/main
 # bsd.sanitizer.mk is not installed, so don't require it (e.g. for ports).
 .sinclude "bsd.sanitizer.mk"
 
