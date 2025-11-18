@@ -10,13 +10,9 @@ MAN=		geom.8
 CFLAGS+=	-I${.CURDIR} -I${.CURDIR}/core
 CFLAGS+=	-DGEOM_CLASS_DIR=\"${GEOM_CLASS_DIR}\"
 
-<<<<<<< HEAD
 NOCFI=		yes
 
-LIBADD=		geom util
-=======
 LIBADD=		geom util xo
->>>>>>> origin/freebsd/14-stable/main
 
 .if defined(RESCUE)
 .PATH:	${SRCTOP}/lib/geom/part \
