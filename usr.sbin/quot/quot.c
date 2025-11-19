@@ -40,9 +40,10 @@
 #include <ufs/ffs/fs.h>
 
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fstab.h>
-#include <errno.h>
+#include <inttypes.h>
 #include <libufs.h>
 #include <paths.h>
 #include <pwd.h>
@@ -55,6 +56,7 @@
 /* some flags of what to do: */
 static char estimate;
 static char count;
+static char noname;
 static char unused;
 static void (*func)(int, struct fs *, char *);
 static long blocksize;
@@ -281,7 +283,7 @@ user(uid_t uid)
 		    usr--) {
 			if (!usr->name) {
 				usr->uid = uid;
-				if (!(pwd = getpwuid(uid))) {
+				if (noname || !(pwd = getpwuid(uid))) {
 					asprintf(&usr->name, "#%u", uid);
 				} else {
 					usr->name = strdup(pwd->pw_name);
@@ -308,7 +310,10 @@ cmpusers(const void *v1, const void *v2)
 	u1 = (const struct user *)v1;
 	u2 = (const struct user *)v2;
 
-	return u2->space - u1->space;
+	return (u2->space > u1->space ? 1 :
+	    u2->space < u1->space ? -1 :
+	    u1->uid > u2->uid ? 1 :
+	    u1->uid < u2->uid ? -1 : 0);
 }
 
 #define	sortusers(users)	(qsort((users),nusers,sizeof(struct user), \
@@ -476,43 +481,47 @@ douser(int fd, struct fs *super, char *name)
 static void
 donames(int fd, struct fs *super, char *name)
 {
-	int c;
-	ino_t maxino;
-	uintmax_t inode;
 	union dinode *dp;
+	char *end, *line;
+	size_t cap;
+	ssize_t len;
+	intmax_t inode, maxino;
 
 	maxino = super->fs_ncg * super->fs_ipg - 1;
-	/* first skip the name of the filesystem */
-	while ((c = getchar()) != EOF && (c < '0' || c > '9'))
-		while ((c = getchar()) != EOF && c != '\n');
-	ungetc(c,stdin);
-	while (scanf("%ju", &inode) == 1) {
-		if (inode > maxino) {
-			warnx("illegal inode %ju", inode);
-			return;
+	line = NULL;
+	cap = 0;
+	while ((len = getline(&line, &cap, stdin)) > 0) {
+		if (len > 0 && line[len - 1] == '\n')
+			line[--len] = '\0';
+		inode = strtoimax(line, &end, 10);
+		/*
+		 * Silently ignore lines that do not begin with a number.
+		 * For backward compatibility reasons, we do not require
+		 * the optional comment to be preceded by whitespace.
+		 */
+		if (end == line)
+			continue;
+		if (inode <= 0 || inode > maxino) {
+			warnx("invalid inode %jd", inode);
+			continue;
 		}
 		errno = 0;
 		if ((dp = get_inode(fd,super,inode))
 		    && !isfree(super, dp)) {
 			printf("%s\t",user(DIP(super, dp, di_uid))->name);
 			/* now skip whitespace */
-			while ((c = getchar()) == ' ' || c == '\t');
+			while (*end == ' ' || *end == '\t')
+				end++;
 			/* and print out the remainder of the input line */
-			while (c != EOF && c != '\n') {
-				putchar(c);
-				c = getchar();
-			}
-			putchar('\n');
+			printf("%s\n", end);
 		} else {
 			if (errno) {
 				err(1, "%s", name);
 			}
 			/* skip this line */
-			while ((c = getchar()) != EOF && c != '\n');
 		}
-		if (c == EOF)
-			break;
 	}
+	free(line);
 }
 
 static void
@@ -576,6 +585,9 @@ main(int argc, char *argv[])
 	while (--argc > 0 && **++argv == '-') {
 		while (*++*argv) {
 			switch (**argv) {
+			case 'N':
+				noname = 1;
+				break;
 			case 'n':
 				func = donames;
 				break;
