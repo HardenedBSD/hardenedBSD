@@ -434,7 +434,8 @@ MockFS::MockFS(int max_read, int max_readahead, bool allow_other,
 	  m_child_pid(-1),
 	  m_maxwrite(MIN(max_write, max_max_write)),
 	  m_nready(-1),
-	  m_quit(false)
+	  m_quit(false),
+	  m_expect_unmount(false)
 {
 	struct sigaction sa;
 	struct iovec *iov = NULL;
@@ -828,10 +829,12 @@ void MockFS::loop() {
 	}
 }
 
-int MockFS::notify_inval_entry(ino_t parent, const char *name, size_t namelen)
+int MockFS::notify_inval_entry(ino_t parent, const char *name, size_t namelen,
+		int expected_errno)
 {
 	std::unique_ptr<mockfs_buf_out> out(new mockfs_buf_out);
 
+	out->expected_errno = expected_errno;
 	out->header.unique = 0;	/* 0 means asynchronous notification */
 	out->header.error = FUSE_NOTIFY_INVAL_ENTRY;
 	out->body.inval_entry.parent = parent;
@@ -978,7 +981,7 @@ void MockFS::read_request(mockfs_buf_in &in, ssize_t &res) {
 	}
 	res = read(m_fuse_fd, &in, sizeof(in));
 
-	if (res < 0 && !m_quit) {
+	if (res < 0 && errno != EBADF && !m_quit && !m_expect_unmount) {
 		m_quit = true;
 		FAIL() << "read: " << strerror(errno);
 	}
