@@ -13,7 +13,11 @@ export PKGCMD="/usr/sbin/pkg -d --rootdir ${ROOTDIR}"
 export PORTSDIR="${PORTSDIR:-/usr/ports}"
 
 _DVD_PACKAGES="
+<<<<<<< HEAD
 archivers/unzip
+=======
+comms/usbmuxd
+>>>>>>> origin/freebsd/14-stable/main
 devel/git@lite
 graphics/drm-kmod
 misc/freebsd-doc-all
