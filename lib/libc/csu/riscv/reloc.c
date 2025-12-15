@@ -1,19 +1,12 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause
- *
- * Copyright (c) 2019 The FreeBSD Foundation
- *
- * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
- * under sponsorship from the FreeBSD Foundation.
+ * Copyright (c) 2019 Leandro Lupori
+ * Copyright (c) 2024 Jessica Clarke <jrtc27@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -28,19 +21,36 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LIBC_RISCV_STATIC_TLS_H
-#define _LIBC_RISCV_STATIC_TLS_H
+static unsigned long elf_hwcap;
 
-#include <machine/tls.h>
-
-static __inline uintptr_t
-_libc_get_static_tls_base(size_t offset)
+static void
+ifunc_init(const Elf_Auxinfo *aux)
 {
-	uintptr_t tlsbase;
-
-	tlsbase = (uintptr_t)_tcb_get();
-	tlsbase += offset;
-	return (tlsbase);
+	/* Digest the auxiliary vector. */
+	for (; aux->a_type != AT_NULL; aux++) {
+		switch (aux->a_type) {
+		case AT_HWCAP:
+			elf_hwcap = (uint32_t)aux->a_un.a_val;
+			break;
+		}
+	}
 }
 
-#endif
+static void
+crt1_handle_rela(const Elf_Rela *r)
+{
+	typedef Elf_Addr (*ifunc_resolver_t)(
+	    unsigned long, unsigned long, unsigned long, unsigned long,
+	    unsigned long, unsigned long, unsigned long, unsigned long);
+	Elf_Addr *ptr, *where, target;
+
+	switch (ELF_R_TYPE(r->r_info)) {
+	case R_RISCV_IRELATIVE:
+		ptr = (Elf_Addr *)r->r_addend;
+		where = (Elf_Addr *)r->r_offset;
+		target = ((ifunc_resolver_t)ptr)(elf_hwcap,
+		    0, 0, 0, 0, 0, 0, 0);
+		*where = target;
+		break;
+	}
+}

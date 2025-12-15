@@ -390,7 +390,7 @@ enum {
 void _rtld_error(const char *, ...) __printflike(1, 2) __exported;
 void rtld_die(void) __dead2;
 const char *rtld_strerror(int);
-Obj_Entry *map_object(int, const char *, const struct stat *);
+Obj_Entry *map_object(int, const char *, const struct stat *, bool);
 void *xcalloc(size_t, size_t);
 void *xmalloc(size_t);
 char *xstrdup(const char *);
@@ -446,7 +446,7 @@ int reloc_jmpslots(Obj_Entry *, int flags, struct Struct_RtldLockState *);
 int reloc_iresolve(Obj_Entry *, struct Struct_RtldLockState *);
 int reloc_iresolve_nonplt(Obj_Entry *, struct Struct_RtldLockState *);
 int reloc_gnu_ifunc(Obj_Entry *, int flags, struct Struct_RtldLockState *);
-void ifunc_init(Elf_Auxinfo[__min_size(AT_COUNT)]);
+void ifunc_init(Elf_Auxinfo *[__min_size(AT_COUNT)]);
 void init_pltgot(Obj_Entry *);
 void allocate_initial_tls(Obj_Entry *);
 

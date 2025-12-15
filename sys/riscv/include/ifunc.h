@@ -1,9 +1,8 @@
 /*-
- * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2015-2018 The FreeBSD Foundation
+ * Copyright (c) 2024 Jessica Clarke <jrtc27@FreeBSD.org>
  *
- * Copyright (c) 2019 The FreeBSD Foundation
- *
- * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
+ * Part of this software was developed by Konstantin Belousov <kib@FreeBSD.org>
  * under sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,19 +27,23 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LIBC_RISCV_STATIC_TLS_H
-#define _LIBC_RISCV_STATIC_TLS_H
+#ifndef __RISCV_IFUNC_H
+#define	__RISCV_IFUNC_H
 
-#include <machine/tls.h>
+#define	DEFINE_IFUNC(qual, ret_type, name, args)			\
+    static ret_type (*name##_resolver(void))args __used;		\
+    qual ret_type name args __attribute__((ifunc(#name "_resolver")));	\
+    static ret_type (*name##_resolver(void))args
 
-static __inline uintptr_t
-_libc_get_static_tls_base(size_t offset)
-{
-	uintptr_t tlsbase;
-
-	tlsbase = (uintptr_t)_tcb_get();
-	tlsbase += offset;
-	return (tlsbase);
-}
+#define	DEFINE_UIFUNC(qual, ret_type, name, args)			\
+    static ret_type (*name##_resolver(unsigned long, unsigned long,	\
+	unsigned long, unsigned long, unsigned long, unsigned long,	\
+	unsigned long, unsigned long))args __used;			\
+    qual ret_type name args __attribute__((ifunc(#name "_resolver")));	\
+    static ret_type (*name##_resolver(unsigned long elf_hwcap __unused,	\
+	unsigned long _arg2 __unused, unsigned long _arg3 __unused,	\
+	unsigned long _arg4 __unused, unsigned long _arg5 __unused,	\
+	unsigned long _arg6 __unused, unsigned long _arg7 __unused,	\
+	unsigned long _arg8 __unused))args
 
 #endif

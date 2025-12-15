@@ -450,12 +450,12 @@ typedef struct {
 #define	SHT_HIOS		0x6fffffff	/* Last of OS specific semantics */
 #define	SHT_LOPROC		0x70000000	/* reserved range for processor */
 #define	SHT_X86_64_UNWIND	0x70000001	/* unwind information */
-#define	SHT_AMD64_UNWIND	SHT_X86_64_UNWIND 
+#define	SHT_AMD64_UNWIND	SHT_X86_64_UNWIND
 
 #define	SHT_ARM_EXIDX		0x70000001	/* Exception index table. */
-#define	SHT_ARM_PREEMPTMAP	0x70000002	/* BPABI DLL dynamic linking 
+#define	SHT_ARM_PREEMPTMAP	0x70000002	/* BPABI DLL dynamic linking
 						   pre-emption map. */
-#define	SHT_ARM_ATTRIBUTES	0x70000003	/* Object file compatibility 
+#define	SHT_ARM_ATTRIBUTES	0x70000003	/* Object file compatibility
 						   attributes. */
 #define	SHT_ARM_DEBUGOVERLAY	0x70000004	/* See DBGOVL for details. */
 #define	SHT_ARM_OVERLAYSECTION	0x70000005	/* See DBGOVL for details. */
@@ -771,7 +771,7 @@ typedef struct {
 #define	DF_1_NODELETE	0x00000008	/* Set the RTLD_NODELETE for object */
 #define	DF_1_LOADFLTR	0x00000010	/* Immediate loading of filtees */
 #define	DF_1_INITFIRST	0x00000020	/* Initialize DSO first at runtime */
-#define	DF_1_NOOPEN     0x00000040	/* Do not allow loading on dlopen() */
+#define	DF_1_NOOPEN	0x00000040	/* Do not allow loading on dlopen() */
 #define	DF_1_ORIGIN	0x00000080	/* Process $ORIGIN */
 #define	DF_1_INTERPOSE	0x00000400	/* Interpose all objects but main */
 #define	DF_1_NODEFLIB	0x00000800	/* Do not search default paths */
@@ -888,7 +888,7 @@ typedef struct {
 #define	STV_ELIMINATE	0x6
 
 /* Architecture specific data - st_other */
-#define	STO_AARCH64_VARIANT_PCS 0x80
+#define	STO_AARCH64_VARIANT_PCS	0x80
 
 /* Special symbol table indexes. */
 #define	STN_UNDEF	0	/* Undefined symbol index. */
@@ -1060,11 +1060,11 @@ typedef struct {
 #define	R_AARCH64_COPY		1024	/* Copy data from shared object */
 #define	R_AARCH64_GLOB_DAT	1025	/* Set GOT entry to data address */
 #define	R_AARCH64_JUMP_SLOT	1026	/* Set GOT entry to code address */
-#define	R_AARCH64_RELATIVE 	1027	/* Add load address of shared object */
+#define	R_AARCH64_RELATIVE	1027	/* Add load address of shared object */
 #define	R_AARCH64_TLS_DTPREL64	1028
 #define	R_AARCH64_TLS_DTPMOD64	1029
-#define	R_AARCH64_TLS_TPREL64 	1030
-#define	R_AARCH64_TLSDESC 	1031	/* Identify the TLS descriptor */
+#define	R_AARCH64_TLS_TPREL64	1030
+#define	R_AARCH64_TLSDESC	1031	/* Identify the TLS descriptor */
 #define	R_AARCH64_IRELATIVE	1032
 
 #define	R_ARM_NONE		0	/* No relocation. */
@@ -1207,8 +1207,8 @@ typedef struct {
 #define	R_MIPS_GOT_HI16	22	/* GOT HI 16 bit */
 #define	R_MIPS_GOT_LO16	23	/* GOT LO 16 bit */
 #define	R_MIPS_SUB	24
-#define	R_MIPS_CALLHI16 30	/* upper 16 bit GOT entry for function */
-#define	R_MIPS_CALLLO16 31	/* lower 16 bit GOT entry for function */
+#define	R_MIPS_CALLHI16	30	/* upper 16 bit GOT entry for function */
+#define	R_MIPS_CALLLO16	31	/* lower 16 bit GOT entry for function */
 #define	R_MIPS_JALR	37
 #define	R_MIPS_TLS_GD	42
 #define	R_MIPS_COPY	126
@@ -1328,7 +1328,6 @@ typedef struct {
  * RISC-V relocation types.
  */
 
-/* Relocation types used by the dynamic linker. */
 #define	R_RISCV_NONE		0
 #define	R_RISCV_32		1
 #define	R_RISCV_64		2
@@ -1341,8 +1340,7 @@ typedef struct {
 #define	R_RISCV_TLS_DTPREL64	9
 #define	R_RISCV_TLS_TPREL32	10
 #define	R_RISCV_TLS_TPREL64	11
-
-/* Relocation types not used by the dynamic linker. */
+#define	R_RISCV_TLSDESC		12
 #define	R_RISCV_BRANCH		16
 #define	R_RISCV_JAL		17
 #define	R_RISCV_CALL		18
@@ -1368,10 +1366,10 @@ typedef struct {
 #define	R_RISCV_SUB16		38
 #define	R_RISCV_SUB32		39
 #define	R_RISCV_SUB64		40
+#define	R_RISCV_GOT32_PCREL	41
 #define	R_RISCV_ALIGN		43
 #define	R_RISCV_RVC_BRANCH	44
 #define	R_RISCV_RVC_JUMP	45
-#define	R_RISCV_RVC_LUI		46
 #define	R_RISCV_RELAX		51
 #define	R_RISCV_SUB6		52
 #define	R_RISCV_SET6		53
@@ -1380,6 +1378,14 @@ typedef struct {
 #define	R_RISCV_SET32		56
 #define	R_RISCV_32_PCREL	57
 #define	R_RISCV_IRELATIVE	58
+#define	R_RISCV_PLT32		59
+#define	R_RISCV_SET_ULEB128	60
+#define	R_RISCV_SUB_ULEB128	61
+#define	R_RISCV_TLSDESC_HI20	62
+#define	R_RISCV_TLSDESC_LOAD_LO12 63
+#define	R_RISCV_TLSDESC_ADD_LO12 64
+#define	R_RISCV_TLSDESC_CALL	65
+#define	R_RISCV_VENDOR		191
 
 #define	R_SPARC_NONE		0
 #define	R_SPARC_8		1
