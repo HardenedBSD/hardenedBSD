@@ -51,6 +51,13 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20251218: Remove old MLINK to apmconf(8)
+OLD_FILES+=usr/share/man/man8/apmconf.8.gz
+
+# 20251218: Remove pccard(4) and related
+OLD_FILES+=usr/share/man/man4/pccard.4.gz
+OLD_FILES+=usr/share/man/man4/pcic.4.gz
+
 # 20251023: This file is now installed in /etc/dma
 OLD_FILES+=usr/share/examples/dma/auth.conf
 
