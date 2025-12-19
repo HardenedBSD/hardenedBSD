@@ -289,7 +289,7 @@ sys_getgid(struct thread *td, struct getgid_args *uap)
 
 	td->td_retval[0] = td->td_ucred->cr_rgid;
 #if defined(COMPAT_43)
-	td->td_retval[1] = td->td_ucred->cr_groups[0];
+	td->td_retval[1] = td->td_ucred->cr_gid;
 #endif
 	return (0);
 }
@@ -309,7 +309,7 @@ int
 sys_getegid(struct thread *td, struct getegid_args *uap)
 {
 
-	td->td_retval[0] = td->td_ucred->cr_groups[0];
+	td->td_retval[0] = td->td_ucred->cr_gid;
 	return (0);
 }
 
@@ -397,7 +397,7 @@ again:
  *	pid must be in same session (EPERM)
  *	pid can't have done an exec (EACCES)
  * if pgid != pid
- * 	there must exist some pid in same session having pgid (EPERM)
+ *	there must exist some pid in same session having pgid (EPERM)
  * pid must not be session leader (EPERM)
  */
 #ifndef _SYS_SYSPROTO_H_
@@ -578,8 +578,8 @@ user_setcred(struct thread *td, const u_int flags,
 		if (error != 0)
 			return (error);
 		/* These fields have exactly the same sizes and positions. */
-		memcpy(&wcred, &wcred32, &wcred32.setcred32_copy_end -
-		    &wcred32.setcred32_copy_start);
+		memcpy(&wcred, &wcred32, __rangeof(struct setcred32,
+		    setcred32_copy_start, setcred32_copy_end));
 		/* Remaining fields are pointers and need PTRIN*(). */
 		PTRIN_CP(wcred32, wcred, sc_supp_groups);
 		PTRIN_CP(wcred32, wcred, sc_label);
@@ -672,7 +672,7 @@ kern_setcred(struct thread *const td, const u_int flags,
 	gid_t *groups = NULL;
 	gid_t smallgroups[CRED_SMALLGROUPS_NB];
 	int error;
-	bool cred_set;
+	bool cred_set = false;
 
 	/* Bail out on unrecognized flags. */
 	if (flags & ~SETCREDF_MASK)
@@ -816,23 +816,49 @@ kern_setcred(struct thread *const td, const u_int flags,
 	if (error != 0)
 		goto unlock_finish;
 
+#ifdef RACCT
 	/*
-	 * Set the new credentials, noting that they have changed.
+	 * Hold a reference to 'new_cred', as we need to call some functions on
+	 * it after proc_set_cred_enforce_proc_lim().
 	 */
+	crhold(new_cred);
+#endif
+
+	/* Set the new credentials. */
 	cred_set = proc_set_cred_enforce_proc_lim(p, new_cred);
 	if (cred_set) {
 		setsugid(p);
+#ifdef RACCT
+		/* Adjust RACCT counters. */
+		racct_proc_ucred_changed(p, old_cred, new_cred);
+#endif
 		to_free_cred = old_cred;
 		MPASS(error == 0);
-	} else
+	} else {
+#ifdef RACCT
+		/* Matches the crhold() just before the containing 'if'. */
+		crfree(new_cred);
+#endif
 		error = EAGAIN;
+	}
 
 unlock_finish:
 	PROC_UNLOCK(p);
+
 	/*
 	 * Part 3: After releasing the process lock, we perform cleanups and
 	 * finishing operations.
 	 */
+
+#ifdef RACCT
+	if (cred_set) {
+#ifdef RCTL
+		rctl_proc_ucred_changed(p, new_cred);
+#endif
+		/* Paired with the crhold() above. */
+		crfree(new_cred);
+	}
+#endif
 
 #ifdef MAC
 	if (mac_set_proc_data != NULL)
@@ -960,14 +986,19 @@ sys_setuid(struct thread *td, struct setuid_args *uap)
 		change_euid(newcred, uip);
 		setsugid(p);
 	}
-	/*
-	 * This also transfers the proc count to the new user.
-	 */
-	proc_set_cred(p, newcred);
+
 #ifdef RACCT
 	racct_proc_ucred_changed(p, oldcred, newcred);
+#endif
+#ifdef RCTL
 	crhold(newcred);
 #endif
+	/*
+	 * Takes over 'newcred''s reference, so 'newcred' must not be used
+	 * besides this point except on RCTL where we took an additional
+	 * reference above.
+	 */
+	proc_set_cred(p, newcred);
 	PROC_UNLOCK(p);
 #ifdef RCTL
 	rctl_proc_ucred_changed(p, newcred);
@@ -1082,7 +1113,7 @@ sys_setgid(struct thread *td, struct setgid_args *uap)
 	    gid != oldcred->cr_svgid &&		/* allow setgid(saved gid) */
 #endif
 #ifdef POSIX_APPENDIX_B_4_2_2	/* Use BSD-compat clause from B.4.2.2 */
-	    gid != oldcred->cr_groups[0] && /* allow setgid(getegid()) */
+	    gid != oldcred->cr_gid && /* allow setgid(getegid()) */
 #endif
 	    (error = priv_check_cred(oldcred, PRIV_CRED_SETGID)) != 0)
 		goto fail;
@@ -1094,7 +1125,7 @@ sys_setgid(struct thread *td, struct setgid_args *uap)
 	 */
 	if (
 #ifdef POSIX_APPENDIX_B_4_2_2	/* use the clause from B.4.2.2 */
-	    gid == oldcred->cr_groups[0] ||
+	    gid == oldcred->cr_gid ||
 #endif
 	    /* We are using privs. */
 	    priv_check_cred(oldcred, PRIV_CRED_SETGID) == 0)
@@ -1123,7 +1154,7 @@ sys_setgid(struct thread *td, struct setgid_args *uap)
 	 * In all cases permitted cases, we are changing the egid.
 	 * Copy credentials so other references do not see our changes.
 	 */
-	if (oldcred->cr_groups[0] != gid) {
+	if (oldcred->cr_gid != gid) {
 		change_egid(newcred, gid);
 		setsugid(p);
 	}
@@ -1169,7 +1200,7 @@ sys_setegid(struct thread *td, struct setegid_args *uap)
 	    (error = priv_check_cred(oldcred, PRIV_CRED_SETEGID)) != 0)
 		goto fail;
 
-	if (oldcred->cr_groups[0] != egid) {
+	if (oldcred->cr_gid != egid) {
 		change_egid(newcred, egid);
 		setsugid(p);
 	}
@@ -1341,11 +1372,18 @@ sys_setreuid(struct thread *td, struct setreuid_args *uap)
 		change_svuid(newcred, newcred->cr_uid);
 		setsugid(p);
 	}
-	proc_set_cred(p, newcred);
 #ifdef RACCT
 	racct_proc_ucred_changed(p, oldcred, newcred);
+#endif
+#ifdef RCTL
 	crhold(newcred);
 #endif
+	/*
+	 * Takes over 'newcred''s reference, so 'newcred' must not be used
+	 * besides this point except on RCTL where we took an additional
+	 * reference above.
+	 */
+	proc_set_cred(p, newcred);
 	PROC_UNLOCK(p);
 #ifdef RCTL
 	rctl_proc_ucred_changed(p, newcred);
@@ -1395,12 +1433,12 @@ sys_setregid(struct thread *td, struct setregid_args *uap)
 
 	if (((rgid != (gid_t)-1 && rgid != oldcred->cr_rgid &&
 	    rgid != oldcred->cr_svgid) ||
-	     (egid != (gid_t)-1 && egid != oldcred->cr_groups[0] &&
+	     (egid != (gid_t)-1 && egid != oldcred->cr_gid &&
 	     egid != oldcred->cr_rgid && egid != oldcred->cr_svgid)) &&
 	    (error = priv_check_cred(oldcred, PRIV_CRED_SETREGID)) != 0)
 		goto fail;
 
-	if (egid != (gid_t)-1 && oldcred->cr_groups[0] != egid) {
+	if (egid != (gid_t)-1 && oldcred->cr_gid != egid) {
 		change_egid(newcred, egid);
 		setsugid(p);
 	}
@@ -1408,9 +1446,9 @@ sys_setregid(struct thread *td, struct setregid_args *uap)
 		change_rgid(newcred, rgid);
 		setsugid(p);
 	}
-	if ((rgid != (gid_t)-1 || newcred->cr_groups[0] != newcred->cr_rgid) &&
-	    newcred->cr_svgid != newcred->cr_groups[0]) {
-		change_svgid(newcred, newcred->cr_groups[0]);
+	if ((rgid != (gid_t)-1 || newcred->cr_gid != newcred->cr_rgid) &&
+	    newcred->cr_svgid != newcred->cr_gid) {
+		change_svgid(newcred, newcred->cr_gid);
 		setsugid(p);
 	}
 	proc_set_cred(p, newcred);
@@ -1487,11 +1525,18 @@ sys_setresuid(struct thread *td, struct setresuid_args *uap)
 		change_svuid(newcred, suid);
 		setsugid(p);
 	}
-	proc_set_cred(p, newcred);
 #ifdef RACCT
 	racct_proc_ucred_changed(p, oldcred, newcred);
+#endif
+#ifdef RCTL
 	crhold(newcred);
 #endif
+	/*
+	 * Takes over 'newcred''s reference, so 'newcred' must not be used
+	 * besides this point except on RCTL where we took an additional
+	 * reference above.
+	 */
+	proc_set_cred(p, newcred);
 	PROC_UNLOCK(p);
 #ifdef RCTL
 	rctl_proc_ucred_changed(p, newcred);
@@ -1549,17 +1594,17 @@ sys_setresgid(struct thread *td, struct setresgid_args *uap)
 
 	if (((rgid != (gid_t)-1 && rgid != oldcred->cr_rgid &&
 	      rgid != oldcred->cr_svgid &&
-	      rgid != oldcred->cr_groups[0]) ||
+	      rgid != oldcred->cr_gid) ||
 	     (egid != (gid_t)-1 && egid != oldcred->cr_rgid &&
 	      egid != oldcred->cr_svgid &&
-	      egid != oldcred->cr_groups[0]) ||
+	      egid != oldcred->cr_gid) ||
 	     (sgid != (gid_t)-1 && sgid != oldcred->cr_rgid &&
 	      sgid != oldcred->cr_svgid &&
-	      sgid != oldcred->cr_groups[0])) &&
+	      sgid != oldcred->cr_gid)) &&
 	    (error = priv_check_cred(oldcred, PRIV_CRED_SETRESGID)) != 0)
 		goto fail;
 
-	if (egid != (gid_t)-1 && oldcred->cr_groups[0] != egid) {
+	if (egid != (gid_t)-1 && oldcred->cr_gid != egid) {
 		change_egid(newcred, egid);
 		setsugid(p);
 	}
@@ -1628,8 +1673,8 @@ sys_getresgid(struct thread *td, struct getresgid_args *uap)
 		error1 = copyout(&cred->cr_rgid,
 		    uap->rgid, sizeof(cred->cr_rgid));
 	if (uap->egid)
-		error2 = copyout(&cred->cr_groups[0],
-		    uap->egid, sizeof(cred->cr_groups[0]));
+		error2 = copyout(&cred->cr_gid,
+		    uap->egid, sizeof(cred->cr_gid));
 	if (uap->sgid)
 		error3 = copyout(&cred->cr_svgid,
 		    uap->sgid, sizeof(cred->cr_svgid));
@@ -1739,7 +1784,7 @@ groupmember(gid_t gid, const struct ucred *cred)
 
 	groups_check_positive_len(cred->cr_ngroups);
 
-	if (gid == cred->cr_groups[0])
+	if (gid == cred->cr_gid)
 		return (true);
 
 	return (group_is_supplementary(gid, cred));
@@ -2660,7 +2705,7 @@ cru2xt(struct thread *td, struct xucred *xcr)
  * 'enforce_proc_lim' being true and if no new process can be accounted to the
  * new real UID because of the current limit (see the inner comment for more
  * details) and the caller does not have privilege (PRIV_PROC_LIMIT) to override
- * that.
+ * that.  In this case, the reference to 'newcred' is not taken over.
  */
 static bool
 _proc_set_cred(struct proc *p, struct ucred *newcred, bool enforce_proc_lim)
@@ -2669,10 +2714,6 @@ _proc_set_cred(struct proc *p, struct ucred *newcred, bool enforce_proc_lim)
 
 	MPASS(oldcred != NULL);
 	PROC_LOCK_ASSERT(p, MA_OWNED);
-	KASSERT(newcred->cr_users == 0, ("%s: users %d not 0 on cred %p",
-	    __func__, newcred->cr_users, newcred));
-	KASSERT(newcred->cr_ref == 1, ("%s: ref %ld not 1 on cred %p",
-	    __func__, newcred->cr_ref, newcred));
 
 	if (newcred->cr_ruidinfo != oldcred->cr_ruidinfo) {
 		/*
@@ -2698,8 +2739,10 @@ _proc_set_cred(struct proc *p, struct ucred *newcred, bool enforce_proc_lim)
 	    __func__, oldcred->cr_users, oldcred));
 	oldcred->cr_users--;
 	mtx_unlock(&oldcred->cr_mtx);
+	mtx_lock(&newcred->cr_mtx);
+	newcred->cr_users++;
+	mtx_unlock(&newcred->cr_mtx);
 	p->p_ucred = newcred;
-	newcred->cr_users = 1;
 	PROC_UPDATE_COW(p);
 	if (newcred->cr_ruidinfo != oldcred->cr_ruidinfo)
 		(void)chgproccnt(oldcred->cr_ruidinfo, -1, 0);
@@ -3016,7 +3059,7 @@ void
 change_egid(struct ucred *newcred, gid_t egid)
 {
 
-	newcred->cr_groups[0] = egid;
+	newcred->cr_gid = egid;
 }
 
 /*-
