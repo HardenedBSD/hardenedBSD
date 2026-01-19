@@ -33,3 +33,5 @@ options 	PAX_HARDENING		# Various hardening options
 options 	PAX_SEGVGUARD		# prevent brute-force attacks
 options 	HBSD_DEBUG
 options		HBSD_RESIST_FINGERPRINTING
+
+options		WITNESS_NO_VNODE
