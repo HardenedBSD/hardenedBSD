@@ -3,5 +3,6 @@
 
 include GENERIC
 include HARDENEDBSD-CORE
+include "std.debug"
 
 ident		HARDENEDBSD
