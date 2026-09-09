@@ -205,7 +205,7 @@
 
 /* CLIDR_EL1 - Cache level ID register */
 #define	CLIDR_EL1_REG		MRS_REG_ALT_NAME(CLIDR_EL1)
-#define	CLIDR_EL1_op0		2
+#define	CLIDR_EL1_op0		3
 #define	CLIDR_EL1_op1		1
 #define	CLIDR_EL1_CRn		0
 #define	CLIDR_EL1_CRm		0
@@ -314,6 +314,9 @@
 #define	CNTV_CTL_EL0_CRn	14
 #define	CNTV_CTL_EL0_CRm	3
 #define	CNTV_CTL_EL0_op2	1
+#define	CNTV_CTL_ENABLE		(1 << 0)
+#define	CNTV_CTL_IMASK		(1 << 1)
+#define	CNTV_CTL_ISTATUS	(1 << 2)
 
 /* CNTV_CTL_EL02 - Counter-timer Virtual Timer Control register */
 #define	CNTV_CTL_EL02_op0	3
@@ -445,30 +448,30 @@
 #define	CTR_ERG_MASK		(0xf << CTR_ERG_SHIFT)
 #define	CTR_ERG_VAL(reg)	((reg) & CTR_ERG_MASK)
 #define	CTR_ERG_SIZE(reg)	(4 << (CTR_ERG_VAL(reg) >> CTR_ERG_SHIFT))
-#define	CTR_DLINE_SHIFT		16
-#define	CTR_DLINE_WIDTH		4
-#define	CTR_DLINE_MASK		(0xf << CTR_DLINE_SHIFT)
-#define	CTR_DLINE_VAL(reg)	((reg) & CTR_DLINE_MASK)
-#define	CTR_DLINE_SIZE(reg)	(4 << (CTR_DLINE_VAL(reg) >> CTR_DLINE_SHIFT))
-#define	CTR_L1IP_SHIFT		14
-#define	CTR_L1IP_WIDTH		2
-#define	CTR_L1IP_MASK		(0x3 << CTR_L1IP_SHIFT)
-#define	CTR_L1IP_VAL(reg)	((reg) & CTR_L1IP_MASK)
-#define	 CTR_L1IP_VIPT		(2 << CTR_L1IP_SHIFT)
-#define	 CTR_L1IP_PIPT		(3 << CTR_L1IP_SHIFT)
-#define	CTR_ILINE_SHIFT		0
-#define	CTR_ILINE_WIDTH		4
-#define	CTR_ILINE_MASK		(0xf << CTR_ILINE_SHIFT)
-#define	CTR_ILINE_VAL(reg)	((reg) & CTR_ILINE_MASK)
-#define	CTR_ILINE_SIZE(reg)	(4 << (CTR_ILINE_VAL(reg) >> CTR_ILINE_SHIFT))
+#define	CTR_DminLine_SHIFT	16
+#define	CTR_DminLine_WIDTH	4
+#define	CTR_DminLine_MASK	(0xf << CTR_DminLine_SHIFT)
+#define	CTR_DminLine_VAL(reg)	((reg) & CTR_DminLine_MASK)
+#define	CTR_DminLine_SIZE(reg)	(4 << (CTR_DminLine_VAL(reg) >> CTR_DminLine_SHIFT))
+#define	CTR_L1Ip_SHIFT		14
+#define	CTR_L1Ip_WIDTH		2
+#define	CTR_L1Ip_MASK		(0x3 << CTR_L1Ip_SHIFT)
+#define	CTR_L1Ip_VAL(reg)	((reg) & CTR_L1Ip_MASK)
+#define	 CTR_L1Ip_VIPT		(2 << CTR_L1Ip_SHIFT)
+#define	 CTR_L1Ip_PIPT		(3 << CTR_L1Ip_SHIFT)
+#define	CTR_IminLine_SHIFT	0
+#define	CTR_IminLine_WIDTH	4
+#define	CTR_IminLine_MASK	(0xf << CTR_IminLine_SHIFT)
+#define	CTR_IminLine_VAL(reg)	((reg) & CTR_IminLine_MASK)
+#define	CTR_IminLine_SIZE(reg)	(4 << (CTR_IminLine_VAL(reg) >> CTR_IminLine_SHIFT))
 
 /* CurrentEL - Current Exception Level */
-#define	CURRENTEL_EL_SHIFT	2
-#define	CURRENTEL_EL_MASK	(0x3 << CURRENTEL_EL_SHIFT)
-#define	 CURRENTEL_EL_EL0	(0x0 << CURRENTEL_EL_SHIFT)
-#define	 CURRENTEL_EL_EL1	(0x1 << CURRENTEL_EL_SHIFT)
-#define	 CURRENTEL_EL_EL2	(0x2 << CURRENTEL_EL_SHIFT)
-#define	 CURRENTEL_EL_EL3	(0x3 << CURRENTEL_EL_SHIFT)
+#define	CurrentEL_EL_SHIFT	2
+#define	CurrentEL_EL_MASK	(0x3 << CurrentEL_EL_SHIFT)
+#define	 CurrentEL_EL_EL0	(0x0 << CurrentEL_EL_SHIFT)
+#define	 CurrentEL_EL_EL1	(0x1 << CurrentEL_EL_SHIFT)
+#define	 CurrentEL_EL_EL2	(0x2 << CurrentEL_EL_SHIFT)
+#define	 CurrentEL_EL_EL3	(0x3 << CurrentEL_EL_SHIFT)
 
 /* DAIFSet/DAIFClear */
 #define	DAIF_D			(1 << 3)
@@ -830,25 +833,28 @@
 #define	ICC_SGI1R_EL1_CRn		12
 #define	ICC_SGI1R_EL1_CRm		11
 #define	ICC_SGI1R_EL1_op2		5
-#define	ICC_SGI1R_EL1_TL_SHIFT		0
-#define	ICC_SGI1R_EL1_TL_MASK		(0xffffUL << ICC_SGI1R_EL1_TL_SHIFT)
-#define	ICC_SGI1R_EL1_TL_VAL(x)		((x) & ICC_SGI1R_EL1_TL_MASK)
-#define	ICC_SGI1R_EL1_AFF1_SHIFT	16
-#define	ICC_SGI1R_EL1_AFF1_MASK		(0xfful << ICC_SGI1R_EL1_AFF1_SHIFT)
-#define	ICC_SGI1R_EL1_AFF1_VAL(x)	((x) & ICC_SGI1R_EL1_AFF1_MASK)
-#define	ICC_SGI1R_EL1_SGIID_SHIFT	24
-#define	ICC_SGI1R_EL1_SGIID_MASK	(0xfUL << ICC_SGI1R_EL1_SGIID_SHIFT)
-#define	ICC_SGI1R_EL1_SGIID_VAL(x)	((x) & ICC_SGI1R_EL1_SGIID_MASK)
-#define	ICC_SGI1R_EL1_AFF2_SHIFT	32
-#define	ICC_SGI1R_EL1_AFF2_MASK		(0xfful << ICC_SGI1R_EL1_AFF2_SHIFT)
-#define	ICC_SGI1R_EL1_AFF2_VAL(x)	((x) & ICC_SGI1R_EL1_AFF2_MASK)
-#define	ICC_SGI1R_EL1_RS_SHIFT		44
-#define	ICC_SGI1R_EL1_RS_MASK		(0xful << ICC_SGI1R_EL1_RS_SHIFT)
-#define	ICC_SGI1R_EL1_RS_VAL(x)		((x) & ICC_SGI1R_EL1_RS_MASK)
-#define	ICC_SGI1R_EL1_AFF3_SHIFT	48
-#define	ICC_SGI1R_EL1_AFF3_MASK		(0xfful << ICC_SGI1R_EL1_AFF3_SHIFT)
-#define	ICC_SGI1R_EL1_AFF3_VAL(x)	((x) & ICC_SGI1R_EL1_AFF3_MASK)
-#define	ICC_SGI1R_EL1_IRM		(0x1UL << 40)
+#define	ICC_SGI1R_TargetList_SHIFT	0
+#define	ICC_SGI1R_TargetList_MASK	(0xffffUL << ICC_SGI1R_TargetList_SHIFT)
+#define	ICC_SGI1R_TargetList_VAL(x)	((x) & ICC_SGI1R_TargetList_MASK)
+#define	ICC_SGI1R_Aff1_SHIFT		16
+#define	ICC_SGI1R_Aff1_MASK		(0xfful << ICC_SGI1R_Aff1_SHIFT)
+#define	ICC_SGI1R_Aff1_VAL(x)		((x) & ICC_SGI1R_Aff1_MASK)
+#define	ICC_SGI1R_INTID_SHIFT		24
+#define	ICC_SGI1R_INTID_MASK		(0xfUL << ICC_SGI1R_INTID_SHIFT)
+#define	ICC_SGI1R_INTID_VAL(x)		((x) & ICC_SGI1R_INTID_MASK)
+#define	ICC_SGI1R_Aff2_SHIFT		32
+#define	ICC_SGI1R_Aff2_MASK		(0xfful << ICC_SGI1R_Aff2_SHIFT)
+#define	ICC_SGI1R_Aff2_VAL(x)		((x) & ICC_SGI1R_Aff2_MASK)
+#define	ICC_SGI1R_IRM_SHIFT		40
+#define	ICC_SGI1R_IRM_WIDTH		1
+#define	ICC_SGI1R_IRM_MASK		(UL(0x1) << ICC_SGI1R_IRM_SHIFT)
+#define	ICC_SGI1R_IRM_VAL(x)		((x) & ICC_SGI1R_IRM_MASK)
+#define	ICC_SGI1R_RS_SHIFT		44
+#define	ICC_SGI1R_RS_MASK		(0xful << ICC_SGI1R_RS_SHIFT)
+#define	ICC_SGI1R_RS_VAL(x)		((x) & ICC_SGI1R_RS_MASK)
+#define	ICC_SGI1R_Aff3_SHIFT		48
+#define	ICC_SGI1R_Aff3_MASK		(0xfful << ICC_SGI1R_Aff3_SHIFT)
+#define	ICC_SGI1R_Aff3_VAL(x)		((x) & ICC_SGI1R_Aff3_MASK)
 
 /* ICC_SRE_EL1 */
 #define	ICC_SRE_EL1_SRE		(1U << 0)
@@ -911,7 +917,7 @@
 #define	ID_AA64DFR0_BRPs_SHIFT		12
 #define	ID_AA64DFR0_BRPs_WIDTH		4
 #define	ID_AA64DFR0_BRPs_MASK		(UL(0xf) << ID_AA64DFR0_BRPs_SHIFT)
-#define	ID_AA64DFR0_BRPs_VAL(x)	\
+#define	 ID_AA64DFR0_BRPs_NUM(x)	\
     ((((x) >> ID_AA64DFR0_BRPs_SHIFT) & 0xf) + 1)
 #define	ID_AA64DFR0_PMSS_SHIFT		16
 #define	ID_AA64DFR0_PMSS_WIDTH		4
@@ -922,12 +928,12 @@
 #define	ID_AA64DFR0_WRPs_SHIFT		20
 #define	ID_AA64DFR0_WRPs_WIDTH		4
 #define	ID_AA64DFR0_WRPs_MASK		(UL(0xf) << ID_AA64DFR0_WRPs_SHIFT)
-#define	ID_AA64DFR0_WRPs_VAL(x)	\
+#define	 ID_AA64DFR0_WRPs_NUM(x)	\
     ((((x) >> ID_AA64DFR0_WRPs_SHIFT) & 0xf) + 1)
 #define	ID_AA64DFR0_CTX_CMPs_SHIFT	28
 #define	ID_AA64DFR0_CTX_CMPs_WIDTH	4
 #define	ID_AA64DFR0_CTX_CMPs_MASK	(UL(0xf) << ID_AA64DFR0_CTX_CMPs_SHIFT)
-#define	ID_AA64DFR0_CTX_CMPs_VAL(x)	\
+#define	 ID_AA64DFR0_CTX_CMPs_NUM(x)	\
     ((((x) >> ID_AA64DFR0_CTX_CMPs_SHIFT) & 0xf) + 1)
 #define	ID_AA64DFR0_PMSVer_SHIFT	32
 #define	ID_AA64DFR0_PMSVer_WIDTH	4
@@ -1515,12 +1521,12 @@
 #define	ID_AA64MMFR1_TIDCP1_VAL(x)	((x) & ID_AA64MMFR1_TIDCP1_MASK)
 #define	 ID_AA64MMFR1_TIDCP1_NONE	(UL(0x0) << ID_AA64MMFR1_TIDCP1_SHIFT)
 #define	 ID_AA64MMFR1_TIDCP1_IMPL	(UL(0x1) << ID_AA64MMFR1_TIDCP1_SHIFT)
-#define	ID_AA64MMFR1_CMOVW_SHIFT	56
-#define	ID_AA64MMFR1_CMOVW_WIDTH	4
-#define	ID_AA64MMFR1_CMOVW_MASK		(UL(0xf) << ID_AA64MMFR1_CMOVW_SHIFT)
-#define	ID_AA64MMFR1_CMOVW_VAL(x)	((x) & ID_AA64MMFR1_CMOVW_MASK)
-#define	 ID_AA64MMFR1_CMOVW_NONE	(UL(0x0) << ID_AA64MMFR1_CMOVW_SHIFT)
-#define	 ID_AA64MMFR1_CMOVW_IMPL	(UL(0x1) << ID_AA64MMFR1_CMOVW_SHIFT)
+#define	ID_AA64MMFR1_CMOW_SHIFT		56
+#define	ID_AA64MMFR1_CMOW_WIDTH		4
+#define	ID_AA64MMFR1_CMOW_MASK		(UL(0xf) << ID_AA64MMFR1_CMOW_SHIFT)
+#define	ID_AA64MMFR1_CMOW_VAL(x)	((x) & ID_AA64MMFR1_CMOW_MASK)
+#define	 ID_AA64MMFR1_CMOW_NONE		(UL(0x0) << ID_AA64MMFR1_CMOW_SHIFT)
+#define	 ID_AA64MMFR1_CMOW_IMPL		(UL(0x1) << ID_AA64MMFR1_CMOW_SHIFT)
 #define	ID_AA64MMFR1_ECBHB_SHIFT	60
 #define	ID_AA64MMFR1_ECBHB_WIDTH	4
 #define	ID_AA64MMFR1_ECBHB_MASK		(UL(0xf) << ID_AA64MMFR1_ECBHB_SHIFT)
@@ -1774,7 +1780,6 @@
 #define	 ID_AA64PFR0_AdvSIMD_IMPL	(UL(0x0) << ID_AA64PFR0_AdvSIMD_SHIFT)
 #define	 ID_AA64PFR0_AdvSIMD_HP		(UL(0x1) << ID_AA64PFR0_AdvSIMD_SHIFT)
 #define	 ID_AA64PFR0_AdvSIMD_NONE	(UL(0xf) << ID_AA64PFR0_AdvSIMD_SHIFT)
-#define	ID_AA64PFR0_GIC_BITS		0x4 /* Number of bits in GIC field */
 #define	ID_AA64PFR0_GIC_SHIFT		24
 #define	ID_AA64PFR0_GIC_WIDTH		4
 #define	ID_AA64PFR0_GIC_MASK		(UL(0xf) << ID_AA64PFR0_GIC_SHIFT)
