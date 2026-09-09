@@ -291,7 +291,11 @@ vm_create_disk() {
 		WITH_UNIFIED_OBJDIR=yes \
 		make -C ${WORLDDIR}/stand -V .OBJDIR)"
 	BOOTFILES="$(realpath ${BOOTFILES})"
+<<<<<<< HEAD
 	MAKEFSARGS="-s ${VMSIZE}"
+=======
+	MAKEFSARGS="-s ${VMSIZE} -D -N ${DESTDIR}/etc"
+>>>>>>> rad/freebsd/15-stable/main
 
 	case "${TARGET}:${TARGET_ARCH}" in
 		amd64:amd64 | i386:i386)
