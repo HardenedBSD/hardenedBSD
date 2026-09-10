@@ -28,7 +28,6 @@
 
 #include <sys/cdefs.h>
 #include "opt_acpi.h"
-#include "opt_iommu.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,8 +50,6 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pci_private.h>
 
-#include <dev/iommu/iommu.h>
-
 /* Hooks for the ACPI CA debugging infrastructure. */
 #define _COMPONENT	ACPI_BUS
 ACPI_MODULE_NAME("PCI")
@@ -60,8 +57,13 @@ ACPI_MODULE_NAME("PCI")
 struct acpi_pci_devinfo {
 	struct pci_devinfo	ap_dinfo;
 	ACPI_HANDLE		ap_handle;
+	bus_dma_tag_t		ap_dma_tag;
 	int			ap_flags;
+	int			ap_domain;
 };
+
+/* acpi_pxm_parse() returns -2, -1, or a non-negative domain. */
+#define	ACPI_PCI_DOMAIN_UNSET	(-3)
 
 ACPI_SERIAL_DECL(pci_powerstate, "ACPI PCI power methods");
 
@@ -90,7 +92,10 @@ static int	acpi_pci_set_powerstate_method(device_t dev, device_t child,
 		    int state);
 static void	acpi_pci_update_device(ACPI_HANDLE handle, device_t pci_child);
 static bus_dma_tag_t acpi_pci_get_dma_tag(device_t bus, device_t child);
+static int	acpi_pci_get_cpus(device_t dev, device_t child,
+		    enum cpu_sets op, size_t setsize, cpuset_t *cpuset);
 static int	acpi_pci_get_domain(device_t dev, device_t child, int *domain);
+static device_t acpi_pci_get_locality_device(device_t child);
 
 static device_method_t acpi_pci_methods[] = {
 	/* Device interface */
@@ -104,7 +109,7 @@ static device_method_t acpi_pci_methods[] = {
 	DEVMETHOD(bus_child_deleted,	acpi_pci_child_deleted),
 	DEVMETHOD(bus_child_location,	acpi_pci_child_location_method),
 	DEVMETHOD(bus_get_device_path,	acpi_pci_get_device_path),
-	DEVMETHOD(bus_get_cpus,		acpi_get_cpus),
+	DEVMETHOD(bus_get_cpus,		acpi_pci_get_cpus),
 	DEVMETHOD(bus_get_dma_tag,	acpi_pci_get_dma_tag),
 	DEVMETHOD(bus_get_domain,	acpi_pci_get_domain),
 
@@ -129,6 +134,7 @@ acpi_pci_alloc_devinfo(device_t dev)
 	struct acpi_pci_devinfo *dinfo;
 
 	dinfo = malloc(sizeof(*dinfo), M_DEVBUF, M_WAITOK | M_ZERO);
+	dinfo->ap_domain = ACPI_PCI_DOMAIN_UNSET;
 	return (&dinfo->ap_dinfo);
 }
 
@@ -171,6 +177,8 @@ acpi_pci_child_deleted(device_t dev, device_t child)
 {
 	struct acpi_pci_devinfo *dinfo = device_get_ivars(child);
 
+	if (dinfo->ap_dma_tag != NULL)
+		bus_dma_tag_destroy(dinfo->ap_dma_tag);
 	if (acpi_get_device(dinfo->ap_handle) == child)
 		AcpiDetachData(dinfo->ap_handle, acpi_fake_objhandler);
 	pci_child_deleted(dev, child);
@@ -204,6 +212,50 @@ acpi_pci_get_device_path(device_t bus, device_t child, const char *locator, stru
 	return 	(pci_get_device_path_method(bus, child, locator, sb));
 }
 
+/* Use a VF's PF as the source of its ACPI locality information. */
+static device_t
+acpi_pci_get_locality_device(device_t child)
+{
+	device_t pf;
+
+	pf = pci_iov_get_pf(child);
+	return (pf != NULL ? pf : child);
+}
+
+/* Cache locality on its source device; all of a PF's VFs share its result. */
+static int
+acpi_pci_get_locality_domain(device_t child)
+{
+	struct acpi_pci_devinfo *dinfo;
+	device_t locality;
+	int domain;
+
+	locality = acpi_pci_get_locality_device(child);
+	dinfo = device_get_ivars(locality);
+	domain = dinfo->ap_domain;
+	if (domain == ACPI_PCI_DOMAIN_UNSET) {
+		domain = acpi_pxm_parse(locality);
+		/* Do not make a generic evaluation or mapping error permanent. */
+		if (domain != -1)
+			dinfo->ap_domain = domain;
+	}
+	return (domain);
+}
+
+static int
+acpi_pci_get_cpus(device_t dev, device_t child, enum cpu_sets op,
+    size_t setsize, cpuset_t *cpuset)
+{
+	device_t locality;
+
+	/* BUS_GET_CPUS may preserve a descendant below the PCI function. */
+	if (device_get_parent(child) != dev)
+		return (acpi_get_cpus(dev, child, op, setsize, cpuset));
+	locality = acpi_pci_get_locality_device(child);
+	return (acpi_get_cpus_for_domain(dev, locality,
+	    acpi_pci_get_locality_domain(locality), op, setsize, cpuset));
+}
+
 /*
  * Fetch the NUMA domain for the given device 'dev'.
  *
@@ -217,7 +269,7 @@ acpi_pci_get_domain(device_t dev, device_t child, int *domain)
 {
 	int d;
 
-	d = acpi_pxm_parse(child);
+	d = acpi_pci_get_locality_domain(child);
 	if (d >= 0) {
 		*domain = d;
 		return (0);
@@ -226,7 +278,8 @@ acpi_pci_get_domain(device_t dev, device_t child, int *domain)
 		return (ENOENT);
 
 	/* No _PXM node; go up a level */
-	return (bus_generic_get_domain(dev, child, domain));
+	return (bus_generic_get_domain(dev,
+	    acpi_pci_get_locality_device(child), domain));
 }
 
 /*
@@ -338,6 +391,18 @@ acpi_pci_save_handle(ACPI_HANDLE handle, UINT32 level, void *context,
 void
 acpi_pci_child_added(device_t dev, device_t child)
 {
+	struct acpi_pci_devinfo *dinfo;
+
+	dinfo = device_get_ivars(child);
+
+	/*
+	 * VFs are instantiated dynamically from their PF rather than enumerated
+	 * from ACPI.  A VF's runtime slot and function can match an unrelated
+	 * _ADR below the bridge, causing the ACPI handle for that device to be
+	 * attached to the VF.
+	 */
+	if ((dinfo->ap_dinfo.cfg.flags & PCICFG_VF) != 0)
+		return;
 
 	/*
 	 * PCI devices are added via the bus scan in the normal PCI
@@ -495,26 +560,42 @@ acpi_pci_detach(device_t dev)
 	return (pci_detach(dev));
 }
 
-#ifdef IOMMU
 static bus_dma_tag_t
 acpi_pci_get_dma_tag(device_t bus, device_t child)
 {
-	bus_dma_tag_t tag;
+	struct acpi_pci_devinfo *dinfo;
+	bus_dma_tag_t parent, tag;
+	int domain, error;
 
-	if (device_get_parent(child) == bus) {
-		/* try iommu and return if it works */
-		tag = iommu_get_dma_tag(bus, child);
-	} else
-		tag = NULL;
-	if (tag == NULL)
-		tag = pci_get_dma_tag(bus, child);
+	if (device_get_parent(child) != bus)
+		return (pci_get_dma_tag(bus, child));
+	dinfo = device_get_ivars(child);
+	if (dinfo->ap_dma_tag != NULL)
+		return (dinfo->ap_dma_tag);
+
+	/*
+	 * The parent tag already carries the upstream bridge's proximity
+	 * domain.  Only create a private tag when this function (or its PF,
+	 * for a VF) supplies a more specific _PXM.  In particular, do not
+	 * change the shared PCI or IOMMU tag in place.
+	 */
+	domain = acpi_pci_get_locality_domain(child);
+	if (domain < 0)
+		return (pci_get_dma_tag(bus, child));
+
+	parent = pci_get_dma_tag(bus, child);
+	if (parent == NULL)
+		return (NULL);
+	error = bus_dma_tag_create(parent, 1, 0, BUS_SPACE_MAXADDR,
+	    BUS_SPACE_MAXADDR, NULL, NULL, BUS_SPACE_MAXSIZE,
+	    BUS_SPACE_UNRESTRICTED, BUS_SPACE_MAXSIZE, 0, NULL, NULL, &tag);
+	if (error != 0)
+		return (parent);
+	error = bus_dma_tag_set_domain(tag, domain);
+	if (error != 0) {
+		bus_dma_tag_destroy(tag);
+		return (parent);
+	}
+	dinfo->ap_dma_tag = tag;
 	return (tag);
 }
-#else
-static bus_dma_tag_t
-acpi_pci_get_dma_tag(device_t bus, device_t child)
-{
-
-	return (pci_get_dma_tag(bus, child));
-}
-#endif
