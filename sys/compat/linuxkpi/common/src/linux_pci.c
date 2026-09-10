@@ -1842,8 +1842,8 @@ lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
 	/* dma_sync_single_for_cpu() unrolled to avoid lock recursicn. */
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(obj->dmat, obj->dmamap,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTWRITE);
@@ -2012,6 +2012,17 @@ linuxkpi_dma_sync(struct device *dev, dma_addr_t dma_addr, size_t size,
 	DMA_PRIV_UNLOCK(priv);
 }
 
+void
+lkpi_dma_sync_sg(struct device *dev, struct scatterlist *sgl, bus_dmasync_op_t op)
+{
+	struct linux_dma_priv *priv;
+
+	priv = dev->dma_priv;
+	DMA_PRIV_LOCK(priv);
+	bus_dmamap_sync(priv->dmat, sgl->dma_map, op);
+	DMA_PRIV_UNLOCK(priv);
+}
+
 int
 linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
     enum dma_data_direction direction, unsigned long attrs)
@@ -2053,13 +2064,14 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 		break;
 	case DMA_TO_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	case DMA_FROM_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
 		break;
 	default:
 		break;
@@ -2087,8 +2099,8 @@ linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sgl,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTWRITE);
