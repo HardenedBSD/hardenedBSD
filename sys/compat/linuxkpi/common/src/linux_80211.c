@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2020-2026 The FreeBSD Foundation
- * Copyright (c) 2020-2025 Bjoern A. Zeeb
+ * Copyright (c) 2020-2026 Bjoern A. Zeeb
  *
  * This software was developed by Björn Zeeb under sponsorship from
  * the FreeBSD Foundation.
@@ -1359,6 +1359,8 @@ lkpi_cipher_suite_to_name(uint32_t wlan_cipher_suite)
 		return ("BIP_GMAC_128");
 	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
 		return ("BIP_GMAC_256");
+	case WLAN_CIPHER_SUITE_SMS4:
+		return ("WPI-SMS4");
 	default:
 		return ("??");
 	}
@@ -1392,7 +1394,7 @@ lkpi_l80211_to_net80211_cyphers(struct ieee80211com *ic,
 	case WLAN_CIPHER_SUITE_BIP_GMAC_256:
 		return (IEEE80211_CRYPTO_BIP_GMAC_256);
 	default:
-		ic_printf(ic, "%s: unknown WLAN Cipher Suite %#08x | %u (%s)\n",
+		ic_printf(ic, "%s: unknown/unsupported WLAN Cipher Suite %#08x | %u (%s)\n",
 		    __func__,
 		    wlan_cipher_suite >> 8, wlan_cipher_suite & 0xff,
 		    lkpi_cipher_suite_to_name(wlan_cipher_suite));
@@ -2710,6 +2712,8 @@ lkpi_bss_info_change(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 {
 	struct lkpi_vif *lvif;
 	enum ieee80211_bss_changed vif_cfg_bits, link_info_bits;
+
+	lockdep_assert_wiphy(hw->wiphy);
 
 	if (ieee80211_vif_is_mld(vif)) {
 		TODO("This likely needs a subset only; split up into 3 parts.");
@@ -4230,8 +4234,10 @@ lkpi_iv_sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 	 * If this direct call to mo_bss_info_changed will not work due to
 	 * locking, see if queue_work() is fast enough.
 	 */
+	wiphy_lock(hw->wiphy);
 	bss_changed = lkpi_update_dtim_tsf(vif, ni, ni->ni_vap, __func__, __LINE__);
 	lkpi_bss_info_change(hw, vif, bss_changed);
+	wiphy_unlock(hw->wiphy);
 }
 
 /*
@@ -4349,9 +4355,18 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	vif->p2p = false;
 	vif->probe_req_reg = false;
 	vif->type = lkpi_opmode_to_vif_type(opmode);
+	lvif->wdev.wiphy = hw->wiphy;
 	lvif->wdev.iftype = vif->type;
+	wiphy_lock(hw->wiphy);
+	list_add_rcu(&lvif->wdev.list, &hw->wiphy->wdev_list);
+	wiphy_unlock(hw->wiphy);
+	memcpy(lvif->wdev.address, mac, IEEE80211_ADDR_LEN);
+#if 0
 	/* Need to fill in other fields as well. */
-	IMPROVE();
+	struct net_device			*netdev;	/* When do we create this? */
+	uint32_t				radio_mask;
+#endif
+	IMPROVE("wdev");
 
 	/* Create a chanctx to be used later. */
 	IMPROVE("lkpi_alloc_lchanctx reserved as many as can be");
@@ -4442,13 +4457,14 @@ lkpi_ic_vap_create(struct ieee80211com *ic, const char name[IFNAMSIZ],
 	TAILQ_INSERT_TAIL(&lhw->lvif_head, lvif, lvif_entry);
 	LKPI_80211_LHW_LVIF_UNLOCK(lhw);
 
+	wiphy_lock(hw->wiphy);
+
 	/* Set bss_info. */
 	bss_changed = 0;
 	lkpi_bss_info_change(hw, vif, bss_changed);
 
 	/* Configure tx queues (conf_tx), default WME & send BSS_CHANGED_QOS. */
 	IMPROVE("Hardcoded values; to fix see 802.11-2016, 9.4.2.29 EDCA Parameter Set element");
-	wiphy_lock(hw->wiphy);
 	for (ac = 0; ac < IEEE80211_NUM_ACS; ac++) {
 
 		bzero(&txqp, sizeof(txqp));
@@ -4590,6 +4606,10 @@ lkpi_ic_vap_delete(struct ieee80211vap *vap)
 	LKPI_80211_LHW_LVIF_LOCK(lhw);
 	TAILQ_REMOVE(&lhw->lvif_head, lvif, lvif_entry);
 	LKPI_80211_LHW_LVIF_UNLOCK(lhw);
+
+	wiphy_lock(hw->wiphy);
+	list_del_rcu(&lvif->wdev.list);
+	wiphy_unlock(hw->wiphy);
 
 	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
@@ -5081,12 +5101,14 @@ lkpi_ic_scan_start(struct ieee80211com *ic)
 			    common_ie_len, hw->wiphy->max_scan_ie_len);
 		}
 
+		lvif = VAP_TO_LVIF(vap);
+
 		hw_req = malloc(sizeof(*hw_req) + ssids_len +
 		    s6ghzlen + chan_len + lhw->supbands * lhw->scan_ie_len +
 		    common_ie_len, M_LKPI80211, M_WAITOK | M_ZERO);
 
 		hw_req->req.flags = 0;			/* XXX ??? */
-		/* hw_req->req.wdev */
+		hw_req->req.wdev = &lvif->wdev;
 		hw_req->req.wiphy = hw->wiphy;
 		hw_req->req.no_cck = false;		/* XXX */
 
@@ -5212,7 +5234,6 @@ lkpi_ic_scan_start(struct ieee80211com *ic)
 		hw_req->req.ie_len = ieend - ie;
 		hw_req->req.scan_start = jiffies;
 
-		lvif = VAP_TO_LVIF(vap);
 		vif = LVIF_TO_VIF(lvif);
 
 		LKPI_80211_LHW_SCAN_LOCK(lhw);
@@ -8093,6 +8114,8 @@ lkpi_convert_rx_status(struct ieee80211_hw *hw, struct lkpi_sta *lsta,
 			 rx_stats->r_flags |= (IEEE80211_R_C_NF | IEEE80211_R_C_RSSI);
 	}
 
+	/* rx_status->antenna */
+
 	/* XXX-NET80211 We are not going to populate c_phytype! */
 
 	switch (rx_status->encoding) {
@@ -8713,6 +8736,7 @@ linuxkpi_wiphy_new(const struct cfg80211_ops *ops, size_t priv_len)
 
 	wiphy = LWIPHY_TO_WIPHY(lwiphy);
 
+	INIT_LIST_HEAD(&wiphy->wdev_list);
 	mutex_init(&wiphy->mtx);
 	TODO();
 
@@ -8815,15 +8839,116 @@ linuxkpi_80211_wiphy_register(struct wiphy *wiphy)
 static uint32_t
 lkpi_cfg80211_calculate_bitrate_ht(struct rate_info *rate)
 {
-	TODO("cfg80211_calculate_bitrate_ht");
-	return (rate->legacy);
+	/*
+	 * IEEE Std 802.11-2024, 19.5 Parameters for HT-MCSs;
+	 * Tables Table 19-27-MCS NSS=1 800ns GI, and following.
+	 * We use 100Kbit/s entries, the expacted return scale.
+	 * We can calulate MCS0..31 entries.
+	 */
+	uint32_t r;
+	uint8_t nss, mcsidx;
+
+	if (rate->mcs > 31)
+		goto inval;
+
+	switch (rate->bw) {
+	case RATE_INFO_BW_20:
+		r = 65;
+		break;
+	case RATE_INFO_BW_40:
+		r = 135;
+		break;
+	default:
+		goto inval;
+		/* NOTREACHED */
+	}
+
+	nss = (rate->mcs >> 3) + 1;
+	mcsidx = rate->mcs & 0x07;
+
+	switch (mcsidx) {
+	case 0 ... 3:
+		r *= (mcsidx + 1);
+		break;
+	case 4:
+		r *= (mcsidx + 2);
+		break;
+	case 5 ... 7:
+		r *= (mcsidx + 3);
+		break;
+	default:
+		goto inval;
+		/* NOTREACHED */
+	}
+	r *= nss;
+	if ((rate->flags & RATE_INFO_FLAGS_SHORT_GI) != 0)
+		r = (r * 10) / 9;
+
+	return (r);
+
+inval:
+	/* Do not warn every time or we get too much spam on console! */
+	WARN_ONCE(1, "%s: rate mcs %u nss %u mcsidx %u invalid!\n",  __func__,
+	    rate->mcs, nss, mcsidx);
+	return (0);
 }
 
 static uint32_t
 lkpi_cfg80211_calculate_bitrate_vht(struct rate_info *rate)
 {
-	TODO("cfg80211_calculate_bitrate_vht");
-	return (rate->legacy);
+	/*
+	 * IEEE Std 802.11-2024, 21.5 Parameters for VHT-MCSs;
+	 * Tables 21-29 NSS=1 800ns GI, and following.
+	 * We use 100Kbit/s entries, the expacted return scale.
+	 */
+	static const uint16_t datarate[4][10] = {
+		/* BW20 */
+		{ 65, 130, 195, 260, 390, 520, 585, 650, 780, 0 },
+		/* BW40 */
+		{ 135, 270, 405, 540, 810, 1080, 1215, 1350, 1620, 1800 },
+		/* BW80 */
+		{ 293, 585, 878, 1170, 1755, 2340, 2633, 2925, 3510, 3900 },
+		/* BW160 */
+		{ 585, 1170, 1755, 2340, 3510, 4680, 5265, 5850, 7020, 7800 }
+	};
+	uint32_t r;
+	uint8_t bwidx;
+
+	/* Should we warn about out of bounds values? */
+	if (rate->mcs > 9 || rate->nss > 8)
+		goto inval;
+
+	switch (rate->bw) {
+	case RATE_INFO_BW_20:
+		bwidx = 0;
+		break;
+	case RATE_INFO_BW_40:
+		bwidx = 1;
+		break;
+	case RATE_INFO_BW_80:
+		bwidx = 2;
+		break;
+	case RATE_INFO_BW_160:
+		bwidx = 2;
+		break;
+	default:
+		goto inval;
+		/* NOTREACHED */
+	}
+
+	r = datarate[bwidx][rate->mcs];
+	/* Calculate the other NSS tables and the SGI column. */
+	r *= rate->nss;
+	if ((rate->flags & RATE_INFO_FLAGS_SHORT_GI) != 0)
+		r = (r * 10) / 9;
+
+	return (r);
+
+inval:
+	/* Do not warn every time or we get too much spam on console! */
+	WARN_ONCE(1, "%s: rate mcs %u nss %u bw %d (%s) invalid!\n",  __func__,
+	    rate->mcs, rate->nss, rate->bw, lkpi_rate_info_bw_to_str(rate->bw));
+	return (0);
 }
 
 uint32_t
@@ -9098,7 +9223,15 @@ linuxkpi_ieee80211_tx_status_ext(struct ieee80211_hw *hw,
 
 		IMPROVE("only update rate if needed but that requires us to get a proper rate from mo_sta_statistics");
 		ieee80211_ratectl_tx_complete(ni, &txs);
-		ieee80211_ratectl_rate(ni->ni_vap->iv_bss, NULL, 0);
+		/*
+		 * A tx completion can land here after the vap has been torn
+		 * down (iv_bss cleared on the way to INIT) while frames were
+		 * still in flight; there is no bss node left to rate-adjust.
+		 * This is another case of !lvif->lvif_bss_synched but checking
+		 * that seems too cumbersome.
+		 */
+		if (ni->ni_vap->iv_bss != NULL)
+			ieee80211_ratectl_rate(ni->ni_vap->iv_bss, NULL, 0);
 
 #ifdef LINUXKPI_DEBUG_80211
 		if (linuxkpi_debug_80211 & D80211_TRACE_TX) {
