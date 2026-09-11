@@ -28,7 +28,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/wait.h>
 
 #include <assert.h>
 #include <ctype.h>
@@ -45,7 +44,6 @@
 #include <sysexits.h>
 #include <termios.h>
 #include <unistd.h>
-#include <spawn.h>
 
 #include "pw.h"
 #include "bitmap.h"
@@ -53,7 +51,6 @@
 
 #define LOGNAMESIZE (MAXLOGNAME-1)
 
-extern char **environ;
 static		char locked_str[] = "*LOCKED*";
 
 static struct passwd fakeuser = {
@@ -171,7 +168,7 @@ pw_set_passwd(struct passwd *pwd, int fd, bool precrypted, bool update)
 	char		line[_PASSWORD_LEN+1];
 	char		*p;
 
-	if (fd == '-') {
+	if (fd == _PWDASH) {
 		if (!pwd->pw_passwd || *pwd->pw_passwd != '*') {
 			pwd->pw_passwd = "*";	/* No access */
 			return (1);
@@ -680,34 +677,32 @@ pw_checkname(char *name, int gecos)
 static void
 rmat(uid_t uid)
 {
-	DIR            *d = opendir("/var/at/jobs");
+	DIR            *d;
+	struct dirent  *e;
+	int             atfd;
 
-	if (d != NULL) {
-		struct dirent  *e;
-
-		while ((e = readdir(d)) != NULL) {
-			struct stat     st;
-			pid_t		pid;
-
-			if (strncmp(e->d_name, ".lock", 5) != 0 &&
-			    stat(e->d_name, &st) == 0 &&
-			    !S_ISDIR(st.st_mode) &&
-			    st.st_uid == uid) {
-				const char *argv[] = {
-					"/usr/sbin/atrm",
-					e->d_name,
-					NULL
-				};
-				if (posix_spawn(&pid, argv[0], NULL, NULL,
-				    (char *const *) argv, environ)) {
-					warn("Failed to execute '%s %s'",
-					    argv[0], argv[1]);
-				} else
-					(void) waitpid(pid, NULL, 0);
-			}
-		}
-		closedir(d);
+	atfd = openat(conf.rootfd, "var/at/jobs", O_DIRECTORY | O_CLOEXEC);
+	if (atfd == -1)
+		return;
+	d = fdopendir(atfd);
+	if (d == NULL) {
+		close(atfd);
+		return;
 	}
+
+	while ((e = readdir(d)) != NULL) {
+		struct stat     st;
+
+		if (strncmp(e->d_name, ".lock", 5) == 0)
+			continue;
+		if (fstatat(atfd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+			continue;
+		if (S_ISDIR(st.st_mode) || st.st_uid != uid)
+			continue;
+		if (unlinkat(atfd, e->d_name, 0) != 0)
+			warn("Failed to remove at job '%s'", e->d_name);
+	}
+	closedir(d);
 }
 
 int
@@ -842,7 +837,6 @@ pw_user_del(int argc, char **argv, char *arg1)
 	char *name = NULL;
 	char grname[MAXLOGNAME];
 	char *nispasswd = NULL;
-	char file[MAXPATHLEN];
 	char home[MAXPATHLEN];
 	const char *cfg = NULL;
 	struct stat st;
@@ -928,25 +922,12 @@ pw_user_del(int argc, char **argv, char *arg1)
 	if (strcmp(pwd->pw_name, "root") == 0)
 		errx(EX_DATAERR, "cannot remove user 'root'");
 
-	if (!PWALTDIR()) {
+	if (PWALTDIR() != PWF_ALT) {
 		/* Remove crontabs */
-		snprintf(file, sizeof(file), "/var/cron/tabs/%s", pwd->pw_name);
-		if (access(file, F_OK) == 0) {
-			const char *argv[] = {
-				"crontab",
-				"-u",
-				pwd->pw_name,
-				"-r",
-				NULL
-			};
-			pid_t pid;
-
-			if (posix_spawnp(&pid, argv[0], NULL, NULL,
-						(char *const *) argv, environ)) {
-				warn("Failed to execute '%s %s'",
-						argv[0], argv[1]);
-			} else
-				(void) waitpid(pid, NULL, 0);
+		int cfd = openat(conf.rootfd, "var/cron/tabs", O_DIRECTORY | O_CLOEXEC);
+		if (cfd != -1) {
+			unlinkat(cfd, pwd->pw_name, 0);
+			close(cfd);
 		}
 	}
 
@@ -954,7 +935,6 @@ pw_user_del(int argc, char **argv, char *arg1)
 	 * Save these for later, since contents of pwd may be
 	 * invalidated by deletion
 	 */
-	snprintf(file, sizeof(file), "%s/%s", _PATH_MAILDIR, pwd->pw_name);
 	strlcpy(home, pwd->pw_dir, sizeof(home));
 	gr = GETGRGID(pwd->pw_gid);
 	if (gr != NULL)
@@ -1005,11 +985,16 @@ pw_user_del(int argc, char **argv, char *arg1)
 	    (uintmax_t)id);
 
 	/* Remove mail file */
-	if (PWALTDIR() != PWF_ALT)
-		unlinkat(conf.rootfd, file + 1, 0);
+	if (PWALTDIR() != PWF_ALT) {
+		int mfd = openat(conf.rootfd, &_PATH_MAILDIR[1], O_DIRECTORY | O_CLOEXEC);
+		if (mfd != -1) {
+			unlinkat(mfd, pwd->pw_name, 0);
+			close(mfd);
+		}
+	}
 
 	/* Remove at jobs */
-	if (!PWALTDIR() && getpwuid(id) == NULL)
+	if (PWALTDIR() != PWF_ALT && GETPWUID(id) == NULL)
 		rmat(id);
 
 	/* Remove home directory and contents */
@@ -1306,7 +1291,7 @@ pw_user_add(int argc, char **argv, char *arg1)
 				    "exclusive options");
 			fd = pw_checkfd(optarg);
 			precrypted = true;
-			if (fd == '-')
+			if (fd == _PWDASH)
 				errx(EX_USAGE, "-H expects a file descriptor");
 			break;
 		case 'h':
@@ -1629,7 +1614,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 				    "exclusive options");
 			fd = pw_checkfd(optarg);
 			precrypted = true;
-			if (fd == '-')
+			if (fd == _PWDASH)
 				errx(EX_USAGE, "-H expects a file descriptor");
 			break;
 		case 'h':
@@ -1716,9 +1701,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 	}
 
 	if (grname && pwd->pw_uid != 0) {
-		grp = GETGRNAM(grname);
-		if (grp == NULL)
-			grp = GETGRGID(pw_checkid(grname, GID_MAX));
+		grp = group_from_name_or_id(grname);
 		if (grp->gr_gid != pwd->pw_gid) {
 			pwd->pw_gid = grp->gr_gid;
 			edited = true;
