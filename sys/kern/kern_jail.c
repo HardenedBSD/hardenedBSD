@@ -247,12 +247,7 @@ static struct bool_flags pr_flag_allow[NBBY * NBPW] = {
 	 PR_ALLOW_READ_MSGBUF},
 	{JAIL_PARAM_ALLOW_UNPRIV_DEBUG, JAIL_PARAM_ALLOW_NOUNPRIV_DEBUG,
 	 PR_ALLOW_UNPRIV_DEBUG},
-<<<<<<< HEAD
-	{"allow.extattr", "allow.noextattr", PR_ALLOW_EXTATTR},
-	{"allow.suser", "allow.nosuser", PR_ALLOW_SUSER},
-=======
 	{JAIL_PARAM_ALLOW_SUSER, JAIL_PARAM_ALLOW_NOSUSER, PR_ALLOW_SUSER},
->>>>>>> rad/freebsd/current/main
 #ifdef VIMAGE
 	{JAIL_PARAM_ALLOW_NFSD, JAIL_PARAM_ALLOW_NONFSD, PR_ALLOW_NFSD},
 #endif
