@@ -498,6 +498,7 @@ MAN=	aac.4 \
 	procfs.4 \
 	proto.4 \
 	ps4dshock.4 \
+	ps5dsense.4 \
 	psm.4 \
 	pst.4 \
 	pt.4 \
@@ -791,7 +792,8 @@ MLINKS+=me.4 if_me.4
 MLINKS+=mem.4 kmem.4
 MLINKS+=mfi.4 mfi_linux.4 \
 	mfi.4 mfip.4
-MLINKS+=mlx5en.4 mce.4
+MLINKS+=mlx5en.4 mce.4 \
+	mlx5en.4 if_mce.4
 MLINKS+=mos.4 if_mos.4
 MLINKS+=msdosfs.4 msdos.4
 MLINKS+=msk.4 if_msk.4
@@ -1011,7 +1013,7 @@ MLINKS+=cgem.4 if_cgem.4
 .endif
 
 .if empty(MAN_ARCH) || ${MAN_ARCH} == "all"
-__arches=	${:!/bin/sh -c "/bin/ls -d ${.CURDIR}/man4.*"!:E}
+__arches=	${:!/bin/sh -c "echo ${.CURDIR}/man4.*"!:E}
 .else
 __arches=	${MAN_ARCH}
 .endif
