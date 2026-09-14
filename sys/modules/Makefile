@@ -177,6 +177,7 @@ SUBDIR=	\
 	${_igc} \
 	imgact_binmisc \
 	${_imx} \
+	${_intel_pmc} \
 	${_intelspi} \
 	${_io} \
 	${_ioat} \
@@ -825,6 +826,7 @@ _hptrr=		hptrr
 _hyperv=	hyperv
 _ichwd=		ichwd
 _ida=		ida
+_intel_pmc=	intel_pmc
 _intelspi=	intelspi
 _ips=		ips
 _isci=		isci

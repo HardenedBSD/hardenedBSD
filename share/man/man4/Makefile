@@ -53,6 +53,7 @@ MAN=	aac.4 \
 	${_amdsmn.4} \
 	${_amdsmu.4} \
 	${_amdtemp.4} \
+	${_apple_bce.4} \
 	${_bxe.4} \
 	${_aout.4} \
 	${_apic.4} \
@@ -264,6 +265,7 @@ MAN=	aac.4 \
 	${_imcsmb.4} \
 	inet.4 \
 	inet6.4 \
+	intel_pmc.4 \
 	intpm.4 \
 	intro.4 \
 	${_io.4} \
@@ -971,6 +973,10 @@ MLINKS+=sume.4 if_sume.4
 .if ${MK_BHYVE} != "no"
 _bhyve.4=	bhyve.4
 _vmm.4=		vmm.4
+.endif
+
+.if ${MK_USB} != "no"
+_apple_bce.4=	apple_bce.4
 .endif
 .endif
 
