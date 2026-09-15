@@ -368,7 +368,7 @@ cc_ack_received(struct tcpcb *tp, struct tcphdr *th, uint16_t nsegs,
 void
 cc_conn_init(struct tcpcb *tp)
 {
-	struct hc_metrics_lite metrics;
+	struct tcp_hc_metrics metrics;
 	struct inpcb *inp = tptoinpcb(tp);
 	u_int maxseg;
 	int rtt;
@@ -605,7 +605,7 @@ tcp6_input(struct mbuf **mp, int *offp, int proto)
 int
 tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 {
-	struct mbuf *m = *mp;
+	struct mbuf *m;
 	struct tcphdr *th = NULL;
 	struct ip *ip = NULL;
 	struct inpcb *inp = NULL;
@@ -626,7 +626,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 	struct m_tag *fwd_tag = NULL;
 #ifdef INET6
 	struct ip6_hdr *ip6 = NULL;
-	int isipv6;
+	bool isipv6;
 #else
 	const void *ip6 = NULL;
 #endif /* INET6 */
@@ -636,10 +636,6 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 
 	NET_EPOCH_ASSERT();
 
-#ifdef INET6
-	isipv6 = (mtod(m, struct ip *)->ip_v == 6) ? 1 : 0;
-#endif
-
 	off0 = *offp;
 	m = *mp;
 	*mp = NULL;
@@ -648,6 +644,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 
 	m->m_pkthdr.tcp_tun_port = port;
 #ifdef INET6
+	isipv6 = mtod(m, struct ip *)->ip_v == 6;
 	if (isipv6) {
 		ip6 = mtod(m, struct ip6_hdr *);
 		th = (struct tcphdr *)((caddr_t)ip6 + off0);
@@ -786,9 +783,9 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 					TCPSTAT_INC(tcps_rcvshort);
 					return (IPPROTO_DONE);
 				}
+				ip6 = mtod(m, struct ip6_hdr *);
+				th = (struct tcphdr *)((caddr_t)ip6 + off0);
 			}
-			ip6 = mtod(m, struct ip6_hdr *);
-			th = (struct tcphdr *)((caddr_t)ip6 + off0);
 		}
 #endif
 #if defined(INET) && defined(INET6)
@@ -1591,11 +1588,9 @@ tcp_do_segment(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 		to.to_flags &= ~TOF_SACK;
 	}
 #if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
-	if ((tp->t_flags & TF_SIGNATURE) != 0 &&
-	    (to.to_flags & TOF_SIGNATURE) == 0) {
+	if ((tp->t_flags & TF_SIGNATURE) == 0 &&
+	    (to.to_flags & TOF_SIGNATURE) != 0)
 		TCPSTAT_INC(tcps_sig_err_sigopt);
-		/* XXX: should drop? */
-	}
 #endif
 	/*
 	 * If echoed timestamp is later than the current time,
@@ -2134,20 +2129,26 @@ tcp_do_segment(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th,
 		 * - RST drops connection only if SEG.SEQ == RCV.NXT.
 		 * - If RST is in window, we send challenge ACK.
 		 *
-		 * Note: to take into account delayed ACKs, we should
-		 *   test against last_ack_sent instead of rcv_nxt.
+		 * Note 1: to take into account delayed ACKs, we should
+		 *   test against last_ack_sent in addition to rcv_nxt.
 		 * Note 2: we handle special case of closed window, not
 		 *   covered by the RFC.
+		 * Note 3 (XXXMT): check against rcv_adv instead of
+		 *   tp->rcv_nxt + tp->rcv_wnd.
 		 */
-		if ((SEQ_GEQ(th->th_seq, tp->last_ack_sent) &&
-		    SEQ_LT(th->th_seq, tp->last_ack_sent + tp->rcv_wnd)) ||
-		    (tp->rcv_wnd == 0 && tp->last_ack_sent == th->th_seq)) {
+		if ((tp->rcv_wnd > 0 &&
+		     SEQ_GEQ(th->th_seq, tp->last_ack_sent) &&
+		     SEQ_LT(th->th_seq, tp->rcv_nxt + tp->rcv_wnd)) ||
+		    (tp->rcv_wnd == 0 &&
+		     (tp->last_ack_sent == th->th_seq ||
+		      tp->rcv_nxt == th->th_seq))) {
 			KASSERT(tp->t_state != TCPS_SYN_SENT,
 			    ("%s: TH_RST for TCPS_SYN_SENT th %p tp %p",
 			    __func__, th, tp));
 
 			if (V_tcp_insecure_rst ||
-			    tp->last_ack_sent == th->th_seq) {
+			    tp->last_ack_sent == th->th_seq ||
+			    tp->rcv_nxt == th->th_seq) {
 				TCPSTAT_INC(tcps_drops);
 				/* Drop the connection. */
 				switch (tp->t_state) {
@@ -3723,12 +3724,12 @@ tcp_xmit_timer(struct tcpcb *tp, int rtt)
  */
 void
 tcp_mss_update(struct tcpcb *tp, int offer, int mtuoffer,
-    struct hc_metrics_lite *metricptr, struct tcp_ifcap *cap)
+    struct tcp_hc_metrics *metricptr, struct tcp_ifcap *cap)
 {
 	int mss = 0;
 	uint32_t maxmtu = 0;
 	struct inpcb *inp = tptoinpcb(tp);
-	struct hc_metrics_lite metrics;
+	struct tcp_hc_metrics metrics;
 #ifdef INET6
 	int isipv6 = ((inp->inp_vflag & INP_IPV6) != 0) ? 1 : 0;
 	size_t min_protoh = isipv6 ?
@@ -3774,7 +3775,7 @@ tcp_mss_update(struct tcpcb *tp, int offer, int mtuoffer,
 		 * if there was no cache hit.
 		 */
 		if (metricptr != NULL)
-			bzero(metricptr, sizeof(struct hc_metrics_lite));
+			bzero(metricptr, sizeof(struct tcp_hc_metrics));
 		return;
 	}
 
@@ -3885,7 +3886,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 	uint32_t bufsize;
 	struct inpcb *inp = tptoinpcb(tp);
 	struct socket *so;
-	struct hc_metrics_lite metrics;
+	struct tcp_hc_metrics metrics;
 	struct tcp_ifcap cap;
 
 	KASSERT(tp != NULL, ("%s: tp == NULL", __func__));

@@ -57,6 +57,10 @@ properties:
   power-domains:
     maxItems: 1
 
+  label:
+    description:
+      Description of a coresight device.
+
   in-ports:
     $ref: /schemas/graph.yaml#/properties/ports
 
@@ -73,6 +77,9 @@ properties:
       port:
         description: Output connection to CoreSight Trace bus
         $ref: /schemas/graph.yaml#/properties/port
+
+  access-controllers:
+    maxItems: 1
 
 required:
   - compatible

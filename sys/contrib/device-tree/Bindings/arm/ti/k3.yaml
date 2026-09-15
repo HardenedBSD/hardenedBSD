@@ -37,6 +37,12 @@ properties:
           - const: phytec,am62a-phycore-som
           - const: ti,am62a7
 
+      - description: K3 AM62L3 SoC and Boards
+        items:
+          - enum:
+              - ti,am62l3-evm
+          - const: ti,am62l3
+
       - description: K3 AM62P5 SoC and Boards
         items:
           - enum:
@@ -58,6 +64,13 @@ properties:
               - ti,am62-lp-sk
           - const: ti,am625
 
+      - description: K3 AM6254atl SiP
+        items:
+          - enum:
+              - ti,am6254atl-sk
+          - const: ti,am6254atl
+          - const: ti,am625
+
       - description: K3 AM62x SoC Toradex Verdin Modules and Carrier Boards
         items:
           - enum:
@@ -66,6 +79,7 @@ properties:
               - toradex,verdin-am62-nonwifi-ivy    # Verdin AM62 Module on Ivy
               - toradex,verdin-am62-nonwifi-mallow # Verdin AM62 Module on Mallow
               - toradex,verdin-am62-nonwifi-yavia  # Verdin AM62 Module on Yavia
+              - toradex,verdin-am62-nonwifi-zinnia # Verdin AM62 Module on Zinnia
           - const: toradex,verdin-am62-nonwifi     # Verdin AM62 Module without Wi-Fi / BT
           - const: toradex,verdin-am62             # Verdin AM62 Module
           - const: ti,am625
@@ -78,6 +92,7 @@ properties:
               - toradex,verdin-am62-wifi-ivy    # Verdin AM62 Wi-Fi / BT Module on Ivy
               - toradex,verdin-am62-wifi-mallow # Verdin AM62 Wi-Fi / BT Module on Mallow
               - toradex,verdin-am62-wifi-yavia  # Verdin AM62 Wi-Fi / BT Module on Yavia
+              - toradex,verdin-am62-wifi-zinnia # Verdin AM62 Wi-Fi / BT Module on Zinnia
           - const: toradex,verdin-am62-wifi     # Verdin AM62 Wi-Fi / BT Module
           - const: toradex,verdin-am62          # Verdin AM62 Module
           - const: ti,am625
@@ -90,6 +105,7 @@ properties:
               - toradex,verdin-am62p-nonwifi-ivy    # Verdin AM62P Module on Ivy
               - toradex,verdin-am62p-nonwifi-mallow # Verdin AM62P Module on Mallow
               - toradex,verdin-am62p-nonwifi-yavia  # Verdin AM62P Module on Yavia
+              - toradex,verdin-am62p-nonwifi-zinnia # Verdin AM62P Module on Zinnia
           - const: toradex,verdin-am62p-nonwifi     # Verdin AM62P Module without Wi-Fi / BT
           - const: toradex,verdin-am62p             # Verdin AM62P Module
           - const: ti,am62p5
@@ -102,8 +118,15 @@ properties:
               - toradex,verdin-am62p-wifi-ivy    # Verdin AM62P Wi-Fi / BT Module on Ivy
               - toradex,verdin-am62p-wifi-mallow # Verdin AM62P Wi-Fi / BT Module on Mallow
               - toradex,verdin-am62p-wifi-yavia  # Verdin AM62P Wi-Fi / BT Module on Yavia
+              - toradex,verdin-am62p-wifi-zinnia # Verdin AM62P Wi-Fi / BT Module on Zinnia
           - const: toradex,verdin-am62p-wifi     # Verdin AM62P Wi-Fi / BT Module
           - const: toradex,verdin-am62p          # Verdin AM62P Module
+          - const: ti,am62p5
+
+      - description: K3 AM62P5 SoC Variscite SOM and Carrier Boards
+        items:
+          - const: variscite,var-som-am62p-symphony
+          - const: variscite,var-som-am62p
           - const: ti,am62p5
 
       - description: K3 AM642 SoC
@@ -144,6 +167,14 @@ properties:
               - siemens,iot2050-basic-pg2
               - ti,am654-evm
           - const: ti,am654
+
+      - description: K3 AM69 SoC Toradex Aquila Modules and Carrier Boards
+        items:
+          - enum:
+              - toradex,aquila-am69-clover   # Aquila AM69 Module on Clover Board
+              - toradex,aquila-am69-dev      # Aquila AM69 Module on Aquila Development Board
+          - const: toradex,aquila-am69       # Aquila AM69 Module
+          - const: ti,j784s4
 
       - description: K3 J7200 SoC
         oneOf:

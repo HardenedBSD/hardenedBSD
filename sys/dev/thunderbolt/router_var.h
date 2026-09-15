@@ -24,8 +24,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
 #ifndef _ROUTER_VAR_H
@@ -86,6 +84,10 @@ struct router_cfg_cap {
 	uint8_t		vsc_len;
 	uint16_t	vsec_len;
 };
+
+/* Router reset registers */
+#define ROUTER_HRR	0x39898
+#define ROUTER_HIR	0x39858
 
 int tb_router_attach(struct router_softc *, tb_route_t);
 int tb_router_attach_root(struct nhi_softc *, tb_route_t);

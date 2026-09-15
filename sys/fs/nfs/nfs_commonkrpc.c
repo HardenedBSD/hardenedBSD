@@ -59,6 +59,7 @@
 
 #include <rpc/rpc.h>
 #include <rpc/krpc.h>
+#include <rpc/clntrdma.h>
 
 #include <kgssapi/krb5/kcrypto.h>
 
@@ -261,7 +262,7 @@ newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
 	CLIENT *client;
 	struct netconfig *nconf;
 	struct socket *so;
-	int one = 1, retries, error = 0;
+	int one = 1, retries, error = 0, val;
 	struct thread *td = curthread;
 	SVCXPRT *xprt;
 	struct timeval timo;
@@ -289,93 +290,101 @@ newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
 		td->td_ucred = cred;
 	saddr = nrp->nr_nam;
 
-	if (saddr->sa_family == AF_INET)
-		if (nrp->nr_sotype == SOCK_DGRAM)
+	if (saddr->sa_family == AF_INET) {
+		if (nmp != NULL && NFSHASRDMA(nmp))
+			nconf = getnetconfigent("rdma");
+		else if (nrp->nr_sotype == SOCK_DGRAM)
 			nconf = getnetconfigent("udp");
 		else
 			nconf = getnetconfigent("tcp");
-	else
-		if (nrp->nr_sotype == SOCK_DGRAM)
+	} else {
+		if (nmp != NULL && NFSHASRDMA(nmp))
+			nconf = getnetconfigent("rdma6");
+		else if (nrp->nr_sotype == SOCK_DGRAM)
 			nconf = getnetconfigent("udp6");
 		else
 			nconf = getnetconfigent("tcp6");
+	}
 			
-	pktscale = nfs_bufpackets;
-	if (pktscale < 2)
-		pktscale = 2;
-	if (pktscale > 64)
-		pktscale = 64;
-	pktscalesav = pktscale;
-	/*
-	 * soreserve() can fail if sb_max is too small, so shrink pktscale
-	 * and try again if there is an error.
-	 * Print a log message suggesting increasing sb_max.
-	 * Creating a socket and doing this is necessary since, if the
-	 * reservation sizes are too large and will make soreserve() fail,
-	 * the connection will work until a large send is attempted and
-	 * then it will loop in the krpc code.
-	 */
-	so = NULL;
-	saddr = NFSSOCKADDR(nrp->nr_nam, struct sockaddr *);
-	error = socreate(saddr->sa_family, &so, nrp->nr_sotype, 
-	    nrp->nr_soproto, td->td_ucred, td);
-	if (error != 0)
-		goto out;
-	do {
-	    if (error != 0 && pktscale > 2) {
-		if (nmp != NULL && nrp->nr_sotype == SOCK_STREAM &&
-		    pktscale == pktscalesav) {
-		    /*
-		     * Suggest vfs.nfs.bufpackets * maximum RPC message,
-		     * adjusted for the sb_max->sb_max_adj conversion of
-		     * MCLBYTES / (MSIZE + MCLBYTES) as the minimum setting
-		     * for kern.ipc.maxsockbuf.
-		     */
-		    tval = (NFS_MAXBSIZE + NFS_MAXXDR) * nfs_bufpackets;
-		    tval *= MSIZE + MCLBYTES;
-		    tval += MCLBYTES - 1; /* Round up divide by MCLBYTES. */
-		    tval /= MCLBYTES;
-		    printf("Consider increasing kern.ipc.maxsockbuf to a "
-			"minimum of %ju to support %ubyte NFS I/O\n",
-			(uintmax_t)tval, NFS_MAXBSIZE);
-		}
-		pktscale--;
-	    }
-	    if (nrp->nr_sotype == SOCK_DGRAM) {
-		if (nmp != NULL) {
-			sndreserve = (NFS_MAXDGRAMDATA + NFS_MAXPKTHDR) *
-			    pktscale;
-			rcvreserve = (NFS_MAXDGRAMDATA + NFS_MAXPKTHDR) *
-			    pktscale;
-		} else {
-			sndreserve = rcvreserve = 1024 * pktscale;
-		}
-	    } else {
-		if (nrp->nr_sotype != SOCK_STREAM)
-			panic("nfscon sotype");
-		if (nmp != NULL) {
-			sndreserve = (NFS_MAXBSIZE + NFS_MAXXDR) *
-			    pktscale;
-			rcvreserve = (NFS_MAXBSIZE + NFS_MAXXDR) *
-			    pktscale;
-		} else {
-			sndreserve = rcvreserve = 1024 * pktscale;
-		}
-	    }
-	    error = soreserve(so, sndreserve, rcvreserve);
-	    if (error != 0 && nmp != NULL && nrp->nr_sotype == SOCK_STREAM &&
-		pktscale <= 2)
-		printf("Must increase kern.ipc.maxsockbuf or reduce"
-		    " rsize, wsize\n");
-	} while (error != 0 && pktscale > 2);
-	soclose(so);
+	sndreserve = rcvreserve = 0;
+	if (nmp == NULL || !NFSHASRDMA(nmp)) {
+		pktscale = nfs_bufpackets;
+		if (pktscale < 2)
+			pktscale = 2;
+		if (pktscale > 64)
+			pktscale = 64;
+		pktscalesav = pktscale;
+		/*
+		 * soreserve() can fail if sb_max is too small, so shrink
+		 * pktscale and try again if there is an error.
+		 * Print a log message suggesting increasing sb_max.
+		 * Creating a socket and doing this is necessary since, if the
+		 * reservation sizes are too large and will make soreserve()
+		 * fail, the connection will work until a large send is
+		 * attempted and then it will loop in the krpc code.
+		 */
+		so = NULL;
+		saddr = NFSSOCKADDR(nrp->nr_nam, struct sockaddr *);
+		error = socreate(saddr->sa_family, &so, nrp->nr_sotype,
+		    nrp->nr_soproto, td->td_ucred, td);
+		if (error != 0)
+			goto out;
+		do {
+		    if (error != 0 && pktscale > 2) {
+			if (nmp != NULL && nrp->nr_sotype == SOCK_STREAM &&
+			    pktscale == pktscalesav) {
+			    /*
+			     * Suggest vfs.nfs.bufpackets * maximum RPC message,
+			     * adjusted for the sb_max->sb_max_adj conversion of
+			     * MCLBYTES / (MSIZE + MCLBYTES) as the minimum
+			     * setting for kern.ipc.maxsockbuf.
+			     */
+			    tval = (NFS_MAXBSIZE + NFS_MAXXDR) * nfs_bufpackets;
+			    tval *= MSIZE + MCLBYTES;
+			    tval += MCLBYTES - 1; /* Round up divide. */
+			    tval /= MCLBYTES;
+			    printf("Consider increasing kern.ipc.maxsockbuf to "
+				"a minimum of %ju to support %ubyte NFS I/O\n",
+				(uintmax_t)tval, NFS_MAXBSIZE);
+			}
+			pktscale--;
+		    }
+		    if (nrp->nr_sotype == SOCK_DGRAM) {
+			if (nmp != NULL) {
+				sndreserve = (NFS_MAXDGRAMDATA +
+				    NFS_MAXPKTHDR) * pktscale;
+				rcvreserve = (NFS_MAXDGRAMDATA +
+				    NFS_MAXPKTHDR) * pktscale;
+			} else {
+				sndreserve = rcvreserve = 1024 * pktscale;
+			}
+		    } else {
+			if (nrp->nr_sotype != SOCK_STREAM)
+				panic("nfscon sotype");
+			if (nmp != NULL) {
+				sndreserve = (NFS_MAXBSIZE + NFS_MAXXDR) *
+				    pktscale;
+				rcvreserve = (NFS_MAXBSIZE + NFS_MAXXDR) *
+				    pktscale;
+			} else {
+				sndreserve = rcvreserve = 1024 * pktscale;
+			}
+		    }
+		    error = soreserve(so, sndreserve, rcvreserve);
+		    if (error != 0 && nmp != NULL &&
+			nrp->nr_sotype == SOCK_STREAM && pktscale <= 2)
+			printf("Must increase kern.ipc.maxsockbuf or reduce"
+			    " rsize, wsize\n");
+		} while (error != 0 && pktscale > 2);
+		soclose(so);
+	}
 	if (error != 0)
 		goto out;
 
 	client = clnt_reconnect_create(nconf, saddr, nrp->nr_prog,
 	    nrp->nr_vers, sndreserve, rcvreserve);
 	CLNT_CONTROL(client, CLSET_WAITCHAN, "nfsreq");
-	if (nmp != NULL) {
+	if (nmp != NULL && !NFSHASRDMA(nmp)) {
 		if ((nmp->nm_flag & NFSMNT_INT))
 			CLNT_CONTROL(client, CLSET_INTERRUPTIBLE, &one);
 		if ((nmp->nm_flag & NFSMNT_RESVPORT))
@@ -466,7 +475,7 @@ newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
 				retries = nfs_dsretries;
 			}
 		}
-	} else {
+	} else if (nmp == NULL) {
 		/*
 		 * Three cases:
 		 * - Null RPC callback to client
@@ -481,6 +490,41 @@ newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
 		}
 		if (dotls)
 			CLNT_CONTROL(client, CLSET_TLS, &one);
+	} else {
+		/* RDMA. */
+		if (NFSHASNFSV4N(nmp) && cred != NULL &&
+		    svc_rdma_create_backchannel_call != NULL) {
+			/*
+			 * Set up the backchannel.
+			 */
+			/*
+			 * Make sure the nfscbd_pool doesn't get
+			 * destroyed while doing this.
+			 */
+			NFSD_LOCK();
+			if (nfs_numnfscbd > 0) {
+				nfs_numnfscbd++;
+				NFSD_UNLOCK();
+				xprt = svc_rdma_create_backchannel_call(
+				    nfscbd_pool);
+				CLNT_CONTROL(client, CLSET_BACKCHANNEL, xprt);
+				NFSD_LOCK();
+				nfs_numnfscbd--;
+				if (nfs_numnfscbd == 0)
+					wakeup(&nfs_numnfscbd);
+			}
+			NFSD_UNLOCK();
+		}
+
+		/* Set the small reply size for a Readdir. */
+		val = NFS_DIRBLKSIZ + PAGE_SIZE;
+		CLNT_CONTROL(client, CLSET_RDMASMALL_REPLY, &val);
+		val = NFSV4_CBSLOTS;
+		CLNT_CONTROL(client, CLSET_RDMA_CBSLOTS, &val);
+		if (NFSHASSOFT(nmp))
+			retries = nmp->nm_retry;
+		else
+			retries = INT_MAX;
 	}
 	CLNT_CONTROL(client, CLSET_RETRIES, &retries);
 
@@ -690,7 +734,7 @@ newnfs_request(struct nfsrv_descript *nd, struct nfsmount *nmp,
 	struct ucred *authcred, *savcred;
 	struct nfsclsession *sep;
 	uint8_t sessionid[NFSX_V4SESSIONID];
-	bool nextconn_set;
+	bool nextconn_set, has_mreduce;
 	struct timespec trylater_delay, ts, waituntil;
 
 	/* Initially 1msec. */
@@ -705,6 +749,10 @@ newnfs_request(struct nfsrv_descript *nd, struct nfsmount *nmp,
 		return (ESTALE);
 	}
 
+	has_mreduce = false;
+	if (nmp != NULL && NFSHASRDMA(nmp) &&
+	    (nd->nd_mreq->m_flags & M_PROTO11) != 0)
+		has_mreduce = true;
 	/*
 	 * Set authcred, which is used to acquire RPC credentials to
 	 * the cred argument, by default. The crhold() should not be
@@ -1279,9 +1327,15 @@ tryagain:
 				}
 				sep = NFSMNT_MDSSESSION(nmp);
 				if (bcmp(sep->nfsess_sessionid,
-				    nd->nd_sessionid, NFSX_V4SESSIONID) == 0 &&
-				    sep->nfsess_defunct == 0) {
-					/* Initiate recovery. */
+				    nd->nd_sessionid, NFSX_V4SESSIONID) == 0) {
+					/*
+					 * Initiate recovery.  Even if
+					 * nfsess_defunct is already set,
+					 * another recovery may be needed.
+					 * NFSCLFLAGS_RECVRINPRG |
+					 * NFSCLFLAGS_RECOVER should avoid
+					 * recovery storms.
+					 */
 					sep->nfsess_defunct = 1;
 					NFSCL_DEBUG(1, "Marked defunct\n");
 					if (nmp->nm_clp != NULL &&
@@ -1486,6 +1540,8 @@ out:
 	}
 #endif
 
+	if (has_mreduce)
+		rpc_remove_mreduce(nd->nd_mreq, false);
 	m_freem(nd->nd_mreq);
 	if (usegssname == 0)
 		AUTH_DESTROY(auth);

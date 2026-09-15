@@ -326,6 +326,7 @@ struct ufshci_controller {
 	256 /* Some controllers have their LSDB and MCQS fields reset to 0. */
 
 	uint32_t ref_clk;
+	uint32_t hs_series;
 
 	struct cam_sim *ufshci_sim;
 	struct cam_path *ufshci_path;
@@ -409,7 +410,7 @@ struct ufshci_controller {
 	uint32_t max_tx_lanes;
 	uint32_t max_rx_lanes;
 
-	bool is_failed;
+	uint32_t is_failed;
 };
 
 #define ufshci_mmio_offsetof(reg) offsetof(struct ufshci_registers, reg)
@@ -434,6 +435,7 @@ uint8_t ufshci_sim_translate_scsi_to_ufs_lun(lun_id_t scsi_lun);
 uint64_t ufshci_sim_translate_ufs_to_scsi_lun(uint8_t ufs_lun);
 int ufshci_sim_attach(struct ufshci_controller *ctrlr);
 void ufshci_sim_detach(struct ufshci_controller *ctrlr);
+void ufshci_sim_release_wlun_periph(struct ufshci_controller *ctrlr);
 struct cam_periph *ufshci_sim_find_periph(struct ufshci_controller *ctrlr,
     uint8_t wlun);
 int ufshci_sim_send_ssu(struct ufshci_controller *ctrlr, bool start,
@@ -479,12 +481,12 @@ int ufshci_dev_link_state_transition(struct ufshci_controller *ctrlr,
     enum ufshci_uic_link_state target_state);
 
 /* Controller Command */
-void ufshci_ctrlr_cmd_send_task_mgmt_request(struct ufshci_controller *ctrlr,
+int ufshci_ctrlr_cmd_send_task_mgmt_request(struct ufshci_controller *ctrlr,
     ufshci_cb_fn_t cb_fn, void *cb_arg, uint8_t function, uint8_t lun,
     uint8_t task_tag, uint8_t iid);
-void ufshci_ctrlr_cmd_send_nop(struct ufshci_controller *ctrlr,
+int ufshci_ctrlr_cmd_send_nop(struct ufshci_controller *ctrlr,
     ufshci_cb_fn_t cb_fn, void *cb_arg);
-void ufshci_ctrlr_cmd_send_query_request(struct ufshci_controller *ctrlr,
+int ufshci_ctrlr_cmd_send_query_request(struct ufshci_controller *ctrlr,
     ufshci_cb_fn_t cb_fn, void *cb_arg, struct ufshci_query_param param);
 void ufshci_ctrlr_cmd_send_scsi_command(struct ufshci_controller *ctrlr,
     ufshci_cb_fn_t cb_fn, void *cb_arg, uint8_t *cmd_ptr, uint8_t cmd_len,

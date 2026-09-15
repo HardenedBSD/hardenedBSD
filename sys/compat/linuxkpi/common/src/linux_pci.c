@@ -1580,6 +1580,9 @@ pci_alloc_irq_vectors(struct pci_dev *pdev, int minv, int maxv,
 {
 	int error;
 
+	if ((flags & PCI_IRQ_AFFINITY) != 0) {
+		pr_debug("%s: TODO PCI_IRQ_AFFINITY\n", __func__);
+	}
 	if (flags & PCI_IRQ_MSIX) {
 		struct msix_entry *entries;
 		int i;
@@ -1613,7 +1616,7 @@ out:
 }
 
 struct msi_desc *
-lkpi_pci_msi_desc_alloc(int irq)
+lkpi_pci_msi_desc_alloc(unsigned int irq)
 {
 	struct device *dev;
 	struct pci_dev *pdev;
@@ -1661,6 +1664,33 @@ pci_device_is_present(struct pci_dev *pdev)
 	dev = pdev->dev.bsddev;
 
 	return (bus_child_present(dev));
+}
+
+void *
+linuxkpi_pci_map_rom(struct pci_dev *pdev, size_t *size)
+{
+	device_t dev;
+
+	dev = pdev->dev.bsddev;
+
+	if (pci_get_class(dev) != PCIC_DISPLAY &&
+	    (pci_get_class(dev) != PCIC_OLD ||
+	     pci_get_subclass(dev) != PCIS_OLD_VGA)) {
+		pr_debug("%s: TODO\n", __func__);
+		return (NULL);
+	}
+
+	return (vga_pci_map_bios(device_get_parent(dev), size));
+}
+
+void
+linuxkpi_pci_unmap_rom(struct pci_dev *pdev, void *rom)
+{
+	device_t dev;
+
+	dev = pdev->dev.bsddev;
+
+	vga_pci_unmap_bios(device_get_parent(dev), rom);
 }
 
 CTASSERT(sizeof(dma_addr_t) <= sizeof(uint64_t));
@@ -1842,8 +1872,8 @@ lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
 	/* dma_sync_single_for_cpu() unrolled to avoid lock recursicn. */
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(obj->dmat, obj->dmamap,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(obj->dmat, obj->dmamap, BUS_DMASYNC_POSTWRITE);
@@ -1989,6 +2019,56 @@ linuxkpi_dmam_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_ha
 	return (dr->mem);
 }
 
+void *
+linuxkpi_dma_alloc_noncoherent(struct device *dev, size_t size, dma_addr_t *dma_handle,
+    enum dma_data_direction direction, gfp_t gfp)
+{
+	struct linux_dma_priv *priv;
+	size_t align;
+	void *mem;
+
+	size = PAGE_ALIGN(size);
+	align = PAGE_SIZE << get_order(size);
+	mem = kmem_alloc_contig(size, gfp & GFP_NATIVE_MASK, 0, BUS_SPACE_MAXADDR,
+	    align, 0, VM_MEMATTR_DEFAULT);
+	if (mem == NULL) {
+		*dma_handle = 0;
+		return (NULL);
+	}
+
+	priv = dev->dma_priv;
+	*dma_handle = linux_dma_map_phys_common(dev, vtophys(mem), size, priv->dmat);
+	if (*dma_handle == 0) {
+		kmem_free(mem, size);
+		mem = NULL;
+	}
+	return (mem);
+}
+
+void
+linuxkpi_dma_free_noncoherent(struct device *dev, size_t size, void *vaddr,
+    dma_addr_t dma_handle, enum dma_data_direction direction)
+{
+	lkpi_dma_unmap(dev, dma_handle, size, direction, 0);
+	kmem_free(vaddr, size);
+}
+
+void *
+linuxkpi_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
+    gfp_t gfp, unsigned long attrs)
+{
+	return (linuxkpi_dma_alloc_noncoherent(dev, size, dma_handle,
+	    DMA_BIDIRECTIONAL, gfp));
+}
+
+void
+linuxkpi_dma_free_attrs(struct device *dev, size_t size, void *vaddr,
+    dma_addr_t dma_handle, unsigned long attrs)
+{
+	linuxkpi_dma_free_noncoherent(dev, size, vaddr, dma_handle,
+	    DMA_BIDIRECTIONAL);
+}
+
 void
 linuxkpi_dma_sync(struct device *dev, dma_addr_t dma_addr, size_t size,
     bus_dmasync_op_t op)
@@ -2009,6 +2089,17 @@ linuxkpi_dma_sync(struct device *dev, dma_addr_t dma_addr, size_t size,
 	}
 
 	bus_dmamap_sync(obj->dmat, obj->dmamap, op);
+	DMA_PRIV_UNLOCK(priv);
+}
+
+void
+lkpi_dma_sync_sg(struct device *dev, struct scatterlist *sgl, bus_dmasync_op_t op)
+{
+	struct linux_dma_priv *priv;
+
+	priv = dev->dma_priv;
+	DMA_PRIV_LOCK(priv);
+	bus_dmamap_sync(priv->dmat, sgl->dma_map, op);
 	DMA_PRIV_UNLOCK(priv);
 }
 
@@ -2046,6 +2137,7 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 		    ("More than one segment (nseg=%d)", nseg + 1));
 
 		sg_dma_address(sg) = seg.ds_addr;
+		sg->dma_length = sg->length;
 	}
 
 	if ((attrs & DMA_ATTR_SKIP_CPU_SYNC) != 0)
@@ -2053,13 +2145,14 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 		break;
 	case DMA_TO_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	case DMA_FROM_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
 		break;
 	default:
 		break;
@@ -2087,8 +2180,8 @@ linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sgl,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(priv->dmat, sgl->dma_map,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_TO_DEVICE:
 		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTWRITE);

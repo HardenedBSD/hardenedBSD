@@ -59,6 +59,7 @@
 #include <linux/device.h>
 #include <linux/pci_ids.h>
 #include <linux/pm.h>
+#include <linux/interrupt.h>
 
 /*
  * <linux/ioport.h> should be included here, like Linux, but we can't have that
@@ -240,6 +241,7 @@ extern const char *pci_power_names[6];
 #define	PCI_IRQ_INTX			0x01
 #define	PCI_IRQ_MSI			0x02
 #define	PCI_IRQ_MSIX			0x04
+#define	PCI_IRQ_AFFINITY		0x08
 #define	PCI_IRQ_ALL_TYPES		(PCI_IRQ_MSIX|PCI_IRQ_MSI|PCI_IRQ_INTX)
 
 #if defined(LINUXKPI_VERSION) && (LINUXKPI_VERSION <= 61000)
@@ -387,7 +389,7 @@ int linuxkpi_pci_enable_msix(struct pci_dev *pdev, struct msix_entry *entries,
 struct pci_dev *lkpinew_pci_dev(device_t);
 void lkpi_pci_devres_release(struct device *, void *);
 struct pci_dev *lkpi_pci_get_device(uint32_t, uint32_t, struct pci_dev *);
-struct msi_desc *lkpi_pci_msi_desc_alloc(int);
+struct msi_desc *lkpi_pci_msi_desc_alloc(unsigned int);
 struct device *lkpi_pci_find_irq_dev(unsigned int irq);
 int _lkpi_pci_enable_msi_range(struct pci_dev *pdev, int minvec, int maxvec);
 
@@ -435,6 +437,24 @@ pci_resource_flags(struct pci_dev *pdev, int bar)
 	if (type < 0)
 		return (0);
 	return (1 << type);
+}
+
+static inline int
+pci_select_bars(struct pci_dev *pdev, unsigned long flags)
+{
+	int bars, bar;
+
+	bars = 0;
+	/* We only support BARs here; Linux may support more types. */
+	for (bar = PCIR_MAX_BAR_0; bar >= 0; bar--) {
+		int bar_flags;
+
+		bar_flags = pci_resource_flags(pdev, bar);
+		if ((bar_flags & flags) != 0)
+			bars |= (1 << bar);
+	}
+
+	return (bars);
 }
 
 static inline const char *
@@ -658,26 +678,10 @@ pci_find_ext_capability(struct pci_dev *pdev, int capid)
 	return (reg);
 }
 
-#define	PCIM_PCAP_PME_SHIFT	11
 static __inline bool
-pci_pme_capable(struct pci_dev *pdev, uint32_t flag)
+pci_pme_capable(struct pci_dev *pdev, pci_power_t state)
 {
-	struct pci_devinfo *dinfo;
-	pcicfgregs *cfg;
-
-	if (flag > (PCIM_PCAP_D3PME_COLD >> PCIM_PCAP_PME_SHIFT))
-		return (false);
-
-	dinfo = device_get_ivars(pdev->dev.bsddev);
-	cfg = &dinfo->cfg;
-
-	if (cfg->pp.pp_cap == 0)
-		return (false);
-
-	if ((cfg->pp.pp_cap & (1 << (PCIM_PCAP_PME_SHIFT + flag))) != 0)
-		return (true);
-
-	return (false);
+	return (pci_has_pme(pdev->dev.bsddev, state));
 }
 
 static inline int
@@ -908,6 +912,11 @@ pci_reset_function(struct pci_dev *pdev)
 #define	pci_unmap_len		dma_unmap_len
 #define	pci_unmap_len_set	dma_unmap_len_set
 
+void *linuxkpi_pci_map_rom(struct pci_dev *pdev, size_t *size);
+void linuxkpi_pci_unmap_rom(struct pci_dev *pdev, void *rom);
+#define	pci_map_rom(pdev, size)		linuxkpi_pci_map_rom(pdev, size)
+#define	pci_unmap_rom(pdev, rom)	linuxkpi_pci_unmap_rom(pdev, rom)
+
 typedef unsigned int __bitwise pci_channel_state_t;
 typedef unsigned int __bitwise pci_ers_result_t;
 
@@ -933,6 +942,8 @@ struct pci_error_handlers {
 	pci_ers_result_t (*link_reset)(struct pci_dev *dev);
 	pci_ers_result_t (*slot_reset)(struct pci_dev *dev);
 	void (*resume)(struct pci_dev *dev);
+	void (*reset_prepare)(struct pci_dev *);
+	void (*reset_done)(struct pci_dev *);
 };
 
 /* FreeBSD does not support SRIOV - yet */
@@ -1583,6 +1594,17 @@ pci_irq_vector(struct pci_dev *pdev, unsigned int vector)
 	}
 
         return (-ENXIO);
+}
+
+static inline int
+pci_msix_vec_count(struct pci_dev *pdev)
+{
+	int avail;
+
+	avail = pci_msix_count(pdev->dev.bsddev);
+	if (avail == 0)
+		return (-EINVAL);
+	return (avail);
 }
 
 static inline int

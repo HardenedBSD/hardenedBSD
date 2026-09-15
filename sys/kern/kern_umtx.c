@@ -113,7 +113,7 @@
 			  (td)->td_user_pri <= PRI_MAX_TIMESHARE) ?\
 			 PRI_MAX_TIMESHARE : (td)->td_user_pri)
 
-#define	GOLDEN_RATIO_PRIME	2654404609U
+#define	GOLDEN_RATIO_32		1640531527U
 #ifndef	UMTX_CHAINS
 #define	UMTX_CHAINS		512
 #endif
@@ -180,7 +180,7 @@ static void umtxq_hash(struct umtx_key *key);
 static int do_unlock_pp(struct thread *td, struct umutex *m, uint32_t flags,
     bool rb);
 static void umtx_thread_cleanup(struct thread *td);
-SYSINIT(umtx, SI_SUB_EVENTHANDLER+1, SI_ORDER_MIDDLE, umtxq_sysinit, NULL);
+SYSINIT(umtx, SI_SUB_EVENTHANDLER, SI_ORDER_LAST, umtxq_sysinit, NULL);
 
 #define umtxq_signal(key, nwake)	umtxq_signal_queue((key), (nwake), UMTX_SHARED_QUEUE)
 
@@ -380,7 +380,7 @@ umtxq_hash(struct umtx_key *key)
 	unsigned n;
 
 	n = (uintptr_t)key->info.both.a + key->info.both.b;
-	key->hash = ((n * GOLDEN_RATIO_PRIME) >> UMTX_SHIFTS) % UMTX_CHAINS;
+	key->hash = ((n * GOLDEN_RATIO_32) >> UMTX_SHIFTS) % UMTX_CHAINS;
 }
 
 struct umtxq_chain *
@@ -1423,19 +1423,23 @@ do_lock_normal(struct thread *td, struct umutex *m, uint32_t flags,
 			}
 
 			/*
-			 * If no one owns it but it is contested try
-			 * to acquire it.
+			 * If no one owns it, but it is contested or
+			 * the CAS above failed spuriously (possible
+			 * on ll/sc architectures), try to acquire it.
+			 * Sleeping would be forever in the spurious
+			 * case: no owner exists to wake us.
 			 */
 			MPASS(rv == 1);
-			if (owner == UMUTEX_CONTESTED) {
-				rv = casueword32(&m->m_owner,
-				    UMUTEX_CONTESTED, &owner,
-				    id | UMUTEX_CONTESTED);
+			if (owner == UMUTEX_CONTESTED ||
+			    owner == UMUTEX_UNOWNED) {
+				rv = casueword32(&m->m_owner, owner,
+				    &owner, id | UMUTEX_CONTESTED);
 				/* The address was invalid. */
 				if (rv == -1)
 					return (EFAULT);
 				if (rv == 0) {
-					MPASS(owner == UMUTEX_CONTESTED);
+					MPASS(owner == UMUTEX_CONTESTED ||
+					    owner == UMUTEX_UNOWNED);
 					return (0);
 				}
 				if (rv == 1) {
@@ -1451,7 +1455,7 @@ do_lock_normal(struct thread *td, struct umutex *m, uint32_t flags,
 				continue;
 			}
 
-			/* rv == 1 but not contested, likely store failure */
+			/* rv == 1 with a real owner, fall through to sleep. */
 			rv = thread_check_susp(td, false);
 			if (rv != 0)
 				return (rv);
@@ -2028,7 +2032,7 @@ int
 umtxq_sleep_pi(struct umtx_q *uq, struct umtx_pi *pi, uint32_t owner,
     const char *wmesg, struct umtx_abs_timeout *timo, bool shared)
 {
-	struct thread *td, *td1;
+	struct thread *td;
 	struct umtx_q *uq1;
 	int error, pri;
 #ifdef INVARIANTS
@@ -2044,13 +2048,22 @@ umtxq_sleep_pi(struct umtx_q *uq, struct umtx_pi *pi, uint32_t owner,
 	umtxq_insert(uq);
 	mtx_lock(&umtx_lock);
 	if (pi->pi_owner == NULL) {
+		struct thread *ownertd;
+
 		mtx_unlock(&umtx_lock);
-		td1 = tdfind(owner, shared ? -1 : td->td_proc->p_pid);
+		ownertd = tdfind(owner, shared ? -1 : td->td_proc->p_pid);
 		mtx_lock(&umtx_lock);
-		if (td1 != NULL) {
-			if (pi->pi_owner == NULL)
-				umtx_pi_setowner(pi, td1);
-			PROC_UNLOCK(td1->td_proc);
+		if (ownertd != NULL) {
+			/*
+			 * An exiting thread that has already called
+			 * umtx_thread_exit() must not be made the owner of a
+			 * shared mutex.
+			 */
+			if ((ownertd->td_proc->p_flag & P_WEXIT) == 0 &&
+			    (ownertd->td_dbgflags & TDB_EXIT) == 0 &&
+			    pi->pi_owner == NULL)
+				umtx_pi_setowner(pi, ownertd);
+			PROC_UNLOCK(ownertd->td_proc);
 		}
 	}
 

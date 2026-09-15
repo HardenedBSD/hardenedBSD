@@ -15,7 +15,7 @@ HardenedBSD ?.?.?  (UNKNOWN)
                 Edit /etc/motd to change this login announcement.               
 
 HardenedBSD website: https://hardenedbsd.org/
-Code repositories:   https://git.hardenedbsd.org/
+Code repositories:   https://radicle.network/nodes/rad.hardenedbsd.org/
 Mailing lists:       https://hardenedbsd.org/content/mailing-lists/
 Documentation:
-    https://git.hardenedbsd.org/hardenedbsd/HardenedBSD/-/wikis/home
+    https://radicle.network/nodes/rad.hardenedbsd.org/docs

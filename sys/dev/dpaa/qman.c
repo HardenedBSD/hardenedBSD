@@ -111,43 +111,12 @@
 
 /* Software portals.  Cache-enabled registers */
 
-#define	QCSP_VERB_INIT_FQ_PARK		0x40
-#define	QCSP_VERB_INIT_FQ_SCHED		0x41
-#define	QCSP_VERB_QUERY_FQ		0x44
-#define	QCSP_VERB_QUERY_FQ_NP		0x45
-#define	QCSP_VERB_ALTER_FQ_SCHED	0x48
-#define	QCSP_VERB_ALTER_FQ_FE		0x49
-#define	QCSP_VERB_ALTER_FQ_RETIRE	0x4a
-#define	QCSP_VERB_ALTER_FQ_TAKE_OUT	0x4b
-#define	QCSP_VERB_ALTER_FQ_RETIRE_CTXB	0x4c
-#define	QCSP_VERB_ALTER_FQ_XON		0x4d
-#define	QCSP_VERB_ALTER_FQ_XOFF		0x4e
-
-/* Init FQ */
-#define	QCSP_INIT_FQ_WE_OAC		0x0100
-#define	QCSP_INIT_FQ_WE_ORPC		0x0080
-#define	QCSP_INIT_FQ_WE_CGID		0x0040
-#define	QCSP_INIT_FQ_WE_FQ_CTRL		0x0020
-#define	QCSP_INIT_FQ_WE_DEST_WQ		0x0010
-#define	QCSP_INIT_FQ_WE_ICS_CRED	0x0008
-#define	QCSP_INIT_FQ_WE_TD_THRESH	0x0004
-#define	QCSP_INIT_FQ_WE_CONTEXT_B	0x0002
-#define	QCSP_INIT_FQ_WE_CONTEXT_A	0x0001
-
-#define	QMAN_MC_RES_OK			0xf0
-
-#define	QMAN_MC_AFQS_NE			0x01
-
-/* Init FQ options */
-#define	QM_FQCTRL_CGE			0x0400
-#define	QM_FQCTRL_TDE			0x0200
-#define	QM_FQCTRL_ORP			0x0100
-#define	QM_FQCTRL_CTXASTASH		0x0080
-#define	QM_FQCTRL_CPCSTASH		0x0040
-#define	QM_FQCTRL_FORCESFDR		0x0008
-#define	QM_FQCTRL_AVOIDBLOCK		0x0004
-#define	QM_FQCTRL_HOLDACTIVE		0x0002
-#define	QM_FQCTRL_LIC			0x0001
+/*
+ * Context_A stashing config.
+ */
+#define	QM_STASHING_EXCL_ANNOTATION	0x04
+#define	QM_STASHING_EXCL_DATA		0x02
+#define	QM_STASHING_EXCL_CONTEXT	0x01
 
 #define	QMAN_CHANNEL_POOL1_REV1		0x21
 #define	QMAN_CHANNEL_POOL1_REV3		0x401
@@ -342,7 +311,6 @@ qman_attach(device_t dev)
 	 */
 	nfqd = fqd_sz / 64;
 	qman_total_fqids = nfqd;
-	qman_channel_base = qman_channel_pool1;
 	qman_fq_list = malloc(nfqd * sizeof(struct qman_fq *), M_QMAN,
 	    M_WAITOK);
 
@@ -371,15 +339,16 @@ qman_attach(device_t dev)
 
 	if (qman3)
 		qman_channel_pool1 = QMAN_CHANNEL_POOL1_REV3;
+	qman_channel_base = qman_channel_pool1;
 
 	sc->sc_qman_base_channel = qman_channel_pool1;
 
 	sc->sc_fqalloc =
 	    vmem_create("qman-fqalloc", 1, nfqd - 1, 1, 0, M_WAITOK);
 	sc->sc_qpalloc =
-	    vmem_create("qman-fqalloc", qman_channel_pool1,
+	    vmem_create("qman-qpalloc", qman_channel_pool1,
 	    QMAN_POOL_CHANNELS, 1, 0, M_WAITOK);
-	sc->sc_cgalloc = vmem_create("qman->cgalloc", 0, QMAN_CGRS,
+	sc->sc_cgalloc = vmem_create("qman-cgalloc", 0, QMAN_CGRS,
 	    1, 0, M_WAITOK);
 
 	if (bus_setup_intr(dev, sc->sc_ires, INTR_TYPE_NET, NULL, qman_isr,
@@ -477,6 +446,44 @@ qman_free_channel(int channel)
 	vmem_free(sc->sc_qpalloc, channel, 1);
 }
 
+int
+qman_percpu_channel(int cpu)
+{
+	device_t portal;
+	struct qman_portal_softc *sc;
+
+	portal = DPCPU_ID_GET(cpu, qman_affine_portal);
+	if (portal == NULL)
+		return (-1);
+
+	sc = device_get_softc(portal);
+
+	return (sc->sc_affine_channel);
+}
+
+int
+qman_alloc_fqid_range(uint32_t count, uint32_t align, uint32_t *basep)
+{
+	struct qman_softc *sc = qman_sc;
+	vmem_addr_t base;
+	int error;
+
+	error = vmem_xalloc(sc->sc_fqalloc, count, align, 0, 0,
+	    VMEM_ADDR_MIN, VMEM_ADDR_MAX, M_BESTFIT | M_NOWAIT, &base);
+	if (error != 0)
+		return (error);
+	*basep = base;
+	return (0);
+}
+
+void
+qman_free_fqid_range(uint32_t base, uint32_t count)
+{
+	struct qman_softc *sc = qman_sc;
+
+	vmem_free(sc->sc_fqalloc, base, count);
+}
+
 /**
  * @group QMan API functions implementation.
  * @{
@@ -496,7 +503,8 @@ qman_fq_create(uint32_t fqids_num, int channel, uint8_t wq,
     bool force_fqid, uint32_t fqid_or_align, bool init_parked,
     bool hold_active, bool prefer_in_cache, bool congst_avoid_ena,
     void *congst_group, int8_t overhead_accounting_len,
-    uint32_t tail_drop_threshold)
+    uint32_t tail_drop_threshold,
+    uint8_t annotation_cl, uint8_t data_cl)
 {
 	union qman_mc_command cmd;
 	struct qman_softc *sc;
@@ -508,14 +516,28 @@ qman_fq_create(uint32_t fqids_num, int channel, uint8_t wq,
 
 	sc = qman_sc;
 
-	if (fqids_num != 1) {
-		device_printf(sc->sc_dev,
-		    "Only one fq allocation allowed currently\n");
-		return (NULL);
-	}
-
 	bzero(&cmd, sizeof(cmd));
-	vmem_alloc(sc->sc_fqalloc, fqids_num, M_BESTFIT | M_WAITOK, &fqid_base);
+	if (force_fqid) {
+		/*
+		 * Caller has already reserved the FQID (typically via
+		 * qman_alloc_fqid_range() for a KeyGen distribution range)
+		 * and passes the concrete FQID via fqid_or_align.  Do not
+		 * touch the vmem allocator; just record the base for
+		 * downstream book-keeping.
+		 */
+		fqid_base = fqid_or_align;
+	} else {
+		int error;
+
+		error = vmem_alloc(sc->sc_fqalloc, fqids_num,
+		    M_BESTFIT | M_WAITOK, &fqid_base);
+		if (error != 0) {
+			device_printf(sc->sc_dev,
+			    "qman_fq_create: no FQID range of %u\n",
+			    fqids_num);
+			return (NULL);
+		}
+	}
 	cmd.init_fq.fqid = fqid_base;
 	cmd.init_fq.count = fqids_num - 1;
 	cmd.init_fq.dest_chan = channel;
@@ -529,6 +551,24 @@ qman_fq_create(uint32_t fqids_num, int channel, uint8_t wq,
 	    (hold_active ? QM_FQCTRL_HOLDACTIVE : 0) |
 	    (congst_avoid_ena ? QM_FQCTRL_AVOIDBLOCK : 0);
 
+	/*
+	 * Configure hardware cache stashing: on dequeue, QMan will push
+	 * the requested number of cachelines of frame annotation and/or
+	 * frame data into the destination core's cache, hiding memory
+	 * latency for the RX callback.
+	 */
+	if (annotation_cl != 0 || data_cl != 0) {
+		uint64_t excl, cl;
+
+		excl = (annotation_cl != 0 ? QM_STASHING_EXCL_ANNOTATION : 0) |
+		    (data_cl != 0 ? QM_STASHING_EXCL_DATA : 0);
+		cl = ((annotation_cl & 3) << 4) | ((data_cl & 3) << 2);
+		/* excl in wire byte 0 (bits 63-56), cl in wire byte 1. */
+		cmd.init_fq.context_a = (excl << 56) | (cl << 48);
+		cmd.init_fq.fq_ctrl |= QM_FQCTRL_CTXASTASH;
+		cmd.init_fq.we_mask |= QCSP_INIT_FQ_WE_CONTEXT_A;
+	}
+
 	critical_enter();
 
 	/* Ensure we have got QMan port initialized */
@@ -541,14 +581,18 @@ qman_fq_create(uint32_t fqids_num, int channel, uint8_t wq,
 
 	critical_exit();
 	if (res == NULL || rslt != QMAN_MC_RES_OK) {
-		vmem_free(sc->sc_fqalloc, fqid_base, fqids_num);
+		if (!force_fqid)
+			vmem_free(sc->sc_fqalloc, fqid_base, fqids_num);
 		goto err;
 	}
 
 	fqh = malloc(sizeof(*fqh), M_QMAN, M_WAITOK | M_ZERO);
 	fqh->fqid = fqid_base;
+	fqh->fqid_count = fqids_num;
+	fqh->force_fqid = force_fqid;
 
-	qman_fq_list[fqid_base] = fqh;
+	for (uint32_t i = 0; i < fqids_num; i++)
+		qman_fq_list[fqid_base + i] = fqh;
 
 	return (fqh);
 
@@ -558,7 +602,7 @@ err:
 }
 
 static int
-qman_fq_retire(device_t portal, struct qman_fq *fq)
+qman_fq_retire_one(device_t portal, uint32_t fqid)
 {
 	union qman_mc_command cmd;
 	union qman_mc_result *rr;
@@ -566,7 +610,7 @@ qman_fq_retire(device_t portal, struct qman_fq *fq)
 	bzero(&cmd, sizeof(cmd));
 
 	cmd.alter_fqs.verb = QCSP_VERB_ALTER_FQ_RETIRE;
-	cmd.alter_fqs.fqid = fq->fqid;
+	cmd.alter_fqs.fqid = fqid;
 	rr = QMAN_PORTAL_MC_SEND_RAW(portal, &cmd);
 	if (rr == NULL)
 		return (ETIMEDOUT);
@@ -585,18 +629,27 @@ int
 qman_fq_free(struct qman_fq *fq)
 {
 	struct qman_softc *sc;
+	device_t portal;
 	int error;
 
 	sc = qman_sc;
 
 	critical_enter();
-	error = qman_fq_retire(DPCPU_GET(qman_affine_portal), fq);
+	portal = DPCPU_GET(qman_affine_portal);
+	for (uint32_t i = 0; i < fq->fqid_count; i++) {
+		error = qman_fq_retire_one(portal, fq->fqid + i);
+		if (error != 0) {
+			critical_exit();
+			return (error);
+		}
+	}
 	/* TODO: Take FQ out of service. */
 	critical_exit();
-	if (error != 0)
-		return (error);
-	vmem_free(sc->sc_fqalloc, fq->fqid, 1);
-	qman_fq_list[fq->fqid] = NULL;
+
+	if (!fq->force_fqid)
+		vmem_free(sc->sc_fqalloc, fq->fqid, fq->fqid_count);
+	for (uint32_t i = 0; i < fq->fqid_count; i++)
+		qman_fq_list[fq->fqid + i] = NULL;
 	free(fq, M_QMAN);
 
 	return (0);
@@ -609,6 +662,13 @@ qman_fq_register_cb(struct qman_fq *fq, qman_cb_dqrr callback,
 	fq->cb.dqrr = callback;
 	fq->cb.ctx = ctx;
 
+	return (0);
+}
+
+int
+qman_fq_register_flush_cb(struct qman_fq *fq, qman_cb_flush flush)
+{
+	fq->cb.flush = flush;
 	return (0);
 }
 

@@ -35,7 +35,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/caprights.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/imgact.h>
 #include <sys/ktr.h>
@@ -46,6 +46,7 @@
 #include <sys/mutex.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
+#include <sys/procdesc.h>
 #include <sys/ptrace.h>
 #include <sys/reg.h>
 #include <sys/rwlock.h>
@@ -53,6 +54,7 @@
 #include <sys/sleepqueue.h>
 #include <sys/sx.h>
 #include <sys/syscallsubr.h>
+#include <sys/sysctl.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/vnode.h>
@@ -80,6 +82,11 @@
 #ifdef COMPAT_FREEBSD32
 #include <sys/procfs.h>
 #endif
+
+bool allow_ptrace_in_cap_mode = true;
+SYSCTL_BOOL(_security_bsd, OID_AUTO, allow_ptrace_in_cap_mode, CTLFLAG_RWTUN,
+    &allow_ptrace_in_cap_mode, 0,
+    "Allow ptrace(2) in capability mode");
 
 /* Assert it's safe to unlock a process, e.g. to allocate working memory */
 #define	PROC_ASSERT_TRACEREQ(p)	MPASS(((p)->p_flag2 & P2_PTRACEREQ) != 0)
@@ -463,6 +470,7 @@ vmspace_rwmem(struct vmspace *vm, struct uio *uio)
 	vm_map_t map;
 	vm_offset_t pageno;		/* page number */
 	vm_prot_t reqprot;
+	ssize_t orig_resid;
 	int error, fault_flags, page_offset, writing;
 
 	map = &vm->vm_map;
@@ -476,10 +484,12 @@ vmspace_rwmem(struct vmspace *vm, struct uio *uio)
 	reqprot = writing ? VM_PROT_COPY | VM_PROT_READ : VM_PROT_READ;
 	fault_flags = writing ? VM_FAULT_DIRTY : VM_FAULT_NORMAL;
 
+	orig_resid = uio->uio_resid;
+
 	if (writing) {
 		error = priv_check(curthread, PRIV_PROC_MEM_WRITE);
 		if (error != 0)
-			goto out;
+			return (error);
 	}
 
 	/*
@@ -536,9 +546,7 @@ vmspace_rwmem(struct vmspace *vm, struct uio *uio)
 		vm_page_unwire(m, PQ_ACTIVE);
 
 	} while (error == 0 && uio->uio_resid > 0);
-
-out:
-	return (error);
+	return (uio->uio_resid == orig_resid ? error : 0);
 }
 
 int
@@ -713,6 +721,26 @@ ptrace_vm_entry(struct thread *td, struct proc *p, struct ptrace_vm_entry *pve)
 	return (error);
 }
 
+static int
+ptrace_check_allowed(struct thread *td, int req, bool pd_mode, pid_t pid)
+{
+	if (!allow_ptrace)
+		return (ENOSYS);
+	if (!IN_CAPABILITY_MODE(td))
+		return (0);
+	if (!allow_ptrace_in_cap_mode)
+		return (ECAPMODE);
+	if (pd_mode)
+		return (0);
+	if (req == PT_TRACE_ME)
+		return (0);
+	if (req == PT_GET_CHILDREN && pid == td->td_proc->p_pid)
+		return (0);
+	if (req == PT_CLEARSTEP && pid == td->td_tid)
+		return (0);
+	return (ECAPMODE);
+}
+
 /*
  * Process debugging system call.
  */
@@ -725,8 +753,9 @@ struct ptrace_args {
 };
 #endif
 
-int
-sys_ptrace(struct thread *td, struct ptrace_args *uap)
+static int
+ptrace_useraction(struct thread *td, int req, bool pd_mode, pid_t pid, int pfd,
+    lwpid_t lwpid, void *uaddr, int udata)
 {
 	/*
 	 * XXX this obfuscation is to reduce stack usage, but the register
@@ -746,30 +775,26 @@ sys_ptrace(struct thread *td, struct ptrace_args *uap)
 		struct ptrace_sc_ret psr;
 		int ptevents;
 		struct ptrace_child *children;
+		char sv_name[32];
 	} r;
 	syscallarg_t pscr_args[nitems(td->td_sa.args)];
 	void *addr;
-	int error;
+	int error, data;
 
-	if (!allow_ptrace)
-		return (ENOSYS);
-	error = 0;
+	error = ptrace_check_allowed(td, req, pd_mode, pid);
+	if (error != 0)
+		return (error);
 
-	AUDIT_ARG_PID(uap->pid);
-	AUDIT_ARG_CMD(uap->req);
-	AUDIT_ARG_VALUE(uap->data);
 	addr = &r;
-	switch (uap->req) {
+	switch (req) {
 	case PT_GET_EVENT_MASK:
 	case PT_LWPINFO:
 	case PT_GET_SC_ARGS:
 	case PT_GET_SC_RET:
 		break;
 	case PT_SET_SC_RET:
-		if (uap->data != sizeof(r.psr))
-			error = EINVAL;
-		else
-			error = copyin(uap->addr, &r.psr, sizeof(r.psr));
+		error = udata != sizeof(r.psr) ? EINVAL :
+		    copyin(uaddr, &r.psr, sizeof(r.psr));
 		break;
 	case PT_GETREGS:
 		bzero(&r.reg, sizeof(r.reg));
@@ -782,41 +807,34 @@ sys_ptrace(struct thread *td, struct ptrace_args *uap)
 		break;
 	case PT_GETREGSET:
 	case PT_SETREGSET:
-		error = copyin(uap->addr, &r.vec, sizeof(r.vec));
+		error = copyin(uaddr, &r.vec, sizeof(r.vec));
 		break;
 	case PT_SETREGS:
-		error = copyin(uap->addr, &r.reg, sizeof(r.reg));
+		error = copyin(uaddr, &r.reg, sizeof(r.reg));
 		break;
 	case PT_SETFPREGS:
-		error = copyin(uap->addr, &r.fpreg, sizeof(r.fpreg));
+		error = copyin(uaddr, &r.fpreg, sizeof(r.fpreg));
 		break;
 	case PT_SETDBREGS:
-		error = copyin(uap->addr, &r.dbreg, sizeof(r.dbreg));
+		error = copyin(uaddr, &r.dbreg, sizeof(r.dbreg));
 		break;
 	case PT_SET_EVENT_MASK:
-		if (uap->data != sizeof(r.ptevents))
-			error = EINVAL;
-		else
-			error = copyin(uap->addr, &r.ptevents, uap->data);
+		error = udata != sizeof(r.ptevents) ? EINVAL :
+		    copyin(uaddr, &r.ptevents, udata);
 		break;
 	case PT_IO:
-		error = copyin(uap->addr, &r.piod, sizeof(r.piod));
+		error = copyin(uaddr, &r.piod, sizeof(r.piod));
 		break;
 	case PT_VM_ENTRY:
-		error = copyin(uap->addr, &r.pve, sizeof(r.pve));
+		error = copyin(uaddr, &r.pve, sizeof(r.pve));
 		break;
 	case PT_COREDUMP:
-		if (uap->data != sizeof(r.pc))
-			error = EINVAL;
-		else
-			error = copyin(uap->addr, &r.pc, uap->data);
+		error = udata != sizeof(r.pc) ? EINVAL :
+		    copyin(uaddr, &r.pc, udata);
 		break;
 	case PT_SC_REMOTE:
-		if (uap->data != sizeof(r.sr)) {
-			error = EINVAL;
-			break;
-		}
-		error = copyin(uap->addr, &r.sr, uap->data);
+		error = udata != sizeof(r.sr) ? EINVAL :
+		    copyin(uaddr, &r.sr, udata);
 		if (error != 0)
 			break;
 		if (r.sr.pscr_nargs > nitems(td->td_sa.args)) {
@@ -830,73 +848,83 @@ sys_ptrace(struct thread *td, struct ptrace_args *uap)
 		r.sr.pscr_args = pscr_args;
 		break;
 	case PT_GET_CHILDREN:
-		if (uap->addr == NULL)
+		if (uaddr == NULL)
 			addr = NULL;
-		else if (uap->data < 0)
+		else if (udata < 0)
 			error = EINVAL;
 		else
 			addr = &r.children;
+		break;
+	case PT_GET_ABI_NAME:
+		if (udata < 0) {
+			error = EINVAL;
+			break;
+		}
+		data = udata;
+		udata = sizeof(r.sv_name);
 		break;
 	case PTINTERNAL_FIRST ... PTINTERNAL_LAST:
 		error = EINVAL;
 		break;
 	default:
-		addr = uap->addr;
+		addr = uaddr;
 		break;
 	}
 	if (error != 0)
 		return (error);
 
-	error = kern_ptrace(td, uap->req, uap->pid, addr, uap->data);
+	error = ptrace_action(td, req, pd_mode, pid, pfd, lwpid, addr, udata);
 	if (error != 0)
 		return (error);
 
-	switch (uap->req) {
+	switch (req) {
 	case PT_VM_ENTRY:
-		error = copyout(&r.pve, uap->addr, sizeof(r.pve));
+		error = copyout(&r.pve, uaddr, sizeof(r.pve));
 		break;
 	case PT_IO:
-		error = copyout(&r.piod, uap->addr, sizeof(r.piod));
+		error = copyout(&r.piod, uaddr, sizeof(r.piod));
 		break;
 	case PT_GETREGS:
-		error = copyout(&r.reg, uap->addr, sizeof(r.reg));
+		error = copyout(&r.reg, uaddr, sizeof(r.reg));
 		break;
 	case PT_GETFPREGS:
-		error = copyout(&r.fpreg, uap->addr, sizeof(r.fpreg));
+		error = copyout(&r.fpreg, uaddr, sizeof(r.fpreg));
 		break;
 	case PT_GETDBREGS:
-		error = copyout(&r.dbreg, uap->addr, sizeof(r.dbreg));
+		error = copyout(&r.dbreg, uaddr, sizeof(r.dbreg));
 		break;
 	case PT_GETREGSET:
-		error = copyout(&r.vec, uap->addr, sizeof(r.vec));
+		error = copyout(&r.vec, uaddr, sizeof(r.vec));
 		break;
 	case PT_GET_EVENT_MASK:
-		/* NB: The size in uap->data is validated in kern_ptrace(). */
-		error = copyout(&r.ptevents, uap->addr, uap->data);
+		/* NB: The size in uap->data is validated in ptraceimpl(). */
+		error = copyout(&r.ptevents, uaddr, udata);
 		break;
 	case PT_LWPINFO:
-		/* NB: The size in uap->data is validated in kern_ptrace(). */
-		error = copyout(&r.pl, uap->addr, uap->data);
+		/* NB: The size in uap->data is validated in ptraceimpl(). */
+		error = copyout(&r.pl, uaddr, udata);
 		break;
 	case PT_GET_SC_ARGS:
-		error = copyout(r.args, uap->addr, MIN(uap->data,
-		    sizeof(r.args)));
+		error = copyout(r.args, uaddr, MIN(udata, sizeof(r.args)));
 		break;
 	case PT_GET_SC_RET:
-		error = copyout(&r.psr, uap->addr, MIN(uap->data,
-		    sizeof(r.psr)));
+		error = copyout(&r.psr, uaddr, MIN(udata, sizeof(r.psr)));
 		break;
 	case PT_SC_REMOTE:
-		error = copyout(&r.sr.pscr_ret, uap->addr +
+		error = copyout(&r.sr.pscr_ret, (char *)uaddr +
 		    offsetof(struct ptrace_sc_remote, pscr_ret),
 		    sizeof(r.sr.pscr_ret));
 		break;
 	case PT_GET_CHILDREN:
-		if (uap->addr != NULL) {
-			error = copyout(r.children, uap->addr,
+		if (uaddr != NULL) {
+			error = copyout(r.children, uaddr,
 			    td->td_retval[0] * sizeof(struct ptrace_child));
 			free(r.children, M_TEMP);
 		}
+		break;
+	case PT_GET_ABI_NAME:
+		error = data <= strlen(r.sv_name) ? ENOMEM :
+		    copyout(&r.sv_name, uaddr, strlen(r.sv_name) + 1);
 		break;
 	}
 
@@ -1067,7 +1095,8 @@ ptrace_sel_coredump_thread(struct proc *p)
 }
 
 int
-kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
+ptrace_action(struct thread *td, int req, bool pd_mode, pid_t pid, int pfd,
+    lwpid_t lwpid, void *addr, int data)
 {
 	struct iovec iov;
 	struct uio uio;
@@ -1081,6 +1110,7 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 	struct ptrace_coredump *pc;
 	struct thr_coredump_req *tcq;
 	struct thr_syscall_req *tsr;
+	struct file *pfp;
 	struct ptrace_child *children, *ptc;
 	int error, num, num1, tmp;
 	lwpid_t tid = 0, *buf;
@@ -1092,6 +1122,7 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 	curp = td->td_proc;
 	proctree_locked = false;
 	p2_req_set = false;
+	pfp = NULL;
 
 	/* Lock proctree before locking the process. */
 	switch (req) {
@@ -1119,24 +1150,42 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 	if (req == PT_TRACE_ME) {
 		p = td->td_proc;
 		PROC_LOCK(p);
-	} else {
-		if (pid <= PID_MAX) {
-			if ((p = pfind(pid)) == NULL) {
-				if (proctree_locked)
-					sx_xunlock(&proctree_lock);
-				return (ESRCH);
+	} else if (pd_mode) {
+		if (!proctree_locked)
+			sx_slock(&proctree_lock);
+		error = fget_procdesc(td, pfd, &cap_ptrace_rights, EINVAL,
+		    &pfp, NULL, &p);
+		if (!proctree_locked)
+			sx_sunlock(&proctree_lock);
+		if (error != 0)
+			goto fail_proctree;
+		pid = p->p_pid;
+		if (lwpid != -1) {
+			FOREACH_THREAD_IN_PROC(p, td2) {
+				if (td2->td_tid == lwpid)
+					break;
 			}
-		} else {
-			td2 = tdfind(pid, -1);
 			if (td2 == NULL) {
-				if (proctree_locked)
-					sx_xunlock(&proctree_lock);
-				return (ESRCH);
+				PROC_UNLOCK(p);
+				error = ESRCH;
+				goto fail_proctree;
 			}
-			p = td2->td_proc;
-			tid = pid;
-			pid = p->p_pid;
+			tid = td2->td_tid;
 		}
+	} else if (pid <= PID_MAX) {
+		if ((p = pfind(pid)) == NULL) {
+			error = ESRCH;
+			goto fail_proctree;
+		}
+	} else {
+		td2 = tdfind(pid, -1);
+		if (td2 == NULL) {
+			error = ESRCH;
+			goto fail_proctree;
+		}
+		p = td2->td_proc;
+		tid = pid;
+		pid = p->p_pid;
 	}
 	AUDIT_ARG_PROCESS(p);
 
@@ -2040,6 +2089,11 @@ get_children_repeat:
 		PROC_LOCK(p);
 		break;
 
+	case PT_GET_ABI_NAME:
+		if (strlcpy(addr, p->p_sysent->sv_name, data) >= data)
+			error = ENOMEM;
+		break;
+
 	default:
 #ifdef __HAVE_PTRACE_MACHDEP
 		if (req >= PT_FIRSTMACH) {
@@ -2062,9 +2116,46 @@ fail:
 		p->p_flag2 &= ~P2_PTRACEREQ;
 	}
 	PROC_UNLOCK(p);
+fail_proctree:
 	if (proctree_locked)
 		sx_xunlock(&proctree_lock);
+	if (pfp != NULL)
+		fdrop(pfp, td);
 	return (error);
 }
 #undef PROC_READ
 #undef PROC_WRITE
+
+int
+kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
+{
+	return (ptrace_action(td, req, false, pid, -1, -1, addr, data));
+}
+
+int
+sys_ptrace(struct thread *td, struct ptrace_args *uap)
+{
+	int error;
+
+	AUDIT_ARG_PID(uap->pid);
+	AUDIT_ARG_CMD(uap->req);
+	AUDIT_ARG_VALUE(uap->data);
+
+	error = ptrace_useraction(td, uap->req, false, uap->pid, -1, -1,
+	    uap->addr, uap->data);
+	return (error);
+}
+
+int
+sys_pdptrace(struct thread *td, struct pdptrace_args *uap)
+{
+	int error;
+
+	AUDIT_ARG_FD(uap->pfd);
+	AUDIT_ARG_CMD(uap->req);
+	AUDIT_ARG_VALUE(uap->data);
+
+	error = ptrace_useraction(td, uap->req, true, -1, uap->pfd, uap->lwpid,
+	    uap->addr, uap->data);
+	return (error);
+}

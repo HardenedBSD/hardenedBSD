@@ -900,10 +900,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		firmware-name = "qcom/sm8650/gen70900_zap.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sm8650/gen70900_zap.mbn";
 };
 
 &lpass_tlmm {
@@ -939,10 +939,6 @@
 
 &mdss_dp0 {
 	status = "okay";
-};
-
-&mdss_dp0_out {
-	data-lanes = <0 1>;
 };
 
 &pcie0 {
@@ -1050,7 +1046,19 @@
 	vdd3-supply = <&vreg_l5b_3p1>;
 };
 
-&pmk8550_rtc {
+&pm8550vs_c {
+	status = "okay";
+};
+
+&pm8550vs_d {
+	status = "okay";
+};
+
+&pm8550vs_e {
+	status = "okay";
+};
+
+&pm8550vs_g {
 	status = "okay";
 };
 
@@ -1310,12 +1318,10 @@
  */
 
 &usb_1 {
-	status = "okay";
-};
-
-&usb_1_dwc3 {
 	dr_mode = "otg";
 	usb-role-switch;
+
+	status = "okay";
 };
 
 &usb_1_dwc3_hs {

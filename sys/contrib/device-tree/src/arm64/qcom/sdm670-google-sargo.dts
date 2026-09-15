@@ -33,6 +33,14 @@
 
 	aliases { };
 
+	battery: battery {
+		compatible = "simple-battery";
+
+		voltage-min-design-microvolt = <3312000>;
+		voltage-max-design-microvolt = <4400000>;
+		charge-full-design-microamp-hours = <3000000>;
+	};
+
 	chosen {
 		stdout-path = "serial0:115200n8";
 
@@ -396,11 +404,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		memory-region = <&gpu_mem>;
-		firmware-name = "qcom/sdm670/sargo/a615_zap.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sdm670/sargo/a615_zap.mbn";
 };
 
 &i2c9 {
@@ -475,6 +482,15 @@
 };
 
 &mdss_mdp {
+	status = "okay";
+};
+
+&pm660_charger {
+	monitored-battery = <&battery>;
+	status = "okay";
+};
+
+&pm660_rradc {
 	status = "okay";
 };
 

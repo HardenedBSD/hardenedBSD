@@ -15,12 +15,17 @@ description:
 
 properties:
   compatible:
-    items:
-      - enum:
-          - apple,t6000-smc
-          - apple,t8103-smc
-          - apple,t8112-smc
-      - const: apple,smc
+    oneOf:
+      - items:
+          - const: apple,t6020-smc
+          - const: apple,t8103-smc
+      - items:
+          - enum:
+              # Do not add additional SoC to this list.
+              - apple,t6000-smc
+              - apple,t8103-smc
+              - apple,t8112-smc
+          - const: apple,smc
 
   reg:
     items:
@@ -40,6 +45,9 @@ properties:
 
   reboot:
     $ref: /schemas/power/reset/apple,smc-reboot.yaml
+
+  rtc:
+    $ref: /schemas/rtc/apple,smc-rtc.yaml
 
 additionalProperties: false
 
@@ -75,5 +83,11 @@ examples:
           nvmem-cell-names = "shutdown_flag", "boot_stage",
                              "boot_error_count", "panic_count";
         };
+
+        rtc {
+          compatible = "apple,smc-rtc";
+          nvmem-cells = <&rtc_offset>;
+          nvmem-cell-names = "rtc_offset";
+       };
       };
     };

@@ -3,7 +3,7 @@
 .\" Copyright 2021 Rubicon Communications, LLC (Netgate)
 .\" SPDX-License-Identifier: BSD-3-Clause
 .\"
-.Dd March 9, 2026
+.Dd August 30, 2026
 .Dt IGC 4
 .Os
 .Sh NAME
@@ -32,6 +32,24 @@ On Motherboard) based on the Intel I225 Multi Gigabit Controller.
 The driver supports Transmit/Receive checksum offload, Jumbo Frames,
 MSI/MSI-X, TSO, and RSS.
 .Pp
+On systems that expose PCI power-management wake, the driver supports the
+.Cm wol_magic ,
+.Cm wol_ucast ,
+and
+.Cm wol_mcast
+capabilities shown by
+.Xr ifconfig 8 .
+Magic-packet wake is enabled by default and any advertised wake mode can be
+enabled or disabled with
+.Xr ifconfig 8 .
+Waking the system from an ACPI sleep state also requires enabling the
+corresponding device wake source when it is exposed, for example:
+.Bd -literal -offset indent
+sysctl dev.igc.0.wake=1
+.Ed
+The interface wake capabilities select the controller packet filters; they do
+not enable the ACPI wake source.
+.Pp
 Support for Jumbo Frames is provided via the interface MTU setting.
 Selecting an MTU larger than 1500 bytes with the
 .Xr ifconfig 8
@@ -39,10 +57,17 @@ utility
 configures the adapter to receive and transmit Jumbo Frames.
 The maximum MTU size for Jumbo Frames is 9216 bytes.
 .Pp
-This driver version supports VLAN hardware insertion / extraction, and
-VLAN checksum offload.
+This driver version supports VLAN hardware insertion / extraction,
+VLAN checksum offload, and VLAN hardware filtering.
 For information on enabling VLANs, see
 .Xr ifconfig 8 .
+.Pp
+The identification LED of an adapter supported by the
+.Nm
+driver can be controlled via the
+.Xr led 4
+interface at
+.Pa /dev/led/igc* .
 The
 .Nm
 driver supports the following media types:
@@ -147,13 +172,14 @@ A fatal initialization error has occurred.
 .It "igc%d: Unable to allocate bus resource: memory"
 A fatal initialization error has occurred.
 .It "igc%d: Invalid MAC address"
-The MAC address programmed into the EEPROM is either empty or a multicast/broadcast
-address.
+The MAC address programmed into the EEPROM is either empty or a multicast or
+broadcast address.
 .El
 .Sh SEE ALSO
 .Xr altq 4 ,
 .Xr arp 4 ,
 .Xr iflib 4 ,
+.Xr led 4 ,
 .Xr netintro 4 ,
 .Xr ng_ether 4 ,
 .Xr vlan 4 ,

@@ -54,6 +54,10 @@ properties:
       - const: apb_pclk
       - const: atclk
 
+  label:
+    description:
+      Description of a coresight device.
+
   power-domains:
     maxItems: 1
 
@@ -65,6 +69,9 @@ properties:
       port:
         description: Input connection from the CoreSight Trace bus.
         $ref: /schemas/graph.yaml#/properties/port
+
+  access-controllers:
+    maxItems: 1
 
 required:
   - compatible

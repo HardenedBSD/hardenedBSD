@@ -1358,6 +1358,10 @@ dev/cfi/cfi_core.c		optional cfi
 dev/cfi/cfi_dev.c		optional cfi
 dev/cfi/cfi_disk.c		optional cfid
 dev/chromebook_platform/chromebook_platform.c	optional chromebook_platform
+dev/coreboot/coreboot.c			optional coreboot
+dev/coreboot/coreboot_cbmem.c		optional coreboot
+dev/coreboot/coreboot_console.c		optional coreboot
+dev/coreboot/coreboot_timestamps.c	optional coreboot
 dev/ciss/ciss.c			optional ciss
 dev/clk/clk.c			optional clk
 dev/clk/clkdev_if.m		optional clk
@@ -1634,6 +1638,10 @@ dev/efidev/efirt.c		optional efirt
 dev/efidev/efirtc.c		optional efirt efirtc
 dev/e1000/if_em.c		optional em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
+dev/e1000/if_igbv.c		optional em \
+	compile-with "${NORMAL_C} -I$S/dev/e1000"
+dev/e1000/if_igb_iov.c		optional em \
+	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/em_txrx.c		optional em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/igb_txrx.c		optional em \
@@ -1732,7 +1740,7 @@ dev/filemon/filemon.c		optional filemon
 dev/firewire/firewire.c		optional firewire
 dev/firewire/fwcrom.c		optional firewire
 dev/firewire/fwdev.c		optional firewire
-dev/firewire/fwcam.c		optional fwcam
+dev/firewire/fwcam.c		optional fwcam video
 dev/firewire/fwdma.c		optional firewire
 dev/firewire/fwdv.c		optional fwdv
 dev/firewire/fwisound.c		optional fwisound sound
@@ -1808,6 +1816,7 @@ dev/hid/hrfkill.c		optional hrfkill
 dev/hid/hsctrl.c		optional hsctrl
 dev/hid/ietp.c			optional ietp
 dev/hid/ps4dshock.c		optional ps4dshock
+dev/hid/ps5dsense.c		optional ps5dsense
 dev/hid/u2f.c			optional u2f
 dev/hid/xb360gp.c		optional xb360gp
 dev/hptiop/hptiop.c		optional hptiop scbus
@@ -2982,6 +2991,17 @@ dev/rtwn/rtl8192e/r92e_rom.c	optional rtwn
 dev/rtwn/rtl8192e/r92e_rx.c	optional rtwn
 dev/rtwn/rtl8192e/usb/r92eu_attach.c	optional rtwn_usb
 dev/rtwn/rtl8192e/usb/r92eu_init.c	optional rtwn_usb
+# RTL8723B
+dev/rtwn/rtl8723b/r23b_calib.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_fw.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_init.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_led.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rf.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rom.c	optional rtwn
+dev/rtwn/rtl8723b/r23b_rx.c	optional rtwn
+dev/rtwn/rtl8723b/usb/r23bu_attach.c	optional rtwn_usb
+dev/rtwn/rtl8723b/usb/r23bu_init.c	optional rtwn_usb
+dev/rtwn/rtl8723b/usb/r23bu_rom.c	optional rtwn_usb
 # RTL8812A
 dev/rtwn/rtl8812a/r12a_beacon.c	optional rtwn
 dev/rtwn/rtl8812a/r12a_calib.c	optional rtwn
@@ -3506,10 +3526,12 @@ dev/usb/template/usb_template_cdceem.c	optional usb_template
 # USB video drivers
 #
 dev/usb/video/udl.c			optional udl
-dev/usb/video/uvideo.c			optional uvideo
+dev/usb/video/uvideo.c			optional uvideo video
 #
 # USB END
 #
+dev/video/video.c			optional video
+dev/video/video_if.m			optional video
 dev/videomode/videomode.c		optional videomode
 dev/videomode/edid.c			optional videomode
 dev/videomode/pickmode.c		optional videomode
@@ -3990,6 +4012,7 @@ kern/subr_disk.c		standard
 kern/subr_early.c		standard
 kern/subr_epoch.c		standard
 kern/subr_eventhandler.c	standard
+kern/subr_exterr.c		standard
 kern/subr_fattime.c		standard
 kern/subr_firmware.c		optional firmware
 kern/subr_filter.c		standard
@@ -4728,6 +4751,8 @@ compat/linuxkpi/common/src/linux_kthread.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_lock.c		optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_math.c		optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_mhi.c		optional compat_linuxkpi wlan \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_netdev.c	optional compat_linuxkpi \
@@ -4759,6 +4784,8 @@ compat/linuxkpi/common/src/linux_siphash.c	optional compat_linuxkpi \
 compat/linuxkpi/common/src/linux_skbuff.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_slab.c		optional compat_linuxkpi \
+	compile-with "${LINUXKPI_C}"
+compat/linuxkpi/common/src/linux_timesub.c	optional compat_linuxkpi \
 	compile-with "${LINUXKPI_C}"
 compat/linuxkpi/common/src/linux_usb.c		optional compat_linuxkpi usb \
 	compile-with "${LINUXKPI_C}"

@@ -19,9 +19,9 @@ load_rc_config $name
 : ${osrelease_file:=/var/run/os-release}
 : ${osrelease_perms:=444}
 : ${osrelease_home_url:="https://hardenedbsd.org/"}
-: ${osrelease_documentation_url:="https://git.hardenedbsd.org/hardenedbsd/HardenedBSD/-/wikis/home"}
+: ${osrelease_documentation_url:="https://radicle.network/nodes/rad.hardenedbsd.org/docs"}
 : ${osrelease_support_url:="mailto:users@hardenedbsd.org"}
-: ${osrelease_bug_report_url:="https://git.hardenedbsd.org/hardenedbsd/HardenedBSD/-/issues"}
+: ${osrelease_bug_report_url:="https://radicle.network/nodes/rad.hardenedbsd.org/src/issues"}
 
 osrelease_start()
 {

@@ -49,6 +49,8 @@
 #include <atf-c.h>
 #include <kvm.h>
 
+#include "freebsd_test_suite/macros.h"
+
 /* Tests for procdesc(4) that aren't specific to any one syscall */
 
 /*
@@ -341,12 +343,14 @@ ATF_TC_BODY(pdopenpid_esrch, tc)
 }
 
 /*
- * pdopenpid should fail in capability mode.
+ * pdopenpid works for children in capability mode.
  */
-ATF_TC_WITHOUT_HEAD(pdopenpid_capmode);
-ATF_TC_BODY(pdopenpid_capmode, tc)
+ATF_TC_WITHOUT_HEAD(pdopenpid_child);
+ATF_TC_BODY(pdopenpid_child, tc)
 {
 	pid_t child, parent;
+
+	ATF_REQUIRE_FEATURE("security_capability_mode");
 
 	parent = getpid();
 	child = fork();
@@ -358,7 +362,37 @@ ATF_TC_BODY(pdopenpid_capmode, tc)
 	}
 
 	ATF_REQUIRE_MSG(cap_enter() == 0, "cap_enter: %s", strerror(errno));
-	ATF_REQUIRE_ERRNO(ECAPMODE, pdopenpid(child, 0) < 0);
+	ATF_REQUIRE_MSG(pdopenpid(child, 0) >= 0, "pdopenpid: %s",
+	    strerror(errno));
+}
+
+/*
+ * pdopenpid should fail in capability mode.
+ */
+ATF_TC_WITHOUT_HEAD(pdopenpid_capmode);
+ATF_TC_BODY(pdopenpid_capmode, tc)
+{
+	pid_t child;
+	volatile pid_t grandchild;
+
+	ATF_REQUIRE_FEATURE("security_capability_mode");
+
+	child = vfork();
+	ATF_REQUIRE_MSG(child >= 0, "fork: %s", strerror(errno));
+	if (child == 0) {
+		grandchild = fork();
+		ATF_REQUIRE_MSG(grandchild >= 0, "fork: %s", strerror(errno));
+		if (grandchild == 0) {
+			for (;;)
+				sleep(1);
+		} else {
+			_exit(0);
+		}
+	}
+
+	ATF_REQUIRE_MSG(cap_enter() == 0, "cap_enter: %s", strerror(errno));
+	ATF_REQUIRE_ERRNO(ECAPMODE, pdopenpid(grandchild, 0) < 0);
+	kill(grandchild, SIGKILL);
 }
 
 /*
@@ -519,23 +553,38 @@ ATF_TC_WITHOUT_HEAD(pdopenpid_pdwait_only_one);
 ATF_TC_BODY(pdopenpid_pdwait_only_one, tc)
 {
 	pid_t child;
-	int fd1, fd2, status;
+	int fd1, fd2, pip[2], status;
+
+	ATF_REQUIRE_EQ(pipe(pip), 0);
 
 	child = pdfork(&fd1, PD_DAEMON);
 	ATF_REQUIRE_MSG(child >= 0, "pdfork: %s", strerror(errno));
-	if (child == 0)
-		_exit(42);
+	if (child == 0) {
+		char c;
 
+		close(pip[1]);
+		/* Block until the parent has opened the second fd. */
+		(void)read(pip[0], &c, 1);
+		_exit(42);
+	}
+	ATF_REQUIRE(close(pip[0]) == 0);
+
+	/* Open the second fd while the child is still alive. */
 	fd2 = pdopenpid(child, 0);
 	ATF_REQUIRE_MSG(fd2 >= 0, "pdopenpid: %s", strerror(errno));
+
+	/* Release the child so that it exits. */
+	ATF_REQUIRE(close(pip[1]) == 0);
 
 	/* Collect via the first fd. */
 	ATF_REQUIRE_MSG(pdwait(fd1, &status, WEXITED, NULL, NULL) == 0,
 	    "pdwait(fd1): %s", strerror(errno));
 	ATF_REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 42);
 
-	/* The second fd should no longer be able to collect. */
-	ATF_REQUIRE_ERRNO(ESRCH, pdwait(fd2, &status, WEXITED, NULL, NULL) < 0);
+	/* The second fd should be able to collect as well. */
+	ATF_REQUIRE_MSG(pdwait(fd2, &status, WEXITED, NULL, NULL) == 0,
+	    "pdwait(fd2): %s", strerror(errno));
+	ATF_REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 42);
 
 	ATF_REQUIRE(close(fd1) == 0);
 	ATF_REQUIRE(close(fd2) == 0);
@@ -740,6 +789,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, pdopenpid_einval);
 	ATF_TP_ADD_TC(tp, pdopenpid_emfile);
 	ATF_TP_ADD_TC(tp, pdopenpid_esrch);
+	ATF_TP_ADD_TC(tp, pdopenpid_child);
 	ATF_TP_ADD_TC(tp, pdopenpid_capmode);
 	ATF_TP_ADD_TC(tp, pdopenpid_pdfork_then_open);
 	ATF_TP_ADD_TC(tp, pdopenpid_fork_then_open);

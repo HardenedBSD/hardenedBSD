@@ -1172,8 +1172,9 @@ run_rc_command()
 	if [ -z "$_svcj" ]; then
 		_svcj=${svcj_all_enable}
 		if [ -z "$_svcj" ]; then
-			eval ${name}_svcj=NO
+			_svcj=NO
 		fi
+		eval ${name}_svcj=$_svcj
 	fi
 
 					# setup pid check command
@@ -1299,6 +1300,9 @@ run_rc_command()
 			routing)
 				_opts="allow.routing"
 				;;
+			setaudit)
+				_opts="allow.setaudit"
+				;;
 			settime)
 				_opts="allow.settime"
 				;;
@@ -1411,8 +1415,8 @@ run_rc_command()
 						fi
 						if [ ${_do_jailing} -eq 1 ]; then
 							$JAIL_CMD -c $_svcj_generic_params $_svcj_cmd_options \
-							    exec.start="${SERVICE} -E _rc_svcj=jailing ${name} ${_rc_prefix}start $rc_extra_args" \
-							    exec.stop="${SERVICE} -E _rc_svcj=jailing ${name} ${_rc_prefix}stop $rc_extra_args" \
+							    exec.start="${SERVICE} -E _rc_svcj=jailing ${rc_service##*/} ${_rc_prefix}start $rc_extra_args" \
+							    exec.stop="${SERVICE} -E _rc_svcj=jailing ${rc_service##*/} ${_rc_prefix}stop $rc_extra_args" \
 							    exec.consolelog="/var/log/svcj_${name}_console.log" \
 							    name=svcj-${name} && _return=0
 						fi
@@ -1422,18 +1426,34 @@ run_rc_command()
 					;;
 				stop)
 					if [ "${_rc_svcj}" != jailing ]; then
-						$SERVICE -E _rc_svcj=jailing -j svcj-${name} ${name} ${_rc_prefix}stop $rc_extra_args || _return=1
+						$SERVICE -E _rc_svcj=jailing -j svcj-${name} ${rc_service##*/} ${_rc_prefix}stop $rc_extra_args || _return=1
 						$JAIL_CMD -r svcj-${name} 2>/dev/null
 					else
 						_run_rc_doit "$_cmd $rc_extra_args" || _return=1
 					fi
 					;;
-				restart|status) ;; # no special case needed for svcj or handled somewhere else
+				restart)
+					if [ "${_rc_svcj}" = jailing ]; then
+						_run_rc_doit "$_cmd $rc_extra_args" || _return=1
+					elif /usr/sbin/jls -j svcj-${name} jid >/dev/null 2>&1; then
+						$SERVICE -E _rc_svcj=jailing -j svcj-${name} ${rc_service##*/} ${_rc_prefix}restart $rc_extra_args || _return=1
+					else
+						# nothing to restart, so start it
+						( run_rc_command ${_rc_prefix}start $rc_extra_args ) || _return=1
+					fi
+					;;
+				status)
+					if [ "${_rc_svcj}" != jailing ]; then
+						$SERVICE -E _rc_svcj=jailing -j svcj-${name} ${rc_service##*/} ${_rc_prefix}status $rc_extra_args || _return=1
+					else
+						_run_rc_doit "$_cmd $rc_extra_args" || _return=1
+					fi
+					;;
 				*)
 					eval _rc_svcj_extra_cmd=\$${name}_${rc_arg}_svcj_enable
 					: ${_rc_svcj_extra_cmd:=NO}
 					if checkyesno _rc_svcj_extra_cmd && [ "${_rc_svcj}" != jailing ]; then
-						$SERVICE -v -E _rc_svcj=jailing -j svcj-${name} ${name} ${_rc_prefix}${rc_arg} $rc_extra_args || _return=1
+						$SERVICE -v -E _rc_svcj=jailing -j svcj-${name} ${rc_service##*/} ${_rc_prefix}${rc_arg} $rc_extra_args || _return=1
 					else
 						_run_rc_doit "$_cmd $rc_extra_args" || _return=1
 					fi
@@ -1513,8 +1533,8 @@ run_rc_command()
 						fi
 					fi
 					$JAIL_CMD -c $_svcj_generic_params $_svcj_cmd_options\
-					    exec.start="${SERVICE} -E _rc_svcj=jailing ${name} ${_rc_prefix}start $rc_extra_args" \
-					    exec.stop="${SERVICE} -E _rc_svcj=jailing ${name} ${_rc_prefix}stop $rc_extra_args" \
+					    exec.start="${SERVICE} -E _rc_svcj=jailing ${rc_service##*/} ${_rc_prefix}start $rc_extra_args" \
+					    exec.stop="${SERVICE} -E _rc_svcj=jailing ${rc_service##*/} ${_rc_prefix}stop $rc_extra_args" \
 					    exec.consolelog="/var/log/svcj_${name}_console.log" \
 					    name=svcj-${name} || return 1
 				fi
@@ -1583,6 +1603,10 @@ $command $rc_flags $command_args"
 
 		stop)
 			if [ -z "$rc_pid" ]; then
+				if checkyesno ${name}_svcj &&
+				    /usr/sbin/jls -j svcj-${name} jid >/dev/null 2>&1; then
+					$JAIL_CMD -r svcj-${name} 2>/dev/null
+				fi
 				[ -n "$rc_fast" ] && return 0
 				_run_rc_notrunning
 				return 1
@@ -1841,6 +1865,9 @@ _run_rc_killcmd()
 	_cmd="kill -$1 $rc_pid"
 	if [ -n "$_user" ]; then
 		_cmd="su -m ${_user} -c 'sh -c \"${_cmd}\"'"
+	fi
+	if checkyesno ${name}_svcj && [ "${_rc_svcj}" != jailing ]; then
+	    _cmd="/usr/sbin/jexec svcj-${name} ${_cmd}"
 	fi
 	echo "$_cmd"
 }

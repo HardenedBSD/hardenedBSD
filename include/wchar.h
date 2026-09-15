@@ -97,6 +97,9 @@ typedef	__wint_t	wint_t;
 
 #define	WCHAR_MIN	__WCHAR_MIN
 #define	WCHAR_MAX	__WCHAR_MAX
+#if __ISO_C_VISIBLE >= 2023
+#define	WCHAR_WIDTH	__WCHAR_WIDTH
+#endif
 
 #ifndef WEOF
 #define	WEOF 	((wint_t)-1)
@@ -245,5 +248,19 @@ size_t	wcslcpy(wchar_t *, const wchar_t *, size_t);
 #include <xlocale/_wchar.h>
 #endif
 __END_DECLS
+
+#if defined(__qualsel) && !defined(__cplusplus) && \
+    defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define	wcschr(s, c)		__qualsel((s),				\
+	(const wchar_t *)(wcschr)((s), (c)), (wcschr)((s), (c)))
+#define	wcspbrk(s, set)		__qualsel((s),				\
+	(const wchar_t *)(wcspbrk)((s), (set)), (wcspbrk)((s), (set)))
+#define	wcsrchr(s, c)		__qualsel((s),				\
+	(const wchar_t *)(wcsrchr)((s), (c)), (wcsrchr)((s), (c)))
+#define	wcsstr(s, find)		__qualsel((s),				\
+	(const wchar_t *)(wcsstr)((s), (find)), (wcsstr)((s), (find)))
+#define	wmemchr(s, c, n)	__qualsel((s),				\
+	(const wchar_t *)(wmemchr)((s), (c), (n)), (wmemchr)((s), (c), (n)))
+#endif
 
 #endif /* !_WCHAR_H_ */

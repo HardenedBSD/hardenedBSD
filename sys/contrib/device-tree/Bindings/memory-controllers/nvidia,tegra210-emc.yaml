@@ -33,6 +33,9 @@ properties:
     items:
       - description: EMC general interrupt
 
+  "#interconnect-cells":
+    const: 0
+
   memory-region:
     maxItems: 1
     description:
@@ -44,6 +47,14 @@ properties:
     description:
       phandle of the memory controller node
 
+  operating-points-v2:
+    description:
+      Should contain freqs and voltages and opp-supported-hw property, which
+      is a bitfield indicating SoC speedo ID mask.
+
+allOf:
+  - $ref: /schemas/thermal/thermal-cooling-devices.yaml
+
 required:
   - compatible
   - reg
@@ -51,7 +62,7 @@ required:
   - clock-names
   - nvidia,memory-controller
 
-additionalProperties: false
+unevaluatedProperties: false
 
 examples:
   - |
@@ -79,4 +90,8 @@ examples:
         interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
         memory-region = <&emc_table>;
         nvidia,memory-controller = <&mc>;
+        operating-points-v2 = <&dvfs_opp_table>;
+
+        #interconnect-cells = <0>;
+        #cooling-cells = <2>;
     };

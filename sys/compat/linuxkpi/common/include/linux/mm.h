@@ -42,6 +42,7 @@
 #include <linux/overflow.h>
 #include <linux/shrinker.h>
 #include <linux/page.h>
+#include <linux/page-flags.h>
 
 #include <asm/pgtable.h>
 
@@ -415,6 +416,12 @@ unlock_page(struct page *page)
 {
 
 	vm_page_xunbusy(page);
+}
+
+static inline void
+split_page(struct page *page, unsigned int order)
+{
+	pr_debug("%s: TODO\n", __func__);
 }
 
 extern int is_vmalloc_addr(const void *addr);

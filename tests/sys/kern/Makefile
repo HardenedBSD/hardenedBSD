@@ -63,6 +63,7 @@ LIBADD.timerfd+=	pthread
 # One test modifies the system time.
 TEST_METADATA.timerfd+=	is_exclusive="true"
 ATF_TESTS_C+=	tty_pts
+ATF_TESTS_C+=	unix_connectat
 ATF_TESTS_C+=	unix_dgram
 ATF_TESTS_C+=	unix_passfd_dgram
 TEST_METADATA.unix_passfd_dgram+=	is_exclusive="true"
@@ -105,6 +106,7 @@ LIBADD.sys_getrandom+=			zstd
 LIBADD.sys_getrandom+=			c
 LIBADD.sys_getrandom+=			pthread
 LIBADD.ptrace_test+=			pthread
+LIBADD.unix_connectat+=			util
 LIBADD.unix_seqpacket_test+=		pthread
 LIBADD.inotify_test+=			util
 LIBADD.kcov+=				pthread
@@ -128,8 +130,7 @@ NETBSD_ATF_TESTS_C+=	sysv_test
 
 CFLAGS.mqueue_test+=	-I${SRCTOP}/tests
 LIBADD.mqueue_test+=	rt
-
-LIBADD.tty_pts+=	atf_c util
+LIBADD.tty_pts+=	util
 
 ATF_TESTS_C+=	libkern_crc32
 SRCS.libkern_crc32+=	libkern_crc32.c
@@ -154,6 +155,9 @@ CFLAGS.subr_unit.c+=	-Wno-missing-prototypes
 SRCS.subr_unit_test+=	subr_unit.c
 
 CFLAGS.exterr_test+=	-I${SRCTOP}/tests
+CFLAGS.pdwait+=		-I${SRCTOP}/tests
+CFLAGS.procdesc+=	-I${SRCTOP}/tests
+CFLAGS.ptrace_test+=	-I${SRCTOP}/tests
 
 WARNS?=	3
 

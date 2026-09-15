@@ -107,6 +107,12 @@ struct bootp {
 #define TAG_CLASSID		((unsigned char)  60)
 #define TAG_CLIENTID		((unsigned char)  61)
 #define TAG_USER_CLASS		((unsigned char)  77)
+#define TAG_CLIENT_ARCH		((unsigned char)  93)	/* RFC 4578 */
+#define TAG_VI_VENDOR_CLASS	((unsigned char) 124)	/* RFC 3925 */
+#define TAG_VI_VENDOR_OPTS	((unsigned char) 125)	/* RFC 3925 */
+
+#define FREEBSD_ENTERPRISE_NUMBER	2238
+#define FREEBSD_VI_INITMD		1
 #endif
 
 #define TAG_END			((unsigned char) 255)
@@ -143,5 +149,11 @@ struct cmu_vend {
 /* cached bootp response/dhcp ack */
 extern struct bootp *bootp_response;
 extern size_t bootp_response_size;
+
+/*
+ * DHCP option 93 (Client-System Architecture, RFC 4578).  Netif drivers
+ * with RFC 4578 defined identity set this so bootp() emits the option.
+ */
+extern uint16_t bootp_client_arch;
 
 #endif /* _BOOTP_H_ */

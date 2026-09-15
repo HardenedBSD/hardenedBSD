@@ -164,11 +164,21 @@ typedef int (*qman_cb_dqrr)(device_t, struct qman_fq *,
     struct qman_fd *, void *);
 typedef void (*qman_cb_mr)(device_t, struct qman_fq *,
     struct qman_mr_entry *);
+typedef void (*qman_cb_flush)(struct qman_fq *, void *);
 
 struct qman_cb {
 	qman_cb_dqrr dqrr;
 	qman_cb_mr ern;
 	qman_cb_mr fqscn;
+	/*
+	 * Optional post-poll hook.  If set, qman_portal_loop_dqrr()
+	 * calls it once per poll cycle on every FQ that had a frame
+	 * dispatched, after all DQRR entries have been drained.
+	 * Consumers use this for aggregation flushes (e.g., LRO
+	 * flush, batched if_input) that must happen outside the
+	 * per-frame dispatch path.
+	 */
+	qman_cb_flush flush;
 	void *ctx;
 };
 /**
@@ -245,7 +255,8 @@ struct qman_fq *qman_fq_create(uint32_t fqids_num, int channel,
     uint8_t wq, bool force_fqid, uint32_t fqid_or_align, bool init_parked,
     bool hold_active, bool prefer_in_cache, bool congst_avoid_ena,
     void *congst_group, int8_t overhead_accounting_len,
-    uint32_t tail_drop_threshold);
+    uint32_t tail_drop_threshold,
+    uint8_t annotation_cl, uint8_t data_cl);
 
 /**
  * Free Frame Queue Range.
@@ -264,6 +275,16 @@ int qman_fq_free(struct qman_fq *fq);
  * @param app		A pointer to the user's data.
  * @return		E_OK on success; error code otherwise.
  */
+/*
+ * Register a post-poll flush callback on @fq.  Called once per poll
+ * cycle on any FQ that had at least one dispatched frame during
+ * that cycle, after all DQRR entries were drained.  Reuses the
+ * per-FQ ctx registered via qman_fq_register_cb().  May be called
+ * before or after qman_fq_register_cb() but only makes sense if the
+ * DQRR callback is also set.
+ */
+int	qman_fq_register_flush_cb(struct qman_fq *fq, qman_cb_flush flush);
+
 int	qman_fq_register_cb(struct qman_fq *fq, qman_cb_dqrr callback,
     void *ctx);
 
@@ -312,6 +333,23 @@ int qman_alloc_channel(void);
  * @param chan	Channel ID returned from qman_alloc_channel().
  */
 void qman_free_channel(int);
+
+/*
+ * Look up the pool channel for @cpu.  Each portal has a dedicated channel, and
+ * there is one portal per CPU.
+ */
+int qman_percpu_channel(int cpu);
+
+/*
+ * Reserve a contiguous range of @count FQIDs (needed by callers that
+ * program a KeyGen-style base+mask distribution and then create the
+ * individual FQs one-by-one with force_fqid=true).  @align is the
+ * required base alignment in FQIDs (0 for no requirement, or the
+ * range size for the power-of-two-aligned base FMan KeyGen wants).
+ * Returns 0 on success and writes the base FQID to *basep.
+ */
+int qman_alloc_fqid_range(uint32_t count, uint32_t align, uint32_t *basep);
+void qman_free_fqid_range(uint32_t base, uint32_t count);
 
 /**
  * Poll frames from QMan.

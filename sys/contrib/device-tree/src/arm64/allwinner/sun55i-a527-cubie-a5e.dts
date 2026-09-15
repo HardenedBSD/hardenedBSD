@@ -6,6 +6,7 @@
 #include "sun55i-a523.dtsi"
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
 
 / {
 	model = "Radxa Cubie A5E";
@@ -13,6 +14,7 @@
 
 	aliases {
 		ethernet0 = &gmac0;
+		ethernet1 = &gmac1;
 		serial0 = &uart0;
 	};
 
@@ -20,11 +22,28 @@
 		stdout-path = "serial0:115200n8";
 	};
 
-	ext_osc32k: ext-osc32k-clk {
-		#clock-cells = <0>;
-		compatible = "fixed-clock";
-		clock-frequency = <32768>;
-		clock-output-names = "ext_osc32k";
+	leds {
+		compatible = "gpio-leds";
+
+		power-led {
+			function = LED_FUNCTION_POWER;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
+			default-state = "on";
+			linux,default-trigger = "heartbeat";
+		};
+
+		use-led {
+			function = LED_FUNCTION_ACTIVITY;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&r_pio 0 5 GPIO_ACTIVE_LOW>; /* PL5 */
+		};
+	};
+
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&axp717_adc 3>, /* vsys_v */
+			      <&axp717_adc 4>; /* pmic_temp */
 	};
 
 	reg_vcc5v: vcc5v {
@@ -57,11 +76,22 @@
 
 &gmac0 {
 	phy-mode = "rgmii-id";
-	phy-handle = <&ext_rgmii_phy>;
+	phy-handle = <&ext_rgmii0_phy>;
 	phy-supply = <&reg_cldo3>;
 
 	allwinner,tx-delay-ps = <300>;
 	allwinner,rx-delay-ps = <400>;
+
+	status = "okay";
+};
+
+&gmac1 {
+	phy-mode = "rgmii-id";
+	phy-handle = <&ext_rgmii1_phy>;
+	phy-supply = <&reg_cldo4>;
+
+	tx-internal-delay-ps = <300>;
+	rx-internal-delay-ps = <400>;
 
 	status = "okay";
 };
@@ -72,9 +102,22 @@
 };
 
 &mdio0 {
-	ext_rgmii_phy: ethernet-phy@1 {
+	ext_rgmii0_phy: ethernet-phy@1 {
 		compatible = "ethernet-phy-ieee802.3-c22";
 		reg = <1>;
+		reset-gpios = <&pio 7 8 GPIO_ACTIVE_LOW>; /* PH8 */
+		reset-assert-us = <10000>;
+		reset-deassert-us = <150000>;
+	};
+};
+
+&mdio1 {
+	ext_rgmii1_phy: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <1>;
+		reset-gpios = <&pio 9 16 GPIO_ACTIVE_LOW>; /* PJ16 */
+		reset-assert-us = <10000>;
+		reset-deassert-us = <150000>;
 	};
 };
 
@@ -124,6 +167,17 @@
 		aldoin-supply = <&reg_vcc5v>;
 		bldoin-supply = <&reg_vcc5v>;
 		cldoin-supply = <&reg_vcc5v>;
+
+		axp717_adc: adc {
+			compatible = "x-powers,axp717-adc";
+			#io-channel-cells = <1>;
+		};
+
+		battery-power {
+			compatible = "x-powers,axp717-battery-power-supply";
+			/* charger mode design but has no battery terminal */
+			status = "disabled";
+		};
 
 		regulators {
 			/* Supplies the "little" cluster (1.4 GHz cores) */
@@ -218,6 +272,8 @@
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vcc-pj-phy";
+				/* enough time for the PHY to fully power on */
+				regulator-enable-ramp-delay = <150000>;
 			};
 
 			reg_cpusldo: cpusldo {
@@ -227,6 +283,10 @@
 				regulator-max-microvolt = <900000>;
 				regulator-name = "vdd-cpus";
 			};
+		};
+
+		usb-power {
+			compatible = "x-powers,axp717-usb-power-supply";
 		};
 	};
 

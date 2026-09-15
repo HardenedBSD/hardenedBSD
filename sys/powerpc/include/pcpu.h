@@ -85,17 +85,26 @@ struct pvo_entry;
 #define	BOOKE_TLB_SAVELEN	16
 #define	BOOKE_TLBSAVE_LEN	(BOOKE_TLB_SAVELEN * BOOKE_TLB_MAXNEST)
 
+/*
+ * Stack used by critical-class interrupts taken in kernel mode.  Sized for the
+ * full panic path (powerpc_interrupt -> trap_fatal -> printf -> backtrace),
+ * since that is the only thing that ever runs on it.
+ */
+#define	BOOKE_CRITSTACK_SIZE	16384
+
 #ifdef __powerpc64__
-#define	BOOKE_PCPU_PAD	901
+#define	BOOKE_PCPU_PAD	869
 #else
-#define	BOOKE_PCPU_PAD	365
+#define	BOOKE_PCPU_PAD	349
 #endif
 #define PCPU_MD_BOOKE_FIELDS						\
 	register_t	critsave[BOOKE_CRITSAVE_LEN];		\
-	register_t	mchksave[CPUSAVE_LEN];			\
+	register_t	mchksave[BOOKE_CRITSAVE_LEN];		\
 	register_t	tlbsave[BOOKE_TLBSAVE_LEN];		\
 	register_t	tlb_level;				\
 	uintptr_t	*tlb_lock;				\
+	void		*critstack;				\
+	void		*mchkstack;				\
 	int		tid_next;					\
 	char		__pad[BOOKE_PCPU_PAD];
 

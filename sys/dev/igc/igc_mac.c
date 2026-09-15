@@ -70,6 +70,26 @@ bool igc_null_mng_mode(struct igc_hw IGC_UNUSEDARG *hw)
 }
 
 /**
+ *  igc_enable_mng_pass_thru - Check if management passthrough is needed
+ *  @hw: pointer to the HW structure
+ *
+ *  Verify that the I225/I226 management engine needs the external link.
+ **/
+bool
+igc_enable_mng_pass_thru(struct igc_hw *hw)
+{
+	u32 manc;
+
+	DEBUGFUNC("igc_enable_mng_pass_thru");
+
+	if (!hw->mac.asf_firmware_present)
+		return (false);
+
+	manc = IGC_READ_REG(hw, IGC_MANC);
+	return ((manc & IGC_MANC_RCV_TCO_EN) != 0);
+}
+
+/**
  *  igc_null_update_mc - No-op function, return void
  *  @hw: pointer to the HW structure
  *  @h: dummy variable
@@ -301,7 +321,7 @@ int igc_rar_set_generic(struct igc_hw *hw, u8 *addr, u32 index)
 u32 igc_hash_mc_addr_generic(struct igc_hw *hw, u8 *mc_addr)
 {
 	u32 hash_value, hash_mask;
-	u8 bit_shift = 0;
+	u8 bit_shift = 1;
 
 	DEBUGFUNC("igc_hash_mc_addr_generic");
 
@@ -311,7 +331,7 @@ u32 igc_hash_mc_addr_generic(struct igc_hw *hw, u8 *mc_addr)
 	/* For a mc_filter_type of 0, bit_shift is the number of left-shifts
 	 * where 0xFF would still fall within the hash mask.
 	 */
-	while (hash_mask >> bit_shift != 0xFF)
+	while (bit_shift < 4 && hash_mask >> bit_shift != 0xFF)
 		bit_shift++;
 
 	/* The portion of the address that is used for the hash table
@@ -354,8 +374,10 @@ u32 igc_hash_mc_addr_generic(struct igc_hw *hw, u8 *mc_addr)
 		break;
 	}
 
-	hash_value = hash_mask & (((mc_addr[4] >> (8 - bit_shift)) |
-				  (((u16) mc_addr[5]) << bit_shift)));
+	hash_value = (u32)mc_addr[4];
+	hash_value >>= 8 - bit_shift;
+	hash_value |= (u32)mc_addr[5] << bit_shift;
+	hash_value &= hash_mask;
 
 	return hash_value;
 }
@@ -387,7 +409,7 @@ void igc_update_mc_addr_list_generic(struct igc_hw *hw,
 		hash_reg = (hash_value >> 5) & (hw->mac.mta_reg_count - 1);
 		hash_bit = hash_value & 0x1F;
 
-		hw->mac.mta_shadow[hash_reg] |= (1 << hash_bit);
+		hw->mac.mta_shadow[hash_reg] |= 1U << hash_bit;
 		mc_addr_list += (ETH_ADDR_LEN);
 	}
 
@@ -408,6 +430,7 @@ void igc_clear_hw_cntrs_base_generic(struct igc_hw *hw)
 	DEBUGFUNC("igc_clear_hw_cntrs_base_generic");
 
 	IGC_READ_REG(hw, IGC_CRCERRS);
+	IGC_READ_REG(hw, IGC_RXERRC);
 	IGC_READ_REG(hw, IGC_MPC);
 	IGC_READ_REG(hw, IGC_SCC);
 	IGC_READ_REG(hw, IGC_ECOL);

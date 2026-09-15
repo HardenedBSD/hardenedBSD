@@ -72,6 +72,7 @@
 #include <dev/vmm/vmm_vm.h>
 
 #include "vgic.h"
+#include "vgic_internal.h"
 #include "vgic_v3.h"
 #include "vgic_v3_reg.h"
 
@@ -92,55 +93,6 @@ struct vgic_v3_virt_features {
 	size_t ich_apr_num;
 };
 
-struct vgic_v3_irq {
-	/* List of IRQs that are active or pending */
-	TAILQ_ENTRY(vgic_v3_irq) act_pend_list;
-	struct mtx irq_spinmtx;
-	uint64_t mpidr;
-	int target_vcpu;
-	uint32_t irq;
-	bool active;
-	bool pending;
-	bool enabled;
-	bool level;
-	bool on_aplist;
-	uint8_t priority;
-	uint8_t config;
-#define	VGIC_CONFIG_MASK	0x2
-#define	VGIC_CONFIG_LEVEL	0x0
-#define	VGIC_CONFIG_EDGE	0x2
-};
-
-/* Global data not needed by EL2 */
-struct vgic_v3 {
-	struct mtx 	dist_mtx;
-	uint64_t 	dist_start;
-	size_t   	dist_end;
-
-	uint64_t 	redist_start;
-	size_t 		redist_end;
-
-	uint32_t 	gicd_ctlr;	/* Distributor Control Register */
-
-	struct vgic_v3_irq *irqs;
-};
-
-/* Per-CPU data not needed by EL2 */
-struct vgic_v3_cpu {
-	/*
-	 * We need a mutex for accessing the list registers because they are
-	 * modified asynchronously by the virtual timer.
-	 *
-	 * Note that the mutex *MUST* be a spin mutex because an interrupt can
-	 * be injected by a callout callback function, thereby modifying the
-	 * list registers from a context where sleeping is forbidden.
-	 */
-	struct mtx	lr_mtx;
-
-	struct vgic_v3_irq private_irqs[VGIC_PRV_I_NUM];
-	TAILQ_HEAD(, vgic_v3_irq) irq_act_pend;
-	u_int		ich_lr_used;
-};
 
 /* How many IRQs we support (SGIs + PPIs + SPIs). Not including LPIs */
 #define	VGIC_NIRQS	1023
@@ -155,50 +107,7 @@ static int vgic_v3_max_cpu_count(device_t dev, struct hyp *hyp);
 #define	INJECT_IRQ(hyp, vcpuid, irqid, level)			\
     vgic_v3_inject_irq(NULL, (hyp), (vcpuid), (irqid), (level))
 
-typedef void (register_read)(struct hypctx *, u_int, uint64_t *, void *);
-typedef void (register_write)(struct hypctx *, u_int, u_int, u_int,
-    uint64_t, void *);
-
-#define	VGIC_8_BIT	(1 << 0)
-/* (1 << 1) is reserved for 16 bit accesses */
-#define	VGIC_32_BIT	(1 << 2)
-#define	VGIC_64_BIT	(1 << 3)
-
-struct vgic_register {
-	u_int start;	/* Start within a memory region */
-	u_int end;
-	u_int size;
-	u_int flags;
-	register_read *read;
-	register_write *write;
-};
-
-#define	VGIC_REGISTER_RANGE(reg_start, reg_end, reg_size, reg_flags, readf, \
-    writef)								\
-{									\
-	.start = (reg_start),						\
-	.end = (reg_end),						\
-	.size = (reg_size),						\
-	.flags = (reg_flags),						\
-	.read = (readf),						\
-	.write = (writef),						\
-}
-
-#define	VGIC_REGISTER_RANGE_RAZ_WI(reg_start, reg_end, reg_size, reg_flags) \
-	VGIC_REGISTER_RANGE(reg_start, reg_end, reg_size, reg_flags,	\
-	    gic_zero_read, gic_ignore_write)
-
-#define	VGIC_REGISTER(start_addr, reg_size, reg_flags, readf, writef)	\
-	VGIC_REGISTER_RANGE(start_addr, (start_addr) + (reg_size),	\
-	    reg_size, reg_flags, readf, writef)
-
-#define	VGIC_REGISTER_RAZ_WI(start_addr, reg_size, reg_flags)		\
-	VGIC_REGISTER_RANGE_RAZ_WI(start_addr,				\
-	    (start_addr) + (reg_size), reg_size, reg_flags)
-
 static register_read gic_pidr2_read;
-static register_read gic_zero_read;
-static register_write gic_ignore_write;
 
 /* GICD_CTLR */
 static register_read dist_ctlr_read;
@@ -251,13 +160,13 @@ static struct vgic_register dist_registers[] = {
 	VGIC_REGISTER(GICD_CTLR, 4, VGIC_32_BIT, dist_ctlr_read,
 	    dist_ctlr_write),
 	VGIC_REGISTER(GICD_TYPER, 4, VGIC_32_BIT, dist_typer_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER(GICD_IIDR, 4, VGIC_32_BIT, dist_iidr_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER_RAZ_WI(GICD_STATUSR, 4, VGIC_32_BIT),
-	VGIC_REGISTER(GICD_SETSPI_NSR, 4, VGIC_32_BIT, gic_zero_read,
+	VGIC_REGISTER(GICD_SETSPI_NSR, 4, VGIC_32_BIT, vgic_zero_read,
 	    dist_setclrspi_nsr_write),
-	VGIC_REGISTER(GICD_CLRSPI_NSR, 4, VGIC_32_BIT, gic_zero_read,
+	VGIC_REGISTER(GICD_CLRSPI_NSR, 4, VGIC_32_BIT, vgic_zero_read,
 	    dist_setclrspi_nsr_write),
 	VGIC_REGISTER_RAZ_WI(GICD_SETSPI_SR, 4, VGIC_32_BIT),
 	VGIC_REGISTER_RAZ_WI(GICD_CLRSPI_SR, 4, VGIC_32_BIT),
@@ -321,7 +230,7 @@ static struct vgic_register dist_registers[] = {
 
 	VGIC_REGISTER_RANGE_RAZ_WI(GICD_PIDR4, GICD_PIDR2, 4, VGIC_32_BIT),
 	VGIC_REGISTER(GICD_PIDR2, 4, VGIC_32_BIT, gic_pidr2_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER_RANGE_RAZ_WI(GICD_PIDR2 + 4, GICD_SIZE, 4, VGIC_32_BIT),
 };
 
@@ -343,11 +252,11 @@ static register_read redist_typer_read;
 
 static struct vgic_register redist_rd_registers[] = {
 	VGIC_REGISTER(GICR_CTLR, 4, VGIC_32_BIT, redist_ctlr_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER(GICR_IIDR, 4, VGIC_32_BIT, redist_iidr_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER(GICR_TYPER, 8, VGIC_64_BIT | VGIC_32_BIT,
-	    redist_typer_read, gic_ignore_write),
+	    redist_typer_read, vgic_ignore_write),
 	VGIC_REGISTER_RAZ_WI(GICR_STATUSR, 4, VGIC_32_BIT),
 	VGIC_REGISTER_RAZ_WI(GICR_WAKER, 4, VGIC_32_BIT),
 	VGIC_REGISTER_RAZ_WI(GICR_SETLPIR, 8, VGIC_64_BIT | VGIC_32_BIT),
@@ -361,7 +270,7 @@ static struct vgic_register redist_rd_registers[] = {
 	/* These are identical to the dist registers */
 	VGIC_REGISTER_RANGE_RAZ_WI(GICD_PIDR4, GICD_PIDR2, 4, VGIC_32_BIT),
 	VGIC_REGISTER(GICD_PIDR2, 4, VGIC_32_BIT, gic_pidr2_read,
-	    gic_ignore_write),
+	    vgic_ignore_write),
 	VGIC_REGISTER_RANGE_RAZ_WI(GICD_PIDR2 + 4, GICD_SIZE, 4,
 	    VGIC_32_BIT),
 };
@@ -473,6 +382,9 @@ vgic_v3_cpuinit(device_t dev, struct hypctx *hypctx)
 	vgic_cpu = hypctx->vgic_cpu;
 
 	mtx_init(&vgic_cpu->lr_mtx, "VGICv3 ICH_LR_EL2 lock", NULL, MTX_SPIN);
+
+	vgic_cpu->private_irqs = mallocarray(VGIC_PRV_I_NUM,
+	    sizeof(*vgic_cpu->private_irqs), M_VGIC_V3, M_WAITOK | M_ZERO);
 
 	/* Set the SGI and PPI state */
 	for (irqid = 0; irqid < VGIC_PRV_I_NUM; irqid++) {
@@ -640,21 +552,6 @@ gic_pidr2_read(struct hypctx *hypctx, u_int reg, uint64_t *rval,
     void *arg)
 {
 	*rval = GICR_PIDR2_ARCH_GICv3 << GICR_PIDR2_ARCH_SHIFT;
-}
-
-/* Common read-only/write-ignored helpers */
-static void
-gic_zero_read(struct hypctx *hypctx, u_int reg, uint64_t *rval,
-    void *arg)
-{
-	*rval = 0;
-}
-
-static void
-gic_ignore_write(struct hypctx *hypctx, u_int reg, u_int offset, u_int size,
-    uint64_t wval, void *arg)
-{
-	/* Nothing to do */
 }
 
 static uint64_t
@@ -1307,67 +1204,6 @@ dist_irouter_write(struct hypctx *hypctx, u_int reg, u_int offset, u_int size,
 	write_route(hypctx, n, wval, offset, size);
 }
 
-static bool
-vgic_register_read(struct hypctx *hypctx, struct vgic_register *reg_list,
-    u_int reg_list_size, u_int reg, u_int size, uint64_t *rval, void *arg)
-{
-	u_int i, offset;
-
-	for (i = 0; i < reg_list_size; i++) {
-		if (reg_list[i].start <= reg && reg_list[i].end >= reg + size) {
-			offset = reg & (reg_list[i].size - 1);
-			reg -= offset;
-			if ((reg_list[i].flags & size) != 0) {
-				reg_list[i].read(hypctx, reg, rval, NULL);
-
-				/* Move the bits into the correct place */
-				*rval >>= (offset * 8);
-				if (size < 8) {
-					*rval &= (1ul << (size * 8)) - 1;
-				}
-			} else {
-				/*
-				 * The access is an invalid size. Section
-				 * 12.1.3 "GIC memory-mapped register access"
-				 * of the GICv3 and GICv4 spec issue H
-				 * (IHI0069) lists the options. For a read
-				 * the controller returns unknown data, in
-				 * this case it is zero.
-				 */
-				*rval = 0;
-			}
-			return (true);
-		}
-	}
-	return (false);
-}
-
-static bool
-vgic_register_write(struct hypctx *hypctx, struct vgic_register *reg_list,
-    u_int reg_list_size, u_int reg, u_int size, uint64_t wval, void *arg)
-{
-	u_int i, offset;
-
-	for (i = 0; i < reg_list_size; i++) {
-		if (reg_list[i].start <= reg && reg_list[i].end >= reg + size) {
-			offset = reg & (reg_list[i].size - 1);
-			reg -= offset;
-			if ((reg_list[i].flags & size) != 0) {
-				reg_list[i].write(hypctx, reg, offset,
-				    size, wval, NULL);
-			} else {
-				/*
-				 * See the comment in vgic_register_read.
-				 * For writes the controller ignores the
-				 * operation.
-				 */
-			}
-			return (true);
-		}
-	}
-	return (false);
-}
-
 static int
 dist_read(struct vcpu *vcpu, uint64_t fault_ipa, uint64_t *rval,
     int size, void *arg)
@@ -1788,19 +1624,20 @@ vgic_v3_icc_sgi1r_write(struct vcpu *vcpu, uint64_t rval, void *arg)
 	active_cpus = vm_active_cpus(vm);
 	vcpuid = vcpu_vcpuid(vcpu);
 
-	irqid = ICC_SGI1R_EL1_SGIID_VAL(rval) >> ICC_SGI1R_EL1_SGIID_SHIFT;
-	if ((rval & ICC_SGI1R_EL1_IRM) == 0) {
+	irqid = ICC_SGI1R_INTID_VAL(rval) >> ICC_SGI1R_INTID_SHIFT;
+	if (ICC_SGI1R_IRM_VAL(rval) == 0) {
 		/* Non-zero points at no vcpus */
-		if (ICC_SGI1R_EL1_RS_VAL(rval) != 0)
+		if (ICC_SGI1R_RS_VAL(rval) != 0)
 			return (0);
 
-		aff1 = ICC_SGI1R_EL1_AFF1_VAL(rval) >> ICC_SGI1R_EL1_AFF1_SHIFT;
-		aff2 = ICC_SGI1R_EL1_AFF2_VAL(rval) >> ICC_SGI1R_EL1_AFF2_SHIFT;
-		aff3 = ICC_SGI1R_EL1_AFF3_VAL(rval) >> ICC_SGI1R_EL1_AFF3_SHIFT;
+		aff1 = ICC_SGI1R_Aff1_VAL(rval) >> ICC_SGI1R_Aff1_SHIFT;
+		aff2 = ICC_SGI1R_Aff2_VAL(rval) >> ICC_SGI1R_Aff2_SHIFT;
+		aff3 = ICC_SGI1R_Aff3_VAL(rval) >> ICC_SGI1R_Aff3_SHIFT;
 		mpidr = aff3 << MPIDR_AFF3_SHIFT |
 		    aff2 << MPIDR_AFF2_SHIFT | aff1 << MPIDR_AFF1_SHIFT;
 
-		cpus = ICC_SGI1R_EL1_TL_VAL(rval) >> ICC_SGI1R_EL1_TL_SHIFT;
+		cpus = ICC_SGI1R_TargetList_VAL(rval) >>
+		    ICC_SGI1R_TargetList_SHIFT;
 		cpu_off = 0;
 		while (cpus > 0) {
 			if (cpus & 1) {

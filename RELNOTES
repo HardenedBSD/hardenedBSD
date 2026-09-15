@@ -10,6 +10,29 @@ newline.  Entries should be separated by a newline.
 
 Changes to this file should not be MFCed.
 
+7144a1d58c5c, a311bd18a6fb, 884ee8d6c9b4:
+	These three patches add the required "glue" so that the
+	nfsrdma.ko and nfsclrdma.ko modules can be loaded.
+	These modules provide server and client support for
+	NFS over RDMA.
+
+34bb38445b07:
+    libusb has been updated to upstream 1.0.27 compatible.
+    All missing part is implemented and version tag is bumped.
+
+6563dcb6b1f5:
+	It is now possible to use connectat(2) to connect to a unix(4) socket
+	directly, i.e., without having to specify a name in the sockaddr.
+
+72e57bc26417, 3dfbbe8586bb, d8e8f9251975:
+	These patches provide improvements for the pNFS server
+	configuration.  New optional features include:
+	- Support for striped Flexible File Layouts (RFC8435).
+	- Support for pre-creation of files, allowing the
+	  Open/Create to be done without communicating with
+	  any DSs, so long as the cache of pre-created files
+	  is not depleted.
+
 b92b9da33006, 13d3bd165e22:
 	This patch allows vfs.nfsd.srvmaxio to be set to
 	a value as high as 4Mbytes.  It is usually set

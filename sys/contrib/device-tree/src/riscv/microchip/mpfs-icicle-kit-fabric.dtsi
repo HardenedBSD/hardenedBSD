@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
 /* Copyright (c) 2020-2021 Microchip Technology Inc */
 
-/ {
-	compatible = "microchip,mpfs-icicle-reference-rtlv2210", "microchip,mpfs-icicle-kit",
-		     "microchip,mpfs";
+#include "mpfs.dtsi"
+#include "mpfs-pinctrl.dtsi"
 
+/ {
 	core_pwm0: pwm@40000000 {
 		compatible = "microchip,corepwm-rtl-v4";
 		reg = <0x0 0x40000000 0x0 0xF0>;
@@ -23,6 +23,26 @@
 		interrupt-parent = <&plic>;
 		interrupts = <122>;
 		clock-frequency = <100000>;
+		status = "disabled";
+	};
+
+	ihc: mailbox {
+		compatible = "microchip,sbi-ipc";
+		interrupt-parent = <&plic>;
+		interrupts = <180>, <179>, <178>, <177>;
+		interrupt-names = "hart-1", "hart-2", "hart-3", "hart-4";
+		#mbox-cells = <1>;
+		status = "disabled";
+	};
+
+	mailbox@50000000 {
+		compatible = "microchip,miv-ihc-rtl-v2";
+		reg = <0x0 0x50000000 0x0 0x1c000>;
+		interrupt-parent = <&plic>;
+		interrupts = <180>, <179>, <178>, <177>;
+		interrupt-names = "hart-1", "hart-2", "hart-3", "hart-4";
+		#mbox-cells = <1>;
+		microchip,ihc-chan-disabled-mask = /bits/ 16 <0>;
 		status = "disabled";
 	};
 
@@ -57,10 +77,20 @@
 		};
 	};
 
-	refclk_ccc: cccrefclk {
+	refclk_ccc: clock-cccref {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 	};
+};
+
+&can0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&can0_fabric>;
+};
+
+&can1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&ikrd_can1_cfg>;
 };
 
 &ccc_nw {
@@ -69,4 +99,44 @@
 	clock-names = "pll0_ref0", "pll0_ref1", "pll1_ref0", "pll1_ref1",
 		      "dll0_ref", "dll1_ref";
 	status = "okay";
+};
+
+&mmuart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_fabric>;
+};
+
+&mmuart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_fabric>;
+};
+
+&mmuart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_fabric>;
+};
+
+&mmuart4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4_fabric>;
+};
+
+&mssio {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi1_mssio>, <&can1_mssio>, <&mdio0_mssio>, <&mdio1_mssio>;
+};
+
+&qspi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&qspi_fabric>;
+};
+
+&spi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_fabric>;
+};
+
+&spi1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&ikrd_spi1_cfg>;
 };

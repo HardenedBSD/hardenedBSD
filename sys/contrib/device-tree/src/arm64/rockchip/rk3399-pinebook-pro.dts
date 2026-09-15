@@ -401,8 +401,6 @@
 
 &edp {
 	force-hpd;
-	pinctrl-names = "default";
-	pinctrl-0 = <&edp_hpd>;
 	status = "okay";
 };
 
@@ -418,10 +416,6 @@
 
 &gpu {
 	mali-supply = <&vdd_gpu>;
-	status = "okay";
-};
-
-&hdmi_sound {
 	status = "okay";
 };
 
@@ -951,7 +945,6 @@
 };
 
 &spi1 {
-	max-freq = <10000000>;
 	status = "okay";
 
 	spiflash: flash@0 {

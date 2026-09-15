@@ -156,7 +156,7 @@ virtdone:
 	add	x25, x25, :lo12:initstack
 	str	x25, [x0, #BP_KERN_STACK]
 	str	x27, [x0, #BP_KERN_TTBR0]
-	str	x23, [x0, #BP_BOOT_EL]
+	str	w23, [x0, #BP_BOOT_EL]
 
 	/* Set these before they are used in kasan_init_early */
 	adrp	x1, pmap_sh_attr
@@ -349,8 +349,8 @@ END(mp_cpu_spinloop)
  */
 LENTRY(enter_kernel_el)
 	mrs	x23, CurrentEL
-	and	x23, x23, #(CURRENTEL_EL_MASK)
-	cmp	x23, #(CURRENTEL_EL_EL2)
+	and	x23, x23, #(CurrentEL_EL_MASK)
+	cmp	x23, #(CurrentEL_EL_EL2)
 	b.eq	1f
 
 	/*

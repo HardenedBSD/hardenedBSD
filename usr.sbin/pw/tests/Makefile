@@ -2,10 +2,19 @@ PACKAGE=	tests
 
 BINDIR=		${TESTSDIR}
 
-PROGS+=		crypt
-LIBADD+=	crypt
+.PATH:		${SRCTOP}/usr.sbin/pw
 
-ATF_TESTS_SH=	pw_etcdir_test \
+PROGS+=		crypt
+LIBADD.crypt+=	crypt
+
+ATF_TESTS_C=	pw_unit_test
+SRCS.pw_unit_test=	pw_unit_test.c \
+			pw_utils.c strtounum.c
+LIBADD.pw_unit_test=	util
+CFLAGS.pw_unit_test=	-I${SRCTOP}/usr.sbin/pw
+
+ATF_TESTS_SH=	pw_test\
+		pw_etcdir_test \
 		pw_lock_test \
 		pw_config_test \
 		pw_groupadd_test \

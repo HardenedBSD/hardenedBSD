@@ -39,6 +39,7 @@
 #include "opt_kern_tls.h"
 
 #include <fs/nfs/nfsport.h>
+#include <fs/nfs/nfs_extern.h>
 
 #include <rpc/rpc.h>
 #include <rpc/rpcsec_gss.h>
@@ -105,7 +106,6 @@ static int nfs_proc(struct nfsrv_descript *, u_int32_t, SVCXPRT *xprt,
     struct nfsrvcache **);
 
 extern u_long sb_max_adj;
-extern int newnfs_numnfsd;
 extern time_t nfsdev_time;
 extern int nfsrv_writerpc[NFS_NPROCS];
 extern volatile int nfsrv_devidcnt;
@@ -119,6 +119,10 @@ VNET_DEFINE(int, nfsrv_numnfsd) = 0;
 VNET_DEFINE(struct nfsv4lock, nfsd_suspend_lock);
 
 VNET_DEFINE_STATIC(bool, nfsrvd_inited) = false;
+
+/* Server RDMA listen hook, set by nfsrdma at MOD_LOAD. */
+svc_rdma_listen_ftype *svc_rdma_listen = NULL;
+int nfsrvd_rdma_port = 0;
 
 /*
  * NFS server system calls
@@ -181,7 +185,8 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 	nd.nd_mreq = NULL;
 	nd.nd_cred = NULL;
 
-	if (VNET(nfs_privport) != 0) {
+	/* xp_socket is NULL for RDMA. */
+	if (VNET(nfs_privport) != 0 && xprt->xp_socket != NULL) {
 		/* Check if source port is privileged */
 		u_short port;
 		struct sockaddr *nam = nd.nd_nam;
@@ -260,6 +265,18 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 			goto out;
 		}
 
+		/*
+		 * For RDMA, ND_GSSINTEGRITY and ND_GSSPRIVACY are not
+		 * supported.
+		 */
+		if ((nd.nd_flag & (ND_GSSINTEGRITY | ND_GSSPRIVACY)) != 0 &&
+		    xprt->xp_socket == NULL) {
+			svcerr_auth(rqst, AUTH_FAILED);
+			svc_freereq(rqst);
+			m_freem(nd.nd_mrep);
+			goto out;
+		}
+
 		/* Acquire the principal name for the RPCSEC_GSS cases. */
 		if ((nd.nd_flag & (ND_NFSV4 | ND_GSS)) == (ND_NFSV4 | ND_GSS)) {
 			rcredp = NULL;
@@ -332,6 +349,10 @@ nfssvc_program(struct svc_req *rqst, SVCXPRT *xprt)
 		if ((nfsrv_mextpg || xprt->xp_extpg) && nd.nd_nam2 == NULL &&
 		    PMAP_HAS_DMAP != 0)
 			nd.nd_flag |= ND_CANEXTPG;
+
+		/* If the xprt xp_socket == NULL, this is a RDMA call. */
+		if (xprt->xp_socket == NULL)
+			nd.nd_flag |= ND_RDMA;
 #ifdef MAC
 		mac_cred_associate_nfsd(nd.nd_cred);
 #endif
@@ -485,8 +506,7 @@ nfs_proc(struct nfsrv_descript *nd, u_int32_t xid, SVCXPRT *xprt,
 	 * RC_DROPIT - just throw the request away
 	 */
 	if (cacherep == RC_DOIT) {
-		if ((nd->nd_flag & ND_NFSV41) != 0)
-			nd->nd_xprt = xprt;
+		nd->nd_xprt = xprt;
 		nfsrvd_dorpc(nd, isdgram, tagstr, taglen, minorvers);
 		if ((nd->nd_flag & ND_NFSV41) != 0) {
 			if (nd->nd_repstat != NFSERR_REPLYFROMCACHE &&
@@ -534,6 +554,21 @@ nfssvc_loss(SVCXPRT *xprt)
 }
 
 /*
+ * Register xprt with the correct versions of NFS.
+ */
+void
+nfsrv_svc_reg(SVCXPRT *xprt)
+{
+
+	if (VNET(nfs_minvers) == NFS_VER2)
+		svc_reg(xprt, NFS_PROG, NFS_VER2, nfssvc_program, NULL);
+	if (VNET(nfs_minvers) <= NFS_VER3 && VNET(nfs_maxvers) >= NFS_VER3)
+		svc_reg(xprt, NFS_PROG, NFS_VER3, nfssvc_program, NULL);
+	if (VNET(nfs_maxvers) >= NFS_VER4)
+		svc_reg(xprt, NFS_PROG, NFS_VER4, nfssvc_program, NULL);
+}
+
+/*
  * Adds a socket to the list for servicing by nfsds.
  */
 int
@@ -564,16 +599,7 @@ nfsrvd_addsock(struct file *fp)
 		fp->f_ops = &badfileops;
 		fp->f_data = NULL;
 		xprt->xp_sockref = ++sockref;
-		if (VNET(nfs_minvers) == NFS_VER2)
-			svc_reg(xprt, NFS_PROG, NFS_VER2, nfssvc_program,
-			    NULL);
-		if (VNET(nfs_minvers) <= NFS_VER3 &&
-		    VNET(nfs_maxvers) >= NFS_VER3)
-			svc_reg(xprt, NFS_PROG, NFS_VER3, nfssvc_program,
-			    NULL);
-		if (VNET(nfs_maxvers) >= NFS_VER4)
-			svc_reg(xprt, NFS_PROG, NFS_VER4, nfssvc_program,
-			    NULL);
+		nfsrv_svc_reg(xprt);
 		if (so->so_type == SOCK_STREAM)
 			svc_loss_reg(xprt, nfssvc_loss);
 		SVC_RELEASE(xprt);
@@ -620,6 +646,21 @@ nfsrvd_nfsd(struct thread *td, struct nfsd_nfsd_args *args)
 		VNET(nfsrv_numnfsd)++;	/* Num for this vnet. */
 
 		NFSD_UNLOCK();
+		/*
+		 * If nfsrvd_rdma_port has been set and the nfsrdma.ko module
+		 * has been loaded, start the server side RDMA.
+		 * RDMA does not work within a vnet jail.
+		 */
+		if (!jailed(curthread->td_ucred) && svc_rdma_listen != NULL &&
+		    nfsrvd_rdma_port != 0) {
+			error = svc_rdma_listen(VNET(nfsrvd_pool),
+			    nfsrvd_rdma_port);
+			if (error != 0) {
+				printf("nfsrvd_nfsd: RDMA listen failed=%d\n",
+				    error);
+				nfsrvd_rdma_port = 0;
+			}
+		}
 		error = nfsrv_createdevids(args, td);
 		if (error == 0) {
 			/* An empty string implies AUTH_SYS only. */
@@ -695,6 +736,11 @@ nfsrvd_init(int terminating)
 	if (terminating) {
 		VNET(nfsd_master_proc) = NULL;
 		NFSD_UNLOCK();
+
+		/* Turn off the RDMA listener, if enabled. */
+		if (!jailed(curthread->td_ucred) && svc_rdma_listen != NULL)
+			(void)svc_rdma_listen(VNET(nfsrvd_pool), 0);
+
 		nfsrv_freealllayoutsanddevids();
 		nfsrv_freeallbackchannel_xprts();
 		svcpool_close(VNET(nfsrvd_pool));

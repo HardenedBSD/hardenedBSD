@@ -136,7 +136,7 @@
 	LOAD	%r1, PC_CURPCB(%r1); 	/* Per-thread kernel stack */	\
 1:
 
-#define	STANDARD_CRIT_PROLOG(sprg_sp, savearea, isrr0, isrr1)		\
+#define	STANDARD_CRIT_PROLOG(sprg_sp, savearea, stack, isrr0, isrr1)	\
 	mtspr	sprg_sp, %r1;		/* Save SP */			\
 	GET_CPUINFO(%r1);		/* Per-cpu structure */		\
 	STORE	%r30, (savearea+CPUSAVE_R30)(%r1);			\
@@ -145,23 +145,44 @@
 	mfspr	%r31, SPR_ESR;						\
 	STORE	%r30, (savearea+CPUSAVE_BOOKE_DEAR)(%r1);		\
 	STORE	%r31, (savearea+CPUSAVE_BOOKE_ESR)(%r1);		\
+	mfspr	%r30, SPR_SRR0;						\
+	mfspr	%r31, SPR_SRR1;						\
+	STORE	%r30, (savearea+BOOKE_CRITSAVE_SRR0)(%r1);		\
+	STORE	%r31, (savearea+BOOKE_CRITSAVE_SRR1)(%r1);		\
 	mfspr	%r30, isrr0;						\
 	mfspr	%r31, isrr1;		/* MSR at interrupt time */	\
 	STORE	%r30, (savearea+CPUSAVE_SRR0)(%r1);			\
 	STORE	%r31, (savearea+CPUSAVE_SRR1)(%r1);			\
-	mfspr	%r30, SPR_SRR0;						\
-	mfspr	%r31, SPR_SRR1;		/* MSR at interrupt time */	\
-	STORE	%r30, (savearea+BOOKE_CRITSAVE_SRR0)(%r1);		\
-	STORE	%r31, (savearea+BOOKE_CRITSAVE_SRR1)(%r1);		\
 	isync;								\
-	mfspr	%r1, sprg_sp;		/* Restore SP */		\
 	mfcr	%r30;			/* Save CR */			\
-	/* switch to per-thread kstack if intr taken in user mode */	\
 	mtcr	%r31;			/* MSR at interrupt time  */	\
-	bf	17, 1f;							\
+	/*								\
+	 * Never inherit the interrupted r1.  A critical interrupt can	\
+	 * land partway through a non-critical prolog, where r1 holds	\
+	 * the pcpu pointer rather than a stack, and laying a frame	\
+	 * there walks straight into the adjacent CPU's pcpu.		\
+	 */								\
 	GET_CPUINFO(%r1);		/* Per-cpu structure */		\
+	bf	17, 1f;							\
 	LOAD	%r1, PC_CURPCB(%r1);	/* Per-thread kernel stack */	\
-1:
+	b	2f;							\
+1:	LOAD	%r1, stack(%r1);					\
+2:
+
+/*
+ * Put back the SRR0-1 saved by STANDARD_CRIT_PROLOG.
+ *
+ * A critical interrupt can land in the middle of a non-critical prolog,
+ * before it has stashed SRR0-1, or between the mtsrr0/mtsrr1 and the rfi of
+ * a TLB miss return.  Nested exceptions taken by the C dispatcher clobber
+ * them either way, so restore before returning.
+ */
+#define	CRIT_SRR_RESTORE(savearea)					\
+	GET_CPUINFO(%r3);						\
+	LOAD	%r4, (savearea+BOOKE_CRITSAVE_SRR0)(%r3);		\
+	LOAD	%r5, (savearea+BOOKE_CRITSAVE_SRR1)(%r3);		\
+	mtspr	SPR_SRR0, %r4;						\
+	mtspr	SPR_SRR1, %r5
 
 /*
  * FRAME_SETUP assumes:
@@ -293,13 +314,23 @@
 
 /*
  *
+ * sprg_sp - SPRG{1-3} reg free to use as a scratch once r1 is restored
+ * savearea - temp save area (pc_{tempsave, critsave, mchksave, dbsave})
  * isrr0-1 - save restore registers to restore CPU state to (may be
  *           SRR0-1, CSRR0-1, MCSRR0-1
  *
  * Notes:
  *  - potential TLB miss: YES. The deref'd kstack may be not covered
+ *
+ *  - xSRR0-1 are staged in the savearea rather than written to the SPRs up
+ *    front.  A DTLB miss on the kstack below is not maskable by wrteei, and
+ *    the hardware overwrites SRR0-1 on entry to the miss handler, which then
+ *    restores its own values -- so anything parked in SRR0-1 across the
+ *    register reload is lost, and the rfi returns into the middle of this
+ *    macro instead of to the interrupted context.  Everything after the last
+ *    kstack access touches only pcpu and SPRs, which cannot fault.
  */
-#define	FRAME_LEAVE(isrr0, isrr1)					\
+#define	FRAME_LEAVE(sprg_sp, savearea, isrr0, isrr1)			\
 	wrteei 0;							\
 	/* restore CTR, XER, LR, CR */					\
 	LOAD	%r4, FRAME_CTR+CALLSIZE(%r1);				\
@@ -313,16 +344,26 @@
 	/* restore DBCR0 */						\
 	LOAD	%r4, FRAME_BOOKE_DBCR0+CALLSIZE(%r1);			\
 	mtspr	SPR_DBCR0, %r4;						\
-	/* restore xSRR0-1 */						\
+	/* stage xSRR0-1 where a TLB miss cannot reach them */		\
 	LOAD	%r30, FRAME_SRR0+CALLSIZE(%r1);				\
 	LOAD	%r31, FRAME_SRR1+CALLSIZE(%r1);				\
-	mtspr	isrr0, %r30;						\
-	mtspr	isrr1, %r31;						\
+	GET_CPUINFO(%r4);						\
+	STORE	%r30, (savearea+CPUSAVE_SRR0)(%r4);			\
+	STORE	%r31, (savearea+CPUSAVE_SRR1)(%r4);			\
 	/* restore R2-31, SP */						\
 	LD_REGS(%r1);							\
 	LOAD	%r2, FRAME_2+CALLSIZE(%r1);				\
 	LOAD	%r0, FRAME_0+CALLSIZE(%r1);				\
 	LOAD	%r1, FRAME_1+CALLSIZE(%r1);				\
+	/* no kstack references past here; park r3 to free a scratch */	\
+	mtspr	sprg_sp, %r3;						\
+	GET_CPUINFO(%r3);						\
+	LOAD	%r3, (savearea+CPUSAVE_SRR0)(%r3);			\
+	mtspr	isrr0, %r3;						\
+	GET_CPUINFO(%r3);						\
+	LOAD	%r3, (savearea+CPUSAVE_SRR1)(%r3);			\
+	mtspr	isrr1, %r3;						\
+	mfspr	%r3, sprg_sp;						\
 	isync
 
 /*
@@ -513,13 +554,15 @@ INTERRUPT(int_unknown)
  * Critical input interrupt
  ****************************************************************************/
 INTERRUPT(int_critical_input)
-	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
+	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE,
+	    PC_BOOKE_CRITSTACK, SPR_CSRR0, SPR_CSRR1)
 	FRAME_SETUP(SPR_SPRG2, PC_BOOKE_CRITSAVE, EXC_CRIT)
 	GET_TOCBASE(%r2)
 	addi	%r3, %r1, CALLSIZE
 	bl	CNAME(powerpc_interrupt)
 	TOC_RESTORE
-	FRAME_LEAVE(SPR_CSRR0, SPR_CSRR1)
+	CRIT_SRR_RESTORE(PC_BOOKE_CRITSAVE)
+	FRAME_LEAVE(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
 	rfci
 
 
@@ -527,13 +570,15 @@ INTERRUPT(int_critical_input)
  * Machine check interrupt
  ****************************************************************************/
 INTERRUPT(int_machine_check)
-	STANDARD_PROLOG(SPR_SPRG3, PC_BOOKE_MCHKSAVE, SPR_MCSRR0, SPR_MCSRR1)
+	STANDARD_CRIT_PROLOG(SPR_SPRG3, PC_BOOKE_MCHKSAVE, PC_BOOKE_MCHKSTACK,
+	    SPR_MCSRR0, SPR_MCSRR1)
 	FRAME_SETUP(SPR_SPRG3, PC_BOOKE_MCHKSAVE, EXC_MCHK)
 	GET_TOCBASE(%r2)
 	addi	%r3, %r1, CALLSIZE
 	bl	CNAME(powerpc_interrupt)
 	TOC_RESTORE
-	FRAME_LEAVE(SPR_MCSRR0, SPR_MCSRR1)
+	CRIT_SRR_RESTORE(PC_BOOKE_MCHKSAVE)
+	FRAME_LEAVE(SPR_SPRG3, PC_BOOKE_MCHKSAVE, SPR_MCSRR0, SPR_MCSRR1)
 	rfmci
 
 
@@ -613,9 +658,16 @@ INTERRUPT(int_fixed_interval_timer)
  * Watchdog interrupt
  ****************************************************************************/
 INTERRUPT(int_watchdog)
-	STANDARD_CRIT_PROLOG(SPR_SPRG1, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
-	FRAME_SETUP(SPR_SPRG1, PC_BOOKE_CRITSAVE, EXC_WDOG)
-	b	trap_common
+	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE,
+	    PC_BOOKE_CRITSTACK, SPR_CSRR0, SPR_CSRR1)
+	FRAME_SETUP(SPR_SPRG2, PC_BOOKE_CRITSAVE, EXC_WDOG)
+	GET_TOCBASE(%r2)
+	addi	%r3, %r1, CALLSIZE
+	bl	CNAME(powerpc_interrupt)
+	TOC_RESTORE
+	CRIT_SRR_RESTORE(PC_BOOKE_CRITSAVE)
+	FRAME_LEAVE(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
+	rfci
 
 
 /*****************************************************************************
@@ -933,17 +985,19 @@ interrupt_vector_top:
  * Debug interrupt
  ****************************************************************************/
 INTERRUPT(int_debug)
-	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
+	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE,
+	    PC_BOOKE_CRITSTACK, SPR_CSRR0, SPR_CSRR1)
 	FRAME_SETUP(SPR_SPRG2, PC_BOOKE_CRITSAVE, EXC_DEBUG)
 	bl	int_debug_int
-	FRAME_LEAVE(SPR_CSRR0, SPR_CSRR1)
+	FRAME_LEAVE(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_CSRR0, SPR_CSRR1)
 	rfci
 
 INTERRUPT(int_debug_ed)
-	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_DSRR0, SPR_DSRR1)
+	STANDARD_CRIT_PROLOG(SPR_SPRG2, PC_BOOKE_CRITSAVE,
+	    PC_BOOKE_CRITSTACK, SPR_DSRR0, SPR_DSRR1)
 	FRAME_SETUP(SPR_SPRG2, PC_BOOKE_CRITSAVE, EXC_DEBUG)
 	bl	int_debug_int
-	FRAME_LEAVE(SPR_DSRR0, SPR_DSRR1)
+	FRAME_LEAVE(SPR_SPRG2, PC_BOOKE_CRITSAVE, SPR_DSRR0, SPR_DSRR1)
 	rfdi
 	/* .long 0x4c00004e */
 
@@ -1015,7 +1069,7 @@ CNAME(trapexit):
 CNAME(asttrapexit):
 	b	trapexit		/* test ast ret value ? */
 1:
-	FRAME_LEAVE(SPR_SRR0, SPR_SRR1)
+	FRAME_LEAVE(SPR_SPRG1, PC_TEMPSAVE, SPR_SRR0, SPR_SRR1)
 	rfi
 
 
@@ -1069,7 +1123,7 @@ dbtrap:
 	b	trap_common
 
 dbleave:
-	FRAME_LEAVE(SPR_SRR0, SPR_SRR1)
+	FRAME_LEAVE(SPR_SPRG1, PC_DBSAVE, SPR_SRR0, SPR_SRR1)
 	rfi
 ASEND(breakpoint)
 #endif /* KDB */

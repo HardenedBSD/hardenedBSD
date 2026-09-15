@@ -9,7 +9,7 @@ title: Qualcomm SoC LPASS LPI TLMM Common Properties
 maintainers:
   - Bjorn Andersson <andersson@kernel.org>
   - Srinivas Kandagatla <srinivas.kandagatla@linaro.org>
-  - Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>
+  - Krzysztof Kozlowski <krzk@kernel.org>
 
 description:
   Common properties for the Top Level Mode Multiplexer pin controllers in the
@@ -26,6 +26,14 @@ properties:
 
   gpio-ranges:
     maxItems: 1
+
+  gpio-reserved-ranges:
+    minItems: 1
+    maxItems: 30
+    description:
+      Pins can be reserved for trusted applications or for LPASS, thereby
+      inaccessible from the OS. This property can be used to mark the pins
+      which resources should not be accessed by the OS.
 
 required:
   - gpio-controller

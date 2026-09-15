@@ -60,7 +60,22 @@ struct kobject {
 	struct kref		kref;
 	const struct kobj_type	*ktype;
 	struct list_head	entry;
-	struct sysctl_oid	*oidp;
+	union {
+		struct sysctl_oid	*oidp;
+
+		/*
+		 * On Linux, a `struct kernfs_node *` pointer, representing a
+		 * directory in sysfs, is kept in the `sd` struct field.
+		 *
+		 * We don't have that on FreeBSD because we use sysctls
+		 * instead. Let's alias the sysctl OID pointer to `sd`. This
+		 * pointer is checked by the DRM drivers using:
+		 *     if (var->kobj.sd) {
+		 *         ...
+		 *     }
+		 */
+		void			*sd;
+	};
 	struct kset		*kset;
 };
 
@@ -158,7 +173,7 @@ int	kobject_set_name(struct kobject *kobj, const char *fmt, ...);
 int	kobject_init_and_add(struct kobject *kobj, const struct kobj_type *ktype,
 	    struct kobject *parent, const char *fmt, ...);
 
-static __inline void
+static __inline int
 kobject_uevent_env(struct kobject *kobj, int action, char *envp[])
 {
 
@@ -168,6 +183,8 @@ kobject_uevent_env(struct kobject *kobj, int action, char *envp[])
 	 * Not sure if we do anything related to udev/sysfs at the moment or
 	 * need a shortcut or simply ignore it (for now).
 	 */
+
+	return (0);
 }
 
 void	kset_init(struct kset *kset);

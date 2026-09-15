@@ -68,8 +68,12 @@
 #endif /* __BSD_VISIBLE */
 #endif /* NDEBUG */
 
-#ifndef __STDC_VERSION_ASSERT_H__
-#define __STDC_VERSION_ASSERT_H__ 202311L
+#ifndef _ASSERT_H_
+#define _ASSERT_H_
+
+#if __ISO_C_VISIBLE >= 2023 || __BSD_VISIBLE
+#define __STDC_VERSION_ASSERT_H__	202311L
+#endif
 
 /*
  * Static assertions.  In principle we could define static_assert for
@@ -92,4 +96,4 @@ __BEGIN_DECLS
 void __assert(const char *, const char *, int, const char *) __dead2;
 __END_DECLS
 
-#endif /* !__STDC_VERSION_ASSERT_H__ */
+#endif /* !_ASSERT_H_ */

@@ -288,7 +288,7 @@ struct rl_q_entry {
 	struct rl_q_entry *rl_q_free;
 	off_t		rl_q_start, rl_q_end;
 	int		rl_q_flags;
-#ifdef INVARIANTS
+#ifdef INVARIANT_SUPPORT
 	struct thread	*rl_q_owner;
 #endif
 };
@@ -320,7 +320,7 @@ rlqentry_alloc(vm_ooffset_t start, vm_ooffset_t end, int flags)
 	e->rl_q_start = start;
 	e->rl_q_end = end;
 	e->rl_q_flags = flags;
-#ifdef INVARIANTS
+#ifdef INVARIANT_SUPPORT
 	e->rl_q_owner = curthread;
 #endif
 	return (e);
@@ -497,7 +497,7 @@ again:
 		if (rl_e_is_marked(next)) {
 			next = rl_e_unmark(next);
 			if (rl_q_cas(prev, cur, next)) {
-#ifdef INVARIANTS
+#ifdef INVARIANT_SUPPORT
 				cur->rl_q_owner = NULL;
 #endif
 				cur->rl_q_free = free;
@@ -669,7 +669,7 @@ again:
 			if (rl_e_is_marked(next)) {
 				next = rl_e_unmark(next);
 				if (rl_q_cas(prev, cur, next)) {
-#ifdef INVARIANTS
+#ifdef INVARIANT_SUPPORT
 					cur->rl_q_owner = NULL;
 #endif
 					cur->rl_q_free = *free;
@@ -813,6 +813,58 @@ rangelock_may_recurse(struct rangelock *lock)
 void
 _rangelock_cookie_assert(void *cookie, int what, const char *file, int line)
 {
+	struct rl_q_entry *entry;
+	struct thread *td;
+	uintptr_t c;
+
+	c = (uintptr_t)cookie;
+	switch (what) {
+	case RCA_LOCKED:
+		if (c == RL_RET_CHEAT_RLOCKED || c == RL_RET_CHEAT_WLOCKED)
+			break;
+		entry = cookie;
+		if ((entry->rl_q_flags & RL_LOCK_TYPE_MASK) == 0)
+			panic("rangelock not held (%#x) @ %s:%d\n",
+			    entry->rl_q_flags, file, line);
+		td = entry->rl_q_owner;
+		if (td != curthread)
+			panic("rangelock held by thread %d @ %s:%d\n",
+			    td != NULL ? td->td_tid : -1, file, line);
+		break;
+	case RCA_RLOCKED:
+		if (c == RL_RET_CHEAT_RLOCKED)
+			break;
+		if (c == RL_RET_CHEAT_WLOCKED)
+			panic("rangelock not rlocked (%#jx) @ %s:%d\n",
+			    (uintmax_t)c, file, line);
+		entry = cookie;
+		if ((entry->rl_q_flags & RL_LOCK_TYPE_MASK) != RL_LOCK_READ)
+			panic("rangelock not rlocked (%#x) @ %s:%d\n",
+			    entry->rl_q_flags, file, line);
+		td = entry->rl_q_owner;
+		if (td != curthread)
+			panic("rangelock held by thread %d @ %s:%d\n",
+			    td != NULL ? td->td_tid : -1, file, line);
+		break;
+	case RCA_WLOCKED:
+		if (c == RL_RET_CHEAT_WLOCKED)
+			break;
+		if (c == RL_RET_CHEAT_RLOCKED)
+			panic("rangelock not wlocked (%#jx) @ %s:%d\n",
+			    (uintmax_t)c, file, line);
+		entry = cookie;
+		if ((entry->rl_q_flags & RL_LOCK_TYPE_MASK) != RL_LOCK_WRITE)
+			panic("rangelock not wlocked (%#x) @ %s:%d\n",
+			    entry->rl_q_flags, file, line);
+		td = entry->rl_q_owner;
+		if (td != curthread)
+			panic("rangelock held by thread %d @ %s:%d\n",
+			    td != NULL ? td->td_tid : -1, file, line);
+		break;
+	default:
+		panic("rangelock cookie assert type %d @ %s:%d\n",
+		    what, file, line);
+	}
 }
 #endif	/* INVARIANT_SUPPORT */
 
@@ -846,7 +898,7 @@ DB_SHOW_COMMAND(rangelock, db_show_rangelock)
 		    "flags %x next %p",
 		    e, rl_e_is_marked(e), rl_e_is_marked(x->rl_q_next),
 		    x->rl_q_start, x->rl_q_end, x->rl_q_flags, x->rl_q_next);
-#ifdef INVARIANTS
+#ifdef INVARIANT_SUPPORT
 		db_printf(" owner %p (%d)", x->rl_q_owner,
 		    x->rl_q_owner != NULL ? x->rl_q_owner->td_tid : -1);
 #endif

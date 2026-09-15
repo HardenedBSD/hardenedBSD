@@ -40,8 +40,10 @@
 #include <sys/bus.h>
 #include <sys/callout.h>
 #include <sys/conf.h>
+#include <sys/condvar.h>
 #include <sys/lock.h>
 #include <sys/module.h>
+#include <sys/mutex.h>
 #include <sys/rman.h>
 #include <sys/sx.h>
 #include <sys/taskqueue.h>
@@ -60,7 +62,7 @@
 #include "opt_tpm.h"
 #include "tpm_if.h"
 
-#define	BIT(x) (1 << (x))
+#define	BIT(x) (1U << (x))
 
 /* Timeouts in us */
 #define	TPM_TIMEOUT_A			750000
@@ -73,6 +75,8 @@
  * any timeout defined in spec. Because of that we need a new one.
  */
 #define	TPM_TIMEOUT_LONG		40000000
+
+#define	TPM_CC_Shutdown			0x00000145
 
 /* List of commands that require TPM_TIMEOUT_LONG time to complete */
 #define	TPM_CC_CreatePrimary		0x00000131
@@ -106,6 +110,7 @@
 MALLOC_DECLARE(M_TPM20);
 
 struct tpm_priv {
+	struct sx	io_lock;
 	uint8_t 	buf[TPM_BUFSIZE];
 	size_t		offset;
 	size_t		len;
@@ -121,11 +126,19 @@ struct tpm_sc {
 
 	struct cdev	*sc_cdev;
 
+	/* Serialize commands and lifecycle; intr_lock nests inside. */
 	struct sx 	dev_lock;
+	struct mtx	intr_lock;
+	struct cv	intr_cv;
 
 	void 		*intr_cookie;
 	int 		intr_type;	/* Current event type */
+	uint32_t	intr_generation;
+	uint32_t	intr_mask;	/* Saved TIS interrupt configuration */
 	bool 		interrupts;
+	bool		common_initialized;
+	bool		dying;
+	bool		suspended;
 
 	struct tpm_priv *internal_priv;
 
@@ -171,7 +184,7 @@ OR1(struct tpm_sc *sc, bus_size_t off, uint8_t val)
 static inline void
 OR4(struct tpm_sc *sc, bus_size_t off, uint32_t val)
 {
-	uint32_t v = TPM_READ_1(sc->dev, off);
+	uint32_t v = TPM_READ_4(sc->dev, off);
 
 	TPM_WRITE_4(sc->dev, off, v | val);
 }

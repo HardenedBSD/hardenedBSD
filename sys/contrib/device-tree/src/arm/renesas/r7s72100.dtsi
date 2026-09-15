@@ -14,6 +14,7 @@
 	compatible = "renesas,r7s72100";
 	#address-cells = <1>;
 	#size-cells = <1>;
+	interrupt-parent = <&gic>;
 
 	aliases {
 		i2c0 = &i2c0;
@@ -36,11 +37,12 @@
 		clock-div = <3>;
 	};
 
-	bsc: bus {
+	bsc: bus@0 {
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges = <0 0 0x18000000>;
+		bootph-all;
 	};
 
 	cpus {
@@ -83,7 +85,7 @@
 
 	pmu {
 		compatible = "arm,cortex-a9-pmu";
-		interrupts-extended = <&gic GIC_PPI 0 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_PPI 0 IRQ_TYPE_LEVEL_HIGH>;
 	};
 
 	rtc_x1_clk: rtc_x1 {
@@ -102,11 +104,11 @@
 
 	soc {
 		compatible = "simple-bus";
-		interrupt-parent = <&gic>;
 
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
+		bootph-all;
 
 		L2: cache-controller@3ffff000 {
 			compatible = "arm,pl310-cache";
@@ -557,6 +559,7 @@
 
 		pinctrl: pinctrl@fcfe3000 {
 			compatible = "renesas,r7s72100-ports";
+			bootph-all;
 
 			reg = <0xfcfe3000 0x4230>;
 

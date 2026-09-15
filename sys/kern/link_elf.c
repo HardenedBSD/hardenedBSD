@@ -1146,8 +1146,11 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	 */
 	if (!((hdr->e_phentsize == sizeof(Elf_Phdr)) &&
 	      (hdr->e_phoff + hdr->e_phnum*sizeof(Elf_Phdr) <= PAGE_SIZE) &&
-	      (hdr->e_phoff + hdr->e_phnum*sizeof(Elf_Phdr) <= nbytes)))
+	      (hdr->e_phoff + hdr->e_phnum*sizeof(Elf_Phdr) <= nbytes))) {
 		link_elf_error(filename, "Unreadable program headers");
+		error = ENOEXEC;
+		goto out;
+	}
 
 	/*
 	 * Scan the program header entries, and save key information.
@@ -1167,6 +1170,14 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 				error = ENOEXEC;
 				goto out;
 			}
+
+			if (phdr->p_memsz < phdr->p_filesz) {
+				link_elf_error(filename,
+				    "Invalid program header");
+				error = ENOEXEC;
+				goto out;
+			}
+
 			/*
 			 * XXX: We just trust they come in right order ??
 			 */

@@ -24,6 +24,7 @@
 #include <powerpc/mpc85xx/mpc85xx.h>
 
 #include "fman.h"
+#include "fman_keygen.h"
 
 #define	FMAN_BMI_OFFSET		0x80000
 #define	FMAN_QMI_OFFSET		0x80400
@@ -567,13 +568,6 @@ fman_enable_timestamp(struct fman_softc *sc)
 }
 
 static int
-fman_keygen_init(struct fman_softc *sc)
-{
-	/* TODO: keygen */
-	return (0);
-}
-
-static int
 fman_fpm_init(struct fman_softc *sc)
 {
 	/* Clear all events, and enable interrupts. */
@@ -623,7 +617,7 @@ fman_init(struct fman_softc *sc)
 	fman_bmi_init(sc);
 	fman_qmi_init(sc);
 	fman_hwp_init(sc);
-	if (fman_keygen_init(sc) != 0)
+	if (fman_kg_init(sc) != 0)
 		goto err;
 
 	if (fman_enable(sc) != 0)
@@ -824,7 +818,7 @@ fman_qman_channel_id(device_t dev, int port)
 	if (sc->sc_revision_major >= 6) {
 		static const int qman_port_id[] = {
 		    0x30, 0x31, 0x28, 0x29, 0x2a, 0x2b,
-		    0x2c, 0x2d, 0x02, 0x03, 0x04, 0x05, 0x07, 0x07
+		    0x2c, 0x2d, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x07, 0x07
 		};
 		for (i = 0; i < sc->qman_chan_count; i++) {
 			if (qman_port_id[i] == port)
@@ -832,8 +826,8 @@ fman_qman_channel_id(device_t dev, int port)
 		}
 	} else {
 		static const int qman_port_id[] = {
-		    0x31, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x01,
-		    0x02, 0x03, 0x04, 0x05, 0x07, 0x07
+		    0x30, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x01,
+		    0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x07, 0x07, 0x07
 		};
 		for (i = 0; i < sc->qman_chan_count; i++) {
 			if (qman_port_id[i] == port)

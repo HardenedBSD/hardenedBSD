@@ -7,7 +7,7 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Common Properties for DSI Display Panels
 
 maintainers:
-  - Linus Walleij <linus.walleij@linaro.org>
+  - Linus Walleij <linusw@kernel.org>
 
 description: |
   This document defines device tree properties common to DSI, Display
@@ -46,7 +46,7 @@ properties:
     const: 0
 
 patternProperties:
-  "^panel@[0-3]$":
+  "^(panel|bridge)@[0-3]$":
     description: Panels connected to the DSI link
     type: object
 

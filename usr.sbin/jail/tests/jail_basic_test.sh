@@ -29,12 +29,16 @@ basic_head()
 {
 	atf_set descr 'Basic jail test'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 basic_body()
 {
 	# Create the jail
 	atf_check -s exit:0 -o ignore jail -c name=basejail persist ip4.addr=192.0.1.1
+	# Create a second jail to test `jls -n` in the process for breakage when
+	# handling some of the non-trivial parameter types.
+	atf_check -s exit:0 -o ignore jail -c name=basejail2 persist ip4.addr=192.0.1.2
 	# Check output of jls
 	atf_check -s exit:0 -o ignore jls
 	atf_check -s exit:0 -o ignore jls -v
@@ -52,7 +56,7 @@ basic_body()
 
 basic_cleanup()
 {
-	jail -r basejail
+	jail -r basejail basejail2
 }
 
 atf_test_case "list" "cleanup"
@@ -60,6 +64,7 @@ list_head()
 {
 	atf_set descr 'Specify some jail parameters as lists'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 list_body()
@@ -89,6 +94,7 @@ nested_head()
 {
 	atf_set descr 'Hierarchical jails test'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 nested_body()
@@ -129,6 +135,7 @@ commands_head()
 {
 	atf_set descr 'Commands jail test'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 commands_body()
@@ -170,6 +177,7 @@ jid_name_set_head()
 {
 	atf_set descr 'Test that one can set both the jid and name in a config file'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 find_unused_jid()
@@ -242,6 +250,7 @@ param_consistency_head()
 {
 	atf_set descr 'Test for consistency in jid/name params being set implicitly'
 	atf_set require.user root
+	atf_set require.progs jail
 }
 
 param_consistency_body()
@@ -312,7 +321,7 @@ setaudit_head()
 {
 	atf_set descr 'Test that setaudit works in a jail when configured with allow.setaudit'
 	atf_set require.user root
-	atf_set require.progs setaudit
+	atf_set require.progs setaudit jail
 }
 
 setaudit_body()

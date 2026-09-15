@@ -177,7 +177,7 @@ struct	in6_ndifreq {
 #define ND_COMPUTE_RTIME(x) \
 		(((MIN_RANDOM_FACTOR * (x >> 10)) + (arc4random() & \
 		((MAX_RANDOM_FACTOR - MIN_RANDOM_FACTOR) * (x >> 10)))) /1000)
-#define MAX_NEIGHBOR_ADVERTISEMENT	3	/* RFC4891 Section 10 */
+#define MAX_NEIGHBOR_ADVERTISEMENT	3	/* RFC4861 Section 10 */
 
 struct nd_defrouter {
 	TAILQ_ENTRY(nd_defrouter) dr_entry;
@@ -288,7 +288,7 @@ VNET_DECLARE(int, ip6_temp_regen_advance); /* seconds */
 #define	V_ip6_temp_regen_advance	VNET(ip6_temp_regen_advance)
 
 union nd_opts {
-	struct nd_opt_hdr *nd_opt_array[24];	/* max = ND_OPT_ROUTE_INFO */
+	struct nd_opt_hdr *nd_opt_array[25];	/* max = ND_OPT_ROUTE_INFO */
 	struct {
 		struct nd_opt_hdr *zero;
 		struct nd_opt_hdr *src_lladdr;

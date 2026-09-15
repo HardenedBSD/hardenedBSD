@@ -27,7 +27,6 @@ SUBDIR=	adduser \
 	extattrctl \
 	fifolog \
 	fstyp \
-	fwcamctl \
 	fwcontrol \
 	fwget \
 	getfmac \
@@ -52,6 +51,7 @@ SUBDIR=	adduser \
 	nfscbd \
 	nfsd \
 	nfsdumpstate \
+	nfsdtop \
 	nfsrevoke \
 	nfsuserd \
 	nmtree \

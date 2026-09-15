@@ -165,7 +165,7 @@ fetch_loader_passphrase(void * dummy)
 		kern_unsetenv("kern.geom.eli.passphrase");
 	}
 }
-SYSINIT(geli_fetch_loader_passphrase, SI_SUB_KMEM + 1, SI_ORDER_ANY,
+SYSINIT(geli_fetch_loader_passphrase, SI_SUB_KENV, SI_ORDER_ANY,
     fetch_loader_passphrase, NULL);
 
 static void
@@ -1171,6 +1171,13 @@ g_eli_create(struct gctl_req *req, struct g_class *mp, struct g_provider *bpp,
 	}
 	pp->mediasize = sc->sc_mediasize;
 	pp->sectorsize = sc->sc_sectorsize;
+	if ((sc->sc_flags & G_ELI_FLAG_AUTH) == 0 &&
+	    bpp->stripesize > sc->sc_sectorsize &&
+	    bpp->stripesize % sc->sc_sectorsize == 0 &&
+	    bpp->stripeoffset % sc->sc_sectorsize == 0) {
+		pp->stripesize = bpp->stripesize;
+		pp->stripeoffset = bpp->stripeoffset;
+	}
 	LIST_FOREACH(gap, &bpp->aliases, ga_next)
 		g_provider_add_alias(pp, "%s%s", gap->ga_alias, G_ELI_SUFFIX);
 

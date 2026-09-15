@@ -112,7 +112,7 @@
 		regulator-max-microvolt = <3300000>;
 		regulator-min-microvolt = <3300000>;
 		regulator-name = "+V3.3_SD";
-		startup-delay-us = <2000>;
+		startup-delay-us = <20000>;
 	};
 
 	reg_sd1_vqmmc: regulator-sdhci1-vqmmc {
@@ -147,7 +147,7 @@
 		regulator-name = "+V_SODIMM";
 	};
 
-	reserved-memory {
+	reserved_memory: reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
@@ -162,7 +162,13 @@
 			no-map;
 		};
 
-		wkup_r5fss0_core0_memory_region: r5f-dma-memory@9c900000 {
+		wkup_r5fss0_core0_dma_memory_region: memory@9c800000 {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0x9c800000 0x00 0x100000>;
+			no-map;
+		};
+
+		wkup_r5fss0_core0_memory_region: memory@9c900000 {
 			compatible = "shared-dma-pool";
 			reg = <0x00 0x9c900000 0x00 0x01e00000>;
 			no-map;
@@ -238,6 +244,13 @@
 	pinctrl_qspi1_io3_gpio: main-gpio0-6-default-pins {
 		pinctrl-single,pins = <
 			AM62PX_IOPAD(0x0018, PIN_INPUT, 7) /* (M24) OSPI0_D3.GPIO0_6 */ /* SODIMM 62 */
+		>;
+	};
+
+	/* Verdin SPI_1_CS as GPIO */
+	pinctrl_spi1_cs_gpio: main-gpio0-7-default-pins {
+		pinctrl-single,pins = <
+			AM62PX_IOPAD(0x001c, PIN_OUTPUT, 7) /* (N21) OSPI0_D4.GPIO0_7 */ /* SODIMM 202 */
 		>;
 	};
 
@@ -508,7 +521,7 @@
 		pinctrl-single,pins = <
 			AM62PX_IOPAD(0x0120, PIN_INPUT,  0) /* (K24) MMC2_CMD  */ /* SODIMM 160, WiFi_SDIO_CMD   */
 			AM62PX_IOPAD(0x0118, PIN_OUTPUT, 0) /* (K21) MMC2_CLK  */ /* SODIMM 156, WiFi_SDIO_CLK   */
-			AM62PX_IOPAD(0x011C, PIN_INPUT,  0) /* () MMC2_CLKLB   */
+			AM62PX_IOPAD(0x011c, PIN_INPUT,  0) /* () MMC2_CLKLB   */
 			AM62PX_IOPAD(0x0114, PIN_INPUT,  0) /* (K23) MMC2_DAT0 */ /* SODIMM 162, WiFi_SDIO_DATA0 */
 			AM62PX_IOPAD(0x0110, PIN_INPUT,  0) /* (K22) MMC2_DAT1 */ /* SODIMM 164, WiFi_SDIO_DATA1 */
 			AM62PX_IOPAD(0x010c, PIN_INPUT,  0) /* (L20) MMC2_DAT2 */ /* SODIMM 166, WiFi_SDIO_DATA2 */
@@ -761,13 +774,25 @@
 		>;
 	};
 
-	/* Verdin UART_2 */
+	/* Verdin UART_2 RX/TX */
 	pinctrl_wkup_uart0: wkup-uart0-default-pins {
 		pinctrl-single,pins = <
-			AM62PX_MCU_IOPAD(0x002c, PIN_INPUT,  0) /* (C7) WKUP_UART0_CTSn */ /* SODIMM 143 */
-			AM62PX_MCU_IOPAD(0x0030, PIN_OUTPUT, 0) /* (C6) WKUP_UART0_RTSn */ /* SODIMM 141 */
 			AM62PX_MCU_IOPAD(0x0024, PIN_INPUT,  0) /* (D8) WKUP_UART0_RXD  */ /* SODIMM 137 */
 			AM62PX_MCU_IOPAD(0x0028, PIN_OUTPUT, 0) /* (D7) WKUP_UART0_TXD  */ /* SODIMM 139 */
+		>;
+	};
+
+	/* Verdin UART_2 CTS */
+	pinctrl_wkup_uart0_cts: wkup-uart0-cts-default-pins {
+		pinctrl-single,pins = <
+			AM62PX_MCU_IOPAD(0x002c, PIN_INPUT,  0) /* (C7) WKUP_UART0_CTSn */ /* SODIMM 143 */
+		>;
+	};
+
+	/* Verdin UART_2 RTS */
+	pinctrl_wkup_uart0_rts: wkup-uart0-rts-default-pins {
+		pinctrl-single,pins = <
+			AM62PX_MCU_IOPAD(0x0030, PIN_OUTPUT, 0) /* (C6) WKUP_UART0_RTSn */ /* SODIMM 141 */
 		>;
 	};
 };
@@ -807,7 +832,7 @@
 /* Verdin ETH_1 (On-module PHY) */
 &cpsw_port1 {
 	phy-handle = <&som_eth_phy>;
-	phy-mode = "rgmii-rxid";
+	phy-mode = "rgmii-id";
 	status = "disabled";
 };
 
@@ -828,24 +853,6 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_epwm2_a>, <&pinctrl_epwm2_b>;
 	status = "disabled";
-};
-
-&mailbox0_cluster0 {
-	status = "okay";
-
-	mbox_r5_0: mbox-r5-0 {
-		ti,mbox-rx = <0 0 0>;
-		ti,mbox-tx = <1 0 0>;
-	};
-};
-
-&mailbox0_cluster1 {
-	status = "okay";
-
-	mbox_mcu_r5_0: mbox-mcu-r5-0 {
-		ti,mbox-rx = <0 0 0>;
-		ti,mbox-tx = <1 0 0>;
-	};
 };
 
 &main0_alert {
@@ -1422,7 +1429,11 @@
 /* Verdin UART_2 */
 &wkup_uart0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_wkup_uart0>;
+	pinctrl-0 = <&pinctrl_wkup_uart0>,
+		    <&pinctrl_wkup_uart0_cts>,
+		    <&pinctrl_wkup_uart0_rts>;
 	uart-has-rtscts;
 	status = "disabled";
 };
+
+#include "k3-am62p-ti-ipc-firmware.dtsi"

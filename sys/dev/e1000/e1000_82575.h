@@ -55,6 +55,7 @@
 #define E1000_RAR_ENTRIES_I350	32
 #define E1000_SW_SYNCH_MB	0x00000100
 #define E1000_STAT_DEV_RST_SET	0x00100000
+#define E1000_GCR_DEV_RST_IN_PROGRESS	0x80000000
 
 struct e1000_adv_data_desc {
 	__le64 buffer_addr;    /* Address of the descriptor's data buffer */
@@ -402,9 +403,10 @@ enum e1000_promisc_type {
 	e1000_num_promisc_types
 };
 
-void e1000_vfta_set_vf(struct e1000_hw *, u16, bool);
+s32 e1000_vfta_set_vf(struct e1000_hw *, u16, bool);
 void e1000_rlpml_set_vf(struct e1000_hw *, u16);
 s32 e1000_promisc_set_vf(struct e1000_hw *, enum e1000_promisc_type type);
+s32 e1000_set_uc_addr_vf(struct e1000_hw *, u32, u8 *);
 void e1000_write_vfta_i350(struct e1000_hw *hw, u32 offset, u32 value);
 u16 e1000_rxpbs_adjust_82580(u32 data);
 s32 e1000_read_emi_reg(struct e1000_hw *hw, u16 addr, u16 *data);

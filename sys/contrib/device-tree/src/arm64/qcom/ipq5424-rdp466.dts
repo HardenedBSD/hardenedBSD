@@ -2,7 +2,7 @@
 /*
  * IPQ5424 RDP466 board device tree source
  *
- * Copyright (c) 2024 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024-2025 The Linux Foundation. All rights reserved.
  */
 
 /dts-v1/;
@@ -124,13 +124,6 @@
 	status = "okay";
 };
 
-&sdhc {
-	pinctrl-0 = <&sdc_default_state>;
-	pinctrl-names = "default";
-
-	status = "okay";
-};
-
 &sleep_clk {
 	clock-frequency = <32000>;
 };
@@ -201,27 +194,34 @@
 		};
 	};
 
-	sdc_default_state: sdc-default-state {
-		clk-pins {
+	qpic_snand_default_state: qpic-snand-default-state {
+		clock-pins {
 			pins = "gpio5";
-			function = "sdc_clk";
+			function = "qspi_clk";
 			drive-strength = <8>;
-			bias-disable;
+			bias-pull-down;
 		};
 
-		cmd-pins {
+		cs-pins {
 			pins = "gpio4";
-			function = "sdc_cmd";
+			function = "qspi_cs";
 			drive-strength = <8>;
 			bias-pull-up;
 		};
 
 		data-pins {
 			pins = "gpio0", "gpio1", "gpio2", "gpio3";
-			function = "sdc_data";
+			function = "qspi_data";
 			drive-strength = <8>;
-			bias-pull-up;
+			bias-pull-down;
 		};
+	};
+
+	uart0_pins: uart0-default-state {
+		pins = "gpio10", "gpio11", "gpio12", "gpio13";
+		function = "uart0";
+		drive-strength = <8>;
+		bias-pull-down;
 	};
 
 	pcie2_default_state: pcie2-default-state {
@@ -239,6 +239,38 @@
 	};
 };
 
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	pinctrl-0 = <&qpic_snand_default_state>;
+	pinctrl-names = "default";
+
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		nand-ecc-engine = <&qpic_nand>;
+		nand-ecc-strength = <4>;
+		nand-ecc-step-size = <512>;
+	};
+};
+
+&uart0 {
+	pinctrl-0 = <&uart0_pins>;
+	pinctrl-names = "default";
+	/*
+	 * The required initialization for this SE is not handled by the
+	 * bootloader. Therefore, keep the device in "reserved" state until
+	 * linux gains support for configuring the SE.
+	 */
+	status = "reserved";
+};
+
 &uart1 {
 	pinctrl-0 = <&uart1_pins>;
 	pinctrl-names = "default";
@@ -253,6 +285,26 @@
 	status = "okay";
 };
 
+/*
+ * The bootstrap pins for the board select the XO clock frequency that
+ * supports 48 MHZ, 96 MHZ or 192 MHZ. This setting automatically
+ * enables the right dividers, to ensure the reference clock output
+ * from WiFi to the CMN PLL is 48 MHZ.
+ */
+&ref_48mhz_clk {
+	clock-div = <1>;
+	clock-mult = <1>;
+};
+
+/*
+ * The frequency of xo_board is fixed to 24 MHZ, which is routed
+ * from WiFi output clock 48 MHZ divided by 2.
+ */
 &xo_board {
-	clock-frequency = <24000000>;
+	clock-div = <2>;
+	clock-mult = <1>;
+};
+
+&xo_clk {
+	clock-frequency = <48000000>;
 };

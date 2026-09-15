@@ -81,7 +81,6 @@
 #include <netinet/udp.h>
 
 #include <machine/in_cksum.h>
-#include <dev/led/led.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 
@@ -350,7 +349,8 @@ struct igc_softc {
 	/* FreeBSD operating-system-specific structures. */
 	struct igc_osdep osdep;
 	device_t	dev;
-	struct cdev	*led_dev;
+	u32		ledctl_default;
+	bool		led_active;
 
         struct igc_tx_queue *tx_queues;
         struct igc_rx_queue *rx_queues;
@@ -380,12 +380,13 @@ struct igc_softc {
 	u32		rx_mbuf_sz;
 
 	int		enable_aim;
-
-	/* Management and WOL features */
-	u32		wol;
+	bool		suspend_link_powered_down;
 
 	/* Multicast array memory */
 	u8		*mta;
+
+	/* Retained across resets to restore the hardware VLAN filter table. */
+	u32		shadow_vfta[IGC_VFTA_SIZE];
 
 	/* Info about the interface */
 	u16		link_active;
@@ -411,8 +412,19 @@ struct igc_softc {
 	unsigned long	dropped_pkts;
 	unsigned long	link_irq;
 	unsigned long	rx_overruns;
-	unsigned long	watchdog_events;
-
+	u32		fatal_error_state;
+	u32		fatal_error_peind;
+	u32		fatal_error_pcie;
+	u32		fatal_error_lan;
+	u32		fatal_error_mng;
+	uint64_t	fatal_error_lan_count;
+	uint64_t	fatal_error_mng_count;
+	uint64_t	fatal_error_pcie_count;
+	uint64_t	fatal_error_dma_count;
+	uint64_t	fatal_error_unknown_count;
+	uint64_t	corrected_error_dma_count;
+	uint64_t	corrected_error_pcie_tx_data_count;
+	uint64_t	corrected_error_pcie_retry_count;
 	struct igc_hw_stats stats;
 	u16		vf_ifp;
 };

@@ -8,7 +8,7 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Altera SoCFPGA ECC Manager
 
 maintainers:
-  - Matthew Gerlach <matthew.gerlach@altera.com>
+  - Niravkumar L Rabara <niravkumarlaxmidas.rabara@altera.com>
 
 description:
   This binding describes the device tree nodes required for the Altera SoCFPGA
@@ -53,6 +53,7 @@ properties:
     properties:
       compatible:
         enum:
+          - altr,sdram-edac
           - altr,sdram-edac-a10
           - altr,sdram-edac-s10
 

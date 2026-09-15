@@ -38,6 +38,7 @@ properties:
           - const: simple-mfd
       - items:
           - enum:
+              - fsl,imx53-iomuxc-gpr
               - fsl,imx8mm-iomuxc-gpr
               - fsl,imx8mn-iomuxc-gpr
               - fsl,imx8mp-iomuxc-gpr
@@ -49,6 +50,22 @@ properties:
   mux-controller:
     type: object
     $ref: /schemas/mux/reg-mux.yaml
+
+patternProperties:
+  "^ipu[12]_csi[01]_mux$":
+    type: object
+    $ref: /schemas/media/video-mux.yaml
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          not:
+            contains:
+              const: fsl,imx6q-iomuxc-gpr
+    then:
+      patternProperties:
+        '^ipu[12]_csi[01]_mux$': false
 
 additionalProperties: false
 

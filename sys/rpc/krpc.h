@@ -42,6 +42,24 @@ enum clnt_stat clnt_bck_call(CLIENT *, struct rpc_callextra *, rpcproc_t,
     struct mbuf *, struct mbuf **, struct timeval, SVCXPRT *);
 struct mbuf *_rpc_copym_into_ext_pgs(struct mbuf *, int);
 
+/* Callback functions for server side RDMA. */
+typedef int	clnt_bck_rdma_send_ftype(SVCXPRT *xprt, struct mbuf *m);
+extern clnt_bck_rdma_send_ftype *clnt_bck_rdma_send;
+
+/* Functions for client side RDMA. */
+typedef int	xprt_rdma_check_route_ftype(struct vnet *vnet,
+		    struct sockaddr *dstaddr, uint32_t cbslots);
+extern xprt_rdma_check_route_ftype *rdma_check_route;
+
+typedef SVCXPRT *svc_rdma_create_backchannel_ftype(SVCPOOL *nfscbdool);
+extern svc_rdma_create_backchannel_ftype *svc_rdma_create_backchannel_call;
+
+typedef CLIENT	*clnt_rdma_create_ftype(struct sockaddr *raddr,
+		    const rpcprog_t prog, const rpcvers_t vers, int intrflag,
+		    uint32_t small_reply, uint32_t max_io, uint32_t cblots,
+		    struct rpc_err *err);
+extern clnt_rdma_create_ftype *clnt_rdma_create_call;
+
 /*
  * A pending RPC request which awaits a reply. Requests which have
  * received their reply will have cr_xid set to zero and cr_mrep to
@@ -85,6 +103,9 @@ struct rc_data {
 	void			(*rc_reconcall)(CLIENT *, void *,
 				    struct ucred *); /* reconection upcall */
 	void			*rc_reconarg;	/* upcall arg */
+	uint32_t		rc_rdmasmall_reply; /* size of small reply */
+	uint32_t		rc_rdmamax_io;	/* size of largest I/O */
+	uint32_t		rc_rdma_cbslots; /* Max. # of callbacks */
 };
 
 /* Bits for ct_rcvstate. */
@@ -135,6 +156,29 @@ struct cf_conn {  /* kept in xprt->xp_p1 for actual connection */
 };
 
 void rpcnl_init(void);
+
+/* RDMA procedures. */
+enum rdma_proc {
+	RDMA_MSG = 0,
+	RDMA_NOMSG = 1,
+	RDMA_MSGP = 2,	/* Not used. */
+	RDMA_DONE = 3,	/* Not used. */
+	RDMA_ERROR = 4
+};
+
+enum rdma_errcode {
+	RDMA_ERR_VERS = 1,
+	RDMA_ERR_CHUNK = 2
+};
+
+/* Structure use by both client and server RDMA for reductions (RFC8166). */
+struct rpcrdma_reduce {
+	struct iovec	*iov;
+	uint32_t	xid;
+	uint32_t	off;
+	uint32_t	len;
+	uint8_t		into_mem;
+};
 
 #endif	/* _KERNEL */
 

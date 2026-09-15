@@ -49,6 +49,7 @@
 #include "debug.h"
 #include "fdt.h"
 #include "mem.h"
+#include "ipc.h"
 #include "pci_emul.h"
 #include "pci_irq.h"
 #include "rtc_pl031.h"
@@ -87,6 +88,7 @@ bhyve_init_config(void)
 	set_config_bool("acpi_tables", false);
 	set_config_bool("acpi_tables_in_memory", false);
 	set_config_value("memory.size", "256M");
+	set_config_value("rundir", BHYVE_RUN_DIR);
 }
 
 void
@@ -183,7 +185,7 @@ bhyve_optparse(int argc, char **argv)
 			set_config_value("uuid", optarg);
 			break;
 		case 'W':
-			set_config_bool("virtio_msix", false);
+			set_config_bool("virtio.msix", false);
 			break;
 		case 'h':
 			bhyve_usage(0);
@@ -191,6 +193,9 @@ bhyve_optparse(int argc, char **argv)
 			bhyve_usage(1);
 		}
 	}
+
+	/* Handle backwards compatibility aliases in config options. */
+	bhyve_cfg_warn("virtio_msix", "virtio.msix");
 }
 
 void

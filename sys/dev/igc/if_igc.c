@@ -108,13 +108,15 @@ static void	igc_if_media_status(if_ctx_t, struct ifmediareq *);
 static int	igc_if_media_change(if_ctx_t);
 static int	igc_if_mtu_set(if_ctx_t, uint32_t);
 static void	igc_if_timer(if_ctx_t, uint16_t);
-static void	igc_if_watchdog_reset(if_ctx_t);
+static void	igc_if_vlan_register(if_ctx_t, u16);
+static void	igc_if_vlan_unregister(if_ctx_t, u16);
 static bool	igc_if_needs_restart(if_ctx_t, enum iflib_restart_event);
 
 static void	igc_identify_hardware(if_ctx_t);
 static int	igc_allocate_pci_resources(if_ctx_t);
 static void	igc_free_pci_resources(if_ctx_t);
-static void	igc_reset(if_ctx_t);
+static void	igc_disable_broken_l1_2(if_ctx_t);
+static int	igc_reset(if_ctx_t);
 static int	igc_setup_interface(if_ctx_t);
 static int	igc_setup_msix(if_ctx_t);
 
@@ -125,13 +127,25 @@ static void	igc_if_intr_enable(if_ctx_t);
 static void	igc_if_intr_disable(if_ctx_t);
 static int	igc_if_rx_queue_intr_enable(if_ctx_t, uint16_t);
 static int	igc_if_tx_queue_intr_enable(if_ctx_t, uint16_t);
+static void	igc_handle_fatal_error_intr(struct igc_softc *, u32);
+static bool	igc_handle_fatal_error_admin(struct igc_softc *);
+static void	igc_prepare_fatal_error_reset(struct igc_softc *);
+static void	igc_finish_fatal_error_reset(struct igc_softc *);
 static void	igc_if_multi_set(if_ctx_t);
 static void	igc_if_update_admin_status(if_ctx_t);
+static void	igc_apply_i225_ipg_workaround(struct igc_softc *);
 static void	igc_if_debug(if_ctx_t);
+static void	igc_update_ecc_stats(struct igc_softc *);
 static void	igc_update_stats_counters(struct igc_softc *);
 static void	igc_add_hw_stats(struct igc_softc *);
 static int	igc_if_set_promisc(if_ctx_t, int);
+static bool	igc_if_vlan_filter_capable(if_ctx_t);
+static bool	igc_if_vlan_filter_used(if_ctx_t);
+static void	igc_if_vlan_filter_enable(struct igc_softc *);
+static void	igc_if_vlan_filter_disable(struct igc_softc *);
 static void	igc_setup_vlan_hw_support(if_ctx_t);
+static void	igc_if_led_func(if_ctx_t, int);
+static void	igc_led_restore(struct igc_softc *);
 static void	igc_fw_version(struct igc_softc *);
 static void	igc_sbuf_fw_version(struct igc_fw_version *, struct sbuf *);
 static void	igc_print_fw_version(struct igc_softc *);
@@ -148,10 +162,19 @@ static int	igc_sysctl_tso_tcp_flags_mask(SYSCTL_HANDLER_ARGS);
 /* Management and WOL Support */
 static void	igc_get_hw_control(struct igc_softc *);
 static void	igc_release_hw_control(struct igc_softc *);
-static void	igc_get_wakeup(if_ctx_t);
-static void	igc_enable_wakeup(if_ctx_t);
+static int	igc_enable_pci_busmaster(struct igc_softc *);
+static void	igc_configure_wakeup(if_ctx_t);
+static int	igc_enable_wakeup(if_ctx_t);
+static void	igc_power_up_wakeup_link(struct igc_softc *);
 
 int		igc_intr(void *);
+
+enum igc_fatal_error_state {
+	IGC_FATAL_ERROR_NONE,
+	IGC_FATAL_ERROR_CAPTURING,
+	IGC_FATAL_ERROR_DETECTED,
+	IGC_FATAL_ERROR_RESET_REQUESTED,
+};
 
 /* MSI-X handlers */
 static int	igc_if_msix_intr_assign(if_ctx_t, int);
@@ -217,12 +240,14 @@ static device_method_t igc_if_methods[] = {
 	DEVMETHOD(ifdi_mtu_set, igc_if_mtu_set),
 	DEVMETHOD(ifdi_promisc_set, igc_if_set_promisc),
 	DEVMETHOD(ifdi_timer, igc_if_timer),
-	DEVMETHOD(ifdi_watchdog_reset, igc_if_watchdog_reset),
+	DEVMETHOD(ifdi_vlan_register, igc_if_vlan_register),
+	DEVMETHOD(ifdi_vlan_unregister, igc_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, igc_if_get_counter),
 	DEVMETHOD(ifdi_rx_queue_intr_enable, igc_if_rx_queue_intr_enable),
 	DEVMETHOD(ifdi_tx_queue_intr_enable, igc_if_tx_queue_intr_enable),
 	DEVMETHOD(ifdi_debug, igc_if_debug),
 	DEVMETHOD(ifdi_needs_restart, igc_if_needs_restart),
+	DEVMETHOD(ifdi_led_func, igc_if_led_func),
 	DEVMETHOD_END
 };
 
@@ -445,8 +470,9 @@ igc_set_num_queues(if_ctx_t ctx)
 
 #define	IGC_CAPS							\
     IFCAP_HWCSUM | IFCAP_VLAN_MTU | IFCAP_VLAN_HWTAGGING |		\
-    IFCAP_VLAN_HWCSUM | IFCAP_WOL | IFCAP_TSO4 | IFCAP_LRO |		\
-    IFCAP_VLAN_HWTSO | IFCAP_JUMBO_MTU | IFCAP_HWCSUM_IPV6 | IFCAP_TSO6
+    IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL | IFCAP_TSO4 |	\
+    IFCAP_LRO | IFCAP_VLAN_HWTSO | IFCAP_JUMBO_MTU |			\
+    IFCAP_HWCSUM_IPV6 | IFCAP_TSO6
 
 /*********************************************************************
  *  Device initialization routine
@@ -554,6 +580,9 @@ igc_if_attach_pre(if_ctx_t ctx)
 	/* Determine hardware and mac info */
 	igc_identify_hardware(ctx);
 
+	/* Apply device-specific PCIe L1.2 errata workarounds. */
+	igc_disable_broken_l1_2(ctx);
+
 	scctx->isc_tx_nsegments = IGC_MAX_SCATTER;
 	scctx->isc_nrxqsets_max =
 	    scctx->isc_ntxqsets_max = igc_set_num_queues(ctx);
@@ -648,7 +677,12 @@ igc_if_attach_pre(if_ctx_t ctx)
 	** important in reading the nvm and
 	** mac from that.
 	*/
-	igc_reset_hw(hw);
+	error = igc_reset_hw(hw);
+	if (error != IGC_SUCCESS) {
+		device_printf(dev, "Hardware reset failed: %d\n", error);
+		error = EIO;
+		goto err_late;
+	}
 
 	/* Make sure we have a good EEPROM before we read from it */
 	if (igc_validate_nvm_checksum(hw) < 0) {
@@ -687,12 +721,7 @@ igc_if_attach_pre(if_ctx_t ctx)
 	/*
 	 * Get Wake-on-Lan and Management info for later use
 	 */
-	igc_get_wakeup(ctx);
-
-	/* Enable only WOL MAGIC by default */
-	scctx->isc_capenable &= ~IFCAP_WOL;
-	if (sc->wol != 0)
-		scctx->isc_capenable |= IFCAP_WOL_MAGIC;
+	igc_configure_wakeup(ctx);
 
 	iflib_set_mac(ctx, hw->mac.addr);
 
@@ -716,11 +745,11 @@ igc_if_attach_post(if_ctx_t ctx)
 
 	/* Setup OS specific network interface */
 	error = igc_setup_interface(ctx);
-	if (error != 0) {
-		goto err_late;
-	}
+	if (error != 0)
+		return (error);
 
-	igc_reset(ctx);
+	if (igc_reset(ctx) != IGC_SUCCESS)
+		return (EIO);
 
 	/* Initialize statistics */
 	igc_update_stats_counters(sc);
@@ -732,14 +761,6 @@ igc_if_attach_post(if_ctx_t ctx)
 	igc_get_hw_control(sc);
 
 	INIT_DEBUGOUT("igc_if_attach_post: end");
-
-	return (error);
-
-err_late:
-	igc_release_hw_control(sc);
-	igc_free_pci_resources(ctx);
-	igc_if_queues_free(ctx);
-	free(sc->mta, M_DEVBUF);
 
 	return (error);
 }
@@ -777,7 +798,13 @@ igc_if_detach(if_ctx_t ctx)
 static int
 igc_if_shutdown(if_ctx_t ctx)
 {
-	return igc_if_suspend(ctx);
+	int error;
+
+	error = igc_if_suspend(ctx);
+	if (error != 0)
+		device_printf(iflib_get_dev(ctx),
+		    "Wake configuration failed during shutdown: %d\n", error);
+	return (0);
 }
 
 /*
@@ -787,18 +814,38 @@ static int
 igc_if_suspend(if_ctx_t ctx)
 {
 	struct igc_softc *sc = iflib_get_softc(ctx);
+	int error;
 
+	error = igc_enable_wakeup(ctx);
 	igc_release_hw_control(sc);
-	igc_enable_wakeup(ctx);
-	return (0);
+	return (error);
 }
 
 static int
 igc_if_resume(if_ctx_t ctx)
 {
-	igc_if_init(ctx);
+	struct igc_softc *sc = iflib_get_softc(ctx);
+	u32 wus, wus_ext;
 
-	return(0);
+	/*
+	 * PCIe config space, and with it L1.2, may have been reset
+	 * across the suspend/resume cycle.
+	 */
+	igc_disable_broken_l1_2(ctx);
+	wus = IGC_READ_REG(&sc->hw, IGC_WUS);
+	wus_ext = IGC_READ_REG(&sc->hw, IGC_WUS_EXT);
+	if (wus != 0 || wus_ext != 0)
+		device_printf(sc->dev,
+		    "Wakeup status: %#010x, extended %#010x\n", wus, wus_ext);
+	IGC_WRITE_REG(&sc->hw, IGC_WUFC, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUFC_EXT, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUC, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUS, ~0U);
+	IGC_WRITE_REG(&sc->hw, IGC_WUS_EXT, ~0U);
+	/* Clear PME after its MAC wake source has been removed. */
+	pci_clear_pme(sc->dev);
+
+	return (0);
 }
 
 static int
@@ -842,15 +889,23 @@ igc_if_init(if_ctx_t ctx)
 
 	INIT_DEBUGOUT("igc_if_init: begin");
 
+	if (igc_enable_pci_busmaster(sc) != 0) {
+		device_printf(sc->dev, "Could not enable PCI bus mastering\n");
+		iflib_init_failed(ctx);
+		return;
+	}
+	if (sc->suspend_link_powered_down)
+		igc_power_up_wakeup_link(sc);
+
 	/* Get the latest mac address, User can use a LAA */
 	bcopy(if_getlladdr(ifp), sc->hw.mac.addr,
 	    ETHER_ADDR_LEN);
 
-	/* Put the address into the Receive Address Array */
-	igc_rar_set(&sc->hw, sc->hw.mac.addr, 0);
-
 	/* Initialize the hardware */
-	igc_reset(ctx);
+	if (igc_reset(ctx) != IGC_SUCCESS) {
+		iflib_init_failed(ctx);
+		return;
+	}
 	igc_if_update_admin_status(ctx);
 
 	for (i = 0, tx_que = sc->tx_queues; i < sc->tx_num_queues;
@@ -1101,6 +1156,8 @@ igc_intr(void *arg)
 	if (reg_icr & IGC_ICR_RXO)
 		sc->rx_overruns++;
 
+	igc_handle_fatal_error_intr(sc, reg_icr);
+
 	igc_neweitr(sc, que, rxr);
 
 	return (FILTER_SCHEDULE_THREAD);
@@ -1166,8 +1223,13 @@ igc_msix_link(void *arg)
 	if (reg_icr & (IGC_ICR_RXSEQ | IGC_ICR_LSC)) {
 		igc_handle_link(sc->ctx);
 	}
+	igc_handle_fatal_error_intr(sc, reg_icr);
 
-	IGC_WRITE_REG(&sc->hw, IGC_IMS, IGC_IMS_LSC);
+	reg_icr = IGC_IMS_LSC;
+	if (atomic_load_acq_32(&sc->fatal_error_state) ==
+	    IGC_FATAL_ERROR_NONE)
+		reg_icr |= IGC_IMS_FER;
+	IGC_WRITE_REG(&sc->hw, IGC_IMS, reg_icr);
 	IGC_WRITE_REG(&sc->hw, IGC_EIMS, sc->link_mask);
 
 	return (FILTER_HANDLED);
@@ -1181,6 +1243,93 @@ igc_handle_link(void *context)
 
 	sc->hw.mac.get_link_status = true;
 	iflib_admin_intr_deferred(ctx);
+}
+
+/*
+ * Fatal internal memory errors stop some or all device traffic.  Capture the
+ * read-clear indication before handing recovery to the iflib admin task.
+ */
+static void
+igc_handle_fatal_error_intr(struct igc_softc *sc, u32 icr)
+{
+	struct igc_hw *hw;
+	u32 lanerr, mngerr, pcieerr, peind;
+
+	if ((icr & IGC_ICR_FER) == 0)
+		return;
+
+	hw = &sc->hw;
+	IGC_WRITE_REG(hw, IGC_IMC, IGC_IMS_FER);
+	if (!atomic_cmpset_32(&sc->fatal_error_state,
+	    IGC_FATAL_ERROR_NONE, IGC_FATAL_ERROR_CAPTURING))
+		return;
+
+	peind = IGC_READ_REG(hw, IGC_PEIND) & IGC_PEIND_FATAL_MASK;
+	pcieerr = IGC_READ_REG(hw, IGC_PCIEERRSTS) &
+	    IGC_PCIEERRSTS_FATAL_MASK;
+	lanerr = IGC_READ_REG(hw, IGC_LANPERRSTS) &
+	    IGC_LANPERRSTS_RETX_BUF;
+	mngerr = IGC_READ_REG(hw, IGC_MNGPARSTS) &
+	    IGC_MNGPARSTS_FATAL_MASK;
+	if (pcieerr != 0)
+		peind |= IGC_PEIND_PCIE_PARITY_FATAL;
+	if (lanerr != 0)
+		peind |= IGC_PEIND_LANPORT_PARITY_FATAL;
+
+	sc->fatal_error_peind = peind;
+	sc->fatal_error_pcie = pcieerr;
+	sc->fatal_error_lan = lanerr;
+	sc->fatal_error_mng = mngerr;
+	atomic_store_rel_32(&sc->fatal_error_state,
+	    IGC_FATAL_ERROR_DETECTED);
+	iflib_admin_intr_deferred(sc->ctx);
+}
+
+static bool
+igc_handle_fatal_error_admin(struct igc_softc *sc)
+{
+	u32 peind;
+
+	if (!atomic_cmpset_acq_32(&sc->fatal_error_state,
+	    IGC_FATAL_ERROR_DETECTED, IGC_FATAL_ERROR_RESET_REQUESTED))
+		return (atomic_load_acq_32(&sc->fatal_error_state) !=
+		    IGC_FATAL_ERROR_NONE);
+
+	peind = sc->fatal_error_peind;
+	if (peind & IGC_PEIND_LANPORT_PARITY_FATAL)
+		sc->fatal_error_lan_count++;
+	if (peind & IGC_PEIND_MNG_PARITY_FATAL)
+		sc->fatal_error_mng_count++;
+	if (peind & IGC_PEIND_PCIE_PARITY_FATAL)
+		sc->fatal_error_pcie_count++;
+	if (peind & IGC_PEIND_DMA_PARITY_FATAL)
+		sc->fatal_error_dma_count++;
+	if (peind == 0)
+		sc->fatal_error_unknown_count++;
+
+	device_printf(sc->dev,
+	    "fatal internal memory error: PEIND %#x, PCIEERRSTS %#x, "
+	    "LANPERRSTS %#x, MNGPARSTS %#x\n",
+	    peind, sc->fatal_error_pcie, sc->fatal_error_lan,
+	    sc->fatal_error_mng);
+	/* Management-memory recovery is owned by management firmware. */
+	if (peind != 0 && (peind & IGC_PEIND_HOST_FATAL_MASK) == 0) {
+		sc->fatal_error_peind = 0;
+		sc->fatal_error_pcie = 0;
+		sc->fatal_error_lan = 0;
+		sc->fatal_error_mng = 0;
+		atomic_store_rel_32(&sc->fatal_error_state,
+		    IGC_FATAL_ERROR_NONE);
+		IGC_WRITE_REG(&sc->hw, IGC_IMS, IGC_IMS_FER);
+		IGC_WRITE_FLUSH(&sc->hw);
+		return (true);
+	}
+
+	device_printf(sc->dev, "requesting reset after memory error\n");
+	iflib_request_reset(sc->ctx);
+	/* Re-enter the admin task so it observes the reset request. */
+	iflib_admin_intr_deferred(sc->ctx);
+	return (true);
 }
 
 /*********************************************************************
@@ -1277,8 +1426,6 @@ igc_if_media_change(if_ctx_t ctx)
 		device_printf(sc->dev, "Unsupported media type\n");
 	}
 
-	igc_if_init(ctx);
-
 	return (0);
 }
 
@@ -1299,20 +1446,24 @@ igc_if_set_promisc(if_ctx_t ctx, int flags)
 
 	/* Don't disable if in MAX groups */
 	if (mcnt < MAX_NUM_MULTICAST_ADDRESSES)
-		reg_rctl &=  (~IGC_RCTL_MPE);
-	IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg_rctl);
+		reg_rctl &= ~IGC_RCTL_MPE;
 
 	if (flags & IFF_PROMISC) {
 		reg_rctl |= (IGC_RCTL_UPE | IGC_RCTL_MPE);
 		/* Turn this on if you want to see bad packets */
 		if (igc_debug_sbp)
 			reg_rctl |= IGC_RCTL_SBP;
-		IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg_rctl);
 	} else if (flags & IFF_ALLMULTI) {
 		reg_rctl |= IGC_RCTL_MPE;
 		reg_rctl &= ~IGC_RCTL_UPE;
-		IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg_rctl);
 	}
+
+	if ((flags & IFF_PROMISC) || !igc_if_vlan_filter_used(ctx))
+		reg_rctl &= ~IGC_RCTL_VFE;
+	else
+		reg_rctl |= IGC_RCTL_VFE;
+	IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg_rctl);
+
 	return (0);
 }
 
@@ -1391,12 +1542,42 @@ igc_if_timer(if_ctx_t ctx, uint16_t qid)
 }
 
 static void
+igc_apply_i225_ipg_workaround(struct igc_softc *sc)
+{
+	struct igc_hw *hw = &sc->hw;
+	u32 ipgt, tipg;
+
+	/*
+	 * I225 v1 cannot receive the minimum IPG required at 2.5 Gb/s.
+	 * Intel's documented back-to-back workaround is for the transmitter
+	 * to use a 15-byte IPG instead of 12 bytes.  I225 v2 and later have
+	 * the receive-side fix and should retain the standard IPG.
+	 */
+	if (!igc_is_device_id_i225(hw) ||
+	    hw->revision_id >= IGC_REVISION_2)
+		return;
+
+	ipgt = sc->link_speed == SPEED_2500 ? IGC_I225_TIPG_IPGT_2P5 :
+	    DEFAULT_82543_TIPG_IPGT_COPPER;
+	tipg = IGC_READ_REG(hw, IGC_TIPG);
+	if ((tipg & IGC_TIPG_IPGT_MASK) == ipgt)
+		return;
+
+	tipg &= ~IGC_TIPG_IPGT_MASK;
+	tipg |= ipgt;
+	IGC_WRITE_REG(hw, IGC_TIPG, tipg);
+}
+
+static void
 igc_if_update_admin_status(if_ctx_t ctx)
 {
 	struct igc_softc *sc = iflib_get_softc(ctx);
 	struct igc_hw *hw = &sc->hw;
 	device_t dev = iflib_get_dev(ctx);
 	u32 link_check, thstat, ctrl;
+
+	if (igc_handle_fatal_error_admin(sc))
+		return;
 
 	link_check = thstat = ctrl = 0;
 	/* Get the cached link value or read phy for real */
@@ -1435,19 +1616,8 @@ igc_if_update_admin_status(if_ctx_t ctx)
 		sc->link_active = 0;
 		iflib_link_state_change(ctx, LINK_STATE_DOWN, 0);
 	}
+	igc_apply_i225_ipg_workaround(sc);
 	igc_update_stats_counters(sc);
-}
-
-static void
-igc_if_watchdog_reset(if_ctx_t ctx)
-{
-	struct igc_softc *sc = iflib_get_softc(ctx);
-
-	/*
-	 * Just count the event; iflib(4) will already trigger a
-	 * sufficient reset of the controller.
-	 */
-	sc->watchdog_events++;
 }
 
 /*********************************************************************
@@ -1460,11 +1630,141 @@ static void
 igc_if_stop(if_ctx_t ctx)
 {
 	struct igc_softc *sc = iflib_get_softc(ctx);
+	s32 error;
 
 	INIT_DEBUGOUT("igc_if_stop: begin");
 
-	igc_reset_hw(&sc->hw);
+	igc_led_restore(sc);
+	igc_prepare_fatal_error_reset(sc);
+	error = igc_reset_hw(&sc->hw);
+	if (error != IGC_SUCCESS) {
+		device_printf(sc->dev, "Hardware reset failed while stopping: "
+		    "%d\n", error);
+		return;
+	}
+	igc_finish_fatal_error_reset(sc);
 	IGC_WRITE_REG(&sc->hw, IGC_WUC, 0);
+}
+
+/*
+ * A PCIe-region parity failure stops PCIe and DMA traffic.  Intel requires a
+ * device reset before master disable in this case, unlike the normal reset
+ * path, which disables the bus master first.
+ */
+static void
+igc_prepare_fatal_error_reset(struct igc_softc *sc)
+{
+	struct igc_hw *hw;
+	s32 error;
+	u32 ctrl, pcieerr;
+	int i;
+
+	if (atomic_load_acq_32(&sc->fatal_error_state) ==
+	    IGC_FATAL_ERROR_NONE)
+		return;
+
+	hw = &sc->hw;
+	pcieerr = sc->fatal_error_pcie |
+	    (IGC_READ_REG(hw, IGC_PCIEERRSTS) & IGC_PCIEERRSTS_FATAL_MASK);
+	if ((sc->fatal_error_peind & IGC_PEIND_PCIE_PARITY_FATAL) == 0 &&
+	    pcieerr == 0)
+		return;
+
+	ctrl = IGC_READ_REG(hw, IGC_CTRL);
+	IGC_WRITE_REG(hw, IGC_CTRL, ctrl | IGC_CTRL_DEV_RST);
+	/* Do not access device registers for at least 3 ms after DEV_RST. */
+	msec_delay(3);
+	for (i = 0; i < AUTO_READ_DONE_TIMEOUT; i++) {
+		if ((IGC_READ_REG(hw, IGC_EECD) & IGC_EECD_AUTO_RD) != 0 &&
+		    (IGC_READ_REG(hw, IGC_STATUS) & IGC_STATUS_RST_DONE) != 0)
+			break;
+		msec_delay(1);
+	}
+	if (i == AUTO_READ_DONE_TIMEOUT)
+		device_printf(sc->dev,
+		    "device reset did not complete during parity recovery\n");
+	error = igc_disable_pcie_master_generic(hw);
+	if (error != IGC_SUCCESS)
+		device_printf(sc->dev,
+		    "PCIe master disable failed during parity recovery: %d\n",
+		    error);
+	pcieerr |= IGC_READ_REG(hw, IGC_PCIEERRSTS) &
+	    IGC_PCIEERRSTS_FATAL_MASK;
+	if (pcieerr != 0)
+		IGC_WRITE_REG(hw, IGC_PCIEERRSTS, pcieerr);
+}
+
+static void
+igc_finish_fatal_error_reset(struct igc_softc *sc)
+{
+	struct igc_hw *hw;
+	u32 lanerr, pcieerr;
+
+	if (atomic_load_acq_32(&sc->fatal_error_state) ==
+	    IGC_FATAL_ERROR_NONE)
+		return;
+
+	hw = &sc->hw;
+	pcieerr = sc->fatal_error_pcie |
+	    (IGC_READ_REG(hw, IGC_PCIEERRSTS) & IGC_PCIEERRSTS_FATAL_MASK);
+	if (pcieerr != 0)
+		IGC_WRITE_REG(hw, IGC_PCIEERRSTS, pcieerr);
+	lanerr = sc->fatal_error_lan |
+	    (IGC_READ_REG(hw, IGC_LANPERRSTS) & IGC_LANPERRSTS_RETX_BUF);
+	if (lanerr != 0)
+		IGC_WRITE_REG(hw, IGC_LANPERRSTS, lanerr);
+	/*
+	 * DEV_RST can relatch PEIND from a subordinate status register
+	 * before that register is cleared.  Drain the recovered indication
+	 * before unmasking FER so a later error is not misattributed.
+	 */
+	(void)IGC_READ_REG(hw, IGC_PEIND);
+
+	sc->fatal_error_peind = 0;
+	sc->fatal_error_pcie = 0;
+	sc->fatal_error_lan = 0;
+	sc->fatal_error_mng = 0;
+	atomic_store_rel_32(&sc->fatal_error_state, IGC_FATAL_ERROR_NONE);
+}
+
+/*
+ * I225/I226 have three configurable LED outputs.  DPDK uses LED1 for
+ * adapter identification; retain that convention and preserve the OEM's
+ * configuration for normal link and activity indication.
+ */
+static void
+igc_if_led_func(if_ctx_t ctx, int onoff)
+{
+	struct igc_softc *sc;
+	struct igc_hw *hw;
+	u32 ledctl;
+
+	sc = iflib_get_softc(ctx);
+	hw = &sc->hw;
+	if (onoff) {
+		if (!sc->led_active) {
+			sc->ledctl_default = IGC_READ_REG(hw, IGC_LEDCTL);
+			sc->led_active = true;
+		}
+		ledctl = sc->ledctl_default;
+		ledctl &= ~(IGC_LEDCTL_LED1_MODE_MASK |
+		    IGC_LEDCTL_LED1_BLINK);
+		ledctl |= IGC_LEDCTL_MODE_LED_ON <<
+		    IGC_LEDCTL_LED1_MODE_SHIFT;
+		IGC_WRITE_REG(hw, IGC_LEDCTL, ledctl);
+	} else {
+		igc_led_restore(sc);
+	}
+}
+
+static void
+igc_led_restore(struct igc_softc *sc)
+{
+
+	if (!sc->led_active)
+		return;
+	IGC_WRITE_REG(&sc->hw, IGC_LEDCTL, sc->ledctl_default);
+	sc->led_active = false;
 }
 
 /*********************************************************************
@@ -1495,6 +1795,42 @@ igc_identify_hardware(if_ctx_t ctx)
 		device_printf(dev, "Setup init failure\n");
 		return;
 	}
+}
+
+/*********************************************************************
+ *
+ *  Intel's I225/I226 Specification Update, erratum 2, states that I225
+ *  devices can incorrectly enter L1 substates while CLKREQ# is asserted,
+ *  causing repeated L1-substate entry and exit.  Disable both ASPM and
+ *  PCI-PM L1.2, as the erratum can occur while idle or in D3.
+ *
+ *  I226 devices have a separate erratum where ASPM L1.2 exit latency can
+ *  exceed what the packet buffer can tolerate under load.  Disabling ASPM
+ *  L1.2 on the device itself works around the issue.
+ *
+ **********************************************************************/
+static void
+igc_disable_broken_l1_2(if_ctx_t ctx)
+{
+	device_t dev = iflib_get_dev(ctx);
+	struct igc_softc *sc = iflib_get_softc(ctx);
+	int cap;
+	uint32_t ctl1, mask;
+
+	if (igc_is_device_id_i225(&sc->hw))
+		mask = PCIM_L1PM_CTL1_ASPM_L1_2 |
+		    PCIM_L1PM_CTL1_PCIPM_L1_2;
+	else if (igc_is_device_id_i226(&sc->hw))
+		mask = PCIM_L1PM_CTL1_ASPM_L1_2;
+	else
+		return;
+
+	if (pci_find_extcap(dev, PCIZ_L1PM, &cap) != 0)
+		return;
+
+	ctl1 = pci_read_config(dev, cap + PCIR_L1PM_CTL1, 4);
+	ctl1 &= ~mask;
+	pci_write_config(dev, cap + PCIR_L1PM_CTL1, ctl1, 4);
 }
 
 static int
@@ -1682,8 +2018,9 @@ igc_free_pci_resources(if_ctx_t ctx)
 	if (sc->intr_type == IFLIB_INTR_MSIX)
 		iflib_irq_free(ctx, &sc->irq);
 
-	for (int i = 0; i < sc->rx_num_queues; i++, que++) {
-		iflib_irq_free(ctx, &que->que_irq);
+	if (que != NULL) {
+		for (int i = 0; i < sc->rx_num_queues; i++, que++)
+			iflib_irq_free(ctx, &que->que_irq);
 	}
 
 	if (sc->memory != NULL) {
@@ -1808,7 +2145,7 @@ igc_init_dmac(struct igc_softc *sc, u32 pba)
  *  softc structure.
  *
  **********************************************************************/
-static void
+static int
 igc_reset(if_ctx_t ctx)
 {
 	device_t dev = iflib_get_dev(ctx);
@@ -1816,8 +2153,10 @@ igc_reset(if_ctx_t ctx)
 	struct igc_hw *hw = &sc->hw;
 	u32 rx_buffer_size;
 	u32 pba;
+	s32 error;
 
 	INIT_DEBUGOUT("igc_reset: begin");
+	igc_led_restore(sc);
 	/* Let the firmware know the OS is in control */
 	igc_get_hw_control(sc);
 
@@ -1861,14 +2200,21 @@ igc_reset(if_ctx_t ctx)
 	hw->fc.send_xon = true;
 
 	/* Issue a global reset */
-	igc_reset_hw(hw);
+	error = igc_reset_hw(hw);
+	if (error != IGC_SUCCESS) {
+		device_printf(dev, "Hardware reset failed: %d\n", error);
+		return (error);
+	}
 	IGC_WRITE_REG(hw, IGC_WUC, 0);
 
 	/* and a re-init */
-	if (igc_init_hw(hw) < 0) {
-		device_printf(dev, "Hardware Initialization Failed\n");
-		return;
+	error = igc_init_hw(hw);
+	if (error != IGC_SUCCESS) {
+		device_printf(dev, "Hardware initialization failed: %d\n",
+		    error);
+		return (error);
 	}
+	igc_finish_fatal_error_reset(sc);
 
 	/* Setup DMA Coalescing */
 	igc_init_dmac(sc, pba);
@@ -1879,6 +2225,8 @@ igc_reset(if_ctx_t ctx)
 	IGC_WRITE_REG(hw, IGC_VET, ETHERTYPE_VLAN);
 	igc_get_phy_info(hw);
 	igc_check_for_link(hw);
+
+	return (IGC_SUCCESS);
 }
 
 /*
@@ -2141,6 +2489,7 @@ igc_if_queues_free(if_ctx_t ctx)
 
 	if (sc->mta != NULL) {
 		free(sc->mta, M_DEVBUF);
+		sc->mta = NULL;
 	}
 }
 
@@ -2189,13 +2538,9 @@ igc_initialize_transmit_unit(if_ctx_t ctx)
 		    IGC_READ_REG(&sc->hw, IGC_TDBAL(i)),
 		    IGC_READ_REG(&sc->hw, IGC_TDLEN(i)));
 
-		txdctl = 0; /* clear txdctl */
-		txdctl |= 0x1f; /* PTHRESH */
-		txdctl |= 1 << 8; /* HTHRESH */
-		txdctl |= 1 << 16;/* WTHRESH */
-		txdctl |= 1 << 22; /* Reserved bit 22 must always be 1 */
-		txdctl |= IGC_TXDCTL_GRAN;
-		txdctl |= 1 << 25; /* LWTHRESH */
+		/* WTHRESH must be zero when iflib uses sparse RS. */
+		txdctl = IGC_TX_PTHRESH | (IGC_TX_HTHRESH << 8) |
+		    IGC_TXDCTL_QUEUE_ENABLE;
 
 		IGC_WRITE_REG(hw, IGC_TXDCTL(i), txdctl);
 	}
@@ -2323,11 +2668,10 @@ igc_initialize_receive_unit(if_ctx_t ctx)
 		IGC_WRITE_REG(hw, IGC_RDT(i), 0);
 		/* Enable this Queue */
 		rxdctl = IGC_READ_REG(hw, IGC_RXDCTL(i));
-		rxdctl |= IGC_RXDCTL_QUEUE_ENABLE;
-		rxdctl &= 0xFFF00000;
-		rxdctl |= IGC_RX_PTHRESH;
-		rxdctl |= IGC_RX_HTHRESH << 8;
-		rxdctl |= IGC_RX_WTHRESH << 16;
+		rxdctl &= ~(IGC_RXDCTL_PTHRESH | IGC_RXDCTL_HTHRESH |
+		    IGC_RXDCTL_WTHRESH);
+		rxdctl |= IGC_RX_PTHRESH | (IGC_RX_HTHRESH << 8) |
+		    (IGC_RX_WTHRESH << 16) | IGC_RXDCTL_QUEUE_ENABLE;
 		IGC_WRITE_REG(hw, IGC_RXDCTL(i), rxdctl);
 	}
 
@@ -2341,14 +2685,85 @@ igc_initialize_receive_unit(if_ctx_t ctx)
 }
 
 static void
+igc_if_vlan_register(if_ctx_t ctx, u16 vtag)
+{
+	struct igc_softc *sc = iflib_get_softc(ctx);
+	u32 index, mask;
+
+	index = (vtag >> 5) & 0x7f;
+	mask = 1U << (vtag & 0x1f);
+	if ((sc->shadow_vfta[index] & mask) != 0)
+		return;
+	sc->shadow_vfta[index] |= mask;
+	igc_write_vfta(&sc->hw, index, sc->shadow_vfta[index]);
+}
+
+static void
+igc_if_vlan_unregister(if_ctx_t ctx, u16 vtag)
+{
+	struct igc_softc *sc = iflib_get_softc(ctx);
+	u32 index, mask;
+
+	index = (vtag >> 5) & 0x7f;
+	mask = 1U << (vtag & 0x1f);
+	if ((sc->shadow_vfta[index] & mask) == 0)
+		return;
+	sc->shadow_vfta[index] &= ~mask;
+	igc_write_vfta(&sc->hw, index, sc->shadow_vfta[index]);
+}
+
+static bool
+igc_if_vlan_filter_capable(if_ctx_t ctx)
+{
+	if_t ifp = iflib_get_ifp(ctx);
+
+	return ((if_getcapenable(ifp) & IFCAP_VLAN_HWFILTER) != 0 &&
+	    !igc_disable_crc_stripping);
+}
+
+static bool
+igc_if_vlan_filter_used(if_ctx_t ctx)
+{
+	struct igc_softc *sc = iflib_get_softc(ctx);
+
+	if (!igc_if_vlan_filter_capable(ctx))
+		return (false);
+
+	for (int i = 0; i < IGC_VFTA_SIZE; i++)
+		if (sc->shadow_vfta[i] != 0)
+			return (true);
+
+	return (false);
+}
+
+static void
+igc_if_vlan_filter_enable(struct igc_softc *sc)
+{
+	u32 reg;
+
+	reg = IGC_READ_REG(&sc->hw, IGC_RCTL);
+	reg &= ~IGC_RCTL_CFIEN;
+	reg |= IGC_RCTL_VFE;
+	IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg);
+}
+
+static void
+igc_if_vlan_filter_disable(struct igc_softc *sc)
+{
+	u32 reg;
+
+	reg = IGC_READ_REG(&sc->hw, IGC_RCTL);
+	reg &= ~(IGC_RCTL_VFE | IGC_RCTL_CFIEN);
+	IGC_WRITE_REG(&sc->hw, IGC_RCTL, reg);
+}
+
+static void
 igc_setup_vlan_hw_support(if_ctx_t ctx)
 {
 	struct igc_softc *sc = iflib_get_softc(ctx);
 	struct igc_hw *hw = &sc->hw;
-	struct ifnet *ifp = iflib_get_ifp(ctx);
+	if_t ifp = iflib_get_ifp(ctx);
 	u32 reg;
-
-	/* igc hardware doesn't seem to implement VFTA for HWFILTER */
 
 	if (if_getcapenable(ifp) & IFCAP_VLAN_HWTAGGING &&
 	    !igc_disable_crc_stripping) {
@@ -2360,6 +2775,20 @@ igc_setup_vlan_hw_support(if_ctx_t ctx)
 		reg &= ~IGC_CTRL_VME;
 		IGC_WRITE_REG(hw, IGC_CTRL, reg);
 	}
+
+	if (!igc_if_vlan_filter_capable(ctx)) {
+		igc_if_vlan_filter_disable(sc);
+		return;
+	}
+
+	/* Always admit priority-tagged frames. */
+	sc->shadow_vfta[0] |= 1U;
+
+	/* A reset may clear the VFTA, so restore the complete desired table. */
+	for (int i = 0; i < IGC_VFTA_SIZE; i++)
+		igc_write_vfta(hw, i, sc->shadow_vfta[i]);
+
+	igc_if_vlan_filter_enable(sc);
 }
 
 static void
@@ -2374,9 +2803,13 @@ igc_if_intr_enable(if_ctx_t ctx)
 		IGC_WRITE_REG(hw, IGC_EIAC, mask);
 		IGC_WRITE_REG(hw, IGC_EIAM, mask);
 		IGC_WRITE_REG(hw, IGC_EIMS, mask);
-		IGC_WRITE_REG(hw, IGC_IMS, IGC_IMS_LSC);
+		mask = IGC_IMS_LSC;
 	} else
-		IGC_WRITE_REG(hw, IGC_IMS, IMS_ENABLE_MASK);
+		mask = IMS_ENABLE_MASK;
+	if (atomic_load_acq_32(&sc->fatal_error_state) ==
+	    IGC_FATAL_ERROR_NONE)
+		mask |= IGC_IMS_FER;
+	IGC_WRITE_REG(hw, IGC_IMS, mask);
 	IGC_WRITE_FLUSH(hw);
 }
 
@@ -2431,6 +2864,29 @@ igc_release_hw_control(struct igc_softc *sc)
 }
 
 static int
+igc_enable_pci_busmaster(struct igc_softc *sc)
+{
+	device_t dev;
+	u16 command;
+	int error;
+
+	dev = sc->dev;
+	command = pci_read_config(dev, PCIR_COMMAND, 2);
+	if (command == 0xffff)
+		return (ENXIO);
+	if ((command & PCIM_CMD_BUSMASTEREN) != 0)
+		return (0);
+
+	error = pci_enable_busmaster(dev);
+	command = pci_read_config(dev, PCIR_COMMAND, 2);
+	if (command == 0xffff)
+		return (ENXIO);
+	if ((command & PCIM_CMD_BUSMASTEREN) == 0)
+		return (error != 0 ? error : EIO);
+	return (0);
+}
+
+static int
 igc_is_valid_ether_addr(u8 *addr)
 {
 	char zero_addr[6] = { 0, 0, 0, 0, 0, 0 };
@@ -2442,75 +2898,124 @@ igc_is_valid_ether_addr(u8 *addr)
 	return (true);
 }
 
-/*
-** Parse the interface capabilities with regard
-** to both system management and wake-on-lan for
-** later use.
-*/
+/* Advertise the wake modes supported by I225/I226 physical functions. */
 static void
-igc_get_wakeup(if_ctx_t ctx)
+igc_configure_wakeup(if_ctx_t ctx)
 {
-	struct igc_softc *sc = iflib_get_softc(ctx);
-	u16 eeprom_data = 0, apme_mask;
+	if_softc_ctx_t scctx = iflib_get_softc_ctx(ctx);
+	device_t dev = iflib_get_dev(ctx);
+	int capabilities;
 
-	apme_mask = IGC_WUC_APME;
-	eeprom_data = IGC_READ_REG(&sc->hw, IGC_WUC);
-
-	if (eeprom_data & apme_mask)
-		sc->wol = IGC_WUFC_LNKC;
+	capabilities = pci_has_pme(dev, PCI_POWERSTATE_D3_HOT) ?
+	    IFCAP_WOL : 0;
+	scctx->isc_capabilities &= ~IFCAP_WOL;
+	scctx->isc_capabilities |= capabilities;
+	scctx->isc_capenable &= ~IFCAP_WOL;
+	if (capabilities != 0)
+		scctx->isc_capenable |= IFCAP_WOL_MAGIC;
 }
 
-
-/*
- * Enable PCI Wake On Lan capability
- */
-static void
+/* Configure the requested PCI Wake-on-LAN filters for suspend. */
+static int
 igc_enable_wakeup(if_ctx_t ctx)
 {
 	struct igc_softc *sc = iflib_get_softc(ctx);
 	device_t dev = iflib_get_dev(ctx);
 	if_t ifp = iflib_get_ifp(ctx);
-	int error = 0;
-	u32 ctrl, rctl;
+	int enabled, error = 0, master_error, mcnt;
+	u32 ctrl, rctl, wufc;
+	bool manage;
 
-	if (!pci_has_pm(dev))
-		return;
+	if (!pci_has_pme(dev, PCI_POWERSTATE_D3_HOT))
+		return (0);
 
-	/*
-	 * Determine type of Wakeup: note that wol
-	 * is set with all bits on by default.
-	 */
-	if ((if_getcapenable(ifp) & IFCAP_WOL_MAGIC) == 0)
-		sc->wol &= ~IGC_WUFC_MAG;
-
-	if ((if_getcapenable(ifp) & IFCAP_WOL_UCAST) == 0)
-		sc->wol &= ~IGC_WUFC_EX;
-
-	if ((if_getcapenable(ifp) & IFCAP_WOL_MCAST) == 0)
-		sc->wol &= ~IGC_WUFC_MC;
-	else {
-		rctl = IGC_READ_REG(&sc->hw, IGC_RCTL);
-		rctl |= IGC_RCTL_MPE;
-		IGC_WRITE_REG(&sc->hw, IGC_RCTL, rctl);
+	enabled = if_getcapenable(ifp) & if_getcapabilities(ifp) & IFCAP_WOL;
+	manage = igc_enable_mng_pass_thru(&sc->hw);
+	wufc = 0;
+	if ((enabled & IFCAP_WOL_MAGIC) != 0)
+		wufc |= IGC_WUFC_MAG;
+	if ((enabled & IFCAP_WOL_UCAST) != 0)
+		wufc |= IGC_WUFC_EX;
+	if ((enabled & IFCAP_WOL_MCAST) != 0) {
+		wufc |= IGC_WUFC_MC;
+		bzero(sc->mta, ETHER_ADDR_LEN *
+		    MAX_NUM_MULTICAST_ADDRESSES);
+		mcnt = if_foreach_llmaddr(ifp, igc_copy_maddr, sc->mta);
+		if (mcnt < MAX_NUM_MULTICAST_ADDRESSES)
+			igc_update_mc_addr_list(&sc->hw, sc->mta, mcnt);
 	}
 
-	if (!(sc->wol & (IGC_WUFC_EX | IGC_WUFC_MAG | IGC_WUFC_MC)))
+	IGC_WRITE_REG(&sc->hw, IGC_WUFC, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUFC_EXT, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUC, 0);
+	IGC_WRITE_REG(&sc->hw, IGC_WUS, ~0U);
+	IGC_WRITE_REG(&sc->hw, IGC_WUS_EXT, ~0U);
+
+	if (wufc == 0) {
+		if (manage) {
+			if (sc->suspend_link_powered_down)
+				igc_power_up_wakeup_link(sc);
+			pci_enable_pme(dev);
+		} else {
+			igc_power_down_phy(&sc->hw);
+			sc->suspend_link_powered_down = true;
+			pci_clear_pme(dev);
+		}
+		goto master_disable;
+	}
+	bcopy(if_getlladdr(ifp), sc->hw.mac.addr, ETHER_ADDR_LEN);
+	error = igc_rar_set(&sc->hw, sc->hw.mac.addr, 0);
+	if (error != IGC_SUCCESS) {
+		device_printf(dev,
+		    "Could not restore unicast wake address: %d\n", error);
 		goto pme;
+	}
+	rctl = IGC_READ_REG(&sc->hw, IGC_RCTL);
+	rctl &= ~(IGC_RCTL_UPE | IGC_RCTL_MPE | IGC_RCTL_MO_3);
+	rctl |= IGC_RCTL_EN | IGC_RCTL_BAM |
+	    (sc->hw.mac.mc_filter_type << IGC_RCTL_MO_SHIFT);
+	if ((wufc & IGC_WUFC_MC) != 0)
+		rctl |= IGC_RCTL_MPE;
+	IGC_WRITE_REG(&sc->hw, IGC_RCTL, rctl);
 
 	/* Advertise the wakeup capability */
 	ctrl = IGC_READ_REG(&sc->hw, IGC_CTRL);
 	ctrl |= IGC_CTRL_ADVD3WUC;
 	IGC_WRITE_REG(&sc->hw, IGC_CTRL, ctrl);
+	igc_power_up_wakeup_link(sc);
 
 	/* Enable wakeup by the MAC */
 	IGC_WRITE_REG(&sc->hw, IGC_WUC, IGC_WUC_PME_EN);
-	IGC_WRITE_REG(&sc->hw, IGC_WUFC, sc->wol);
+	IGC_WRITE_REG(&sc->hw, IGC_WUFC, wufc);
 
 pme:
-	if (!error && (if_getcapenable(ifp) & IFCAP_WOL))
+	if (error == IGC_SUCCESS)
 		pci_enable_pme(dev);
+	else {
+		IGC_WRITE_REG(&sc->hw, IGC_WUFC, 0);
+		IGC_WRITE_REG(&sc->hw, IGC_WUFC_EXT, 0);
+		IGC_WRITE_REG(&sc->hw, IGC_WUC, 0);
+		pci_clear_pme(dev);
+	}
 
-	return;
+master_disable:
+	master_error = igc_disable_pcie_master(&sc->hw);
+	if (master_error != IGC_SUCCESS)
+		device_printf(dev, "PCIe master disable timed out: %d\n",
+		    master_error);
+	master_error = pci_disable_busmaster(dev);
+	if (master_error != 0)
+		device_printf(dev, "PCI bus-master disable failed: %d\n",
+		    master_error);
+
+	return (error == IGC_SUCCESS ? 0 : EIO);
+}
+
+static void
+igc_power_up_wakeup_link(struct igc_softc *sc)
+{
+	igc_power_up_phy(&sc->hw);
+	sc->suspend_link_powered_down = false;
 }
 
 /**********************************************************************
@@ -2519,11 +3024,38 @@ pme:
  *
  **********************************************************************/
 static void
+igc_update_ecc_stats(struct igc_softc *sc)
+{
+	struct igc_hw *hw;
+	u32 pbeccsts, pcieeccsts;
+
+	hw = &sc->hw;
+	pbeccsts = IGC_READ_REG(hw, IGC_PBECCSTS);
+	if (pbeccsts & IGC_PBECCSTS_CORR_ERR) {
+		sc->corrected_error_dma_count++;
+		/* Preserve the enable bit while clearing the RW1C status. */
+		IGC_WRITE_REG(hw, IGC_PBECCSTS,
+		    pbeccsts & (IGC_PBECCSTS_ECC_ENABLE |
+		    IGC_PBECCSTS_CORR_ERR));
+	}
+
+	pcieeccsts = IGC_READ_REG(hw, IGC_PCIEECCSTS) &
+	    IGC_PCIEECCSTS_CORR_MASK;
+	if (pcieeccsts & IGC_PCIEECCSTS_TX_WR_DATA)
+		sc->corrected_error_pcie_tx_data_count++;
+	if (pcieeccsts & IGC_PCIEECCSTS_RETRY_BUF)
+		sc->corrected_error_pcie_retry_count++;
+	if (pcieeccsts != 0)
+		IGC_WRITE_REG(hw, IGC_PCIEECCSTS, pcieeccsts);
+}
+
+static void
 igc_update_stats_counters(struct igc_softc *sc)
 {
 	u64 prev_xoffrxc = sc->stats.xoffrxc;
 
 	sc->stats.crcerrs += IGC_READ_REG(&sc->hw, IGC_CRCERRS);
+	sc->stats.rxerrc += IGC_READ_REG(&sc->hw, IGC_RXERRC);
 	sc->stats.mpc += IGC_READ_REG(&sc->hw, IGC_MPC);
 	sc->stats.scc += IGC_READ_REG(&sc->hw, IGC_SCC);
 	sc->stats.ecol += IGC_READ_REG(&sc->hw, IGC_ECOL);
@@ -2531,7 +3063,7 @@ igc_update_stats_counters(struct igc_softc *sc)
 	sc->stats.mcc += IGC_READ_REG(&sc->hw, IGC_MCC);
 	sc->stats.latecol += IGC_READ_REG(&sc->hw, IGC_LATECOL);
 	sc->stats.colc += IGC_READ_REG(&sc->hw, IGC_COLC);
-	sc->stats.colc += IGC_READ_REG(&sc->hw, IGC_RERC);
+	sc->stats.rerc += IGC_READ_REG(&sc->hw, IGC_RERC);
 	sc->stats.dc += IGC_READ_REG(&sc->hw, IGC_DC);
 	sc->stats.rlec += IGC_READ_REG(&sc->hw, IGC_RLEC);
 	sc->stats.xonrxc += IGC_READ_REG(&sc->hw, IGC_XONRXC);
@@ -2598,6 +3130,8 @@ igc_update_stats_counters(struct igc_softc *sc)
 	sc->stats.tncrs += IGC_READ_REG(&sc->hw, IGC_TNCRS);
 	sc->stats.htdpmc += IGC_READ_REG(&sc->hw, IGC_HTDPMC);
 	sc->stats.tsctc += IGC_READ_REG(&sc->hw, IGC_TSCTC);
+
+	igc_update_ecc_stats(sc);
 }
 
 static uint64_t
@@ -2610,13 +3144,17 @@ igc_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 	case IFCOUNTER_COLLISIONS:
 		return (sc->stats.colc);
 	case IFCOUNTER_IERRORS:
+		/*
+		 * RERC overlaps the counters below and, on I225, omits length
+		 * errors.  RFC covers bad-CRC runts that CRCERRS does not count.
+		 */
 		return (sc->dropped_pkts + sc->stats.rxerrc +
 		    sc->stats.crcerrs + sc->stats.algnerrc +
-		    sc->stats.ruc + sc->stats.roc +
-		    sc->stats.mpc + sc->stats.htdpmc);
+		    sc->stats.ruc + sc->stats.rfc + sc->stats.roc +
+		    sc->stats.mpc);
 	case IFCOUNTER_OERRORS:
 		return (if_get_counter_default(ifp, cnt) +
-		    sc->stats.ecol + sc->stats.latecol + sc->watchdog_events);
+		    sc->stats.ecol + sc->stats.latecol);
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}
@@ -2701,8 +3239,10 @@ igc_add_hw_stats(struct igc_softc *sc)
 	struct sysctl_oid_list *child = SYSCTL_CHILDREN(tree);
 	struct igc_hw_stats *stats = &sc->stats;
 
-	struct sysctl_oid *stat_node, *queue_node, *int_node;
-	struct sysctl_oid_list *stat_list, *queue_list, *int_list;
+	struct sysctl_oid *eee_node, *memerr_node, *stat_node, *queue_node,
+	    *int_node;
+	struct sysctl_oid_list *eee_list, *memerr_list, *stat_list, *queue_list,
+	    *int_list;
 
 #define QUEUE_NAME_LEN 32
 	char namebuf[QUEUE_NAME_LEN];
@@ -2717,9 +3257,6 @@ igc_add_hw_stats(struct igc_softc *sc)
 	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "rx_overruns",
 	    CTLFLAG_RD, &sc->rx_overruns,
 	    "RX overruns");
-	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "watchdog_timeouts",
-	    CTLFLAG_RD, &sc->watchdog_events,
-	    "Watchdog timeouts");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "device_control",
 	    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
 	    sc, IGC_CTRL, igc_sysctl_reg_handler, "IU",
@@ -2734,6 +3271,44 @@ igc_add_hw_stats(struct igc_softc *sc)
 	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "fc_low_water",
 	    CTLFLAG_RD, &sc->hw.fc.low_water, 0,
 	    "Flow Control Low Watermark");
+	memerr_node = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "memory_errors",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+	    "Internal memory error indications");
+	memerr_list = SYSCTL_CHILDREN(memerr_node);
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "fatal_lan",
+	    CTLFLAG_RD, &sc->fatal_error_lan_count,
+	    "Fatal LAN-port memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "fatal_management",
+	    CTLFLAG_RD, &sc->fatal_error_mng_count,
+	    "Fatal management-memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "fatal_pcie",
+	    CTLFLAG_RD, &sc->fatal_error_pcie_count,
+	    "Fatal PCIe memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "fatal_dma",
+	    CTLFLAG_RD, &sc->fatal_error_dma_count,
+	    "Fatal DMA memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "fatal_unknown",
+	    CTLFLAG_RD, &sc->fatal_error_unknown_count,
+	    "Fatal memory errors without a reported region");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO, "corrected_dma",
+	    CTLFLAG_RD, &sc->corrected_error_dma_count,
+	    "Corrected DMA memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO,
+	    "corrected_pcie_tx_data", CTLFLAG_RD,
+	    &sc->corrected_error_pcie_tx_data_count,
+	    "Corrected PCIe transmit-data memory error indications");
+	SYSCTL_ADD_UQUAD(ctx, memerr_list, OID_AUTO,
+	    "corrected_pcie_retry", CTLFLAG_RD,
+	    &sc->corrected_error_pcie_retry_count,
+	    "Corrected PCIe retry-buffer memory error indications");
+	eee_node = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "eee",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, NULL,
+	    "Energy Efficient Ethernet statistics");
+	eee_list = SYSCTL_CHILDREN(eee_node);
+	SYSCTL_ADD_UQUAD(ctx, eee_list, OID_AUTO, "tx_lpi_count",
+	    CTLFLAG_RD, &stats->tlpic, "TX LPI event count");
+	SYSCTL_ADD_UQUAD(ctx, eee_list, OID_AUTO, "rx_lpi_count",
+	    CTLFLAG_RD, &stats->rlpic, "RX LPI event count");
 
 	for (int i = 0; i < sc->tx_num_queues; i++, tx_que++) {
 		struct tx_ring *txr = &tx_que->txr;
@@ -2836,6 +3411,9 @@ igc_add_hw_stats(struct igc_softc *sc)
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "recv_errs",
 	    CTLFLAG_RD, &sc->stats.rxerrc,
 	    "Receive Errors");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "recv_error_count",
+	    CTLFLAG_RD, &sc->stats.rerc,
+	    "Receive Error Count (RERC)");
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "crc_errs",
 	    CTLFLAG_RD, &sc->stats.crcerrs,
 	    "CRC errors");
@@ -2912,6 +3490,9 @@ igc_add_hw_stats(struct igc_softc *sc)
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "good_pkts_txd",
 	    CTLFLAG_RD, &sc->stats.gptc,
 	    "Good Packets Transmitted");
+	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "host_tx_discarded",
+	    CTLFLAG_RD, &sc->stats.htdpmc,
+	    "Host Packets Discarded by Transmit MAC");
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "bcast_pkts_txd",
 	    CTLFLAG_RD, &sc->stats.bptc,
 	    "Broadcast Packets Transmitted");
@@ -3173,6 +3754,16 @@ igc_set_flowcntl(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
+static void
+igc_sysctl_request_reinit(struct igc_softc *sc)
+{
+	if ((if_getflags(iflib_get_ifp(sc->ctx)) & IFF_UP) == 0)
+		return;
+
+	iflib_request_reset(sc->ctx);
+	iflib_admin_intr_deferred(sc->ctx);
+}
+
 /*
  * Manage DMA Coalesce:
  * Control values:
@@ -3218,7 +3809,7 @@ igc_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 			return (EINVAL);
 	}
 	/* Reinit the interface */
-	igc_if_init(sc->ctx);
+	igc_sysctl_request_reinit(sc);
 	return (error);
 }
 
@@ -3239,7 +3830,7 @@ igc_sysctl_eee(SYSCTL_HANDLER_ARGS)
 		return (error);
 
 	sc->hw.dev_spec._i225.eee_disable = (value != 0);
-	igc_if_init(sc->ctx);
+	igc_sysctl_request_reinit(sc);
 
 	return (0);
 }
@@ -3297,8 +3888,6 @@ igc_print_debug_info(struct igc_softc *sc)
 {
 	device_t dev = iflib_get_dev(sc->ctx);
 	if_t ifp = iflib_get_ifp(sc->ctx);
-	struct tx_ring *txr = &sc->tx_queues->txr;
-	struct rx_ring *rxr = &sc->rx_queues->rxr;
 
 	if (if_getdrvflags(ifp) & IFF_DRV_RUNNING)
 		printf("Interface is RUNNING ");
@@ -3310,14 +3899,14 @@ igc_print_debug_info(struct igc_softc *sc)
 	else
 		printf("and ACTIVE\n");
 
-	for (int i = 0; i < sc->tx_num_queues; i++, txr++) {
+	for (int i = 0; i < sc->tx_num_queues; i++) {
 		device_printf(dev, "TX Queue %d ------\n", i);
 		device_printf(dev, "hw tdh = %d, hw tdt = %d\n",
 		    IGC_READ_REG(&sc->hw, IGC_TDH(i)),
 		    IGC_READ_REG(&sc->hw, IGC_TDT(i)));
 
 	}
-	for (int j=0; j < sc->rx_num_queues; j++, rxr++) {
+	for (int j = 0; j < sc->rx_num_queues; j++) {
 		device_printf(dev, "RX Queue %d ------\n", j);
 		device_printf(dev, "hw rdh = %d, hw rdt = %d\n",
 		    IGC_READ_REG(&sc->hw, IGC_RDH(j)),

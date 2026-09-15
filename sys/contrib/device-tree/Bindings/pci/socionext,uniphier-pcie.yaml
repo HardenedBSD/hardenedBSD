@@ -51,11 +51,14 @@ properties:
   phy-names:
     const: pcie-phy
 
-  interrupt-controller:
+  legacy-interrupt-controller:
     type: object
     additionalProperties: false
 
     properties:
+      '#address-cells':
+        const: 0
+
       interrupt-controller: true
 
       '#interrupt-cells':
@@ -108,7 +111,8 @@ examples:
                         <0 0 0  3  &pcie_intc 2>,
                         <0 0 0  4  &pcie_intc 3>;
 
-        pcie_intc: interrupt-controller {
+        pcie_intc: legacy-interrupt-controller {
+            #address-cells = <0>;
             interrupt-controller;
             #interrupt-cells = <1>;
             interrupt-parent = <&gic>;

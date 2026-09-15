@@ -53,6 +53,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
+#include <sys/uio.h>
 
 #include <net/vnet.h>
 
@@ -60,6 +61,7 @@
 #include <rpc/nettype.h>
 #include <rpc/rpcsec_gss.h>
 #include <rpc/rpcsec_tls.h>
+#include <rpc/clntrdma.h>
 
 #include <rpc/rpc_com.h>
 #include <rpc/krpc.h>
@@ -67,6 +69,7 @@
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_param.h>
+#include <vm/vm_page.h>
 
 extern	u_long sb_max_adj;	/* not defined in socketvar.h */
 
@@ -937,6 +940,174 @@ _rpc_copym_into_ext_pgs(struct mbuf *mp, int maxextsiz)
 		}
 	}
 	return (mhead);
+}
+
+/*
+ * Create an mr mbuf and associated pages.
+ */
+struct mbuf *
+rpc_reduce_pg(int len, int pos, bool to_mem)
+{
+	struct mbuf *mr;
+	struct rpcrdma_reduce_pg *rb;
+	int i;
+
+	i = howmany(len, PAGE_SIZE);
+	mr = m_get2(sizeof(*rb) + sizeof(vm_page_t) * i, M_WAITOK, MT_DATA, 0);
+	mr->m_flags |= M_PROTO10;
+	mr->m_len = sizeof(*rb) + sizeof(vm_page_t) * i;
+	rb = mtod(mr, struct rpcrdma_reduce_pg *);
+	rb->len = len;
+	rb->npg = i;
+	rb->pos = pos;
+	for (i = 0; i < rb->npg; i++)
+		rb->pg[i] = vm_page_alloc_noobj(VM_ALLOC_WAITOK |
+		    VM_ALLOC_NODUMP | VM_ALLOC_WIRED);
+	rb->into_mem = (to_mem) ? 1 : 0;
+	return (mr);
+}
+
+void
+rpc_free_rdma_reduction(struct mbuf *mr)
+{
+	struct rpcrdma_reduce_pg *rb;
+	int i;
+
+	rb = mtod(mr, struct rpcrdma_reduce_pg *);
+	for (i = 0; i < rb->npg; i++) {
+		vm_page_unwire_noq(rb->pg[i]);
+		vm_page_free(rb->pg[i]);
+	}
+	m_free(mr);
+}
+
+/*
+ * Copy data between anonymous pages and uiop.
+ */
+int
+rpc_copy_uio_pages(struct mbuf *mr, struct uio *uiop, int siz, bool from_pages)
+{
+	struct rpcrdma_reduce_pg *rb;
+	char *cp, *uiocp;
+	int error, left, len, i, uiosiz, xfer;
+
+	rb = mtod(mr, struct rpcrdma_reduce_pg *);
+	if (siz > rb->len)
+		return (EBADRPC);
+	i = 0;
+	cp = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(rb->pg[i]));
+	len = PAGE_SIZE;
+	if (i == rb->npg - 1 && siz < PAGE_SIZE)
+		len = siz;
+	while (siz > 0) {
+		if (uiop->uio_iovcnt <= 0 || uiop->uio_iov == NULL)
+			return (EBADRPC);
+		left = uiop->uio_iov->iov_len;
+		uiocp = uiop->uio_iov->iov_base;
+		if (left > siz)
+			left = siz;
+		uiosiz = left;
+		while (left > 0) {
+			if (len == 0) {
+				if (i == rb->npg - 1)
+					return (EBADRPC);
+				i++;
+				cp = PHYS_TO_DMAP(
+				    VM_PAGE_TO_PHYS(rb->pg[i]));
+				len = PAGE_SIZE;
+				if (i == rb->npg - 1 && siz < PAGE_SIZE)
+					len = siz;
+			}
+			xfer = (left > len) ? len : left;
+			if (from_pages) {
+				if (uiop->uio_segflg == UIO_SYSSPACE) {
+					memcpy(uiocp, cp, xfer);
+				} else {
+					error = copyout(cp, uiocp, xfer);
+					if (error != 0)
+						return (EBADRPC);
+				}
+			} else {
+				if (uiop->uio_segflg == UIO_SYSSPACE) {
+					memcpy(cp, uiocp, xfer);
+				} else {
+					error = copyout(uiocp, cp, xfer);
+					if (error != 0)
+						return (EBADRPC);
+				}
+			}
+			left -= xfer;
+			len -= xfer;
+			cp += xfer;
+			uiocp += xfer;
+			uiop->uio_offset += xfer;
+			uiop->uio_resid -= xfer;
+		}
+		if (uiop->uio_iov->iov_len <= siz) {
+			uiop->uio_iovcnt--;
+			uiop->uio_iov++;
+		} else {
+			uiop->uio_iov->iov_base = (void *)
+				((char *)uiop->uio_iov->iov_base + uiosiz);
+			uiop->uio_iov->iov_len -= uiosiz;
+		}
+		siz -= uiosiz;
+	}
+	return (0);
+}
+
+/*
+ * Copy data from an mbuf list into a list of pages in an rb.
+ */
+void
+rpc_copy_mbuf_to_rb(struct mbuf *m, struct rpcrdma_reduce_pg *rb)
+{
+	int i, j, k, plen;
+	char *cp, *pgp;
+
+	j = m->m_len;
+	cp = mtod(m, char *);
+	for (i = 0; i < rb->npg && m != NULL; i++) {
+		pgp = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(rb->pg[i]));
+		for (plen = PAGE_SIZE; plen > 0; ) {
+			k = MIN(j, plen);
+			memcpy(pgp, cp, k);
+			j -= k;
+			plen -= k;
+			pgp += k;
+			cp += k;
+			if (j == 0) {
+				m = m->m_next;
+				while (m != NULL && m->m_len == 0)
+					m = m->m_next;
+				if (m == NULL)
+					break;
+				cp = mtod(m, char *);
+				j = m->m_len;
+			}
+		}
+	}
+}
+
+/*
+ * Remove the reduce mbuf from the list and, optionally, free it.
+ */
+void
+rpc_remove_mreduce(struct mbuf *m, bool free_it)
+{
+	struct mbuf *mreduce, **mreduce_prev;
+
+	mreduce_prev = &m;
+	for (mreduce = m; mreduce != NULL &&
+	    (mreduce->m_flags & M_PROTO10) == 0;
+	    mreduce = mreduce->m_next)
+		mreduce_prev = &mreduce->m_next;
+	if (mreduce != NULL) {
+		*mreduce_prev = mreduce->m_next;
+		mreduce->m_next = NULL;
+		if (free_it)
+			m_free(mreduce);
+	}
 }
 
 /*

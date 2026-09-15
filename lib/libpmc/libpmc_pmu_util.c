@@ -230,6 +230,7 @@ struct pmu_event_desc {
 	uint32_t ped_coreid;
 	uint32_t ped_allsources;
 	uint32_t ped_allcores;
+	uint32_t ped_rdwrmask;
 	uint32_t ped_event;
 	uint32_t ped_frontend;
 	uint32_t ped_ldlat;
@@ -371,13 +372,15 @@ pmu_parse_event(struct pmu_event_desc *ped, const char *eventin)
 		else if (strcmp(key, "l3_slice_mask") == 0)
 			ped->ped_l3_slice = strtol(value, NULL, 16);
 		else if (strcmp(key, "sourceid") == 0)
-			ped->ped_sourceid = strtol(value, NULL, 16);
+			ped->ped_sourceid = strtol(value, NULL, 0);
 		else if (strcmp(key, "coreid") == 0)
-			ped->ped_coreid = strtol(value, NULL, 16);
+			ped->ped_coreid = strtol(value, NULL, 0);
 		else if (strcmp(key, "allcores") == 0)
-			ped->ped_allcores = strtol(value, NULL, 10);
+			ped->ped_allcores = strtol(value, NULL, 0);
 		else if (strcmp(key, "allsources") == 0)
-			ped->ped_allsources = strtol(value, NULL, 10);
+			ped->ped_allsources = strtol(value, NULL, 0);
+		else if (strcmp(key, "rdwrmask") == 0)
+			ped->ped_rdwrmask = strtol(value, NULL, 0);
 		else if (strcmp(key, "pebs") == 0)
 			ped->ped_pebs = strtol(value, NULL, 10);
 		else {
@@ -589,6 +592,10 @@ pmc_pmu_amd_pmcallocate(const char *event_name, struct pmc_op_pmcallocate *pm,
 			amd->pm_amd_config |=
 			    AMD_PMC_DF2_TO_UNITMASK(ped->ped_umask);
 		}
+	} else if (strcmp("amd_umc", pe->pmu) == 0) {
+		amd->pm_amd_sub_class = PMC_AMD_SUB_CLASS_UMC;
+		amd->pm_amd_config |= AMD_PMC_UMC_TO_EVENTMASK(ped->ped_event);
+		amd->pm_amd_config |= AMD_PMC_UMC_TO_RDWRMASK(ped->ped_rdwrmask);
 	} else {
 		printf("PMC pmu '%s' is not supported!\n", pe->pmu);
 		return (EOPNOTSUPP);

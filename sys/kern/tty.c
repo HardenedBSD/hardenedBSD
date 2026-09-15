@@ -68,12 +68,16 @@
 #undef TTYDEFCHARS
 #include <sys/ucred.h>
 #include <sys/vnode.h>
+#define EXTERR_CATEGORY EXTERR_CAT_TTY
+#include <sys/exterrvar.h>
 
 #include <fs/devfs/devfs.h>
 
 static MALLOC_DEFINE(M_TTY, "tty", "tty device");
 
-static void tty_rel_free(struct tty *tp);
+static void tty_rel_free(struct tty *tp, bool inttydevclose);
+static int tty_wait_proctree(struct tty *tp, struct cv *cv,
+    int proctree_lock_mode);
 
 static TAILQ_HEAD(, tty) tty_list = TAILQ_HEAD_INITIALIZER(tty_list);
 static struct sx tty_list_sx;
@@ -228,20 +232,22 @@ ttydev_enter(struct tty *tp)
 	if (tty_gone(tp) || !tty_opened(tp)) {
 		/* Device is already gone. */
 		tty_unlock(tp);
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "ttydev_enter: device is gone"));
 	}
 
 	return (0);
 }
 
 static void
-ttydev_leave(struct tty *tp)
+ttydev_leave(struct tty *tp, bool inttydevclose)
 {
 
 	tty_assert_locked(tp);
 
 	if (tty_opened(tp) || tp->t_flags & TF_OPENCLOSE) {
 		/* Device is still opened somewhere. */
+		if (inttydevclose)
+			tp->t_flags &= ~TF_INDEVCLOSE;
 		tty_unlock(tp);
 		return;
 	}
@@ -268,7 +274,7 @@ ttydev_leave(struct tty *tp)
 
 	tp->t_flags &= ~TF_OPENCLOSE;
 	cv_broadcast(&tp->t_dcdwait);
-	tty_rel_free(tp);
+	tty_rel_free(tp, inttydevclose);
 }
 
 /*
@@ -287,7 +293,7 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 	if (tty_gone(tp)) {
 		/* Device is already gone. */
 		tty_unlock(tp);
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "ttydev_open: device is gone"));
 	}
 
 	/*
@@ -369,7 +375,7 @@ ttydev_open(struct cdev *dev, int oflags, int devtype __unused,
 
 done:	tp->t_flags &= ~TF_OPENCLOSE;
 	cv_broadcast(&tp->t_dcdwait);
-	ttydev_leave(tp);
+	ttydev_leave(tp, false);
 
 	return (error);
 }
@@ -381,6 +387,11 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 	struct tty *tp = dev->si_drv1;
 
 	tty_lock(tp);
+	if ((tp->t_flags & TF_INDEVCLOSE) != 0) {
+		tty_unlock(tp);
+		return (0);
+	}
+	tp->t_flags |= TF_INDEVCLOSE;
 
 	/*
 	 * Don't actually close the device if it is being used as the
@@ -394,6 +405,7 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 		tp->t_flags &= ~(TF_OPENED_IN|TF_OPENED_OUT);
 
 	if (tp->t_flags & TF_OPENED) {
+		tp->t_flags &= ~TF_INDEVCLOSE;
 		tty_unlock(tp);
 		return (0);
 	}
@@ -413,7 +425,7 @@ ttydev_close(struct cdev *dev, int fflag, int devtype __unused,
 	cv_broadcast(&tp->t_bgwait);
 	cv_broadcast(&tp->t_dcdwait);
 
-	ttydev_leave(tp);
+	ttydev_leave(tp, true);
 
 	return (0);
 }
@@ -428,7 +440,8 @@ tty_is_ctty(struct tty *tp, struct proc *p)
 }
 
 int
-tty_wait_background(struct tty *tp, struct thread *td, int sig)
+tty_wait_background(struct tty *tp, struct thread *td, int sig,
+    int proctree_lock_mode)
 {
 	struct proc *p;
 	struct pgrp *pg;
@@ -437,6 +450,9 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 
 	MPASS(sig == SIGTTIN || sig == SIGTTOU);
 	tty_assert_locked(tp);
+	MPASS(proctree_lock_mode == LA_UNLOCKED ||
+	    proctree_lock_mode == LA_SLOCKED ||
+	    proctree_lock_mode == LA_XLOCKED);
 
 	p = td->td_proc;
 	for (;;) {
@@ -483,7 +499,7 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 			/* Don't allow the action to happen. */
 			PROC_UNLOCK(p);
 			PGRP_UNLOCK(pg);
-			return (EIO);
+			return (EXTERROR(EIO, "cannot wait in background"));
 		}
 		PROC_UNLOCK(p);
 
@@ -501,8 +517,8 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 		pgsignal(pg, ksi.ksi_signo, 1, &ksi);
 		PGRP_UNLOCK(pg);
 
-		error = tty_wait(tp, &tp->t_bgwait);
-		if (error)
+		error = tty_wait_proctree(tp, &tp->t_bgwait, proctree_lock_mode);
+		if (error != 0)
 			return (error);
 	}
 }
@@ -539,7 +555,8 @@ ttydev_write(struct cdev *dev, struct uio *uio, int ioflag)
 		return (error);
 
 	if (tp->t_termios.c_lflag & TOSTOP) {
-		error = tty_wait_background(tp, curthread, SIGTTOU);
+		error = tty_wait_background(tp, curthread, SIGTTOU,
+		    LA_UNLOCKED);
 		if (error)
 			goto done;
 	}
@@ -568,11 +585,215 @@ done:	tty_unlock(tp);
 }
 
 static int
+tty_ioctl_cnotty(struct tty *tp, struct thread *td)
+{
+	struct session *session;
+	struct vnode *vp;
+	struct proc *p;
+	int error;
+
+	p = td->td_proc;
+	error = 0;
+
+	sx_xlock(&proctree_lock);
+	error = ttydev_enter(tp);
+	if (error != 0)
+		goto out_unlock2;
+
+	/*
+	 * If the session doesn't have a controlling TTY, or if we weren't
+	 * invoked on the controlling TTY, we'll return ENOTTY as we've
+	 * historically done.
+	 */
+	session = p->p_session;
+	if (session->s_ttyp == NULL || session->s_ttyp != tp) {
+		error = EXTERROR(ENOTTY, "no controlling tty");
+		goto out_unlock1;
+	}
+
+	if (!SESS_LEADER(p)) {
+		error = EXTERROR(EPERM, "not a session leader");
+		goto out_unlock1;
+	}
+
+	PROC_LOCK(p);
+	SESS_LOCK(session);
+	vp = session->s_ttyvp;
+	session->s_ttyp = NULL;
+	session->s_ttyvp = NULL;
+	session->s_ttydp = NULL;
+	SESS_UNLOCK(session);
+
+	if (tp->t_session == session) {
+		tp->t_session = NULL;
+		tp->t_pgrp = NULL;
+	}
+	tp->t_sessioncnt--;
+	p->p_flag &= ~P_CONTROLT;
+	PROC_UNLOCK(p);
+	sx_xunlock(&proctree_lock);
+
+	/*
+	 * If we did have a vnode, release our reference.  Ordinarily
+	 * we manage these at the devfs layer, but we can't
+	 * necessarily know that we were invoked on the vnode
+	 * referenced in the session (i.e. the vnode we hold a
+	 * reference to).  We explicitly don't check VBAD/VIRF_DOOMED
+	 * here to avoid a vnode leak -- in circumstances elsewhere
+	 * where we'd hit a VIRF_DOOMED vnode, release has been
+	 * deferred until the controlling TTY is either changed or
+	 * released.
+	 */
+	if (vp != NULL)
+		devfs_ctty_unref(vp);
+
+	tty_unlock(tp);
+	return (error);
+
+out_unlock1:
+	tty_unlock(tp);
+out_unlock2:
+	sx_xunlock(&proctree_lock);
+	return (error);
+}
+
+static int
+ttydev_ioctl_sctty(struct tty *tp, caddr_t data, struct thread *td)
+{
+	struct proc *p;
+	int error;
+
+	p = td->td_proc;
+	error = 0;
+
+	error = ttydev_enter(tp);
+	if (error != 0)
+		return (error);
+
+	error = tty_wait_background(tp, td, SIGTTOU, LA_XLOCKED);
+	if (error != 0)
+		goto out;
+
+	if (!SESS_LEADER(p)) {
+		/* Only the session leader may do this. */
+		error = EXTERROR(EPERM, "not a session leader");
+		goto out;
+	}
+
+	if (tp->t_session != NULL && tp->t_session == p->p_session) {
+		/* This is already our controlling TTY. */
+		goto out;
+	}
+
+	if (p->p_session->s_ttyp != NULL ||
+	    (tp->t_session != NULL && tp->t_session->s_ttyvp != NULL &&
+	    tp->t_session->s_ttyvp->v_type != VBAD)) {
+		/*
+		 * There is already a relation between a TTY and
+		 * a session, or the caller is not the session
+		 * leader.
+		 *
+		 * Allow the TTY to be stolen when the vnode is
+		 * invalid, but the reference to the TTY is
+		 * still active.  This allows immediate reuse of
+		 * TTYs of which the session leader has been
+		 * killed or the TTY revoked.
+		 */
+		error = EXTERROR(EPERM, "session already has CTTY");
+		goto out;
+	}
+
+	/* Connect the session to the TTY. */
+	tp->t_session = p->p_session;
+	tp->t_session->s_ttyp = tp;
+	tp->t_sessioncnt++;
+
+	/* Assign foreground process group. */
+	tp->t_pgrp = p->p_pgrp;
+	PROC_LOCK(p);
+	p->p_flag |= P_CONTROLT;
+	PROC_UNLOCK(p);
+out:
+	tty_unlock(tp);
+	return (error);
+}
+
+static int
+ttydev_ioctl_spgrp(struct tty *tp, caddr_t data, struct thread *td)
+{
+	struct pgrp *pg;
+	int error;
+
+	error = ttydev_enter(tp);
+	if (error != 0)
+		return (error);
+
+	error = tty_wait_background(tp, td, SIGTTOU, LA_SLOCKED);
+	if (error != 0)
+		goto out;
+
+	pg = pgfind(*(int *)data);
+	if (pg != NULL)
+		PGRP_UNLOCK(pg);
+	if (pg == NULL || pg->pg_session != td->td_proc->p_session) {
+		error = EXTERROR(EPERM,
+		    "pgrp %jd belongs to other session %jd",
+		    pg != NULL ? pg->pg_id : -1,
+		    td->td_proc->p_session->s_sid);
+		goto out;
+	}
+
+	/*
+	 * Determine if this TTY is the controlling TTY.
+	 */
+	if (!tty_is_ctty(tp, td->td_proc)) {
+		error = EXTERROR(ENOTTY, "not a controlling tty");
+		goto out;
+	}
+	tp->t_pgrp = pg;
+
+	/* Wake up the background process groups. */
+	cv_broadcast(&tp->t_bgwait);
+out:
+	tty_unlock(tp);
+	return (error);
+}
+
+int
+ttydev_ioctl_proctree(struct tty *tp, u_long cmd, caddr_t data,
+    struct thread *td)
+{
+	int error;
+
+	switch (cmd) {
+	case TIOCNOTTY:
+		error = tty_ioctl_cnotty(tp, td);
+		break;
+	case TIOCSCTTY:
+		sx_xlock(&proctree_lock);
+		error = ttydev_ioctl_sctty(tp, data, td);
+		sx_xunlock(&proctree_lock);
+		break;
+	case TIOCSPGRP:
+		sx_slock(&proctree_lock);
+		error = ttydev_ioctl_spgrp(tp, data, td);
+		sx_sunlock(&proctree_lock);
+		break;
+	default:
+		__unreachable();
+	}
+	return (error);
+}
+
+static int
 ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
     struct thread *td)
 {
 	struct tty *tp = dev->si_drv1;
 	int error;
+
+	if (cmd == TIOCNOTTY || cmd == TIOCSCTTY || cmd == TIOCSPGRP)
+		return (ttydev_ioctl_proctree(tp, cmd, data, td));
 
 	error = ttydev_enter(tp);
 	if (error)
@@ -586,11 +807,9 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case TIOCFLUSH:
 	case TIOCNXCL:
 	case TIOCSBRK:
-	case TIOCSCTTY:
 	case TIOCSETA:
 	case TIOCSETAF:
 	case TIOCSETAW:
-	case TIOCSPGRP:
 	case TIOCSTART:
 	case TIOCSTAT:
 	case TIOCSTI:
@@ -620,7 +839,8 @@ ttydev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 		 * If the ioctl() causes the TTY to be modified, let it
 		 * wait in the background.
 		 */
-		error = tty_wait_background(tp, curthread, SIGTTOU);
+		error = tty_wait_background(tp, curthread, SIGTTOU,
+		    LA_UNLOCKED);
 		if (error)
 			goto done;
 	}
@@ -870,7 +1090,7 @@ ttyil_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 
 	tty_lock(tp);
 	if (tty_gone(tp)) {
-		error = ENODEV;
+		error = (EXTERROR(ENODEV, "ttyil_ioctl: device is gone"));
 		goto done;
 	}
 
@@ -1156,7 +1376,7 @@ tty_dealloc(void *arg)
 }
 
 static void
-tty_rel_free(struct tty *tp)
+tty_rel_free(struct tty *tp, bool inttydevclose)
 {
 	struct cdev *dev;
 
@@ -1165,6 +1385,8 @@ tty_rel_free(struct tty *tp)
 #define	TF_ACTIVITY	(TF_GONE|TF_OPENED|TF_HOOK|TF_OPENCLOSE)
 	if (tp->t_sessioncnt != 0 || (tp->t_flags & TF_ACTIVITY) != TF_GONE) {
 		/* TTY is still in use. */
+		if (inttydevclose)
+			tp->t_flags &= ~TF_INDEVCLOSE;
 		tty_unlock(tp);
 		return;
 	}
@@ -1175,6 +1397,8 @@ tty_rel_free(struct tty *tp)
 	/* TTY can be deallocated. */
 	dev = tp->t_dev;
 	tp->t_dev = NULL;
+	if (inttydevclose)
+		tp->t_flags &= ~TF_INDEVCLOSE;
 	tty_unlock(tp);
 
 	if (dev != NULL) {
@@ -1211,7 +1435,7 @@ tty_rel_sess(struct tty *tp, struct session *sess)
 		MPASS(tp->t_pgrp == NULL);
 	}
 	tp->t_sessioncnt--;
-	tty_rel_free(tp);
+	tty_rel_free(tp, false);
 }
 
 void
@@ -1230,76 +1454,7 @@ tty_rel_gone(struct tty *tp)
 	cv_broadcast(&tp->t_dcdwait);
 
 	tp->t_flags |= TF_GONE;
-	tty_rel_free(tp);
-}
-
-static int
-tty_drop_ctty(struct tty *tp, struct proc *p)
-{
-	struct session *session;
-	struct vnode *vp;
-
-	/*
-	 * This looks terrible, but it's generally safe as long as the tty
-	 * hasn't gone away while we had the lock dropped.  All of our sanity
-	 * checking that this operation is OK happens after we've picked it back
-	 * up, so other state changes are generally not fatal and the potential
-	 * for this particular operation to happen out-of-order in a
-	 * multithreaded scenario is likely a non-issue.
-	 */
-	tty_unlock(tp);
-	sx_xlock(&proctree_lock);
-	tty_lock(tp);
-	if (tty_gone(tp)) {
-		sx_xunlock(&proctree_lock);
-		return (ENODEV);
-	}
-
-	/*
-	 * If the session doesn't have a controlling TTY, or if we weren't
-	 * invoked on the controlling TTY, we'll return ENOIOCTL as we've
-	 * historically done.
-	 */
-	session = p->p_session;
-	if (session->s_ttyp == NULL || session->s_ttyp != tp) {
-		sx_xunlock(&proctree_lock);
-		return (ENOTTY);
-	}
-
-	if (!SESS_LEADER(p)) {
-		sx_xunlock(&proctree_lock);
-		return (EPERM);
-	}
-
-	PROC_LOCK(p);
-	SESS_LOCK(session);
-	vp = session->s_ttyvp;
-	session->s_ttyp = NULL;
-	session->s_ttyvp = NULL;
-	session->s_ttydp = NULL;
-	SESS_UNLOCK(session);
-
-	if (tp->t_session == session) {
-		tp->t_session = NULL;
-		tp->t_pgrp = NULL;
-	}
-	tp->t_sessioncnt--;
-	p->p_flag &= ~P_CONTROLT;
-	PROC_UNLOCK(p);
-	sx_xunlock(&proctree_lock);
-
-	/*
-	 * If we did have a vnode, release our reference.  Ordinarily we manage
-	 * these at the devfs layer, but we can't necessarily know that we were
-	 * invoked on the vnode referenced in the session (i.e. the vnode we
-	 * hold a reference to).  We explicitly don't check VBAD/VIRF_DOOMED here
-	 * to avoid a vnode leak -- in circumstances elsewhere where we'd hit a
-	 * VIRF_DOOMED vnode, release has been deferred until the controlling TTY
-	 * is either changed or released.
-	 */
-	if (vp != NULL)
-		devfs_ctty_unref(vp);
-	return (0);
+	tty_rel_free(tp, false);
 }
 
 /*
@@ -1599,7 +1754,44 @@ tty_wait(struct tty *tp, struct cv *cv)
 
 	/* Bail out when the device slipped away. */
 	if (tty_gone(tp))
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "tty_wait: device is gone"));
+
+	/* Restart the system call when we may have been revoked. */
+	if (tp->t_revokecnt != revokecnt)
+		return (ERESTART);
+
+	return (error);
+}
+
+static int
+tty_wait_proctree(struct tty *tp, struct cv *cv, int proctree_lock_mode)
+{
+	int error;
+	int revokecnt = tp->t_revokecnt;
+
+	tty_lock_assert(tp, MA_OWNED | MA_NOTRECURSED);
+	MPASS(!tty_gone(tp));
+	MPASS(proctree_lock_mode == LA_UNLOCKED ||
+	    proctree_lock_mode == LA_SLOCKED ||
+	    proctree_lock_mode == LA_XLOCKED);
+
+	if (proctree_lock_mode != LA_UNLOCKED)
+		sx_unlock(&proctree_lock);
+
+	error = cv_wait_sig_unlock(cv, tp->t_mtx);
+	switch (proctree_lock_mode) {
+	case LA_SLOCKED:
+		sx_slock(&proctree_lock);
+		break;
+	case LA_XLOCKED:
+		sx_xlock(&proctree_lock);
+		break;
+	}
+	tty_lock(tp);
+
+	/* Bail out when the device slipped away. */
+	if (tty_gone(tp))
+		return (EXTERROR(ENXIO, "tty_wait_proctree: device is gone"));
 
 	/* Restart the system call when we may have been revoked. */
 	if (tp->t_revokecnt != revokecnt)
@@ -1621,7 +1813,7 @@ tty_timedwait(struct tty *tp, struct cv *cv, int hz)
 
 	/* Bail out when the device slipped away. */
 	if (tty_gone(tp))
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "tty_timedwait: device is gone"));
 
 	/* Restart the system call when we may have been revoked. */
 	if (tp->t_revokecnt != revokecnt)
@@ -1669,7 +1861,7 @@ tty_sti_check(struct tty *tp, int fflag, struct thread *td)
 {
 	/* Check for global disable. */
 	if (!tty_tiocsti)
-		return (EPERM);
+		return (EXTERROR(EPERM, "security.bsd.allow_tiocsti"));
 
 	/* Root can bypass all of our constraints. */
 	if (priv_check(td, PRIV_TTY_STI) == 0)
@@ -1677,11 +1869,11 @@ tty_sti_check(struct tty *tp, int fflag, struct thread *td)
 
 	/* Unprivileged users must have it opened for read. */
 	if ((fflag & FREAD) == 0)
-		return (EPERM);
+		return (EXTERROR(EPERM, "opened read-only"));
 
 	/* It must also be their controlling tty. */
 	if (!tty_is_ctty(tp, td->td_proc))
-		return (EACCES);
+		return (EXTERROR(EACCES, "not a controlling tty"));
 
 	return (0);
 }
@@ -1868,7 +2060,7 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		return (0);
 	case TIOCGPGRP:
 		if (!tty_is_ctty(tp, td->td_proc))
-			return (ENOTTY);
+			return (EXTERROR(ENOTTY, "not a controlling tty"));
 
 		if (tp->t_pgrp != NULL)
 			*(int *)data = tp->t_pgrp->pg_id;
@@ -1877,100 +2069,17 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		return (0);
 	case TIOCGSID:
 		if (!tty_is_ctty(tp, td->td_proc))
-			return (ENOTTY);
+			return (EXTERROR(ENOTTY, "not a controlling tty"));
 
 		MPASS(tp->t_session);
 		*(int *)data = tp->t_session->s_sid;
 		return (0);
 	case TIOCNOTTY:
-		return (tty_drop_ctty(tp, td->td_proc));
-	case TIOCSCTTY: {
-		struct proc *p = td->td_proc;
-
-		/* XXX: This looks awful. */
-		tty_unlock(tp);
-		sx_xlock(&proctree_lock);
-		tty_lock(tp);
-
-		if (!SESS_LEADER(p)) {
-			/* Only the session leader may do this. */
-			sx_xunlock(&proctree_lock);
-			return (EPERM);
-		}
-
-		if (tp->t_session != NULL && tp->t_session == p->p_session) {
-			/* This is already our controlling TTY. */
-			sx_xunlock(&proctree_lock);
-			return (0);
-		}
-
-		if (p->p_session->s_ttyp != NULL ||
-		    (tp->t_session != NULL && tp->t_session->s_ttyvp != NULL &&
-		    tp->t_session->s_ttyvp->v_type != VBAD)) {
-			/*
-			 * There is already a relation between a TTY and
-			 * a session, or the caller is not the session
-			 * leader.
-			 *
-			 * Allow the TTY to be stolen when the vnode is
-			 * invalid, but the reference to the TTY is
-			 * still active.  This allows immediate reuse of
-			 * TTYs of which the session leader has been
-			 * killed or the TTY revoked.
-			 */
-			sx_xunlock(&proctree_lock);
-			return (EPERM);
-		}
-
-		/* Connect the session to the TTY. */
-		tp->t_session = p->p_session;
-		tp->t_session->s_ttyp = tp;
-		tp->t_sessioncnt++;
-
-		/* Assign foreground process group. */
-		tp->t_pgrp = p->p_pgrp;
-		PROC_LOCK(p);
-		p->p_flag |= P_CONTROLT;
-		PROC_UNLOCK(p);
-
-		sx_xunlock(&proctree_lock);
-		return (0);
-	}
-	case TIOCSPGRP: {
-		struct pgrp *pg;
-
-		/*
-		 * XXX: Temporarily unlock the TTY to locate the process
-		 * group. This code would be lot nicer if we would ever
-		 * decompose proctree_lock.
-		 */
-		tty_unlock(tp);
-		sx_slock(&proctree_lock);
-		pg = pgfind(*(int *)data);
-		if (pg != NULL)
-			PGRP_UNLOCK(pg);
-		if (pg == NULL || pg->pg_session != td->td_proc->p_session) {
-			sx_sunlock(&proctree_lock);
-			tty_lock(tp);
-			return (EPERM);
-		}
-		tty_lock(tp);
-
-		/*
-		 * Determine if this TTY is the controlling TTY after
-		 * relocking the TTY.
-		 */
-		if (!tty_is_ctty(tp, td->td_proc)) {
-			sx_sunlock(&proctree_lock);
-			return (ENOTTY);
-		}
-		tp->t_pgrp = pg;
-		sx_sunlock(&proctree_lock);
-
-		/* Wake up the background process groups. */
-		cv_broadcast(&tp->t_bgwait);
-		return (0);
-	}
+		panic("TIOCNOTTY");
+	case TIOCSCTTY:
+		panic("TIOCSCTTY");
+	case TIOCSPGRP:
+		panic("TIOCSPGRP");
 	case TIOCFLUSH: {
 		int flags = *(int *)data;
 
@@ -2057,7 +2166,7 @@ tty_ioctl(struct tty *tp, u_long cmd, void *data, int fflag, struct thread *td)
 	tty_assert_locked(tp);
 
 	if (tty_gone(tp))
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "tty_ioctl: device is gone"));
 
 	error = ttydevsw_ioctl(tp, cmd, data, td);
 	if (error == ENOIOCTL)
@@ -2241,7 +2350,7 @@ ttyhook_unregister(struct tty *tp)
 	ttydisc_optimize(tp);
 
 	/* Maybe deallocate the TTY as well. */
-	tty_rel_free(tp);
+	tty_rel_free(tp, false);
 }
 
 /*
@@ -2255,7 +2364,7 @@ ttyconsdev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 
 	/* System has no console device. */
 	if (dev_console_filename == NULL)
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "system has no console device"));
 
 	/* Look up corresponding TTY by device name. */
 	sx_slock(&tty_list_sx);
@@ -2269,7 +2378,7 @@ ttyconsdev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 
 	/* System console has no TTY associated. */
 	if (dev_console->si_drv1 == NULL)
-		return (ENXIO);
+		return (EXTERROR(ENXIO, "system console has no TTY attached"));
 
 	return (ttydev_open(dev, oflags, devtype, td));
 }

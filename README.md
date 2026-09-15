@@ -238,6 +238,10 @@ HardenedBSD and the ports tree both set the following `CFLAGS`/`CXXFLAGS`:
 1. `-fno-delete-null-pointer-checks`
 1. `-Werror=format-security`
 
+Various `geom(4)` devfs nodes have been hardened to be owned by `root:wheel`
+(rather than `root:operator`) and chmod `0600` (rather than `0640`). This closes
+various avenues for leaking data, including decrypted `geli(8)` storage devices.
+
 ## Shared Memory (SHM) Hardening
 
 Shared memory (SHM) hardening places restrictions on what can be done with the
@@ -982,12 +986,17 @@ $ git clone \
 
 HardenedBSD's official projects on Radicle include:
 
-| RID                               | Repository                        |
-|-----------------------------------|-----------------------------------|
-| rad:z2HLHXgL1xevBNQsf8BmQW7MpJmtm | Source Tree (src)                 |
-| rad:z2XrdvALg77ycnuZRXgScb27yb3wM | Ports Tree (ports)                |
-| rad:z3QDZAW2FAfuLvihrhiyDC9fAD8G9 | HardenedBSD Package Manager (pkg) |
-| rad:zAcKb74s1brWWpmrsyed2hWiGbuG  | HardenedBSD Build Scripts         |
+| RID                               | Repository                            |
+|-----------------------------------|---------------------------------------|
+| rad:z2HLHXgL1xevBNQsf8BmQW7MpJmtm | Source Tree (src)                     |
+| rad:z2XrdvALg77ycnuZRXgScb27yb3wM | Ports Tree (ports)                    |
+| rad:z4Aucnb2nozutuek6o8PC9YfaBeTm | HardenedBSD Documentation             |
+| rad:z3QDZAW2FAfuLvihrhiyDC9fAD8G9 | HardenedBSD Package Manager (pkg)     |
+| rad:zAcKb74s1brWWpmrsyed2hWiGbuG  | HardenedBSD Build Scripts             |
+| rad:z5p6VcE97HCTVkiNtjBhMtW5mEnW  | HardenedBSD Security Administration   |
+| rad:zZzwtG13zar5mKyyyeAGTByghVqD  | hbsdmon                               |
+| rad:z2hVyd5Ea5Sm8xfY5ovym67wTwrKo | vm-bhyve-hbsd                         |
+| rad:z4BsvtNJUeUWWUQyGyL6deGh8JkkG | Repo AutoSync (Rync)                  |
 
 When submitting bug reports, please include the following information:
 
@@ -1000,10 +1009,13 @@ When submitting bug reports, please include the following information:
 
 HardenedBSD development branches:
 
-| Branch           			| Repository		| Binary Updates| Purpose						|
-|---------------------------------------|-----------------------|---------------|-------------------------------------------------------|
-| hardened/current/master		| HardenedBSD		| amd64, arm64	| Main development branch (16-CURRENT)			|
-| hardened/15-stable/main       | HardenedBSD		| amd64		| 15-STABLE development					|
+| Branch           			        | Repository		| Binary Updates    | Purpose                               |
+|-----------------------------------|-------------------|-------------------|---------------------------------------|
+| hardened/current/master		    | HardenedBSD		| amd64             | Main development branch (16-CURRENT)  |
+| hardened/current/cross-dso-cfi    | HardenedBSD		| amd64             | Cross-DSO CFI development branch      |
+| hardened/current/pledge           | HardenedBSD		| amd64             | Pledge port development branch        |
+| hardened/15-stable/main           | HardenedBSD		| amd64             | 15-STABLE development                 |
+| hardened/15-stable/pledge         | HardenedBSD		| amd64             | 15-STABLE Pledge port development     |
 
 For the most part, the normal FreeBSD development process can be followed.
 Perform a git clone if the intended branch into `/usr/src` and perform the
@@ -1017,6 +1029,26 @@ following steps:
 
 Making use of ZFS and ZFS boot environments in particular is highly recommended,
 especially for those performing custom builds.
+
+New features and bug fixes are expected to land in the `hardened/current/master`
+branch first. After some soak time, commits might become candidates to be
+brought into supported stable branches. Commits should be explicitly tagged as
+being slated for cherry-picked into the stable branches with an "MFC-to" line.
+
+At times, there may be bugs specific to a given stable branch. Direct commits to
+the stable branch should be explicitly mentioned in the commit log message.
+Commits to stable that would break ABI, API, KBI, or KPI must receive explicit
+approval by the HardenedBSD Core Team (`core@hardenedbsd.org`) prior to
+acceptance.
+
+Situations that would require the use of force pushing (`git push --force` or
+`git push --force-with-lease`) require explicit approval by the HardenedBSD Core
+Team (`core@hardenedbsd.org`).
+
+HardenedBSD does not willfully accept AI/LLM/etc generated patches, including
+for documentation, for any project we maintain. If the project has an upstream,
+like our src and ports repos have FreeBSD as their upstream, we cannot control
+what that upstream accepts (or doesn't accept.)
 
 # Ports and Packages Collection
 

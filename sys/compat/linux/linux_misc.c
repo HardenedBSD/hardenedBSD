@@ -362,6 +362,28 @@ linux_mprotect(struct thread *td, struct linux_mprotect_args *uap)
 }
 
 int
+linux_pkey_mprotect(struct thread *td, struct linux_pkey_mprotect_args *uap)
+{
+
+	return (linux_pkey_mprotect_common(td, uap->start, uap->len,
+	    uap->prot, uap->pkey));
+}
+
+int
+linux_pkey_alloc(struct thread *td, struct linux_pkey_alloc_args *uap)
+{
+
+	return (linux_pkey_alloc_common(td, uap->flags, uap->init_val));
+}
+
+int
+linux_pkey_free(struct thread *td, struct linux_pkey_free_args *uap)
+{
+
+	return (linux_pkey_free_common(td, uap->pkey));
+}
+
+int
 linux_madvise(struct thread *td, struct linux_madvise_args *uap)
 {
 
@@ -1843,6 +1865,23 @@ linux_prctl(struct thread *td, struct linux_prctl_args *args)
 			    (uintmax_t)args->arg2);
 			error = EINVAL;
 		}
+		break;
+	case LINUX_PR_GET_THP_DISABLE:
+		/*
+		 * THP not in play, since FreeBSD doesn't have THP. Although
+		 * similar, superpages don't have the crazy issues THP does, so
+		 * tell the best lie possible: there's no problems with crazy
+		 * latency spikes: this feature is disabled.
+		 */
+
+		td->td_retval[0] = 1;
+		break;
+	case LINUX_PR_SET_THP_DISABLE:
+		/*
+		 * Accept anything that's valid: Linux treats any nonzero
+		 * arg2 as "disable", so there's nothing to reject here.
+		 */
+		td->td_retval[0] = 0;
 		break;
 	default:
 		linux_msg(td, "unsupported prctl option %d", args->option);

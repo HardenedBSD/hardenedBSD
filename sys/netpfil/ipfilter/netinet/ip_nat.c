@@ -5147,7 +5147,7 @@ ipf_nat_out(fr_info_t *fin, nat_t *nat, int natadd, u_32_t nflags)
 		ip_fillid(ip, V_ip_random_id);
 		s2 = ntohs(ip->ip_id);
 
-		s1 = ip->ip_len;
+		s1 = ntohs(ip->ip_len);
 		ip->ip_len = ntohs(ip->ip_len);
 		ip->ip_len += fin->fin_plen;
 		ip->ip_len = htons(ip->ip_len);
@@ -5807,14 +5807,13 @@ ipf_nat_expire(ipf_main_softc_t *softc)
 	ipf_nat_softc_t *softn = softc->ipf_nat_soft;
 	ipftq_t *ifq, *ifqnext;
 	ipftqent_t *tqe, *tqn;
-	int i;
 	SPL_INT(s);
 
 	SPL_NET(s);
 	WRITE_ENTER(&softc->ipf_nat);
-	for (ifq = softn->ipf_nat_tcptq, i = 0; ifq != NULL;
+	for (ifq = softn->ipf_nat_tcptq; ifq != NULL;
 	     ifq = ifq->ifq_next) {
-		for (tqn = ifq->ifq_head; ((tqe = tqn) != NULL); i++) {
+		for (tqn = ifq->ifq_head; (tqe = tqn) != NULL;) {
 			if (tqe->tqe_die > softc->ipf_ticks)
 				break;
 			tqn = tqe->tqe_next;
@@ -5823,7 +5822,7 @@ ipf_nat_expire(ipf_main_softc_t *softc)
 	}
 
 	for (ifq = softn->ipf_nat_utqe; ifq != NULL; ifq = ifq->ifq_next) {
-		for (tqn = ifq->ifq_head; ((tqe = tqn) != NULL); i++) {
+		for (tqn = ifq->ifq_head; (tqe = tqn) != NULL;) {
 			if (tqe->tqe_die > softc->ipf_ticks)
 				break;
 			tqn = tqe->tqe_next;

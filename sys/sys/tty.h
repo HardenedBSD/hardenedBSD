@@ -87,6 +87,7 @@ struct tty {
 #define	TF_BUSY_IN	0x20000	/* Process busy in read() -- not supported. */
 #define	TF_BUSY_OUT	0x40000	/* Process busy in write(). */
 #define	TF_BUSY		(TF_BUSY_IN|TF_BUSY_OUT)
+#define	TF_INDEVCLOSE	0x80000	/* In ttydev_close() */
 	unsigned int	t_revokecnt;	/* (t) revoke() count. */
 
 	/* Buffering mechanisms. */
@@ -191,7 +192,8 @@ void	tty_signal_sessleader(struct tty *tp, int signal);
 void	tty_signal_pgrp(struct tty *tp, int signal);
 /* Waking up readers/writers. */
 int	tty_wait(struct tty *tp, struct cv *cv);
-int	tty_wait_background(struct tty *tp, struct thread *td, int sig);
+int	tty_wait_background(struct tty *tp, struct thread *td, int sig,
+    int proctree_lock_mode);
 int	tty_timedwait(struct tty *tp, struct cv *cv, int timo);
 void	tty_wakeup(struct tty *tp, int flags);
 
@@ -225,6 +227,9 @@ void	ttyconsdev_select(const char *name);
 int	pts_alloc(int fflags, struct thread *td, struct file *fp);
 int	pts_alloc_external(int fd, struct thread *td, struct file *fp,
     struct cdev *dev, const char *name);
+
+int	ttydev_ioctl_proctree(struct tty *tp, u_long cmd, caddr_t data,
+	    struct thread *td);
 
 /* Drivers and line disciplines also need to call these. */
 #include <sys/ttydisc.h>

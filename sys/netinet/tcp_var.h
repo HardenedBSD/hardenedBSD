@@ -803,7 +803,7 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
     "\15TF_NOPUSH\16TF_PREVVALID\17TF_WAKESOR\20TF_GPUTINPROG" \
     "\21TF_MORETOCOME\22TF_SONOTCONN\23TF_LASTIDLE\24TF_RXWIN0SENT" \
     "\25TF_FASTRECOVERY\26TF_WASFRECOVERY\27TF_SIGNATURE\30TF_FORCEDATA" \
-    "\31TF_TSO\32TF_TOE\33TF_CLOSED\34TF_UNUSED" \
+    "\31TF_TSO\32TF_TOE\33TF_CLOSED\34TF_DISCONNECTED" \
     "\35TF_LRD\36TF_CONGRECOVERY\37TF_WASCRECOVERY\40TF_FASTOPEN"
 
 #define	IN_FASTRECOVERY(t_flags)	(t_flags & TF_FASTRECOVERY)
@@ -844,7 +844,7 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
 #define	TF2_HPTS_CPU_SET	0x00000200 /* t_hpts_cpu is not random */
 #define	TF2_FBYTES_COMPLETE	0x00000400 /* We have first bytes in and out */
 #define	TF2_ECN_USE_ECT1	0x00000800 /* Use ECT(1) marking on session */
-#define TF2_TCP_ACCOUNTING	0x00001000 /* Do TCP accounting */
+#define	TF2_TCP_ACCOUNTING	0x00001000 /* Do TCP accounting */
 #define	TF2_HPTS_CALLS		0x00002000 /* tcp_output() called via HPTS */
 #define	TF2_MBUF_L_ACKS		0x00004000 /* large mbufs for ack compression */
 #define	TF2_MBUF_ACKCMP		0x00008000 /* mbuf ack compression ok */
@@ -906,7 +906,8 @@ struct tcpopt {
  */
 #define	TO_SYN		0x01		/* parse SYN-only options */
 
-struct hc_metrics_lite {	/* must stay in sync with hc_metrics */
+#ifdef _KERNEL
+struct tcp_hc_metrics {
 	uint32_t	hc_mtu;		/* MTU for this path */
 	uint32_t	hc_ssthresh;	/* outbound gateway buffer limit */
 	uint32_t	hc_rtt;		/* estimated round trip time */
@@ -915,6 +916,7 @@ struct hc_metrics_lite {	/* must stay in sync with hc_metrics */
 	uint32_t	hc_sendpipe;	/* outbound delay-bandwidth product */
 	uint32_t	hc_recvpipe;	/* inbound delay-bandwidth product */
 };
+#endif	/* _KERNEL */
 
 #ifndef _NETINET_IN_PCB_H_
 struct in_conninfo;
@@ -1231,7 +1233,10 @@ struct xtcpcb {
 	uint32_t	t_dsack_pack;		/* (n) */
 	uint16_t	xt_encaps_port;		/* (s) */
 	int16_t		spare16;
-	int32_t		spare32[22];
+	int32_t		t_lognum;		/* (s) */
+	int32_t		t_loglimit;		/* (s) */
+	uint32_t	t_logsn;		/* (s) */
+	int32_t		spare32[19];
 } __aligned(8);
 
 #ifdef _KERNEL
@@ -1255,7 +1260,7 @@ struct tcp_function_info {
  */
 #define	TCPCTL_DO_RFC1323	1	/* use RFC-1323 extensions */
 #define	TCPCTL_MSSDFLT		3	/* MSS default */
-#define TCPCTL_STATS		4	/* statistics */
+#define	TCPCTL_STATS		4	/* statistics */
 #define	TCPCTL_RTTDFLT		5	/* default RTT estimate */
 #define	TCPCTL_KEEPIDLE		6	/* keepalive idle timer */
 #define	TCPCTL_KEEPINTVL	7	/* interval to send keepalives */
@@ -1355,7 +1360,7 @@ VNET_DECLARE(struct inpcbinfo, tcbinfo);
 #define	V_tcp_do_ecn			VNET(tcp_do_ecn)
 #define	V_tcp_do_rfc1323		VNET(tcp_do_rfc1323)
 #define	V_tcp_tolerate_missing_ts	VNET(tcp_tolerate_missing_ts)
-#define V_tcp_ts_offset_per_conn	VNET(tcp_ts_offset_per_conn)
+#define	V_tcp_ts_offset_per_conn	VNET(tcp_ts_offset_per_conn)
 #define	V_tcp_do_rfc3042		VNET(tcp_do_rfc3042)
 #define	V_tcp_do_rfc3390		VNET(tcp_do_rfc3390)
 #define	V_tcp_do_rfc3465		VNET(tcp_do_rfc3465)
@@ -1480,7 +1485,7 @@ uint32_t tcp_maxmtu6(struct in_conninfo *, struct tcp_ifcap *);
 void	 tcp6_use_min_mtu(struct tcpcb *);
 u_int	 tcp_maxseg(const struct tcpcb *);
 u_int	 tcp_fixed_maxseg(const struct tcpcb *);
-void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,
+void	 tcp_mss_update(struct tcpcb *, int, int, struct tcp_hc_metrics *,
 	    struct tcp_ifcap *);
 void	 tcp_mss(struct tcpcb *, int);
 int	 tcp_mssopt(struct in_conninfo *);
@@ -1510,10 +1515,10 @@ void	 tcp_hc_init(void);
 #ifdef VIMAGE
 void	 tcp_hc_destroy(void);
 #endif
-void	 tcp_hc_get(const struct in_conninfo *, struct hc_metrics_lite *);
+void	 tcp_hc_get(const struct in_conninfo *, struct tcp_hc_metrics *);
 uint32_t tcp_hc_getmtu(const struct in_conninfo *);
 void	 tcp_hc_updatemtu(const struct in_conninfo *, uint32_t);
-void	 tcp_hc_update(const struct in_conninfo *, struct hc_metrics_lite *);
+void	 tcp_hc_update(const struct in_conninfo *, struct tcp_hc_metrics *);
 void 	 cc_after_idle(struct tcpcb *tp);
 
 extern	struct protosw tcp_protosw;		/* shared for TOE */

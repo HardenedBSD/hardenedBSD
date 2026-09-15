@@ -15,7 +15,13 @@
 static void
 ufshci_ctrlr_fail(struct ufshci_controller *ctrlr)
 {
-	ctrlr->is_failed = true;
+	/*
+	 * The attach thread and the reset task can both fail the
+	 * controller. A second queue walk would complete the same
+	 * trackers again.
+	 */
+	if (atomic_swap_32(&ctrlr->is_failed, 1) != 0)
+		return;
 
 	ufshci_req_queue_fail(ctrlr, &ctrlr->task_mgmt_req_queue);
 	ufshci_req_queue_fail(ctrlr, &ctrlr->transfer_req_queue);
@@ -121,10 +127,25 @@ ufshci_ctrlr_start(struct ufshci_controller *ctrlr, bool resetting)
 
 	ufshci_dev_init_uic_link_state(ctrlr);
 
-	if ((ctrlr->quirks & UFSHCI_QUIRK_REINIT_AFTER_MAX_GEAR_SWITCH) &&
-	    ufshci_ctrlr_reinit_after_max_gear_switch(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr);
-		return;
+	if (ctrlr->quirks & UFSHCI_QUIRK_REINIT_AFTER_MAX_GEAR_SWITCH) {
+		uint32_t probe;
+
+		/*
+		 * The reinit is only needed when the link did not survive
+		 * the gear switch. A local readback still shows HS when the
+		 * peer is dead. Only peer traffic proves the link works.
+		 */
+		if (ufshci_uic_send_dme_peer_get(ctrlr, PA_Granularity,
+		    &probe) != 0) {
+			ufshci_printf(ctrlr,
+			    "link probe failed after the gear switch, "
+			    "reinitializing\n");
+			if (ufshci_ctrlr_reinit_after_max_gear_switch(
+			    ctrlr) != 0) {
+				ufshci_ctrlr_fail(ctrlr);
+				return;
+			}
+		}
 	}
 
 	/* Read Controller Descriptor (Device, Geometry) */
@@ -145,10 +166,11 @@ ufshci_ctrlr_start(struct ufshci_controller *ctrlr, bool resetting)
 	/* TODO: Configure Background Operations */
 
 	/*
-	 * If the reset is due to a timeout, it is already attached to the SIM
-	 * and does not need to be attached again.
+	 * A reset normally arrives after the SIM is attached. But if the
+	 * first start attempt failed early, the reset path runs without a
+	 * SIM. Attach it whenever it does not exist yet.
 	 */
-	if (!resetting && ufshci_sim_attach(ctrlr) != 0) {
+	if (ctrlr->ufshci_sim == NULL && ufshci_sim_attach(ctrlr) != 0) {
 		ufshci_ctrlr_fail(ctrlr);
 		return;
 	}
@@ -312,6 +334,10 @@ ufshci_ctrlr_reset_task(void *arg, int pending)
 	struct ufshci_controller *ctrlr = arg;
 	int error;
 
+	/* A failed controller must not be re-enabled. */
+	if (ctrlr->is_failed)
+		return;
+
 	/* Release resources */
 	ufshci_utmr_req_queue_disable(ctrlr);
 	ufshci_utr_req_queue_disable(ctrlr);
@@ -363,6 +389,13 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 	}
 	if (!(ctrlr->is_single_db_supported || ctrlr->is_mcq_supported))
 		return (ENXIO);
+
+	/* Every device table entry must name the HS series. */
+	if (ctrlr->hs_series == 0) {
+		ufshci_printf(ctrlr,
+		    "hs_series is missing from the device table\n");
+		return (ENXIO);
+	}
 
 	/*
 	 * The maximum transfer size supported by UFSHCI spec is 65535 * 256 KiB
@@ -448,6 +481,17 @@ ufshci_ctrlr_destruct(struct ufshci_controller *ctrlr, device_t dev)
 		bus_release_resource(ctrlr->dev, SYS_RES_IRQ,
 		    rman_get_rid(ctrlr->res), ctrlr->res);
 
+	/*
+	 * The interrupt and the timers are gone, so nothing enqueues new
+	 * tasks. Free the taskqueue before the SIM teardown below.
+	 */
+	if (ctrlr->taskqueue != NULL) {
+		taskqueue_free(ctrlr->taskqueue);
+		ctrlr->taskqueue = NULL;
+	}
+
+	ufshci_sim_release_wlun_periph(ctrlr);
+
 	mtx_lock(&ctrlr->sc_mtx);
 
 	ufshci_sim_detach(ctrlr);
@@ -494,9 +538,14 @@ int
 ufshci_ctrlr_send_nop(struct ufshci_controller *ctrlr)
 {
 	struct ufshci_completion_poll_status status;
+	int error;
 
 	status.done = 0;
-	ufshci_ctrlr_cmd_send_nop(ctrlr, ufshci_completion_poll_cb, &status);
+	error = ufshci_ctrlr_cmd_send_nop(ctrlr, ufshci_completion_poll_cb,
+	    &status);
+	if (error)
+		return (error);
+
 	ufshci_completion_poll(&status);
 	if (status.error) {
 		ufshci_printf(ctrlr, "ufshci_ctrlr_send_nop failed!\n");

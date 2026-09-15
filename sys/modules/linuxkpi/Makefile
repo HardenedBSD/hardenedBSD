@@ -19,6 +19,7 @@ SRCS=	linux_compat.c \
 	linux_kobject.c \
 	linux_kthread.c \
 	linux_lock.c \
+	linux_math.c \
 	linux_netdev.c \
 	linux_page.c \
 	linuxkpi_page_pool.c \
@@ -35,6 +36,7 @@ SRCS=	linux_compat.c \
 	linux_skbuff.c \
 	linux_slab.c \
 	linux_tasklet.c \
+	linux_timesub.c \
 	linux_usb.c \
 	linux_work.c \
 	linux_xarray.c

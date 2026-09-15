@@ -71,10 +71,15 @@ struct procdesc {
 	/*
 	 * In-flight data and notification of events.
 	 */
-	int		 pd_flags;		/* (p) PD_ flags. */
-	u_short		 pd_xstat;		/* (p) Exit status. */
+	int		 pd_flags;		/* (t) PD_ flags. */
 	struct selinfo	 pd_selinfo;		/* (p) Event notification. */
 	struct mtx	 pd_lock;		/* Protect data + events. */
+
+	/* Exit status. */
+	u_int		 pd_xexit;
+	u_int		 pd_xsig;
+	struct __wrusage pd_wrusage;
+	siginfo_t	 pd_siginfo;
 };
 
 /*
@@ -89,6 +94,7 @@ struct procdesc {
 /*
  * Flags for the pd_flags field.
  */
+#define	PDF_EXIT_INFO	0x00000001	/* Exit info calculated. */
 #define	PDF_EXITED	0x00000004	/* Process exited. */
 
 /*
@@ -102,7 +108,7 @@ struct procdesc {
 /*
  * In-kernel interfaces to process descriptors.
  */
-void	 procdesc_exit(struct proc *);
+bool	 procdesc_exit(struct proc *);
 void	 procdesc_fork(struct proc *p, pid_t child_pid);
 void	 procdesc_jobstate(struct proc *p);
 int	 kern_pdgetpid(struct thread *, int fd, const cap_rights_t *,
@@ -111,12 +117,13 @@ void	 procdesc_new(struct proc *, int);
 void	 procdesc_finit(struct procdesc *, struct file *);
 pid_t	 procdesc_pid(struct file *);
 void	 procdesc_reap(struct proc *);
+void	 procdesc_fill_winfo(struct procdesc *pd, bool proc_locked);
 
 int	 procdesc_falloc(struct thread *, struct file **, int *, int,
 	    struct filecaps *);
 int	 fget_procdesc(struct thread *td, int pfd,
-	    const cap_rights_t *cap_rights, struct file **pfp,
-	    struct procdesc **pdp, struct proc **pp);
+	    const cap_rights_t *cap_rights, int wrong_type_error,
+	    struct file **pfp, struct procdesc **pdp, struct proc **pp);
 #else /* !_KERNEL */
 
 #include <sys/cdefs.h>
@@ -144,6 +151,7 @@ int	 pdopenpid(pid_t, int);
 int	 pdwait(int, int *, int, struct __wrusage *, struct __siginfo *);
 int	 pddupfd(int, int, int);
 pid_t	 pdrfork_thread(int *, int, int, void *, int (*)(void *), void *);
+int	 pdptrace(int, int, int, void *, int);
 __END_DECLS
 
 #endif /* _KERNEL */
@@ -153,7 +161,11 @@ __END_DECLS
  */
 #define	PD_DAEMON	0x00000001	/* Don't exit when procdesc closes. */
 #define	PD_CLOEXEC	0x00000002	/* Close file descriptor on exec. */
+#define	PD_NOWAITPID	0x00000004	/* Reap without waitpid(). */
+#define	PD_PTRACE_CAP	0x00000008	/* Allow PT_PROCDESC in cap mode. */
 
-#define	PD_ALLOWED_AT_FORK	(PD_DAEMON | PD_CLOEXEC)
+#define	PD_ALLOWED_AT_FORK	\
+    (PD_DAEMON | PD_CLOEXEC | PD_NOWAITPID | PD_PTRACE_CAP)
+#define	PD_ALLOWED_AT_OPENPID	(PD_DAEMON | PD_CLOEXEC | PD_PTRACE_CAP)
 
 #endif /* !_SYS_PROCDESC_H_ */

@@ -458,6 +458,11 @@ device_add(struct device *dev)
 		if (dev->devt == 0)
 			dev->devt = makedev(0, device_get_unit(dev->bsddev));
 	}
+
+	/*
+	 * Do not change:
+	 * the specific location is used by IB user space tools (PR298485).
+	 */
 	kobject_add(&dev->kobj, &dev->class->kobj, dev_name(dev));
 
 	if (dev->groups)

@@ -62,7 +62,7 @@ properties:
   default-state:
     description:
       The initial state of the LED. If the LED is already on or off and the
-      default-state property is set the to same value, then no glitch should be
+      default-state property is set to the same value, then no glitch should be
       produced where the LED momentarily turns off (or on). The "keep" setting
       will keep the LED at whatever its current state is, without producing a
       glitch.
@@ -171,6 +171,12 @@ properties:
       Note that this flag is mainly used for PWM-LEDs, where it is not possible
       to map brightness to current. Drivers for other controllers should use
       led-max-microamp.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  default-brightness:
+    description:
+      Brightness to be set if LED's default state is on. Used only during
+      initialization. If the option is not set then max brightness is used.
     $ref: /schemas/types.yaml#/definitions/uint32
 
   panic-indicator:

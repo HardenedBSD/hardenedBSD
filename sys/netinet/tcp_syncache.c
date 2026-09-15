@@ -1169,7 +1169,6 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 				    s, __func__);
 				free(s, M_TCPLOG);
 			}
-			TCPSTAT_INC(tcps_sig_err_sigopt);
 			return (-1); /* Do not send RST */
 		}
 #endif /* TCP_SIGNATURE */
@@ -1528,8 +1527,10 @@ syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			    TCPMD5_INPUT(m, NULL, NULL) != ENOENT)
 				goto done;
 		}
-	} else if (to->to_flags & TOF_SIGNATURE)
+	} else if (to->to_flags & TOF_SIGNATURE) {
+		TCPSTAT_INC(tcps_sig_err_sigopt);
 		goto done;
+	}
 #endif	/* TCP_SIGNATURE */
 	/*
 	 * See if we already have an entry for this connection.
@@ -2384,8 +2385,10 @@ syncookie_expand(struct in_conninfo *inc, const struct syncache_head *sch,
 		sc->sc_tsoff = tcp_new_ts_offset(inc);
 	}
 
+#if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
 	if (to->to_flags & TOF_SIGNATURE)
 		sc->sc_flags |= SCF_SIGNATURE;
+#endif
 
 	sc->sc_rxmits = 0;
 

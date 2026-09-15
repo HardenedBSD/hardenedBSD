@@ -265,6 +265,7 @@ static struct map {
 	/* AMD */
 	{ "L3PMC", "amd_l3" },
 	{ "DFPMC", "amd_df" },
+	{ "UMCPMC", "amd_umc" },
 	/* ARM HiSilicon */
 	{ "hisi_sicl,cpa", "hisi_sicl,cpa"},
 	{ "hisi_sccl,ddrc", "hisi_sccl,ddrc" },
@@ -623,7 +624,14 @@ static int json_events(const char *fn,
 			} else if (json_streq(map, field, "EnAllCores")) {
 				addfield(map, &allcores, "", "allcores=", val);
 			} else if (json_streq(map, field, "EnAllSlices")) {
-				addfield(map, &allslices, "", "allslices=", val);
+				/*
+				 * We use the AMD PPR Family 1Ah Model 70h
+				 * naming scheme of allsources rather than
+				 * slices.  The symbol EnAllSlices is not used
+				 * anywhere except in Zen 4+ for the L3
+				 * counters.
+				 */
+				addfield(map, &allslices, "", "allsources=", val);
 			} else if (json_streq(map, field, "SliceId")) {
 				/*
 				 * We use sourceid because there's a
@@ -641,7 +649,8 @@ static int json_events(const char *fn,
 				if (nz)
 					addfield(map, &cmask, "", "cmask=", val);
 			} else if (json_streq(map, field, "RdWrMask")) {
-				/* AMD UMC */
+				if (nz)
+					addfield(map, &cmask, "", "rdwrmask=", val);
 			} else if (json_streq(map, field, "Invert")) {
 				if (nz)
 					addfield(map, &inv, "", "inv=", val);

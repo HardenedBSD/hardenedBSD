@@ -64,6 +64,7 @@
 #include <machine/trap.h>
 
 #include <x86/linux/linux_x86.h>
+#include <amd64/linux/linux_emul_md.h>
 #include <amd64/linux32/linux.h>
 #include <amd64/linux32/linux32_proto.h>
 #include <compat/linux/linux_elf.h>
@@ -612,6 +613,9 @@ linux_exec_setregs(struct thread *td, struct image_params *imgp,
 	x86_clear_dbregs(pcb);
 
 	fpstate_drop(td);
+
+	/* Linux processes start with PKRU denying unallocated keys. */
+	linux_pkru_exec_init(td);
 }
 
 /*

@@ -158,8 +158,6 @@ static void inm_release(struct in_multi *);
 static struct ip_moptions *
 		inp_findmoptions(struct inpcb *);
 static int	inp_get_source_filters(struct inpcb *, struct sockopt *);
-static int	inp_join_group(struct inpcb *, struct sockopt *);
-static int	inp_leave_group(struct inpcb *, struct sockopt *);
 static int	inp_block_unblock_source(struct inpcb *, struct sockopt *);
 static int	inp_set_multicast_if(struct inpcb *, struct sockopt *);
 static int	inp_set_source_filters(struct inpcb *, struct sockopt *);
@@ -1020,6 +1018,7 @@ inm_merge(struct in_multi *inm, /*const*/ struct in_mfilter *imf)
 	 * Maintain a count of source filters whose state was
 	 * actually modified by this operation.
 	 */
+	nims = NULL;
 	RB_FOREACH(ims, ip_msource_tree, &imf->imf_sources) {
 		lims = (struct in_msource *)ims;
 		if (lims->imsl_st[0] == imf->imf_st[0]) nsrc0++;
@@ -1768,7 +1767,7 @@ inp_getmoptions(struct inpcb *inp, struct sockopt *sopt)
 
 				mreqn.imr_ifindex = ifp->if_index;
 				NET_EPOCH_ENTER(et);
-				IFP_TO_IA(ifp, ia);
+				ia = in_ifprimaryaddr(ifp);
 				if (ia != NULL)
 					mreqn.imr_address =
 					    IA_SIN(ia)->sin_addr;
@@ -1884,7 +1883,7 @@ const struct in_addr *ina, const u_int index)
 /*
  * Join an IPv4 multicast group, possibly with a source.
  */
-static int
+int
 inp_join_group(struct inpcb *inp, struct sockopt *sopt)
 {
 	struct group_source_req		 gsr;
@@ -2208,7 +2207,7 @@ out_inp_unlocked:
 /*
  * Leave an IPv4 multicast group on an inpcb, possibly with a source.
  */
-static int
+int
 inp_leave_group(struct inpcb *inp, struct sockopt *sopt)
 {
 	struct epoch_tracker		 et;

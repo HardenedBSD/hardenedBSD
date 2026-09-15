@@ -768,7 +768,8 @@ struct uio;
  */
 #define	MBF_NOWAIT	0x01
 #define	MBF_MNTLSTLOCK	0x02
-#define	MBF_MASK	(MBF_NOWAIT | MBF_MNTLSTLOCK)
+#define	MBF_PCATCH	0x04
+#define	MBF_MASK	(MBF_NOWAIT | MBF_MNTLSTLOCK | MBF_PCATCH)
 
 #ifdef MALLOC_DECLARE
 MALLOC_DECLARE(M_MOUNT);
@@ -1245,7 +1246,7 @@ int	fhstat(const struct fhandle *, struct stat *);
 int	fhstatfs(const struct fhandle *, struct statfs *);
 int	fstatfs(int, struct statfs *);
 int	getfh(const char *, fhandle_t *);
-int	getfhat(int, char *, struct fhandle *, int);
+int	getfhat(int, const char *, struct fhandle *, int);
 int	getfsstat(struct statfs *, long, int);
 int	getmntinfo(struct statfs **, int);
 int	lgetfh(const char *, fhandle_t *);

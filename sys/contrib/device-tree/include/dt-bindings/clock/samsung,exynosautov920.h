@@ -295,4 +295,24 @@
 #define CLK_DOUT_HSI2_ETHERNET          6
 #define CLK_DOUT_HSI2_ETHERNET_PTP      7
 
+/* CMU_M2M */
+#define CLK_MOUT_M2M_JPEG_USER          1
+#define CLK_MOUT_M2M_NOC_USER           2
+#define CLK_DOUT_M2M_NOCP               3
+
+/* CMU_MFC */
+#define CLK_MOUT_MFC_MFC_USER           1
+#define CLK_MOUT_MFC_WFD_USER           2
+#define CLK_DOUT_MFC_NOCP               3
+
+/* CMU_MFD */
+#define CLK_MOUT_MFD_NOC_USER           1
+#define CLK_DOUT_MFD_NOCP               2
+
+/* CMU_G3D */
+#define FOUT_PLL_G3D                    1
+#define CLK_MOUT_G3D_NOC                2
+#define CLK_MOUT_G3D_SWITCH_USER        3
+#define CLK_MOUT_G3D_NOCP_USER          4
+
 #endif /* _DT_BINDINGS_CLOCK_EXYNOSAUTOV920_H */

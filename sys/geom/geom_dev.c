@@ -35,6 +35,8 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_pax.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -377,8 +379,13 @@ g_dev_taste(struct g_class *mp, struct g_provider *pp, int insist __unused)
 	args.mda_devsw = &g_dev_cdevsw;
 	args.mda_cr = NULL;
 	args.mda_uid = UID_ROOT;
+#ifdef PAX_HARDENING
+	args.mda_gid = GID_WHEEL;
+	args.mda_mode = 0600;
+#else
 	args.mda_gid = GID_OPERATOR;
 	args.mda_mode = 0640;
+#endif
 	args.mda_si_drv1 = sc;
 	args.mda_si_drv2 = cp;
 	error = make_dev_s(&args, &sc->sc_dev, "%s", gp->name);

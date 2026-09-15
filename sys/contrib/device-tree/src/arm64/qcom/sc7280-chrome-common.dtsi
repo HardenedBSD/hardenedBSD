@@ -44,11 +44,6 @@
 			reg = <0x0 0x8ad00000 0x0 0x500000>;
 			no-map;
 		};
-
-		venus_mem: memory@8b200000 {
-			reg = <0x0 0x8b200000 0x0 0x500000>;
-			no-map;
-		};
 	};
 };
 
@@ -70,6 +65,11 @@
 
 &lpass_hm {
 	status = "okay";
+};
+
+&lpass_tlmm {
+	/delete-property/ clocks;
+	/delete-property/ clock-names;
 };
 
 &lpasscc {
@@ -138,17 +138,6 @@
 &scm {
 	/* TF-A firmware maps memory cached so mark dma-coherent to match. */
 	dma-coherent;
-};
-
-&venus {
-	iommus = <&apps_smmu 0x2180 0x20>,
-		 <&apps_smmu 0x2184 0x20>;
-
-	status = "okay";
-
-	video-firmware {
-		iommus = <&apps_smmu 0x21a2 0x0>;
-	};
 };
 
 &watchdog {

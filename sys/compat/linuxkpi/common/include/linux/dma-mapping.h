@@ -108,6 +108,14 @@ void *linuxkpi_dmam_alloc_coherent(struct device *dev, size_t size,
     dma_addr_t *dma_handle, gfp_t flag);
 void linuxkpi_dmam_free_coherent(struct device *dev, size_t size,
     void *addr, dma_addr_t dma_handle);
+void *linuxkpi_dma_alloc_noncoherent(struct device *, size_t, dma_addr_t *,
+    enum dma_data_direction, gfp_t);
+void linuxkpi_dma_free_noncoherent(struct device *, size_t, void *,
+    dma_addr_t, enum dma_data_direction);
+void *linuxkpi_dma_alloc_attrs(struct device *, size_t, dma_addr_t *,
+    gfp_t, unsigned long);
+void linuxkpi_dma_free_attrs(struct device *, size_t, void *,
+    dma_addr_t, unsigned long);
 dma_addr_t linux_dma_map_phys(struct device *dev, vm_paddr_t phys, size_t len);	/* backward compat */
 dma_addr_t lkpi_dma_map_phys(struct device *, vm_paddr_t, size_t,
     enum dma_data_direction, unsigned long);
@@ -121,6 +129,7 @@ void linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sg,
     int nents __unused, enum dma_data_direction direction,
     unsigned long attrs);
 void linuxkpi_dma_sync(struct device *, dma_addr_t, size_t, bus_dmasync_op_t);
+void lkpi_dma_sync_sg(struct device *, struct scatterlist *, bus_dmasync_op_t);
 
 static inline int
 dma_supported(struct device *dev, u64 dma_mask)
@@ -200,6 +209,34 @@ dmam_free_coherent(struct device *dev, size_t size, void *addr,
 	linuxkpi_dmam_free_coherent(dev, size, addr, dma_handle);
 }
 
+static inline void *
+dma_alloc_noncoherent(struct device *dev, size_t size, dma_addr_t *dma_handle,
+    enum dma_data_direction direction, gfp_t gfp)
+{
+	return (linuxkpi_dma_alloc_noncoherent(dev, size, dma_handle, direction, gfp));
+}
+
+static inline void
+dma_free_noncoherent(struct device *dev, size_t size, void *vaddr,
+    dma_addr_t dma_handle, enum dma_data_direction direction)
+{
+	linuxkpi_dma_free_noncoherent(dev, size, vaddr, dma_handle, direction);
+}
+
+static inline void *
+dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
+    gfp_t gfp, unsigned long attrs)
+{
+	return (linuxkpi_dma_alloc_attrs(dev, size, dma_handle, gfp, attrs));
+}
+
+static inline void
+dma_free_attrs(struct device *dev, size_t size, void *vaddr,
+    dma_addr_t dma_handle, unsigned long attrs)
+{
+	linuxkpi_dma_free_attrs(dev, size, vaddr, dma_handle, attrs);
+}
+
 static inline dma_addr_t
 dma_map_page_attrs(struct device *dev, struct page *page, size_t offset,
     size_t size, enum dma_data_direction direction, unsigned long attrs)
@@ -262,9 +299,7 @@ dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma, size_t size,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		op = BUS_DMASYNC_POSTREAD;
-		linuxkpi_dma_sync(dev, dma, size, op);
-		op = BUS_DMASYNC_PREREAD;
+		op = BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE;
 		break;
 	case DMA_TO_DEVICE:
 		op = BUS_DMASYNC_POSTWRITE;
@@ -294,13 +329,13 @@ dma_sync_single_for_device(struct device *dev, dma_addr_t dma,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		op = BUS_DMASYNC_PREWRITE;
+		op = BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD;
 		break;
 	case DMA_TO_DEVICE:
-		op = BUS_DMASYNC_PREREAD;
+		op = BUS_DMASYNC_PREWRITE;
 		break;
 	case DMA_FROM_DEVICE:
-		op = BUS_DMASYNC_PREWRITE;
+		op = BUS_DMASYNC_PREREAD;
 		break;
 	default:
 		return;
@@ -309,21 +344,65 @@ dma_sync_single_for_device(struct device *dev, dma_addr_t dma,
 	linuxkpi_dma_sync(dev, dma, size, op);
 }
 
-/* (20250329) These four seem to be unused code. */
 static inline void
 dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg, int nelems,
     enum dma_data_direction direction)
 {
-	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
+	bus_dmasync_op_t op;
+
+	switch (direction) {
+	case DMA_BIDIRECTIONAL:
+		op = BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE;
+		break;
+	case DMA_TO_DEVICE:
+		op = BUS_DMASYNC_POSTWRITE;
+		break;
+	case DMA_FROM_DEVICE:
+		op = BUS_DMASYNC_POSTREAD;
+		break;
+	default:
+		return;
+	}
+
+	lkpi_dma_sync_sg(dev, sg, op);
+}
+
+static inline void dma_sync_sgtable_for_cpu(struct device *dev,
+		struct sg_table *sgt, enum dma_data_direction dir)
+{
+	dma_sync_sg_for_cpu(dev, sgt->sgl, sgt->orig_nents, dir);
 }
 
 static inline void
 dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg, int nelems,
     enum dma_data_direction direction)
 {
-	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
+	bus_dmasync_op_t op;
+
+	switch (direction) {
+	case DMA_BIDIRECTIONAL:
+		op = BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD;
+		break;
+	case DMA_TO_DEVICE:
+		op = BUS_DMASYNC_PREWRITE;
+		break;
+	case DMA_FROM_DEVICE:
+		op = BUS_DMASYNC_PREREAD;
+		break;
+	default:
+		return;
+	}
+
+	lkpi_dma_sync_sg(dev, sg, op);
 }
 
+static inline void dma_sync_sgtable_for_device(struct device *dev,
+		struct sg_table *sgt, enum dma_data_direction dir)
+{
+	dma_sync_sg_for_device(dev, sgt->sgl, sgt->orig_nents, dir);
+}
+
+/* (20250329) These two seem to be unused code. */
 static inline void
 dma_sync_single_range_for_cpu(struct device *dev, dma_addr_t dma_handle,
     unsigned long offset, size_t size, enum dma_data_direction direction)
@@ -405,7 +484,7 @@ dma_map_sgtable(struct device *dev, struct sg_table *sgt,
 {
 	int nents;
 
-	nents = dma_map_sg_attrs(dev, sgt->sgl, sgt->nents, dir, attrs);
+	nents = dma_map_sg_attrs(dev, sgt->sgl, sgt->orig_nents, dir, attrs);
 	if (nents < 0)
 		return (nents);
 	sgt->nents = nents;
@@ -418,7 +497,7 @@ dma_unmap_sgtable(struct device *dev, struct sg_table *sgt,
     unsigned long attrs)
 {
 
-	dma_unmap_sg_attrs(dev, sgt->sgl, sgt->nents, dir, attrs);
+	dma_unmap_sg_attrs(dev, sgt->sgl, sgt->orig_nents, dir, attrs);
 }
 
 

@@ -29,32 +29,67 @@
 .\"
 .\" * Other names and brands may be claimed as the property of others.
 .\"
-.Dd November 10, 2025
+.Dd September 2, 2026
 .Dt IX 4
 .Os
 .Sh NAME
 .Nm ix
 .Nd Intel 10Gb Ethernet driver
 .Sh SYNOPSIS
-To compile this driver into the kernel,
-place the following lines in your
-kernel configuration file:
-.Bd -ragged -offset indent
-.Cd "device iflib"
-.Cd "device ix"
-.Ed
+.Cd device iflib
+.Cd device ix
 .Pp
-Alternatively, to load the driver as a
-module at boot time, place the following line in
+In
 .Xr loader.conf 5 :
-.Bd -literal -offset indent
-if_ix_load="YES"
-.Ed
+.Cd hw.ix.max_interrupt_rate
+.Cd hw.ix.flow_control
+.Cd hw.ix.advertise_speed
+.Cd hw.ix.enable_msix
+.Cd hw.ix.allow_unsupported_sfp
+.Cd hw.ix.enable_fdir
+.Cd hw.ix.enable_rss
+.Cd hw.ix.enable_aim
+.Cd if_ix_load="YES"
+.Pp
+In
+.Xr loader.conf 5
+or
+.Xr sysctl.conf 5 :
+.Cd dev.ix.?.debug.dump.clusters
+.Cd dev.ix.?.debug.dump.dump
+.Cd dev.ix.?.debug.fw_log.severity. Ns Aq Ar module
+.Cd dev.ix.?.debug.fw_log.register
+.Cd dev.ix.?.debug.fw_log.on_load
+.Cd dev.ix.?.eee_state
+.Cd dev.ix.?.eee.tx_lpi_count
+.Cd dev.ix.?.eee.rx_lpi_count
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for Intel(R) 10Gb Ethernet PCIe adapters.
 The driver supports Jumbo Frames, MSIX, TSO, and RSS.
+.Pp
+The identification LED for each port is controlled through its
+.Pa /dev/led/ix*
+device node.
+.Pp
+On adapters and ports that expose PCI power-management wake, the driver
+supports the
+.Cm wol_magic ,
+.Cm wol_ucast ,
+and
+.Cm wol_mcast
+capabilities shown by
+.Xr ifconfig 8 .
+The NVM APME setting selects whether magic-packet wake is enabled by default
+without hiding wake modes that the hardware and board support.
+Waking the system from an ACPI sleep state also requires enabling the
+corresponding device wake source when it is exposed, for example:
+.Bd -literal -offset indent
+sysctl dev.ix.0.wake=1
+.Ed
+The interface wake capabilities select the controller packet filters; they do
+not enable the ACPI wake source.
 .Pp
 For questions related to hardware requirements,
 refer to the documentation supplied with your Intel 10GbE adapter.
@@ -70,6 +105,58 @@ The maximum MTU size for Jumbo Frames is 9710.
 This driver version supports VLANs.
 For information on enabling VLANs, see
 .Xr ifconfig 8 .
+.Sh SR-IOV
+The driver-specific
+.Va vlan
+parameter in
+.Xr iovctl.conf 5
+accepts a VLAN identifier from 1 through 4095 or the keyword
+.Dq trunk ,
+which is the default.
+A numeric VLAN configures an access VF: the PF inserts the VLAN tag on
+transmit and strips it on receive.
+The stripped administrative tag is not presented to the VF network stack as
+.Dv M_VLANTAG ,
+so received packets are delivered directly through the VF interface.
+With
+.Dq trunk ,
+the VF may add and remove individual VLAN memberships; tags for VLANs
+registered by the VF are presented normally to its network stack.
+.Pp
+VLAN filtering remains enabled in the hardware while SR-IOV is active so that
+the PF can enforce VLAN ownership for each VF pool, including when hardware
+VLAN filtering has been disabled on the PF interface.
+.Pp
+Secondary unicast addresses requested by a VF are accepted only when the VF
+is permitted to change its MAC address and
+.Va mac-anti-spoof
+is disabled in its
+.Xr iovctl.conf 5
+configuration.
+The hardware MAC anti-spoofing control can validate only the VF's primary
+source address, so the driver does not silently weaken an enabled policy to
+install secondary addresses.
+.Pp
+Ethertype anti-spoofing and malicious-driver detection and recovery are
+available only on X550-family devices, including X552 and X553, and on E610.
+The driver cannot enable those hardware protections on earlier devices such
+as 82599.
+After a malicious-driver event, the PF keeps the offending VF's transmit and
+receive paths disabled until the VF completes a new reset handshake.
+.Pp
+On 82599 and X540 devices, the driver instead watches for transmit stalls
+caused by an invalid VF DMA target and resets the VF identified by its PCIe
+error status.
+After five such events from the same VF, the driver quarantines that VF and
+keeps its transmit, receive, and mailbox clear-to-send state disabled.
+Quarantine persists across PF reinitialization and is cleared when the SR-IOV
+configuration is destroyed and recreated.
+The read-only
+.Va dev.ix.N.iov_quarantined_vfs
+sysctl reports quarantined VF pools as a bitmap.
+.Pp
+E610 PFs provide physical link state and speed to VFs that negotiate mailbox
+API 1.6.
 .Sh HARDWARE
 The
 .Nm
@@ -119,6 +206,7 @@ Enable Flow Director.
 Flow Director directs Ethernet packets to the core where the
 packet consuming process, application, container,
 or microservice is running.
+SR-IOV configuration is rejected when Flow Director is enabled.
 .It Va hw.ix.enable_rss
 Enable Receive-Side Scaling (RSS).
 When RSS is enabled, all of the receive data processing for
@@ -160,7 +248,7 @@ Output must be redirected to a file
 and decoded by Intel Customer Support.
 .Pp
 This feature is only supported on E610.
-.It Va dev.ix.?.debug.fw_log.severity.<module>
+.It Va dev.ix.?.debug.fw_log.severity. Ns Aq Ar module
 Specify firmware logging verbosity level for the specified module.
 Available levels include:
 .Pp
@@ -192,6 +280,12 @@ Enable firmware logging during driver initialization when set via
 .Xr kenv 1 .
 .Pp
 This feature is only supported on E610 devices.
+.It Va dev.ix.?.eee_state
+Enable or disable Energy Efficient Ethernet on supported devices.
+.It Va dev.ix.?.eee.tx_lpi_count
+Count transmit Low Power Idle events.
+.It Va dev.ix.?.eee.rx_lpi_count
+Count receive Low Power Idle events.
 .El
 .Sh DIAGNOSTICS
 .Bl -diag
@@ -206,7 +300,7 @@ the network connection (cable).
 .Sh SUPPORT
 For general information and support,
 go to the Intel support website at:
-.Pa http://support.intel.com .
+.Pa https://support.intel.com .
 .Pp
 If an issue is identified with the released source code on the supported kernel
 with a supported adapter, email the specific information related to the
@@ -216,10 +310,12 @@ issue to
 .Xr altq 4 ,
 .Xr arp 4 ,
 .Xr iflib 4 ,
+.Xr led 4 ,
 .Xr netintro 4 ,
 .Xr ng_ether 4 ,
 .Xr polling 4 ,
 .Xr vlan 4 ,
+.Xr iovctl.conf 5 ,
 .Xr ifconfig 8 ,
 .Xr sysctl 8
 .Sh HISTORY

@@ -23,12 +23,19 @@
 		pinctrl-0 = <&pinctrl_gpio>;
 		autorepeat;
 
-		back {
+		key-back {
 			label = "Back";
 			gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
 			linux,code = <KEY_BACK>;
 			wakeup-source;
 		};
+	};
+
+	reg_3v3: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
 	};
 
 	reg_peri_3p15v: regulator-peri-3p15v {
@@ -192,8 +199,6 @@
 		port {
 			ov2680_to_mipi: endpoint {
 				remote-endpoint = <&mipi_from_sensor>;
-				clock-lanes = <0>;
-				data-lanes = <1>;
 				link-frequencies = /bits/ 64 <330000000>;
 			};
 		};
@@ -228,6 +233,8 @@
 	mpl3115@60 {
 		compatible = "fsl,mpl3115";
 		reg = <0x60>;
+		vdd-supply = <&reg_3v3>;
+		vddio-supply = <&reg_3v3>;
 	};
 };
 

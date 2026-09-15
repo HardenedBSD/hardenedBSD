@@ -55,6 +55,10 @@ properties:
       - const: apb_pclk
       - const: atclk
 
+  label:
+    description:
+      Description of a coresight device.
+
   iommus:
     maxItems: 1
 
@@ -123,6 +127,9 @@ properties:
     items:
       - const: tracedata
       - const: metadata
+
+  access-controllers:
+    maxItems: 1
 
 required:
   - compatible

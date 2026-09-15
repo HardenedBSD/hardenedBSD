@@ -36,6 +36,7 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_var.h>
+#include <net/if_vf_status.h>
 #include <net/if_media.h>
 #include <net/iflib.h>
 #include <net/if_private.h>
@@ -61,6 +62,13 @@ CODE {
 	}
 
 	static int
+	null_power_prepare(if_ctx_t _ctx __unused,
+	    enum iflib_power_event _event __unused)
+	{
+		return (0);
+	}
+
+	static int
 	null_queue_intr_enable(if_ctx_t _ctx __unused, uint16_t _qid __unused)
 	{
 		return (ENOTSUP);
@@ -69,6 +77,12 @@ CODE {
 	static void
 	null_led_func(if_ctx_t _ctx __unused, int _onoff __unused)
 	{
+	}
+
+	static bool
+	null_led_supported(if_ctx_t _ctx __unused)
+	{
+		return (true);
 	}
 
 	static void
@@ -112,6 +126,13 @@ CODE {
 		return (ENOTSUP);
 	}
 
+	static int
+	null_vf_status(if_ctx_t _ctx __unused,
+	    struct if_vf_status **_status __unused)
+	{
+		return (ENOTSUP);
+	}
+
 	static bool
 	null_needs_restart(if_ctx_t _ctx __unused, enum iflib_restart_event _event __unused)
 	{
@@ -148,6 +169,16 @@ METHOD int reinit_post {
 METHOD int detach {
 	if_ctx_t _ctx;
 };
+
+#
+# Prepare driver policy which must be established before a terminal stop used
+# for detach, suspend, or shutdown.  This method must not start, stop, or alter
+# queue DMA.  The ordinary lifecycle callback runs after the stop.
+#
+METHOD int power_prepare {
+	if_ctx_t _ctx;
+	enum iflib_power_event _event;
+} DEFAULT null_power_prepare;
 
 METHOD int suspend {
 	if_ctx_t _ctx;
@@ -347,6 +378,10 @@ METHOD void led_func {
 	int _onoff;
 } DEFAULT null_led_func;
 
+METHOD bool led_supported {
+	if_ctx_t _ctx;
+} DEFAULT null_led_supported;
+
 METHOD void vlan_register {
 	if_ctx_t _ctx;
 	uint16_t _vtag;
@@ -375,3 +410,8 @@ METHOD int get_downreason {
 	if_ctx_t _ctx;
 	struct ifdownreason *_ifdr;
 } DEFAULT null_get_downreason;
+
+METHOD int vf_status {
+	if_ctx_t _ctx;
+	struct if_vf_status **_status;
+} DEFAULT null_vf_status;

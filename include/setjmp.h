@@ -39,6 +39,10 @@
 
 #include <sys/cdefs.h>
 
+#if __ISO_C_VISIBLE >= 2023 || __BSD_VISIBLE
+#define __STDC_VERSION_SETJMP_H__	202311L
+#endif
+
 /* The size of the jmp_buf is machine dependent: */
 #include <machine/setjmp.h>
 

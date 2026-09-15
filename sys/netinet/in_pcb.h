@@ -38,50 +38,34 @@
 #define _NETINET_IN_PCB_H_
 
 /*
- * PCB with AF_INET6 null bind'ed laddr can receive AF_INET input packet.
- * So, AF_INET6 null laddr is also used as AF_INET null laddr, by utilizing
- * the following structure.  This requires padding always be zeroed out,
- * which is done right after inpcb allocation and stays through its lifetime.
- */
-struct in_addr_4in6 {
-	uint32_t	ia46_pad32[3];
-	struct in_addr	ia46_addr4;
-};
-
-union in_dependaddr {
-	struct in_addr_4in6 id46_addr;
-	struct in6_addr	id6_addr;
-};
-
-/*
- * NOTE: ipv6 addrs should be 64-bit aligned, per RFC 2553.  in_conninfo has
- * some extra padding to accomplish this.
+ * NOTE: IPv6 inpcb bound to unspecified local address shall also receive IPv4
+ * traffic.  Thus, IPv6 local address that is IN6_IS_ADDR_UNSPECIFIED() should
+ * also be usable as IPv4 INADDR_ANY.  This requires padding in in_dependaddr
+ * to always be zeroed out, which is done right after inpcb allocation and
+ * stays through its lifetime.
  * NOTE 2: tcp_syncache.c uses first 5 32-bit words, which identify fport,
  * lport, faddr to generate hash, so these fields shouldn't be moved.
- */
-struct in_endpoints {
-	uint16_t	ie_fport;		/* foreign port */
-	uint16_t	ie_lport;		/* local port */
-	/* protocol dependent part, local and foreign addr */
-	union in_dependaddr ie_dependfaddr;	/* foreign host table entry */
-	union in_dependaddr ie_dependladdr;	/* local host table entry */
-#define	ie_faddr	ie_dependfaddr.id46_addr.ia46_addr4
-#define	ie_laddr	ie_dependladdr.id46_addr.ia46_addr4
-#define	ie6_faddr	ie_dependfaddr.id6_addr
-#define	ie6_laddr	ie_dependladdr.id6_addr
-	uint32_t	ie6_zoneid;		/* scope zone id */
-};
-
-/*
- * XXX The defines for inc_* are hacks and should be changed to direct
- * references.
  */
 struct in_conninfo {
 	uint8_t		inc_flags;
 	uint8_t		inc_len;
-	uint16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
-	/* protocol dependent part */
-	struct in_endpoints inc_ie;
+	uint16_t	inc_fibnum;
+	struct in_endpoints {
+		uint16_t	ie_fport;		/* foreign port */
+		uint16_t	ie_lport;		/* local port */
+		union in_dependaddr {
+			struct {
+				uint32_t __pad[3];
+				struct in_addr id4_addr;
+			};
+			struct in6_addr	id6_addr;
+		} ie_dependfaddr, ie_dependladdr;
+#define	ie_faddr	ie_dependfaddr.id4_addr
+#define	ie_laddr	ie_dependladdr.id4_addr
+#define	ie6_faddr	ie_dependfaddr.id6_addr
+#define	ie6_laddr	ie_dependladdr.id6_addr
+		uint32_t	ie6_zoneid;		/* scope zone id */
+	} inc_ie;
 };
 
 /*
@@ -192,7 +176,7 @@ struct xinpgen {
 #define	IN6P_RTHDRDSTOPTS	0x00200000 /* receive dstoptions before rthdr */
 #define	IN6P_TCLASS		0x00400000 /* receive traffic class value */
 #define	IN6P_AUTOFLOWLABEL	0x00800000 /* attach flowlabel automatically */
-/*	INP_INLBGROUP		0x01000000 private to in_pcb.c */
+/*	INP_INLBGROUP		0x01000000 private to in_pcb.c/in6_pcb.c */
 #define	INP_ONESBCAST		0x02000000 /* send all-ones broadcast */
 /*	INP_UNCONNECTED		0x04000000 private to in_pcb.c/in6_pcb.c */
 #define	INP_SOCKREF		0x08000000 /* strong socket reference */
@@ -301,17 +285,6 @@ struct xktls_session {
 #include <sys/sysctl.h>
 #include <vm/uma.h>
 #include <sys/ck.h>
-
-/*
- * struct inpcb is the common protocol control block structure used in most
- * IP transport protocols.
- *
- * Pointers to local and foreign host table entries, local and foreign socket
- * numbers, and pointers up (to a socket structure) and down (to a
- * protocol-specific control block) are stored here.
- */
-CK_LIST_HEAD(inpcbhead, inpcb);
-CK_LIST_HEAD(inpcblbgrouphead, inpcblbgroup);
 
 /*
  * struct inpcb captures the network layer state for TCP, UDP, and raw IPv4 and
@@ -428,11 +401,9 @@ struct inpcb {
  *
  * (c) Constant or nearly constant after initialisation
  * (e) Protected by SMR section
- * (h) Locked by ipi_hash_lock
+ * (h) Locked by ipi_list_unconn.lock
  */
 struct inpcbinfo {
-	u_int			 ipi_count;		/* (h) */
-
 	/*
 	 * Generation count -- incremented each time a connection is allocated
 	 * or freed.
@@ -442,9 +413,11 @@ struct inpcbinfo {
 	/*
 	 * Fields associated with port lookup and allocation.
 	 */
-	u_short			 ipi_lastport;		/* (h) */
-	u_short			 ipi_lastlow;		/* (h) */
-	u_short			 ipi_lasthi;		/* (h) */
+	u_int			 ipi_lastport;		/* (h) */
+	u_int			 ipi_lastlow;		/* (h) */
+	u_int			 ipi_lasthi;		/* (h) */
+
+	u_int			 ipi_count;		/* (h) */
 
 	/*
 	 * UMA zone from which inpcbs are allocated for this protocol.
@@ -458,10 +431,12 @@ struct inpcbinfo {
 	 * port numbers.  The "exact" hash holds PCBs connected to a foreign
 	 * address, and "wild" holds the rest.
 	 */
-	struct mtx		 ipi_hash_lock;
-	struct inpcbhead	 ipi_list_unconn;	/* (r:e/w:h) */
-	struct inpcbhead 	*ipi_hash_exact;	/* (r:e/w:h) */
-	struct inpcbhead 	*ipi_hash_wild;		/* (r:e/w:h) */
+	struct inpbucket {
+		CK_LIST_HEAD(, inpcb)	head;
+		struct mtx		lock;
+	}			ipi_list_unconn;	/* (r:e/w:h) */
+	struct inpbucket 	*ipi_hash_exact;	/* (r:e/w:h) */
+	struct inpbucket 	*ipi_hash_wild;		/* (r:e/w:h) */
 	u_long			 ipi_hashmask;		/* (c) */
 	u_long			 ipi_porthashmask;	/* (c) */
 	u_long			 ipi_lbgrouphashmask;	/* (c) */
@@ -469,13 +444,16 @@ struct inpcbinfo {
 	/*
 	 * Global hash of inpcbs, hashed by only local port number.
 	 */
-	struct inpcbhead	*ipi_porthashbase;	/* (h) */
+	struct inpbucket	*ipi_porthash;	/* (h) */
 
 	/*
 	 * Load balance groups used for the SO_REUSEPORT_LB option,
 	 * hashed by local port.
 	 */
-	struct	inpcblbgrouphead *ipi_lbgrouphashbase;	/* (r:e/w:h) */
+	struct lbgroupbucket {
+		CK_LIST_HEAD(, inpcblbgroup)	head;
+		struct mtx			lock;
+	}			*ipi_lbgrouphashbase;	/* (r:e/w:h) */
 };
 
 /*
@@ -551,13 +529,6 @@ struct socket *
 void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 		uint32_t *faddr, uint16_t *fp);
 
-#define	INP_HASH_WLOCK(ipi)		mtx_lock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_WUNLOCK(ipi)		mtx_unlock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_LOCK_ASSERT(ipi)	MPASS(SMR_ENTERED((ipi)->ipi_smr) || \
-					mtx_owned(&(ipi)->ipi_hash_lock))
-#define	INP_HASH_WLOCK_ASSERT(ipi)	mtx_assert(&(ipi)->ipi_hash_lock, \
-					MA_OWNED)
-
 VNET_DECLARE(uint32_t, in_pcbhashseed);
 #define	V_in_pcbhashseed	VNET(in_pcbhashseed)
 
@@ -566,7 +537,7 @@ VNET_DECLARE(uint32_t, in_pcbhashseed);
  * wildcard IPv4 and wildcard IPv6 must be the same, otherwise AF_INET6
  * wildcard bound pcb won't be able to receive AF_INET connections, while:
  * jenkins_hash(&zeroes, 1, s) != jenkins_hash(&zeroes, 4, s)
- * See also comment above struct in_addr_4in6.
+ * See also comment above struct in_conninfo.
  */
 #define	IN_ADDR_JHASH32(addr)						\
 	((addr)->s_addr == INADDR_ANY ? V_in_pcbhashseed :		\

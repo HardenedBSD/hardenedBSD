@@ -36,6 +36,8 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_pax.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -67,8 +69,13 @@ void
 g_ctl_init(void)
 {
 
+#ifdef PAX_HARDENING
 	make_dev_credf(MAKEDEV_ETERNAL, &g_ctl_cdevsw, 0, NULL,
-	    UID_ROOT, GID_OPERATOR, 0640, PATH_GEOM_CTL);
+	    UID_ROOT, GID_WHEEL, 0600, PATH_GEOM_CTL);
+#else
+	make_dev_credf(MAKEDEV_ETERNAL, &g_ctl_cdevsw, 0, NULL,
+	    UID_ROOT, GID_WHEEL, 0640, PATH_GEOM_CTL);
+#endif
 }
 
 /*

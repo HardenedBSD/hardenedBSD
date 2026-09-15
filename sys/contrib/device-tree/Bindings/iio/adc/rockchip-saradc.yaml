@@ -16,6 +16,9 @@ properties:
       - const: rockchip,rk3066-tsadc
       - const: rockchip,rk3399-saradc
       - const: rockchip,rk3528-saradc
+      - items:
+          - const: rockchip,rk3506-saradc
+          - const: rockchip,rk3528-saradc
       - const: rockchip,rk3562-saradc
       - const: rockchip,rk3588-saradc
       - items:
@@ -46,6 +49,9 @@ properties:
     items:
       - const: saradc
       - const: apb_pclk
+
+  power-domains:
+    maxItems: 1
 
   resets:
     maxItems: 1

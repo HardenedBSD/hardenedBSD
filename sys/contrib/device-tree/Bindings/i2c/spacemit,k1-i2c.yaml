@@ -14,7 +14,11 @@ allOf:
 
 properties:
   compatible:
-    const: spacemit,k1-i2c
+    oneOf:
+      - items:
+          - const: spacemit,k3-i2c
+          - const: spacemit,k1-i2c
+      - const: spacemit,k1-i2c
 
   reg:
     maxItems: 1
@@ -41,6 +45,9 @@ properties:
     default: 400000
     maximum: 3300000
 
+  resets:
+    maxItems: 1
+
 required:
   - compatible
   - reg
@@ -56,7 +63,7 @@ examples:
         reg = <0xd4010800 0x38>;
         interrupt-parent = <&plic>;
         interrupts = <36>;
-        clocks =<&ccu 32>, <&ccu 84>;
+        clocks = <&ccu 32>, <&ccu 84>;
         clock-names = "func", "bus";
         clock-frequency = <100000>;
     };

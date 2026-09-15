@@ -636,6 +636,12 @@ __elfN(loadimage)(struct preloaded_file *fp, elf_file_t ef, uint64_t off)
 		if (phdr[i].p_type != PT_LOAD)
 			continue;
 
+		if (phdr[i].p_memsz < phdr[i].p_filesz) {
+			printf("elf" __XSTRING(__ELF_WORD_SIZE)
+			    "_loadimage: invalid PT_LOAD segment\n");
+			goto out;
+		}
+
 		if (module_verbose >= MODULE_VERBOSE_FULL) {
 			printf("Segment: 0x%lx@0x%lx -> 0x%lx-0x%lx",
 			    (long)phdr[i].p_filesz, (long)phdr[i].p_offset,
@@ -838,7 +844,6 @@ nosyms:
 	if (module_verbose > MODULE_VERBOSE_SILENT)
 		printf("\n");
 
-	ret = lastaddr - firstaddr;
 	fp->f_addr = firstaddr;
 
 	php = NULL;
@@ -901,28 +906,28 @@ nosyms:
 			break;
 		}
 	}
-	if (ef->hashtab == NULL || ef->symtab == NULL ||
-	    ef->strtab == NULL || ef->strsz == 0)
-		goto out;
-	COPYOUT(ef->hashtab, &ef->nbuckets, sizeof(ef->nbuckets));
-	COPYOUT(ef->hashtab + 1, &ef->nchains, sizeof(ef->nchains));
-	ef->buckets = ef->hashtab + 2;
-	ef->chains = ef->buckets + ef->nbuckets;
+	if (ef->hashtab != NULL && ef->symtab != NULL &&
+	    ef->strtab != NULL && ef->strsz != 0) {
+		COPYOUT(ef->hashtab, &ef->nbuckets, sizeof(ef->nbuckets));
+		COPYOUT(ef->hashtab + 1, &ef->nchains, sizeof(ef->nchains));
+		ef->buckets = ef->hashtab + 2;
+		ef->chains = ef->buckets + ef->nbuckets;
+	}
 
-	if (__elfN(lookup_symbol)(ef, "__start_set_modmetadata_set", &sym,
-	    STT_NOTYPE) != 0)
-		return 0;
-	p_start = sym.st_value + ef->off;
-	if (__elfN(lookup_symbol)(ef, "__stop_set_modmetadata_set", &sym,
-	    STT_NOTYPE) != 0)
-		return 0;
-	p_end = sym.st_value + ef->off;
+	/* Don't emit a warning if there is no symbol table. */
+	if (ef->buckets != 0 && __elfN(lookup_symbol)(ef,
+	    "__start_set_modmetadata_set", &sym, STT_NOTYPE) == 0) {
+		p_start = sym.st_value + ef->off;
+		if (__elfN(lookup_symbol)(ef, "__stop_set_modmetadata_set",
+		    &sym, STT_NOTYPE) != 0)
+			goto out;
+		p_end = sym.st_value + ef->off;
 
-	if (__elfN(parse_modmetadata)(fp, ef, p_start, p_end) == 0)
-		goto out;
+		if (__elfN(parse_modmetadata)(fp, ef, p_start, p_end) != 0)
+			goto out;
+	}
 
-	if (ef->kernel)		/* kernel must not depend on anything */
-		goto out;
+	ret = lastaddr - firstaddr;
 
 out:
 	if (dp)

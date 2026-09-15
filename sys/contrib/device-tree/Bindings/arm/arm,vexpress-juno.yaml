@@ -8,7 +8,7 @@ title: ARM Versatile Express and Juno Boards
 
 maintainers:
   - Sudeep Holla <sudeep.holla@arm.com>
-  - Linus Walleij <linus.walleij@linaro.org>
+  - Linus Walleij <linusw@kernel.org>
 
 description: |+
   ARM's Versatile Express platform were built as reference designs for exploring
@@ -103,8 +103,9 @@ properties:
           - const: arm,juno-r2
           - const: arm,juno
           - const: arm,vexpress
-      - description: Arm AEMv8a Versatile Express Real-Time System Model
-          (VE RTSM) is a programmers view of the Versatile Express with Arm
+      - description: Arm AEMv8a (Architecture Envelope Model)
+          Versatile Express Real-Time System Model (VE RTSM)
+          is a programmers view of the Versatile Express with Arm
           v8A hardware. See ARM DUI 0575D.
         items:
           - const: arm,rtsm_ve,aemv8a
@@ -117,6 +118,16 @@ properties:
       - description: Arm Foundation model for Aarch64
         items:
           - const: arm,foundation-aarch64
+          - const: arm,vexpress
+      - description: Arm Zena Compute Subsystem Platforms
+          Arm Zena Compute Subsystem (CSS) is a compute platform targeting
+          the automotive sector. Arm Zena CSS is a high-performance Arm
+          Cortex-A720AE Application Processor system augmented with an Arm
+          Cortex-R82AE based Safety Island and real-time domain.
+        items:
+          - enum:
+              - arm,zena-css-fvp
+          - const: arm,zena-css
           - const: arm,vexpress
 
   arm,vexpress,position:
@@ -139,7 +150,7 @@ patternProperties:
       the connection between the motherboard and any tiles. Sometimes the
       compatible is placed directly under this node, sometimes it is placed
       in a subnode named "motherboard-bus". Sometimes the compatible includes
-      "arm,vexpress,v2?-p1" sometimes (on software models) is is just
+      "arm,vexpress,v2?-p1" sometimes (on software models) it is just
       "simple-bus". If the compatible is placed in the "motherboard-bus" node,
       it is stricter and always has two compatibles.
     type: object
@@ -155,6 +166,12 @@ patternProperties:
                   - arm,vexpress,v2p-p1
               - const: simple-bus
           - const: simple-bus
+
+      "#interrupt-cells":
+        const: 1
+
+      interrupt-map: true
+      interrupt-map-mask: true
 
     patternProperties:
       '^motherboard-bus@':

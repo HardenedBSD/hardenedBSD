@@ -280,6 +280,20 @@ pmc_intel_initialize(void)
 		return (NULL);
 	}
 
+	/*
+	 * Detect support for MPERF and APERF MSRs. tsc_perf_stat is set by the
+	 * kernel's generic TSC initialization (start_TSC(), called at boot via
+	 * cpu_startup() -> startrtclock()), not by hwpmc's TSC PMC class. It is
+	 * set only after confirming both MSRs actually increment (some emulators
+	 * expose the CPUID bit without real MSR support).
+	 */
+	if ((cpu_power_ecx & CPUID_PERF_STAT) && (tsc_perf_stat == 1)) {
+		nclasses++;
+	}
+
+	/* Reserve one extra class slot for the optional RAPL counters. */
+	nclasses++;
+
 	/* Allocate base class and initialize machine dependent struct */
 	pmc_mdep = pmc_mdep_alloc(nclasses);
 
@@ -334,6 +348,15 @@ pmc_intel_initialize(void)
 	default:
 		break;
 	}
+
+	if (error == 0) {
+		/* Initialize PERF class. */
+		pmc_perf_initialize(pmc_mdep, ncpus, nclasses - 1);
+	}
+
+	if (error == 0 &&
+	    pmc_rapl_initialize(pmc_mdep, ncpus, pmc_mdep->pmd_nclass - 1) != 0)
+		pmc_mdep->pmd_nclass--;
   error:
 	if (error) {
 		pmc_mdep_free(pmc_mdep);
@@ -346,9 +369,13 @@ pmc_intel_initialize(void)
 void
 pmc_intel_finalize(struct pmc_mdep *md)
 {
+	pmc_rapl_finalize(md);
+
 	pmc_tsc_finalize(md);
 
 	pmc_core_finalize(md);
+
+	pmc_perf_finalize(md);
 
 	/*
 	 * Uncore.

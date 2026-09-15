@@ -3124,7 +3124,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 	case 564: {
 		struct getfhat_args *p = params;
 		iarg[a++] = p->fd; /* int */
-		uarg[a++] = (intptr_t)p->path; /* char * */
+		uarg[a++] = (intptr_t)p->path; /* const char * */
 		uarg[a++] = (intptr_t)p->fhp; /* struct fhandle * */
 		iarg[a++] = p->flags; /* int */
 		*n_args = 4;
@@ -3473,6 +3473,17 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		iarg[a++] = p->fd; /* int */
 		iarg[a++] = p->flags; /* int */
 		*n_args = 3;
+		break;
+	}
+	/* freebsd32_pdptrace */
+	case 605: {
+		struct freebsd32_pdptrace_args *p = params;
+		iarg[a++] = p->req; /* int */
+		iarg[a++] = p->pfd; /* int */
+		iarg[a++] = p->lwpid; /* int */
+		uarg[a++] = (intptr_t)p->addr; /* void * */
+		iarg[a++] = p->data; /* int */
+		*n_args = 5;
 		break;
 	}
 	default:
@@ -8776,7 +8787,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 1:
-			p = "userland char *";
+			p = "userland const char *";
 			break;
 		case 2:
 			p = "userland struct fhandle *";
@@ -9387,6 +9398,28 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "int";
 			break;
 		case 2:
+			p = "int";
+			break;
+		default:
+			break;
+		};
+		break;
+	/* freebsd32_pdptrace */
+	case 605:
+		switch (ndx) {
+		case 0:
+			p = "int";
+			break;
+		case 1:
+			p = "int";
+			break;
+		case 2:
+			p = "int";
+			break;
+		case 3:
+			p = "userland void *";
+			break;
+		case 4:
 			p = "int";
 			break;
 		default:
@@ -11333,6 +11366,11 @@ systrace_return_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		break;
 	/* pddupfd */
 	case 604:
+		if (ndx == 0 || ndx == 1)
+			p = "int";
+		break;
+	/* freebsd32_pdptrace */
+	case 605:
 		if (ndx == 0 || ndx == 1)
 			p = "int";
 		break;

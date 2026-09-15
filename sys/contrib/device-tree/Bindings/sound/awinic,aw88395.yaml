@@ -33,6 +33,12 @@ properties:
   reset-gpios:
     maxItems: 1
 
+  dvdd-supply: true
+
+  firmware-name:
+    maxItems: 1
+    description: Name of the *_acf.bin file used for amplifier initialization
+
   awinic,audio-channel:
     description:
       It is used to distinguish multiple PA devices, so that different
@@ -65,6 +71,17 @@ allOf:
     then:
       properties:
         reset-gpios: false
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: awinic,aw88261
+    then:
+      required:
+        - dvdd-supply
+    else:
+      properties:
+        dvdd-supply: false
 
 unevaluatedProperties: false
 

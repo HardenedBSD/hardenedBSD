@@ -165,7 +165,7 @@ struct nvme_qpair {
 
 	uint32_t		num_entries;
 	uint32_t		num_trackers;
-	uint32_t		sqe_shift;	/* SQE size shift: sqes_max - 6; 0 = 64 bytes, 1 = 128 bytes */
+	uint32_t		sqe_shift;
 	uint16_t		cid_base;	/* CID offset for SHARED_TAGS IO queues */
 	uint32_t		sq_tdbl_off;
 	uint32_t		cq_hdbl_off;
@@ -223,6 +223,7 @@ struct nvme_controller {
 	uint32_t		ready_timeout_in_ms;
 	uint32_t		quirks;
 	uint8_t			max_identify_cns;	/* max CNS value for IDENTIFY (0 = no limit) */
+	uint8_t			io_sqes;
 #define	QUIRK_DELAY_B4_CHK_RDY	1		/* Can't touch MMIO on disable */
 #define	QUIRK_DISABLE_TIMEOUT	2		/* Disable broken completion timeout feature */
 #define	QUIRK_INTEL_ALIGNMENT	4		/* Pre NVMe 1.3 performance alignment */
@@ -232,6 +233,15 @@ struct nvme_controller {
 #define	QUIRK_APPLE_SHARED_CID_SPACE		0x20	/* Admin/IO share a single CID table */
 #define	QUIRK_APPLE_NO_ASYNC_EVENT		0x40	/* Skip NVMe async event requests */
 #define	QUIRK_APPLE_SINGLE_VECTOR		0x80	/* Single MSI vector, one IO queue */
+#define	QUIRK_EMPTY_NAMESPACE_CHANGED_LOG	0x100	/* Change Namespace List Log is always empty */
+#define	QUIRK_APPLE_S3X_NS1_ONLY		0x200	/* Ignore Apple-internal namespace 2 */
+#define	QUIRK_APPLE_128_BYTE_SQES		0x400	/* T2 uses 128-byte I/O SQEs */
+#define	QUIRK_PCIE_FLR_ON_FATAL			0x800	/* Use FLR for a fatal controller */
+#define	QUIRK_APPLE_S3X_SERIALIZE		0x1000	/* One S3X I/O at a time */
+
+/* Values programmed into CC.IOSQES (log2 of the SQE size in bytes). */
+#define	NVME_IOSQES_64				6
+#define	NVME_IOSQES_128				7
 
 	int			resource_id;
 	struct resource		*resource;
@@ -330,9 +340,26 @@ struct nvme_controller {
 	counter_u64_t			alignment_splits;
 };
 
+static inline uint32_t
+nvme_ctrlr_num_namespaces(const struct nvme_controller *ctrlr)
+{
+	uint32_t nn;
+
+	nn = min(ctrlr->cdata.nn, NVME_MAX_NAMESPACES);
+	if ((ctrlr->quirks & QUIRK_APPLE_S3X_NS1_ONLY) != 0)
+		nn = min(nn, 1U);
+	return (nn);
+}
+
+static inline bool
+nvme_ctrlr_nsid_visible(const struct nvme_controller *ctrlr, uint32_t nsid)
+{
+	return (nsid >= 1 && nsid <= nvme_ctrlr_num_namespaces(ctrlr));
+}
+
 /*
  * Access the idx'th submission queue entry.
- * sqe_shift is sqes_max - 6: 0 for standard 64-byte SQEs, 1 for 128-byte.
+ * sqe_shift is 0 for standard 64-byte SQEs and 1 for 128-byte SQEs.
  */
 #define	NVME_SQE(qpair, idx)	(&(qpair)->cmd[(idx) << (qpair)->sqe_shift])
 

@@ -472,7 +472,7 @@
 				#phy-cells = <0>;
 			};
 
-			usb3_phy: usb3phy@4400 {
+			usb3_phy: usb3-phy@4400 {
 				compatible = "ti,omap-usb3";
 				reg = <0x4400 0x80>,
 				<0x4800 0x64>,
@@ -2393,7 +2393,7 @@
 			#size-cells = <1>;
 			ranges = <0x0 0x4000 0x1000>;
 
-			wdt2: wdt@0 {
+			wdt2: watchdog@0 {
 				compatible = "ti,omap5-wdt", "ti,omap3-wdt";
 				reg = <0x0 0x80>;
 				interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;

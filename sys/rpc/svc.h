@@ -76,6 +76,7 @@
 #define SVCSET_VERSQUIET	2
 #define SVCGET_CONNMAXREC	3
 #define SVCSET_CONNMAXREC	4
+#define SVCSET_READDDP		5
 
 /*
  * Operations for rpc_control().
@@ -343,6 +344,14 @@ typedef struct __rpc_svcpool {
 } SVCPOOL;
 
 /*
+ * svc_rdma_listen is the function in the nfsrdma.ko module called to
+ * enable the RDMA server side listener.
+ * nfsrvd_rdma_port - The port# that RDMA should listen on for the NFS server.
+ */
+typedef int	svc_rdma_listen_ftype(SVCPOOL *pool, int port);
+extern svc_rdma_listen_ftype *svc_rdma_listen;
+
+/*
  * Operations defined on an SVCXPRT handle
  *
  * SVCXPRT		*xprt;
@@ -608,6 +617,7 @@ extern SVCXPRT *svc_vc_create(SVCPOOL *, struct socket *,
          */
 
 extern SVCXPRT *svc_vc_create_backchannel(SVCPOOL *);
+extern SVCXPRT *svc_rdma_create_backchannel(SVCPOOL *);
 
 extern void *clnt_bck_create(struct socket *, const rpcprog_t, const rpcvers_t);
 	/*

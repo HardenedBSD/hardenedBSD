@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2009 Bruce Simpson.
+ * Copyright (c) 2009-2026 Bruce Simpson.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,6 +34,7 @@
  * Normative references: RFC 2292, RFC 3492, RFC 3542, RFC 3678, RFC 3810.
  */
 
+#include "opt_inet.h"
 #include "opt_inet6.h"
 
 #include <sys/param.h>
@@ -162,6 +163,9 @@ static struct ifnet *
 static int	in6p_block_unblock_source(struct inpcb *, struct sockopt *);
 static int	in6p_set_multicast_if(struct inpcb *, struct sockopt *);
 static int	in6p_set_source_filters(struct inpcb *, struct sockopt *);
+#ifdef INET
+static int	in6_v6_mreq_to_v4(struct ipv6_mreq *, struct ip_mreq *);
+#endif
 static int	sysctl_ip6_mcast_filters(SYSCTL_HANDLER_ARGS);
 
 SYSCTL_DECL(_net_inet6_ip6);	/* XXX Not in any common header. */
@@ -1038,6 +1042,7 @@ in6m_merge(struct in6_multi *inm, /*const*/ struct in6_mfilter *imf)
 	 * Maintain a count of source filters whose state was
 	 * actually modified by this operation.
 	 */
+	nims = NULL;
 	RB_FOREACH(ims, ip6_msource_tree, &imf->im6f_sources) {
 		lims = (struct in6_msource *)ims;
 		if (lims->im6sl_st[0] == imf->im6f_st[0]) nsrc0++;
@@ -1881,11 +1886,56 @@ in6p_lookup_mcast_ifp(const struct inpcb *inp, const struct sockaddr_in6 *gsin6)
 	return (nh ? nh->nh_ifp : NULL);
 }
 
+#ifdef INET
+/*
+ * Perform sockopt mreq argument conversion for IPv4-mapped groups.
+ *
+ * This function is required to support an extension to the behaviour
+ * in RFC 3493 Sec 3.7, which was never formally proposed by any
+ * contemporary IPv6 normative reference, but which is now required
+ * by much application software using IPv6 sockets as a convenience.
+ * Refer to manual page ip6(4) for further information.
+ *
+ * FUTURE: Use IPv4 source-address selection.
+ */
+static int
+in6_v6_mreq_to_v4(struct ipv6_mreq *mreq, struct ip_mreq *mreq_v4)
+{
+	int			 error;
+	struct epoch_tracker	 et;
+	struct ifnet		*ifp;
+	struct in_ifaddr	*ia;
+
+	NET_EPOCH_ENTER(et);
+
+	ifp = ifnet_byindex(mreq->ipv6mr_interface);
+	if (ifp == NULL) {
+		error = EADDRNOTAVAIL;
+		goto out;
+	}
+
+	/*
+	 * Here, we do not compare the ifnet's primary IPv4 address with
+	 * INADDR_ANY, to permit its use during system initialization.
+	 * If this is not required, an appropriate check to screen it out
+	 * should be added, e.g. in_nullhost(ia->ia_addr.sin_addr.s_addr).
+	 */
+	ia = in_ifprimaryaddr(ifp);
+	if (ia == NULL) {
+		error = EADDRNOTAVAIL;
+		goto out;
+	}
+	mreq_v4->imr_interface.s_addr = ia->ia_addr.sin_addr.s_addr;
+	error = 0;
+
+out:
+	NET_EPOCH_EXIT(et);
+	return (error);
+}
+#endif /* INET */
+
 /*
  * Join an IPv6 multicast group, possibly with a source.
- *
- * FIXME: The KAME use of the unspecified address (::)
- * to join *all* multicast groups is currently unsupported.
  *
  * XXXGL: this function multiple times uses ifnet_byindex() without
  * proper protection - staying in epoch, or putting reference on ifnet.
@@ -1929,6 +1979,34 @@ in6p_join_group(struct inpcb *inp, struct sockopt *sopt)
 		    sizeof(struct ipv6_mreq));
 		if (error)
 			return (error);
+#ifdef INET
+		/*
+		 * Support for the non-IETF-ratified extension to RFC 3493 to
+		 * join IPv4 groups as IPv4 mapped addresses on IPv6 sockets.
+		 */
+		if (IN6_IS_ADDR_V4MAPPED(&mreq.ipv6mr_multiaddr)) {
+			struct ip_mreq mreq_v4;
+			struct sockopt sopt_v4 = {
+				.sopt_dir     = SOPT_SET,
+				.sopt_level   = sopt->sopt_level,
+				.sopt_name    = IP_ADD_MEMBERSHIP,
+				.sopt_val     = &mreq_v4,
+				.sopt_valsize = sizeof(mreq_v4),
+				.sopt_rights  = sopt->sopt_rights
+			};
+
+			mreq_v4.imr_multiaddr.s_addr =
+			    htonl(mreq.ipv6mr_multiaddr.s6_addr32[3]);
+			if (mreq.ipv6mr_interface == 0)
+				mreq_v4.imr_interface.s_addr = INADDR_ANY;
+			else
+				error = in6_v6_mreq_to_v4(&mreq, &mreq_v4);
+			if (error)
+				return error;
+
+			return (inp_join_group(inp, &sopt_v4));
+		}
+#endif /* INET */
 
 		gsa->sin6.sin6_family = AF_INET6;
 		gsa->sin6.sin6_len = sizeof(struct sockaddr_in6);
@@ -2242,6 +2320,34 @@ in6p_leave_group(struct inpcb *inp, struct sockopt *sopt)
 		    sizeof(struct ipv6_mreq));
 		if (error)
 			return (error);
+#ifdef INET
+		/*
+		 * Support for the non-IETF-ratified extension to RFC 3493 to
+		 * leave IPv4 groups as IPv4 mapped addresses on IPv6 sockets.
+		 */
+		if (IN6_IS_ADDR_V4MAPPED(&mreq.ipv6mr_multiaddr)) {
+			struct ip_mreq mreq_v4;
+			struct sockopt sopt_v4 = {
+				.sopt_dir     = SOPT_SET,
+				.sopt_level   = sopt->sopt_level,
+				.sopt_name    = IP_DROP_MEMBERSHIP,
+				.sopt_val     = &mreq_v4,
+				.sopt_valsize = sizeof(mreq_v4),
+				.sopt_rights  = sopt->sopt_rights
+			};
+
+			mreq_v4.imr_multiaddr.s_addr =
+			    htonl(mreq.ipv6mr_multiaddr.s6_addr32[3]);
+			if (mreq.ipv6mr_interface == 0)
+				mreq_v4.imr_interface.s_addr = INADDR_ANY;
+			else
+				error = in6_v6_mreq_to_v4(&mreq, &mreq_v4);
+			if (error)
+				return error;
+
+			return (inp_leave_group(inp, &sopt_v4));
+		}
+#endif /* INET */
 		gsa->sin6.sin6_family = AF_INET6;
 		gsa->sin6.sin6_len = sizeof(struct sockaddr_in6);
 		gsa->sin6.sin6_addr = mreq.ipv6mr_multiaddr;

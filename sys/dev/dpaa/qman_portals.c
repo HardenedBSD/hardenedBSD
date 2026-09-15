@@ -16,6 +16,8 @@
 #include <sys/proc.h>
 #include <sys/pcpu.h>
 #include <sys/sched.h>
+#include <sys/smp.h>	/* For CPU_FOREACH() */
+#include <sys/sysctl.h>
 #include <ddb/ddb.h>
 
 #include <machine/bus.h>
@@ -115,6 +117,7 @@
 #define	QCSP_IER		0x0e04
 #define	QCSP_ISDR		0x0e08
 #define	QCSP_IIR		0xe0c
+#define	QCSP_ITPR		0x0e14
 
 #define	QM_EQCR_VERB_CMD_ENQUEUE	0x01
 #define	QM_EQCR_VERB_BIT_INT		0x04
@@ -129,6 +132,85 @@ DPAA_RING(qman_eqcr, QMAN_EQCR_COUNT, QCSP_EQCR_PI_CENA, QCSP_EQCR_CI_CENA,
 		QCSP_EQCR_PI_CINH, QCSP_EQCR_CI_CINH);
 DPAA_RING(qman_dqrr, QMAN_DQRR_COUNT, QCSP_DQRR_PI_CENA, QCSP_DQRR_CI_CENA,
 		QCSP_DQRR_PI_CINH, QCSP_DQRR_CI_CINH);
+
+/*
+ *  dqrr_ithresh: fire DQRR interrupt once N (of 16) dequeues queued (1-15)
+ *  mr_ithresh:   fire MR interrupt after N messages (1-7)
+ *  iperiod:      timer bound on interrupt latency, in units of 256 QMan
+ *                clocks (~32 us on typical QorIQ platform clock at 100)
+ */
+static int qman_dqrr_ithresh = 12;
+static int qman_mr_ithresh = 4;
+static int qman_iperiod = 100;
+
+static void
+qman_portal_update_reg(bus_size_t reg, uint32_t val)
+{
+	struct qman_portal_softc *sc;
+	device_t portal;
+	int cpu;
+
+	CPU_FOREACH(cpu) {
+		portal = DPCPU_ID_GET(cpu, qman_affine_portal);
+		if (portal == NULL)
+			continue;
+		sc = device_get_softc(portal);
+		bus_write_4(sc->sc_base.sc_mres[1], reg, val);
+	}
+}
+
+static int
+qman_sysctl_reg(struct sysctl_oid *oidp, struct sysctl_req *req,
+    int *var, int min, int max, bus_size_t reg)
+{
+	int val, error;
+
+	val = *var;
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	if (val < min || val > max)
+		return (EINVAL);
+	*var = val;
+	qman_portal_update_reg(reg, val);
+	return (0);
+}
+
+static int
+qman_sysctl_dqrr_ithresh(SYSCTL_HANDLER_ARGS)
+{
+	return (qman_sysctl_reg(oidp, req,
+	    &qman_dqrr_ithresh, 1, 15, QCSP_DQRR_ITR));
+}
+
+static int
+qman_sysctl_mr_ithresh(SYSCTL_HANDLER_ARGS)
+{
+	return (qman_sysctl_reg(oidp, req,
+	    &qman_mr_ithresh, 1, 7, QCSP_MR_ITR));
+}
+
+static int
+qman_sysctl_iperiod(SYSCTL_HANDLER_ARGS)
+{
+	return (qman_sysctl_reg(oidp, req,
+	    &qman_iperiod, 1, 65535, QCSP_ITPR));
+}
+
+SYSCTL_NODE(_hw, OID_AUTO, qman, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "QMan portal tunables");
+SYSCTL_PROC(_hw_qman, OID_AUTO, dqrr_ithresh,
+    CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
+    NULL, 0, qman_sysctl_dqrr_ithresh, "I",
+    "DQRR interrupt threshold (dequeues queued before interrupt; 1-15)");
+SYSCTL_PROC(_hw_qman, OID_AUTO, mr_ithresh,
+    CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
+    NULL, 0, qman_sysctl_mr_ithresh, "I",
+    "Message Ring interrupt threshold (messages queued before interrupt; 1-7)");
+SYSCTL_PROC(_hw_qman, OID_AUTO, iperiod,
+    CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_MPSAFE,
+    NULL, 0, qman_sysctl_iperiod, "I",
+    "Interrupt time period (units of 256 QMan clocks)");
 
 /*
  * pmode: one of the CFG_EPM constants.
@@ -164,8 +246,7 @@ qman_dqrr_init(struct qman_portal_softc *sc)
 	/* Dequeue from the direct-connect channel and pool 0, up to 3 frames */
 	bus_write_4(regs, QCSP_DQRR_SDQCR,
 	    SDQCR_FC | SDQCR_DP | SDQCR_DCT_PRI_PREC |
-	    (DEF_SDQCR_TOKEN << SDQCR_TOKEN_S) |
-	    DQRR_DQ_SRC_DCP | SDQCR_DQ_SRC_CHAN(0));
+	    (DEF_SDQCR_TOKEN << SDQCR_TOKEN_S) | DQRR_DQ_SRC_DCP);
 	bus_write_4(regs, QCSP_DQRR_VDQCR, 0);
 	bus_write_4(regs, QCSP_DQRR_PDQCR, 0);
 
@@ -208,6 +289,12 @@ qman_portal_attach(device_t dev, int cpu)
 	}
 	sc->sc_affine_channel = cell;
 	DPCPU_ID_SET(cpu, qman_affine_portal, dev);
+
+	/* Interrupt coalescing.  See tunables above. */
+	bus_write_4(sc->sc_base.sc_mres[1], QCSP_DQRR_ITR, qman_dqrr_ithresh);
+	bus_write_4(sc->sc_base.sc_mres[1], QCSP_MR_ITR, qman_mr_ithresh);
+	bus_write_4(sc->sc_base.sc_mres[1], QCSP_ITPR, qman_iperiod);
+
 	bus_write_4(sc->sc_base.sc_mres[1], QCSP_IER,
 	    QM_PIRQ_EQCI | QM_PIRQ_EQRI | QM_PIRQ_MRI | QM_PIRQ_CSCI |
 	    QM_PIRQ_DQRI);
@@ -282,6 +369,7 @@ qman_portal_fq_enqueue(device_t dev, struct qman_fq *fq, struct dpaa_fd *frame)
 static int
 qman_portal_loop_dqrr(struct qman_portal_softc *sc)
 {
+	SLIST_HEAD(, qman_fq) dirty_fqs = SLIST_HEAD_INITIALIZER(dirty_fqs);
 	struct qman_dqrr_entry *dqrr;
 	struct qman_dqrr_entry *base;
 	struct qman_fq *fq;
@@ -289,23 +377,44 @@ qman_portal_loop_dqrr(struct qman_portal_softc *sc)
 	    DQRR_CI_CI_M;
 	int pi = bus_read_4(sc->sc_base.sc_mres[1], QCSP_DQRR_PI_CINH) &
 	    DQRR_PI_PI_M;
+	int start_ci = ci;
 
 	base = sc->sc_dqrr.ring;
 	do {
 		dqrr = &base[ci];
 		dpaa_flush_line(dqrr);
 		dpaa_touch_line(dqrr);
-		if ((dqrr->stat & QMAN_DQRR_STAT_HAS_FRAME)) {
-			fq = qman_fq_from_index(dqrr->fqid);
-			if (fq != NULL && fq->cb.dqrr != NULL) {
-				fq->cb.dqrr(sc->sc_base.sc_dev, fq,
-				    &dqrr->fd, fq->cb.ctx);
-			}
-		} else
+		if ((dqrr->stat & QMAN_DQRR_STAT_HAS_FRAME) == 0)
 			break;
+
+		fq = qman_fq_from_index(dqrr->fqid);
+		if (fq != NULL && fq->cb.dqrr != NULL) {
+			fq->cb.dqrr(sc->sc_base.sc_dev, fq,
+			    &dqrr->fd, fq->cb.ctx);
+			/*
+			 * Track the FQ for post-poll flush.  Only need to track
+			 * once.
+			 */
+			if (fq->cb.flush != NULL && !fq->dirty) {
+				fq->dirty = true;
+				SLIST_INSERT_HEAD(&dirty_fqs, fq,
+				    dirty_next);
+			}
+		}
 		ci = (ci + 1) & DQRR_CI_CI_M;
-		bus_write_4(sc->sc_base.sc_mres[1], QCSP_DQRR_CI_CINH, ci);
 	} while (ci != pi);
+
+	/* Update CI after the loop.  CI writes are expensive. */
+	if (ci != start_ci)
+		bus_write_4(sc->sc_base.sc_mres[1], QCSP_DQRR_CI_CINH, ci);
+
+	/* Drain the dirty list, invoking the per-FQ flush hook. */
+	while (!SLIST_EMPTY(&dirty_fqs)) {
+		fq = SLIST_FIRST(&dirty_fqs);
+		SLIST_REMOVE_HEAD(&dirty_fqs, dirty_next);
+		fq->dirty = false;
+		fq->cb.flush(fq, fq->cb.ctx);
+	}
 
 	return (0);
 }
@@ -374,7 +483,7 @@ qman_portal_static_dequeue_channel(device_t dev, int channel)
 	uint32_t reg;
 
 	reg = bus_read_4(sc->sc_base.sc_mres[1], QCSP_DQRR_SDQCR);
-	reg |= (1 << (15 - (channel - qman_channel_base)));
+	reg |= (1 << (14 - (channel - qman_channel_base)));
 	bus_write_4(sc->sc_base.sc_mres[1], QCSP_DQRR_SDQCR, reg);
 }
 
@@ -385,7 +494,7 @@ qman_portal_static_dequeue_rm_channel(device_t dev, int channel)
 	uint32_t reg;
 
 	reg = bus_read_4(sc->sc_base.sc_mres[1], QCSP_DQRR_SDQCR);
-	reg &= ~(1 << (15 - (channel - qman_channel_base)));
+	reg &= ~(1 << (14 - (channel - qman_channel_base)));
 	bus_write_4(sc->sc_base.sc_mres[1], QCSP_DQRR_SDQCR, reg);
 }
 
@@ -400,6 +509,7 @@ DB_SHOW_COMMAND(fqid, qman_show_fqid)
 		return;
 
 	bzero(&cmd, sizeof(cmd));
+	cmd.query_fq_np.verb = QCSP_VERB_QUERY_FQ_NP;
 	cmd.query_fq_np.fqid = addr;
 
 	/* Ensure we have got QMan port initialized */
@@ -412,6 +522,7 @@ DB_SHOW_COMMAND(fqid, qman_show_fqid)
 	/* Dump all NP fields */
 	if (res != NULL && save_res.query_fq_np.rslt == 0xf0) {
 		db_printf("FQID: %d\n", (int)addr);
+		db_printf("  Non-programmable:\n");
 		db_printf("  State: %x\n", save_res.query_fq_np.state);
 		db_printf("  Link: %x\n", save_res.query_fq_np.fqd_link);
 		db_printf("  ODP_SEQ: %x\n", save_res.query_fq_np.odp_seq);
@@ -435,5 +546,26 @@ DB_SHOW_COMMAND(fqid, qman_show_fqid)
 		db_printf("  od1_sfdr: %x\n", save_res.query_fq_np.od1_sfdr);
 		db_printf("  od2_sfdr: %x\n", save_res.query_fq_np.od2_sfdr);
 		db_printf("  od3_sfdr: %x\n", save_res.query_fq_np.od3_sfdr);
+	}
+
+	bzero(&cmd, sizeof(cmd));
+	cmd.query_fq.verb = QCSP_VERB_QUERY_FQ;
+	cmd.query_fq.fqid = addr;
+
+	res = qman_portal_mc_send_raw(portal, &cmd);
+	if (res != NULL)
+		save_res = *res;
+
+	if (res != NULL && save_res.query_fq.rslt == 0xf0) {
+		db_printf("  Programmable:\n");
+		db_printf("  ORPC: %02x\n", save_res.query_fq.orpc);
+		db_printf("  CGID: %02x\n", save_res.query_fq.cgid);
+		db_printf("  FQ_CTRL: %04x\n", save_res.query_fq.fq_ctrl);
+		db_printf("  DEST_WQ: %04x\n", save_res.query_fq.dest_wq);
+		db_printf("  ICS_CRED: %04x\n", save_res.query_fq.ics_cred);
+		db_printf("  TD_thresh: %04x\n", save_res.query_fq.td_thresh);
+		db_printf("  Context_B: %08x\n", save_res.query_fq.context_b);
+		db_printf("  Context_A: %16lx\n", save_res.query_fq.context_a);
+		db_printf("  OAC: %04x\n", save_res.query_fq.oac);
 	}
 }

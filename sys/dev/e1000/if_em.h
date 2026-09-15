@@ -48,6 +48,7 @@
 #endif
 #include <sys/buf_ring.h>
 #include <sys/bus.h>
+#include <sys/callout.h>
 #include <sys/endian.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
@@ -95,6 +96,9 @@
 #include "e1000_82571.h"
 #include "ifdi_if.h"
 
+struct igb_vf;
+struct igb_vf_mac_filter;
+
 /* Tunables */
 
 /*
@@ -133,6 +137,7 @@
 #define EM_DEFAULT_RXD		1024
 #define EM_DEFAULT_MULTI_RXD	4096
 #define IGB_MAX_RXD		4096
+#define IGB_MAX_FRAME_SIZE	9234
 
 /*
  * EM_TIDV - Transmit Interrupt Delay Value
@@ -225,6 +230,11 @@
  */
 #define EM_VENDOR_ID			0x8086
 #define EM_FLASH			0x0014
+#define EM_SUBVENDOR_DELL		0x1028
+#define EM_SUBVENDOR_HP			0x103c
+#define EM_I350_SUBDEVICE_WOL_1		0x1f52
+#define EM_I350_SUBDEVICE_WOL_2		0x5001
+#define EM_I350_SUBDEVICE_WOL_3		0x5002
 
 #define EM_JUMBO_PBA			0x00000028
 #define EM_DEFAULT_PBA			0x00000030
@@ -236,8 +246,8 @@
 #define PCI_ANY_ID			(~0U)
 #define ETHER_ALIGN			2
 #define EM_FC_PAUSE_TIME		0x0680
-#define EM_EEPROM_APME			0x400;
-#define EM_82544_APME			0x0004;
+#define EM_EEPROM_APME_HIGH		0x0400
+#define EM_EEPROM_APME_LOW		0x0004
 
 /* Support AutoMediaDetect for Marvell M88 PHY in i354 */
 #define IGB_MEDIA_RESET		(1 << 0)
@@ -291,17 +301,40 @@
 #define PCICFG_DESC_RING_STATUS	0xe4
 #define FLUSH_DESC_REQUIRED	0x100
 
+#define EM_TX_PTHRESH		31
+#define EM_TX_HTHRESH		1
+#define EM_TX_WTHRESH		1
 
-#define IGB_RX_PTHRESH	((hw->mac.type == e1000_i354) ? 12 : \
-			    ((hw->mac.type <= e1000_82576) ? 16 : 8))
-#define IGB_RX_HTHRESH	8
-#define IGB_RX_WTHRESH	((hw->mac.type == e1000_82576 && \
-			    (sc->intr_type == IFLIB_INTR_MSIX)) ? 1 : 4)
+#define EM_RXDCTL_PTHRESH_MASK	0x0000003F
+#define EM_RXDCTL_HTHRESH_MASK	0x00003F00
+#define EM_RXDCTL_WTHRESH_MASK	0x003F0000
+#define EM_RXDCTL_THRESH_MASK	(EM_RXDCTL_PTHRESH_MASK | \
+				 EM_RXDCTL_HTHRESH_MASK | \
+				 EM_RXDCTL_WTHRESH_MASK)
 
-#define IGB_TX_PTHRESH	((hw->mac.type == e1000_i354) ? 20 : 8)
-#define IGB_TX_HTHRESH	1
-#define IGB_TX_WTHRESH	((hw->mac.type != e1000_82575 && \
-			    sc->intr_type == IFLIB_INTR_MSIX) ? 1 : 16)
+#define EM_JUMBO_RX_PTHRESH	3
+#define EM_JUMBO_RX_HTHRESH	1
+#define EM_82574_RX_PTHRESH	32
+#define EM_82574_RX_HTHRESH	4
+#define EM_82574_RX_WTHRESH	4
+
+#define IGB_RXDCTL_PTHRESH_MASK	0x0000001F
+#define IGB_RXDCTL_HTHRESH_MASK	0x00001F00
+#define IGB_RXDCTL_WTHRESH_MASK	0x001F0000
+#define IGB_RXDCTL_THRESH_MASK	(IGB_RXDCTL_PTHRESH_MASK | \
+				 IGB_RXDCTL_HTHRESH_MASK | \
+				 IGB_RXDCTL_WTHRESH_MASK)
+#define IGB_82575_RXDCTL_THRESH_MASK	0x003F3F3F
+
+#define IGB_RX_PTHRESH		8
+#define I354_RX_PTHRESH		12
+#define IGB_RX_HTHRESH		8
+#define IGB_RX_WTHRESH		4
+#define IGB_82576_RX_WTHRESH	1
+
+#define IGB_TX_PTHRESH		8
+#define I354_TX_PTHRESH	20
+#define IGB_TX_HTHRESH		1
 
 /*
  * TDBA/RDBA should be aligned on 16 byte boundary. But TDLEN/RDLEN should be
@@ -384,11 +417,8 @@
 #define UPDATE_VF_REG(reg, last, cur)		\
 do {						\
 	u32 new = E1000_READ_REG(&sc->hw, reg);	\
-	if (new < last)				\
-		cur += 0x100000000LL;		\
+	cur += (u32)(new - last);		\
 	last = new;				\
-	cur &= 0xFFFFFFFF00000000LL;		\
-	cur |= new;				\
 } while (0)
 
 struct e1000_softc;
@@ -554,6 +584,7 @@ struct e1000_softc {
 	int			if_flags;
 	int			em_insert_vlan_header;
 	u32			ims;
+	bool			allow_64bit_dma;
 	bool			in_detach;
 
 	u32			flags;
@@ -567,7 +598,9 @@ struct e1000_softc {
 
 	int			enable_aim;
 	/* Management and WOL features */
-	u32			wol;
+	bool			wol_phy_wakeup;
+	bool			wol_phy_armed;
+	bool			suspend_link_powered_down;
 	bool			has_manage;
 	bool			has_amt;
 
@@ -581,6 +614,10 @@ struct e1000_softc {
 	** to repopulate it.
 	*/
 	u32			shadow_vfta[EM_VFTA_SIZE];
+	u32			vf_vfta_stale[EM_VFTA_SIZE];
+	u32			vf_vfta_retry[EM_VFTA_SIZE];
+	sbintime_t		vf_vlan_retry_deadline;
+	u16			vf_vlan_retry_cursor;
 
 	/* Info about the interface */
 	enum em_link_state	link_state;
@@ -592,6 +629,58 @@ struct e1000_softc {
 	u32			pba;
 	int			link_mask;
 	int			tso_automasked;
+	u32			phy_hang_count;
+	u32			promisc_pending;
+	u32			stats_pending;
+	u32			device_reset_state;
+	u32			fatal_error_state;
+	u32			fatal_error_icr;
+	u32			fatal_error_pbeccsts;
+	u32			fatal_error_peind;
+	u32			fatal_error_pcie;
+	u32			fatal_error_pcie_ecc;
+	u32			fatal_error_lan;
+	u32			fatal_error_dma_tx;
+	u32			fatal_error_dma_rx;
+	u32			fatal_error_dma_host;
+	u64			fatal_error_reset_count;
+	u64			fatal_error_lan_count;
+	u64			fatal_error_mng_count;
+	u64			fatal_error_pcie_count;
+	u64			fatal_error_dma_count;
+	u64			fatal_error_unknown_count;
+	u64			corrected_error_dma_count;
+	u64			corrected_error_pcie_tx_data_count;
+	u64			corrected_error_pcie_retry_count;
+	u64			corrected_error_pcie_other_count;
+	u64			corrected_error_packet_buffer_count;
+	u64			corrected_error_lan_mng_fifo_count;
+	u64			uncorrected_error_packet_buffer_count;
+	u64			uncorrected_error_dma_count;
+	u64			uncorrected_error_pcie_count;
+
+#ifdef PCI_IOV
+	struct igb_vf		*vfs;
+	struct igb_vf_mac_filter *vf_mac_filters;
+	struct callout		iov_mbx_retry;
+	u32			iov_vfta[EM_VFTA_SIZE];
+	u32			iov_mdd_cause;
+	u32			iov_pending;
+	u32			iov_spoof_pending;
+	u32			iov_blocked_pending;
+	u32			iov_intr_drain_pending;
+	u32			iov_teardown;
+	struct timeval		iov_last_mdd_log;
+	u16			num_vfs;
+	u16			num_vf_mac_filters;
+	u16			pool;
+	bool			iov_hw_active;
+	bool			iov_mta_valid;
+	bool			iov_mbx_retry_initialized;
+	bool			iov_pf_mdd_blocked;
+	bool			iov_pf_vlan_promisc;
+	bool			iov_vfta_valid;
+#endif
 
 	u64			que_mask;
 
@@ -608,15 +697,71 @@ struct e1000_softc {
 	unsigned long		dropped_pkts;
 	unsigned long		link_irq;
 	unsigned long		rx_overruns;
-	unsigned long		watchdog_events;
+	u64			rx_csum_good;
+	u64			rx_csum_errors;
 
 	union {
 		struct e1000_hw_stats	stats;		/* !sc->vf_ifp */
 		struct e1000_vf_stats	vf_stats;	/* sc->vf_ifp */
 	} ustats;
 
+	struct callout		vf_queue_retry;
+	struct callout		vf_mbx_retry;
+	struct timeval		vf_last_queue_log;
+	struct timeval		vf_last_mbx_log;
+	u32			vf_queue_retry_new_epoch;
+	u32			vf_queue_retry_pending;
+	u32			vf_mbx_ready;
+	u32			vf_mbx_retry_pending;
 	u16			vf_ifp;
+	u8			vf_queue_failures;
+	u8			vf_mbx_retry_stage;
+	bool			vf_queue_gave_up;
+	bool			vf_queue_retry_initialized;
+	bool			vf_mbx_retry_initialized;
+	bool			vf_queues_sanitized;
+	bool			vf_reset_pending;
+	/* A PF can retain auxiliary filters across a VF reset. */
+	bool			vf_uc_filters_set;
 };
+
+/*
+ * Shared PF/VF mechanisms and VF policy entry points.  The latter live in
+ * if_igbv.c so the VF method table cannot accidentally select PF policy.
+ */
+int	em_if_attach_pre(if_ctx_t);
+int	em_if_attach_post(if_ctx_t);
+void	em_add_device_sysctls(struct e1000_softc *);
+int	em_if_set_promisc_impl(if_ctx_t, int);
+bool	em_is_valid_ether_addr(const u8 *);
+void	em_initialize_transmit_rings(if_ctx_t);
+void	em_update_stats_counters(struct e1000_softc *);
+void	igb_initialize_receive_rings(if_ctx_t, bool);
+
+int	igbv_get_regs(SYSCTL_HANDLER_ARGS);
+int	igbv_if_attach_pre(if_ctx_t);
+int	igbv_if_attach_post(if_ctx_t);
+int	igbv_if_media_change(if_ctx_t);
+void	igbv_if_intr_enable(if_ctx_t);
+void	igbv_if_intr_disable(if_ctx_t);
+void	igbv_if_update_admin_status(if_ctx_t);
+void	igbv_initialize_receive_unit(if_ctx_t);
+void	igbv_initialize_transmit_unit(if_ctx_t);
+void	igbv_mbx_retry_detach(struct e1000_softc *);
+void	igbv_mbx_retry_failed(if_ctx_t);
+void	igbv_mbx_retry_prepare(struct e1000_softc *);
+void	igbv_mbx_retry_stop(struct e1000_softc *);
+void	igbv_queue_retry_detach(struct e1000_softc *);
+void	igbv_queue_retry_failed(if_ctx_t);
+void	igbv_queue_retry_prepare(struct e1000_softc *);
+void	igbv_queue_retry_stop(struct e1000_softc *);
+void	igbv_reconcile_mac(struct e1000_softc *, if_t);
+bool	igbv_reset(if_ctx_t);
+bool	igbv_sanitize_queues(struct e1000_softc *);
+void	igbv_log_reset_failure(struct e1000_softc *, s32, bool);
+void	igbv_update_uc_addr_list(struct e1000_softc *, if_t);
+void	igbv_vlan_retry_add(struct e1000_softc *, u16);
+void	igbv_vlan_retry_clear(struct e1000_softc *, u16);
 
 /********************************************************************************
  * vendor_info_array

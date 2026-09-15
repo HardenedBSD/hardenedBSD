@@ -643,10 +643,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		firmware-name = "qcom/sm8450/a730_zap.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sm8450/a730_zap.mbn";
 };
 
 &i2c9 {
@@ -1197,11 +1197,6 @@
 
 &usb_1 {
 	status = "okay";
-};
-
-&usb_1_dwc3 {
-	dr_mode = "otg";
-	usb-role-switch;
 };
 
 &usb_1_dwc3_hs {

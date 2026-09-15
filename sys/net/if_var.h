@@ -131,6 +131,8 @@ typedef void (*if_qflush_fn_t)(if_t);
 typedef int (*if_transmit_fn_t)(if_t, struct mbuf *);
 typedef	uint64_t (*if_get_counter_t)(if_t, ift_counter);
 typedef	void (*if_reassign_fn_t)(if_t, struct vnet *, char *);
+struct if_vf_status;
+typedef	int (*if_vf_status_fn_t)(if_t, struct if_vf_status **);
 typedef int (*if_spdadd_fn_t)(if_t ifp, void *sp, void *inp, void **priv);
 typedef int (*if_spddel_fn_t)(if_t ifp, void *sp, void *priv);
 typedef int (*if_sa_newkey_fn_t)(if_t ifp, void *sav, u_int drv_spi,
@@ -525,6 +527,8 @@ VNET_DECLARE(if_t, loif);	/* first loopback interface */
 #define MCDPRINTF(...)
 #endif
 
+typedef int (*if_foreach_group_cb_t)(struct ifg_group *, void *);
+int	if_foreach_group(if_t, if_foreach_group_cb_t, void *);
 int	if_addgroup(if_t, const char *);
 int	if_delgroup(if_t, const char *);
 int	if_addmulti(if_t, struct sockaddr *, struct ifmultiaddr **);
@@ -727,6 +731,7 @@ void if_setinitfn(if_t ifp, if_init_fn_t);
 void if_setinputfn(if_t ifp, if_input_fn_t);
 if_input_fn_t if_getinputfn(if_t ifp);
 void if_setioctlfn(if_t ifp, if_ioctl_fn_t);
+void if_setvfstatusfn(if_t ifp, if_vf_status_fn_t);
 void if_setoutputfn(if_t ifp, if_output_fn_t);
 void if_setstartfn(if_t ifp, if_start_fn_t);
 if_start_fn_t if_getstartfn(if_t ifp);
@@ -763,6 +768,7 @@ void *ifr_buffer_get_buffer(void *data);
 size_t ifr_buffer_get_length(void *data);
 
 int ifhwioctl(u_long, if_t, caddr_t, struct thread *);
+int if_get_vf_status(if_t, struct if_vf_status **);
 
 #ifdef DEVICE_POLLING
 enum poll_cmd { POLL_ONLY, POLL_AND_CHECK_STATUS };

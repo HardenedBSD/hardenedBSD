@@ -124,24 +124,28 @@
 					reg = <0>;
 					interrupt-parent = <&switch>;
 					interrupts = <0 IRQ_TYPE_LEVEL_HIGH>;
+					max-speed = <100>; /* only 100Mbit/s lanes are routed */
 				};
 
 				switchphy1: switchphy@1 {
 					reg = <1>;
 					interrupt-parent = <&switch>;
 					interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+					max-speed = <100>; /* only 100Mbit/s lanes are routed */
 				};
 
 				switchphy2: switchphy@2 {
 					reg = <2>;
 					interrupt-parent = <&switch>;
 					interrupts = <2 IRQ_TYPE_LEVEL_HIGH>;
+					max-speed = <100>; /* only 100Mbit/s lanes are routed */
 				};
 
 				switchphy3: switchphy@3 {
 					reg = <3>;
 					interrupt-parent = <&switch>;
 					interrupts = <3 IRQ_TYPE_LEVEL_HIGH>;
+					max-speed = <100>; /* only 100Mbit/s lanes are routed */
 				};
 
 				switchphy4: switchphy@4 {
@@ -160,7 +164,7 @@
 	pinctrl-0 = <&pinctrl_ecspi5>;
 	status = "okay";
 
-	m25_eeprom: flash@0 {
+	m25_eeprom: eeprom@0 {
 		compatible = "atmel,at25";
 		spi-max-frequency = <10000000>;
 		size = <0x8000>;
@@ -195,6 +199,8 @@
 			mma8453: mma8453@1c {
 				compatible = "fsl,mma8453";
 				reg = <0x1c>;
+				vdd-supply = <&reg_3p3v>;
+				vddio-supply = <&reg_3p3v>;
 			};
 		};
 
@@ -211,6 +217,8 @@
 			mpl3115: mpl3115@60 {
 				compatible = "fsl,mpl3115";
 				reg = <0x60>;
+				vdd-supply = <&reg_3p3v>;
+				vddio-supply = <&reg_3p3v>;
 			};
 		};
 

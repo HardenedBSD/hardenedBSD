@@ -2549,6 +2549,7 @@ void
 closelogfiles(void)
 {
 	struct filed *f;
+	bool defer_free;
 
 	while (!STAILQ_EMPTY(&fhead)) {
 		f = STAILQ_FIRST(&fhead);
@@ -2557,6 +2558,13 @@ closelogfiles(void)
 		/* flush any pending output */
 		if (f->f_prevcount)
 			fprintlog_successive(f, 0);
+
+		/*
+		 * If a piped process is running, then defer the filed
+		 * cleanup until it exits.  close_filed() below sets
+		 * f_type to F_UNUSED, so capture this before calling it.
+		 */
+		defer_free = (f->f_type == F_PIPE && f->f_procdesc != -1);
 
 		switch (f->f_type) {
 		case F_FILE:
@@ -2585,11 +2593,7 @@ closelogfiles(void)
 			free(f->f_prop_filter);
 		}
 
-		/*
-		 * If a piped process is running, then defer the filed
-		 * cleanup until it exits.
-		 */
-		if (f->f_type != F_PIPE || f->f_procdesc == -1)
+		if (!defer_free)
 			free(f);
 	}
 }
@@ -3825,9 +3829,10 @@ p_open(const char *prog, int *rpd)
 		    "behaviour.", pid);
 	}
 
-	if (cap_rights_limit(pd,
-	    cap_rights_init(&rights, CAP_PDKILL, CAP_EVENT)) == -1)
-		err(1, "cap_rights_limit");
+	if (caph_rights_limit(pd,
+	    cap_rights_init(&rights, CAP_PDKILL, CAP_EVENT, CAP_PDGETPID)) ==
+	    -1)
+		err(1, "caph_rights_limit");
 	*rpd = pd;
 	return (pfd[1]);
 }

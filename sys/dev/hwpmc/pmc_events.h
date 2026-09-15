@@ -53,6 +53,23 @@
 #define	__PMC_EV_ALIAS_TSC()			\
 __PMC_EV_ALIAS("cycles",	TSC_TSC)
 
+/* RAPL energy counters. */
+#define	__PMC_EV_RAPL()				\
+	__PMC_EV(RAPL, ENERGY_PKG)		\
+	__PMC_EV(RAPL, ENERGY_CORES)		\
+	__PMC_EV(RAPL, ENERGY_DRAM)
+
+#define	PMC_EV_RAPL_FIRST	PMC_EV_RAPL_ENERGY_PKG
+#define	PMC_EV_RAPL_LAST	PMC_EV_RAPL_ENERGY_DRAM
+
+/* MPERF / APERF MSRs */
+#define __PMC_EV_PERF()				\
+	__PMC_EV(PERF, MPERF)			\
+	__PMC_EV(PERF, APERF)
+
+#define		PMC_EV_PERF_FIRST	PMC_EV_PERF_MPERF
+#define		PMC_EV_PERF_LAST	PMC_EV_PERF_APERF
+
 /*
  * Software events are dynamically defined.
  */
@@ -2428,6 +2445,8 @@ __PMC_EV_ALIAS("unhalted-reference-cycles", IAF_CPU_CLK_UNHALTED_REF)
  * 0x14500	0x0020		ARM DMC-620 clkdiv2 events
  * 0x14520	0x0080		ARM DMC-620 clk events
  * 0x14600	0x0100		ARM CMN-600 events
+ * 0x14700	0x0100		AMD/Intel RAPL energy events
+ * 0x14800	0x0100		AMD/Intel PERF MSRs events
  * 0x20000	0x1000		Software events
  */
 #define	__PMC_EVENTS()					\
@@ -2454,7 +2473,11 @@ __PMC_EV_ALIAS("unhalted-reference-cycles", IAF_CPU_CLK_UNHALTED_REF)
 	__PMC_EV_BLOCK(DMC620_PMU_C,	0x14520)	\
 	__PMC_EV_DMC620_PMU_C()				\
 	__PMC_EV_BLOCK(CMN600_PMU,	0x14600)	\
-	__PMC_EV_CMN600_PMU()
+	__PMC_EV_CMN600_PMU()				\
+	__PMC_EV_BLOCK(RAPL,		0x14700)	\
+	__PMC_EV_RAPL()					\
+	__PMC_EV_BLOCK(PERF,		0x14800)	\
+	__PMC_EV_PERF()
 
 #define	PMC_EVENT_FIRST	PMC_EV_TSC_TSC
 #define	PMC_EVENT_LAST	PMC_EV_SOFT_LAST

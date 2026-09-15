@@ -7,8 +7,17 @@
 /dts-v1/;
 /plugin/;
 
+&apss_watchdog {
+	status = "okay";
+};
+
 /* We can't and don't need to use zap shader in EL2 as linux can zap the gpu on it's own. */
 &gpu_zap_shader {
+	status = "disabled";
+};
+
+&iris {
+	/* TODO: Add video-firmware iommus to start IRIS from EL2 */
 	status = "disabled";
 };
 
@@ -41,6 +50,14 @@
 
 &pcie_smmu {
 	status = "okay";
+};
+
+&remoteproc_adsp {
+	iommus = <&apps_smmu 0x1000 0x80>;
+};
+
+&remoteproc_cdsp {
+	iommus = <&apps_smmu 0x0c00 0x0>;
 };
 
 /*

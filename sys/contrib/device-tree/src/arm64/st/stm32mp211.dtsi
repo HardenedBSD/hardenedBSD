@@ -94,19 +94,37 @@
 		#size-cells = <2>;
 
 		rifsc: bus@42080000 {
-			compatible = "simple-bus";
+			compatible = "st,stm32mp21-rifsc", "simple-bus";
 			reg = <0x42080000 0x0 0x1000>;
 			ranges;
 			dma-ranges;
 			#address-cells = <1>;
 			#size-cells = <2>;
+			#access-controller-cells = <1>;
 
 			usart2: serial@400e0000 {
 				compatible = "st,stm32h7-uart";
 				reg = <0x400e0000 0x0 0x400>;
 				interrupts = <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&ck_flexgen_08>;
+				access-controllers = <&rifsc 32>;
 				status = "disabled";
+			};
+		};
+
+		bsec: efuse@44000000 {
+			compatible = "st,stm32mp25-bsec";
+			reg = <0x44000000 0x0 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			part_number_otp@24 {
+				reg = <0x24 0x4>;
+			};
+
+			package_otp@1e8 {
+				reg = <0x1e8 0x1>;
+				bits = <0 3>;
 			};
 		};
 

@@ -109,6 +109,7 @@ aq_hw_fw_downld_dwords(struct aq_hw *hw, uint32_t a, uint32_t *p, uint32_t cnt)
 			err = ETIMEDOUT;
 			goto err_exit;
 		}
+		err = 0;
 	}
 
 	mif_mcp_up_mailbox_addr_set(hw, a);
@@ -124,6 +125,7 @@ aq_hw_fw_downld_dwords(struct aq_hw *hw, uint32_t a, uint32_t *p, uint32_t cnt)
 			     1000U);
 
 		*(p++) = mif_mcp_up_mailbox_data_get(hw);
+		a += 4;
 	}
 
 	reg_glb_cpu_sem_set(hw, 1U, AQ_HW_FW_SM_RAM);
@@ -311,6 +313,12 @@ aq_hw_get_mac_permanent(struct aq_hw *hw,  uint8_t *mac)
 	AQ_DBG_ENTER();
 
 	err = hw->fw_ops->get_mac_addr(hw, mac);
+	if (err != 0) {
+		/* A transient mailbox failure must not fail the attach. */
+		device_printf(hw->dev, "could not read the MAC address: %d\n",
+		    err);
+		memset(mac, 0, ETHER_ADDR_LEN);
+	}
 
 	/* Couldn't get MAC address from HW. Use auto-generated one. */
 	if ((mac[0] & 1) || ((mac[0] | mac[1] | mac[2]) == 0)) {
@@ -598,13 +606,20 @@ static int
 aq2_art_filter_set(struct aq_hw *hw, uint32_t idx, uint32_t tag,
     uint32_t mask, uint32_t action)
 {
+	idx += hw->art_filter_base_index;
+	if (idx >= AQ2_ART_TABLE_SIZE) {
+		device_printf(hw->dev,
+		    "ART index %u out of range (firmware base %u)\n", idx,
+		    hw->art_filter_base_index);
+		return (EINVAL);
+	}
+
 	if (AQ_HW_WAIT_FOR(reg_glb_cpu_sem_get(hw, AQ2_ART_SEM_INDEX) == 1U,
 	    10U, 1000U) != 0) {
 		device_printf(hw->dev, "ART semaphore timeout, idx %u\n", idx);
 		return (EBUSY);
 	}
 
-	idx += hw->art_filter_base_index;
 	AQ_WRITE_REG(hw, AQ2_RPF_ACT_ART_REQ_TAG_REG(idx), tag);
 	AQ_WRITE_REG(hw, AQ2_RPF_ACT_ART_REQ_MASK_REG(idx), mask);
 	AQ_WRITE_REG(hw, AQ2_RPF_ACT_ART_REQ_ACTION_REG(idx), action);
@@ -739,6 +754,10 @@ aq_hw_mac_addr_set(struct aq_hw *hw, uint8_t *mac_addr, uint8_t index)
 		err = EINVAL;
 		goto err_exit;
 	}
+	if (index >= AQ_HW_MAC_MAX) {
+		err = EINVAL;
+		goto err_exit;
+	}
 	h = (mac_addr[0] << 8) | (mac_addr[1]);
 	l = (mac_addr[2] << 24) | (mac_addr[3] << 16) | (mac_addr[4] << 8) |
 	    mac_addr[5];
@@ -804,7 +823,10 @@ aq_hw_init(struct aq_hw *hw, uint8_t *mac_addr, uint8_t adm_irq, bool msix)
 
 	aq_hw_mac_addr_set(hw, mac_addr, AQ_HW_MAC);
 
-	aq_hw_mpi_set(hw, MPI_INIT, hw->link_rate);
+	/* A lost ack must not skip the setup that follows. */
+	err = aq_hw_mpi_set(hw, MPI_INIT, hw->link_rate);
+	if (err != 0)
+		device_printf(hw->dev, "could not set F/W link mode: %d\n", err);
 
 	aq_hw_qos_set(hw);
 

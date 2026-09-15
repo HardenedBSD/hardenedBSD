@@ -16,7 +16,12 @@ libunit_la_SOURCES = \
 # all test binaries
 UNIT_TESTS = \
 	%D%/test_zap \
-	%D%/test_namecheck
+	%D%/test_namecheck \
+	%D%/test_btree \
+	%D%/test_fletcher \
+	%D%/test_sha2 \
+	%D%/test_cityhash \
+	%D%/test_nvpair
 noinst_PROGRAMS = $(UNIT_TESTS)
 
 
@@ -49,6 +54,84 @@ nodist_%C%_test_namecheck_SOURCES = \
 
 %C%_test_namecheck_LDADD = \
 	libspl.la \
+	libunit.la
+
+
+%C%_test_btree_CFLAGS = $(AM_CFLAGS)
+
+nodist_%C%_test_btree_SOURCES = \
+	module/avl/avl.c \
+	module/zfs/btree.c
+
+%C%_test_btree_SOURCES = \
+	%D%/test_btree.c
+
+%C%_test_btree_LDADD = \
+	libspl.la \
+	libunit.la
+
+
+%C%_test_fletcher_CFLAGS = $(AM_CFLAGS)
+
+nodist_%C%_test_fletcher_SOURCES = \
+	module/zcommon/zfs_fletcher.c \
+	module/zcommon/zfs_fletcher_aarch64_neon.c \
+	module/zcommon/zfs_fletcher_avx512.c \
+	module/zcommon/zfs_fletcher_intel.c \
+	module/zcommon/zfs_fletcher_sse.c \
+	module/zcommon/zfs_fletcher_superscalar.c \
+	module/zcommon/zfs_fletcher_superscalar4.c
+
+%C%_test_fletcher_SOURCES = \
+	%D%/test_fletcher.c
+
+%C%_test_fletcher_LDADD = \
+	libspl.la \
+	libunit.la
+
+
+%C%_test_sha2_CFLAGS = $(AM_CFLAGS)
+
+nodist_%C%_test_sha2_SOURCES = \
+	module/zfs/zfs_impl.c
+
+%C%_test_sha2_SOURCES = \
+	%D%/test_sha2.c
+
+%C%_test_sha2_LDADD = \
+	libicp.la \
+	libspl.la \
+	libunit.la
+
+
+%C%_test_cityhash_CFLAGS = $(AM_CFLAGS)
+
+nodist_%C%_test_cityhash_SOURCES = \
+	module/zcommon/cityhash.c
+
+%C%_test_cityhash_SOURCES = \
+	%D%/test_cityhash.c
+
+%C%_test_cityhash_LDADD = \
+	libunit.la \
+	libspl.la
+
+
+%C%_test_nvpair_CFLAGS = $(AM_CFLAGS) $(LIBTIRPC_CFLAGS)
+
+nodist_%C%_test_nvpair_SOURCES = \
+	module/nvpair/nvpair.c \
+	module/nvpair/fnvpair.c \
+	module/nvpair/nvpair_alloc_fixed.c \
+	lib/libnvpair/nvpair_alloc_system.c \
+	lib/libnvpair/libnvpair.c
+
+%C%_test_nvpair_SOURCES = \
+	%D%/test_nvpair.c
+
+%C%_test_nvpair_LDADD = \
+	libspl.la \
+	$(LIBTIRPC_LIBS) \
 	libunit.la
 
 

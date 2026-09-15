@@ -42,6 +42,8 @@ properties:
       address, thus it can be driven by the host during the reset sequence.
     maxItems: 1
 
+  panel: true
+
   reset-gpios:
     maxItems: 1
 
@@ -62,7 +64,6 @@ additionalProperties: false
 required:
   - compatible
   - reg
-  - interrupts
 
 examples:
   - |

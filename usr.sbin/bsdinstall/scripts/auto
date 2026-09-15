@@ -209,7 +209,7 @@ if [ ! -f $BSDINSTALL_DISTDIR/MANIFEST ]; then
 	PKGBASE=yes
 else
 	bsddialog --backtitle "$OSNAME Installer" --title "Select Installation Type" \
-		--yes-label "Distribution Sets" --no-label "Packages" --yesno \
+		--yes-label "Distribution Sets" --no-label "Packages (HBSD: Please no)" --yesno \
 		$PKGBASE_DEFAULT_BUTTON \
 		"Would you like to install the base system using legacy distribution sets or packages?" 0 0
 	if [ $? -eq 1 ]; then

@@ -55,12 +55,14 @@ properties:
           - const: microchip,lan9691-switch
 
   reg:
+    minItems: 2
     items:
       - description: cpu target
       - description: devices target
       - description: general control block target
 
   reg-names:
+    minItems: 2
     items:
       - const: cpu
       - const: devices
@@ -149,9 +151,22 @@ properties:
 
         required:
           - reg
-          - phys
           - phy-mode
           - microchip,bandwidth
+
+        if:
+          not:
+            properties:
+              phy-mode:
+                contains:
+                  enum:
+                    - rgmii
+                    - rgmii-id
+                    - rgmii-rxid
+                    - rgmii-txid
+        then:
+          required:
+            - phys
 
         oneOf:
           - required:
@@ -167,6 +182,26 @@ required:
   - interrupts
   - interrupt-names
   - ethernet-ports
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - microchip,lan9691-switch
+    then:
+      properties:
+        reg:
+          maxItems: 2
+        reg-names:
+          maxItems: 2
+    else:
+      properties:
+        reg:
+          minItems: 3
+        reg-names:
+          minItems: 3
 
 additionalProperties: false
 
@@ -245,4 +280,3 @@ examples:
     };
 
 ...
-#  vim: set ts=2 sw=2 sts=2 tw=80 et cc=80 ft=yaml :

@@ -14,6 +14,7 @@
 / {
 	memory@10000000 {
 		reg = <0x10000000 0x40000000>;
+		device_type = "memory";
 	};
 
 	reg_3p3v: 3p3v {
@@ -70,8 +71,9 @@
 };
 
 &clks {
-	clocks = <&rtc_sqw>;
-	clock-names = "ckil";
+	clocks = <&osc>, <&rtc_sqw>, <&ckih1>, <&anaclk1>, <&anaclk2>;
+	clock-names = "osc", "ckil", "ckih1", "anaclk1", "anaclk2";
+
 	assigned-clocks = <&clks IMX6QDL_CLK_LDB_DI0_SEL>,
 			  <&clks IMX6QDL_CLK_LDB_DI1_SEL>;
 	assigned-clock-parents = <&clks IMX6QDL_CLK_PLL2_PFD0_352M>,
@@ -157,7 +159,7 @@
 	sda-gpios = <&gpio1 6 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 	status = "okay";
 
-	rtc: m41t62@68 {
+	rtc: rtc@68 {
 		compatible = "st,m41t62";
 		reg = <0x68>;
 

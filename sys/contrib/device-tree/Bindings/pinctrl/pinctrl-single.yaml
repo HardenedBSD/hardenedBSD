@@ -24,6 +24,7 @@ properties:
       - items:
           - enum:
               - ti,am437-padconf
+              - ti,am62l-padconf
               - ti,am654-padconf
               - ti,dra7-padconf
               - ti,omap2420-padconf
@@ -37,6 +38,10 @@ properties:
           - enum:
               - marvell,pxa1908-padconf
           - const: pinconf-single
+      - items:
+          - enum:
+              - brcm,bcm7038-padconf
+          - const: pinctrl-single
 
   reg:
     maxItems: 1

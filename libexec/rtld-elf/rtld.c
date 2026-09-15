@@ -1031,8 +1031,8 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 	dbg("tcb_list_entry_offset %zu", tcb_list_entry_offset);
 
 	if (relocate_objects(obj_main,
-		ld_bind_now != NULL && *ld_bind_now != '\0', &obj_rtld,
-		SYMLOOK_EARLY, NULL) == -1)
+	    ld_bind_now != NULL && *ld_bind_now != '\0', &obj_rtld,
+	    SYMLOOK_EARLY, NULL) == -1)
 		rtld_die();
 
 	dbg("doing copy relocations");
@@ -1844,6 +1844,12 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, caddr_t entry, const char *path)
 			break;
 
 		case PT_TLS:
+			if (ph->p_memsz < ph->p_filesz) {
+				_rtld_error("%s: invalid PT_TLS segment",
+				    path);
+				return (NULL);
+			}
+
 			obj->tlsindex = 1;
 			obj->tlssize = ph->p_memsz;
 			obj->tlsalign = ph->p_align;
@@ -1875,14 +1881,19 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, caddr_t entry, const char *path)
 void
 digest_notes(Obj_Entry *obj, Elf_Addr note_start, Elf_Addr note_end)
 {
-	const Elf_Note *note;
+	const Elf_Note *note, *next_note;
 	const char *note_name;
 	uintptr_t p;
 
-	for (note = (const Elf_Note *)note_start; (Elf_Addr)note < note_end;
-	    note = (const Elf_Note *)((const char *)(note + 1) +
-		roundup2(note->n_namesz, sizeof(Elf32_Addr)) +
-		roundup2(note->n_descsz, sizeof(Elf32_Addr)))) {
+	for (note = (const Elf_Note *)note_start;; note = next_note) {
+		if ((Elf_Addr)note + sizeof(Elf_Note) > note_end)
+			break;
+		next_note = (const Elf_Note *)((const char *)(note + 1) +
+		    roundup2(note->n_namesz, sizeof(Elf32_Addr)) +
+		    roundup2(note->n_descsz, sizeof(Elf32_Addr)));
+		if ((Elf_Addr)next_note > note_end)
+			break;
+
 		if (arch_digest_note(obj, note))
 			continue;
 
@@ -1895,7 +1906,7 @@ digest_notes(Obj_Entry *obj, Elf_Addr note_start, Elf_Addr note_end)
 			continue;
 		note_name = (const char *)(note + 1);
 		if (strncmp(NOTE_FREEBSD_VENDOR, note_name,
-			sizeof(NOTE_FREEBSD_VENDOR)) != 0)
+		    sizeof(NOTE_FREEBSD_VENDOR)) != 0)
 			continue;
 		switch (note->n_type) {
 		case NT_FREEBSD_ABI_TAG:
@@ -2608,9 +2619,7 @@ init_rtld(caddr_t mapbase, Elf_Auxinfo **aux_info)
 	objtmp.path = NULL;
 	objtmp.rtld = true;
 	objtmp.mapbase = mapbase;
-#ifdef PIC
 	objtmp.relocbase = mapbase;
-#endif
 
 	objtmp.dynamic = rtld_dynamic(&objtmp);
 	digest_dynamic1(&objtmp, 1, &dyn_rpath, &dyn_soname, &dyn_runpath);
@@ -5700,6 +5709,11 @@ unref_dag(Obj_Entry *root)
 
 /*
  * Common code for MD __tls_get_addr().
+ *
+ * The tcb->tcb_dtv data structure is thread-local.  The reason that
+ * the function needs to take the rtld_bind_lock exclusive (as opposed
+ * to only shared, to safely access obj_list in allocate_module_tls())
+ * is to protect the rtld_malloc data.
  */
 static void *
 tls_get_addr_slow(struct tcb *tcb, int index, size_t offset, bool locked)

@@ -150,6 +150,7 @@
 /* Statistics Register Descriptions */
 #define IGC_CRCERRS		0x04000  /* CRC Error Count - R/clr */
 #define IGC_ALGNERRC		0x04004  /* Alignment Error Count - R/clr */
+#define IGC_RXERRC		0x0400C  /* Receive Error Count - R/clr */
 #define IGC_MPC			0x04010  /* Missed Packet Count - R/clr */
 #define IGC_SCC			0x04014  /* Single Collision Count - R/clr */
 #define IGC_ECOL		0x04018  /* Excessive Collision Count - R/clr */
@@ -230,7 +231,7 @@
 #define IGC_VFTA		0x05600  /* VLAN Filter Table Array - RW Array */
 #define IGC_WUC			0x05800  /* Wakeup Control - RW */
 #define IGC_WUFC		0x05808  /* Wakeup Filter Control - RW */
-#define IGC_WUS			0x05810  /* Wakeup Status - RO */
+#define IGC_WUS			0x05810  /* Wakeup Status - RW1C */
 /* Management registers */
 #define IGC_MANC		0x05820  /* Management Control - RW */
 #define IGC_IPAV		0x05838  /* IP Address Valid - RW */
@@ -375,8 +376,13 @@
 #define IGC_FCRTC		0x02170 /* Flow Control Rx high watermark */
 #define IGC_PCIEMISC		0x05BB8 /* PCIE misc config register */
 
-/* PCIe Parity Status Register */
-#define IGC_PCIEERRSTS		0x05BA8
+/* Memory error detection registers */
+#define IGC_PEIND		0x01084 /* Parity and ECC Indication - RC */
+#define IGC_PBECCSTS		0x0245C /* Packet Buffer ECC Status */
+#define IGC_PCIEERRSTS		0x05BA8 /* PCIe Parity Status - RW1C */
+#define IGC_PCIEECCSTS		0x05BAC /* PCIe ECC Status - RW1C */
+#define IGC_LANPERRSTS		0x05F58 /* LAN Port Parity Status - RW1C */
+#define IGC_MNGPARSTS		0x08F24 /* Management Parity Status */
 
 #define IGC_PROXYS		0x5F64 /* Proxying Status */
 #define IGC_PROXYFC		0x5F60 /* Proxying Filter Control */

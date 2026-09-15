@@ -96,9 +96,12 @@ dev/dpaa/dpaa_eth.c		optional	dpaa
 dev/dpaa/fman.c			optional	dpaa fdt
 dev/dpaa/fman_fdt.c		optional	dpaa fdt
 dev/dpaa/fman_if.m		optional	dpaa
+dev/dpaa/fman_keygen.c		optional	dpaa
 dev/dpaa/fman_mdio.c		optional	dpaa fdt
 dev/dpaa/fman_port_if.m		optional	dpaa
 dev/dpaa/fman_port.c		optional	dpaa
+dev/dpaa/fman_port_rx.c		optional	dpaa
+dev/dpaa/fman_port_tx.c		optional	dpaa
 dev/dpaa/fman_xmdio.c		optional	dpaa fdt mdio miibus
 dev/dpaa/dpaa_common.c		optional	dpaa
 dev/dpaa/if_dtsec.c		optional	dpaa
@@ -243,7 +246,7 @@ dev/powermac_nvram/powermac_nvram.c optional	powermac_nvram powermac
 dev/quicc/quicc_bfe_fdt.c	optional	quicc mpc85xx
 dev/random/darn.c		optional	powerpc64 !random_loadable | powerpc64le !random_loadable
 dev/scc/scc_bfe_macio.c		optional	scc powermac
-dev/sdhci/fsl_sdhci.c		optional	mpc85xx sdhci
+dev/sdhci/sdhci_fsl_fdt.c	optional	mpc85xx sdhci
 dev/sec/sec.c			optional	sec mpc85xx
 dev/sound/macio/aoa.c		optional	snd_davbus | snd_ai2s powermac
 dev/sound/macio/davbus.c	optional	snd_davbus powermac

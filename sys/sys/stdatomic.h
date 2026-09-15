@@ -27,11 +27,15 @@
  * SUCH DAMAGE.
  */
 
-#ifndef __STDC_VERSION_STDATOMIC_H__
-#define __STDC_VERSION_STDATOMIC_H__	202311L
+#ifndef _STDATOMIC_H_
+#define _STDATOMIC_H_
 
 #include <sys/cdefs.h>
 #include <sys/_types.h>
+
+#if __ISO_C_VISIBLE >= 2023 || __BSD_VISIBLE
+#define __STDC_VERSION_STDATOMIC_H__	202311L
+#endif
 
 #if (__has_extension(c_atomic) || __has_extension(cxx_atomic)) && \
     defined(__clang__)
@@ -438,4 +442,4 @@ atomic_flag_clear(volatile atomic_flag *__object)
 #undef __bool_locally_defined
 #endif
 
-#endif /* !__STDC_VERSION_STDATOMIC_H__ */
+#endif /* !_STDATOMIC_H_ */

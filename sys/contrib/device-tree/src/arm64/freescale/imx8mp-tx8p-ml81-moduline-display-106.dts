@@ -9,7 +9,7 @@
 #include "imx8mp-tx8p-ml81.dtsi"
 
 / {
-	compatible = "gocontroll,moduline-display", "fsl,imx8mp";
+	compatible = "gocontroll,moduline-display-106", "karo,tx8p-ml81", "fsl,imx8mp";
 	chassis-type = "embedded";
 	hardware = "Moduline Display V1.06";
 	model = "GOcontroll Moduline Display baseboard";
@@ -34,6 +34,24 @@
 	external-sensor-supply {
 		compatible = "regulator-output";
 		vout-supply = <&reg_5v0_sensor>;
+	};
+
+	flexcan1_phy: can-phy0 {
+		compatible = "ti,tcan1051", "ti,tcan1042";
+		#phy-cells = <0>;
+		pinctrl-0 = <&pinctrl_flexcan1_stby>;
+		pinctrl-names = "default";
+		max-bitrate = <5000000>;
+		standby-gpios = <&gpio4 3 GPIO_ACTIVE_HIGH>;
+	};
+
+	flexcan2_phy: can-phy1 {
+		compatible = "ti,tcan1051", "ti,tcan1042";
+		#phy-cells = <0>;
+		pinctrl-0 = <&pinctrl_flexcan2_stby>;
+		pinctrl-names = "default";
+		max-bitrate = <5000000>;
+		standby-gpios = <&gpio5 9 GPIO_ACTIVE_HIGH>;
 	};
 
 	reg_1v8_per: regulator-1v8-per {
@@ -83,26 +101,6 @@
 		regulator-max-microvolt = <6400000>;
 		regulator-min-microvolt = <6400000>;
 		regulator-name = "6v4";
-	};
-
-	reg_can1_stby: regulator-can1-stby {
-		compatible = "regulator-fixed";
-		pinctrl-0 = <&pinctrl_flexcan1_reg>;
-		pinctrl-names = "default";
-		regulator-max-microvolt = <3300000>;
-		regulator-min-microvolt = <3300000>;
-		regulator-name = "can1-stby";
-		gpio = <&gpio4 3 GPIO_ACTIVE_LOW>;
-	};
-
-	reg_can2_stby: regulator-can2-stby {
-		compatible = "regulator-fixed";
-		pinctrl-0 = <&pinctrl_flexcan2_reg>;
-		pinctrl-names = "default";
-		regulator-max-microvolt = <3300000>;
-		regulator-min-microvolt = <3300000>;
-		regulator-name = "can2-stby";
-		gpio = <&gpio5 9 GPIO_ACTIVE_LOW>;
 	};
 
 	sound {
@@ -180,16 +178,16 @@
 };
 
 &flexcan1 {
+	phys = <&flexcan1_phy>;
 	pinctrl-0 = <&pinctrl_flexcan1>;
 	pinctrl-names = "default";
-	xceiver-supply = <&reg_can1_stby>;
 	status = "okay";
 };
 
 &flexcan2 {
+	phys = <&flexcan2_phy>;
 	pinctrl-0 = <&pinctrl_flexcan2>;
 	pinctrl-names = "default";
-	xceiver-supply = <&reg_can2_stby>;
 	status = "okay";
 };
 
@@ -278,7 +276,7 @@
 		>;
 	};
 
-	pinctrl_flexcan1_reg: flexcan1reggrp {
+	pinctrl_flexcan1_stby: flexcan1stbygrp {
 		fsl,pins = <
 			MX8MP_IOMUXC_SAI1_RXD1__GPIO4_IO03
 				(MX8MP_DSE_X2 | MX8MP_FSEL_FAST | MX8MP_PULL_UP | MX8MP_PULL_ENABLE)
@@ -294,7 +292,7 @@
 		>;
 	};
 
-	pinctrl_flexcan2_reg: flexcan2reggrp {
+	pinctrl_flexcan2_stby: flexcan2stbygrp {
 		fsl,pins = <
 			MX8MP_IOMUXC_ECSPI1_SS0__GPIO5_IO09
 				(MX8MP_DSE_X2 | MX8MP_FSEL_FAST | MX8MP_PULL_UP | MX8MP_PULL_ENABLE)
@@ -304,36 +302,36 @@
 	pinctrl_i2c2: i2c2grp {
 		fsl,pins = <
 			MX8MP_IOMUXC_I2C2_SCL__I2C2_SCL
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 			MX8MP_IOMUXC_I2C2_SDA__I2C2_SDA
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 		>;
 	};
 
 	pinctrl_i2c2_gpio: i2c2-gpiogrp {
 		fsl,pins = <
 			MX8MP_IOMUXC_I2C2_SCL__GPIO5_IO16
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 			MX8MP_IOMUXC_I2C2_SDA__GPIO5_IO17
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 		>;
 	};
 
 	pinctrl_i2c4: i2c4grp {
 		fsl,pins = <
 			MX8MP_IOMUXC_ECSPI2_MISO__I2C4_SCL
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 			MX8MP_IOMUXC_ECSPI2_SS0__I2C4_SDA
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 		>;
 	};
 
 	pinctrl_i2c4_gpio: i2c4-gpiogrp {
 		fsl,pins = <
 			MX8MP_IOMUXC_ECSPI2_MISO__GPIO5_IO12
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 			MX8MP_IOMUXC_ECSPI2_SS0__GPIO5_IO13
-				MX8MP_I2C_DEFAULT
+				(MX8MP_DSE_X6 | MX8MP_I2C_DEFAULT)
 		>;
 	};
 

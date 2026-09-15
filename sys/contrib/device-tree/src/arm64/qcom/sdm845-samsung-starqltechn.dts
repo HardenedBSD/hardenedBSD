@@ -56,6 +56,21 @@
 		};
 	};
 
+	slpi_regulator: slpi-regulator {
+		compatible = "regulator-fixed";
+		pinctrl-0 = <&slpi_ldo_active_state>;
+		pinctrl-names = "default";
+
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-name = "slpi";
+
+		enable-active-high;
+		gpio = <&tlmm 8 GPIO_ACTIVE_HIGH>;
+	};
+
 	vib_regulator: gpio-regulator {
 		compatible = "regulator-fixed";
 
@@ -118,7 +133,7 @@
 		};
 
 		slpi_mem: slpi@96700000 {
-			reg = <0 0x96700000 0 0xf00000>;
+			reg = <0 0x96700000 0 0x1000000>;
 			no-map;
 		};
 
@@ -143,10 +158,10 @@
 		};
 	};
 
-	i2c21 {
+	i2c-21 {
 		compatible = "i2c-gpio";
-		sda-gpios = <&tlmm 127 GPIO_ACTIVE_HIGH>;
-		scl-gpios = <&tlmm 128 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&tlmm 127 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 128 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 		i2c-gpio,delay-us = <2>;
 		pinctrl-0 = <&i2c21_sda_state &i2c21_scl_state>;
 		pinctrl-names = "default";
@@ -236,11 +251,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		memory-region = <&gpu_mem>;
-		firmware-name = "qcom/sdm845/starqltechn/a630_zap.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sdm845/Samsung/starqltechn/a630_zap.mbn";
 };
 
 &mdss {
@@ -584,15 +598,15 @@
 &i2c14 {
 	status = "okay";
 
-	pmic@66 {
+	max77705: pmic@66 {
 		compatible = "maxim,max77705";
 		reg = <0x66>;
+		#interrupt-cells = <1>;
 		interrupt-parent = <&pm8998_gpios>;
 		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
 		pinctrl-0 = <&pmic_int_default>;
 		pinctrl-names = "default";
-		#address-cells = <1>;
-		#size-cells = <0>;
 
 		leds {
 			compatible = "maxim,max77705-rgb";
@@ -631,9 +645,8 @@
 		reg = <0x69>;
 		compatible = "maxim,max77705-charger";
 		monitored-battery = <&battery>;
-		interrupt-parent = <&pm8998_gpios>;
-		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
-
+		interrupt-parent = <&max77705>;
+		interrupts = <0>;
 	};
 
 	fuel-gauge@36 {
@@ -641,8 +654,8 @@
 		compatible = "maxim,max77705-battery";
 		power-supplies = <&max77705_charger>;
 		maxim,rsns-microohm = <5000>;
-		interrupt-parent = <&pm8998_gpios>;
-		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-parent = <&max77705>;
+		interrupts = <2>;
 	};
 };
 
@@ -686,7 +699,8 @@
 };
 
 &adsp_pas {
-	firmware-name = "qcom/sdm845/starqltechn/adsp.mbn";
+	firmware-name = "qcom/sdm845/Samsung/starqltechn/adsp.mbn";
+
 	status = "okay";
 };
 
@@ -701,7 +715,7 @@
 	pinctrl-names = "default";
 	status = "okay";
 
-	audio-routing =	"RX_BIAS", "MCLK",
+	audio-routing = "RX_BIAS", "MCLK",
 			"AMIC2", "MIC BIAS2",	/* Headset Mic */
 			"AMIC3", "MIC BIAS2",	/* FM radio left Tx */
 			"AMIC4", "MIC BIAS2",	/* FM radio right Tx */
@@ -891,15 +905,24 @@
 };
 
 &mss_pil {
-	firmware-name = "qcom/sdm845/starqltechn/mba.mbn",
-			"qcom/sdm845/starqltechn/modem.mbn";
+	firmware-name = "qcom/sdm845/Samsung/starqltechn/mba.mbn",
+			"qcom/sdm845/Samsung/starqltechn/modem.mbn";
+
 	status = "okay";
 };
 
 &ipa {
 	qcom,gsi-loader = "self";
 	memory-region = <&ipa_fw_mem>;
-	firmware-name = "qcom/sdm845/starqltechn/ipa_fws.mbn";
+	firmware-name = "qcom/sdm845/Samsung/starqltechn/ipa_fws.mbn";
+
+	status = "okay";
+};
+
+&slpi_pas {
+	firmware-name = "qcom/sdm845/Samsung/starqltechn/slpi.mbn";
+	cx-supply = <&slpi_regulator>;
+
 	status = "okay";
 };
 
@@ -1027,6 +1050,13 @@
 		pins = "gpio126";
 		function = "gpio";
 		bias-pull-up;
+	};
+
+	slpi_ldo_active_state: slpi-ldo-active-state {
+		pins = "gpio8";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	touch_irq_state: touch-irq-state {

@@ -82,6 +82,20 @@ struct mmap_req {
 	mmap_check_fp_fn	mr_check_fp_fn;
 };
 
+/*
+ * A copyin_hdtr_t takes a pointer to a sendfile header/trailer in
+ * userspace and storage for on in the kernel and copies it in.
+ */
+typedef int (copyin_hdtr_t)(const void *hdtrp, struct sf_hdtr *hdtr);
+
+/*
+ * A copyinuio_t takes a pointer to an iovec in userspace along with a
+ * count and allocates a struct uio containing a copy of the iovec.
+ * The uio should be freed with freeuio().
+ */
+typedef int (copyinuio_t)(const void *iovp, unsigned int iovcnt,
+    struct uio **iov);
+
 uint64_t at2cnpflags(u_int at_flags, u_int mask);
 int	kern___getcwd(struct thread *td, char *buf, enum uio_seg bufseg,
 	    size_t buflen, size_t path_max);
@@ -133,7 +147,7 @@ int	kern_cpuset_getid(struct thread *td, cpulevel_t level,
 	    cpuwhich_t which, id_t id, cpusetid_t *setid);
 int	kern_cpuset_setid(struct thread *td, cpuwhich_t which,
 	    id_t id, cpusetid_t setid);
-int	kern_dup(struct thread *td, u_int mode, int flags, int old, int new);
+int	kern_dup(struct thread *td, u_int mode, int flags, int oldd, int newd);
 int	kern_execve(struct thread *td, struct image_args *args,
 	    struct mac *mac_p, struct vmspace *oldvmspace);
 void	kern_exit(struct thread *, int, int);
@@ -318,8 +332,8 @@ int	kern_readlinkat(struct thread *td, int fd, const char *path,
 int	kern_readv(struct thread *td, int fd, struct uio *auio);
 int	kern_recvit(struct thread *td, int s, struct msghdr *mp,
 	    enum uio_seg fromseg, struct mbuf **controlp);
-int	kern_renameat(struct thread *td, int oldfd, const char *old, int newfd,
-	    const char *new, enum uio_seg pathseg, u_int flags);
+int	kern_renameat(struct thread *td, int fromfd, const char *from,
+	    int tofd, const char *to, enum uio_seg pathseg, u_int flags);
 int	kern_sched_getparam(struct thread *td, struct thread *targettd,
 	    struct sched_param *param);
 int	kern_sched_getscheduler(struct thread *td, struct thread *targettd,
@@ -334,6 +348,10 @@ int	kern_sched_rr_get_interval_td(struct thread *td, struct thread *targettd,
 	    struct timespec *ts);
 int	kern_semctl(struct thread *td, int semid, int semnum, int cmd,
 	    union semun *arg, register_t *rval);
+int	kern_sendfile(struct thread *td, int fd, int s, off_t offset,
+	    size_t nbytes, struct sf_hdtr *hdtr, off_t *sbytes, int flags,
+	    bool compat, copyin_hdtr_t *copyin_hdtr_f,
+	    copyinuio_t *copyinuio_f);
 int	kern_select(struct thread *td, int nd, fd_set *fd_in, fd_set *fd_ou,
 	    fd_set *fd_ex, struct timeval *tvp, int abi_nfdbits);
 int	kern_sendit(struct thread *td, int s, struct msghdr *mp, int flags,

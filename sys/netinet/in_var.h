@@ -152,21 +152,6 @@ do {									\
 }
 
 /*
- * Macro for finding the internet address structure (in_ifaddr) corresponding
- * to a given interface (ifnet structure).
- */
-#define IFP_TO_IA(ifp, ia)						\
-	/* struct ifnet *ifp; */					\
-	/* struct in_ifaddr *ia; */					\
-do {									\
-	NET_EPOCH_ASSERT();						\
-	for ((ia) = CK_STAILQ_FIRST(&V_in_ifaddrhead);			\
-	    (ia) != NULL && (ia)->ia_ifp != (ifp);			\
-	    (ia) = CK_STAILQ_NEXT((ia), ia_link))			\
-		continue;						\
-} while (0)
-
-/*
  * Legacy IPv4 IGMP per-link structure.
  */
 struct router_info {
@@ -473,6 +458,11 @@ void	in_ifattach(void *, struct ifnet *);
 #ifdef VIMAGE
 void	in_detachhead(struct rib_head *rh);
 #endif
+
+struct sockopt;
+
+int	inp_join_group(struct inpcb *, struct sockopt *);
+int	inp_leave_group(struct inpcb *, struct sockopt *);
 
 #endif /* _KERNEL */
 

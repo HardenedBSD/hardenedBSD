@@ -22,7 +22,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_0>;
-			#clock-cells = <1>;
 			clocks = <&pmd0clk 0>;
 		};
 		cpu@1 {
@@ -32,7 +31,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_0>;
-			#clock-cells = <1>;
 			clocks = <&pmd0clk 0>;
 		};
 		cpu@100 {
@@ -42,7 +40,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_1>;
-			#clock-cells = <1>;
 			clocks = <&pmd1clk 0>;
 		};
 		cpu@101 {
@@ -52,7 +49,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_1>;
-			#clock-cells = <1>;
 			clocks = <&pmd1clk 0>;
 		};
 		cpu@200 {
@@ -62,7 +58,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_2>;
-			#clock-cells = <1>;
 			clocks = <&pmd2clk 0>;
 		};
 		cpu@201 {
@@ -72,7 +67,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_2>;
-			#clock-cells = <1>;
 			clocks = <&pmd2clk 0>;
 		};
 		cpu@300 {
@@ -82,7 +76,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_3>;
-			#clock-cells = <1>;
 			clocks = <&pmd3clk 0>;
 		};
 		cpu@301 {
@@ -92,7 +85,6 @@
 			enable-method = "spin-table";
 			cpu-release-addr = <0x1 0x0000fff8>;
 			next-level-cache = <&xgene_L2_3>;
-			#clock-cells = <1>;
 			clocks = <&pmd3clk 0>;
 		};
 		xgene_L2_0: l2-cache-0 {
@@ -211,9 +203,9 @@
 		};
 	};
 
-	refclk: refclk {
+	refclk: clock-100000000 {
 		compatible = "fixed-clock";
-		#clock-cells = <1>;
+		#clock-cells = <0>;
 		clock-frequency = <100000000>;
 		clock-output-names = "refclk";
 	};
@@ -232,6 +224,16 @@
 		clock-frequency = <50000000>;
 	};
 
+	i2c {
+		compatible = "apm,xgene-slimpro-i2c";
+		mboxes = <&mailbox 0>;
+	};
+
+	hwmonslimpro {
+		compatible = "apm,xgene-slimpro-hwmon";
+		mboxes = <&mailbox 7>;
+	};
+
 	soc {
 		compatible = "simple-bus";
 		#address-cells = <2>;
@@ -246,7 +248,7 @@
 			pmdpll: pmdpll@170000f0 {
 				compatible = "apm,xgene-pcppll-v2-clock";
 				#clock-cells = <1>;
-				clocks = <&refclk 0>;
+				clocks = <&refclk>;
 				reg = <0x0 0x170000f0 0x0 0x10>;
 				clock-output-names = "pmdpll";
 			};
@@ -286,14 +288,14 @@
 			socpll: socpll@17000120 {
 				compatible = "apm,xgene-socpll-v2-clock";
 				#clock-cells = <1>;
-				clocks = <&refclk 0>;
+				clocks = <&refclk>;
 				reg = <0x0 0x17000120 0x0 0x1000>;
 				clock-output-names = "socpll";
 			};
 
 			socplldiv2: socplldiv2  {
 				compatible = "fixed-factor-clock";
-				#clock-cells = <1>;
+				#clock-cells = <0>;
 				clocks = <&socpll 0>;
 				clock-mult = <1>;
 				clock-div = <2>;
@@ -303,7 +305,7 @@
 			ahbclk: ahbclk@17000000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x17000000 0x0 0x2000>;
 				reg-names = "div-reg";
 				divider-offset = <0x164>;
@@ -327,7 +329,7 @@
 			sdioclk: sdioclk@1f2ac000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x1f2ac000 0x0 0x1000
 					0x0 0x17000000 0x0 0x2000>;
 				reg-names = "csr-reg", "div-reg";
@@ -344,7 +346,7 @@
 			pcie0clk: pcie0clk@1f2bc000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x1f2bc000 0x0 0x1000>;
 				reg-names = "csr-reg";
 				clock-output-names = "pcie0clk";
@@ -353,7 +355,7 @@
 			pcie1clk: pcie1clk@1f2cc000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x1f2cc000 0x0 0x1000>;
 				reg-names = "csr-reg";
 				clock-output-names = "pcie1clk";
@@ -362,7 +364,7 @@
 			xge0clk: xge0clk@1f61c000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x1f61c000 0x0 0x1000>;
 				reg-names = "csr-reg";
 				enable-mask = <0x3>;
@@ -373,7 +375,7 @@
 			xge1clk: xge1clk@1f62c000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x1f62c000 0x0 0x1000>;
 				reg-names = "csr-reg";
 				enable-mask = <0x3>;
@@ -384,7 +386,7 @@
 			rngpkaclk: rngpkaclk@17000000 {
 				compatible = "apm,xgene-device-clock";
 				#clock-cells = <1>;
-				clocks = <&socplldiv2 0>;
+				clocks = <&socplldiv2>;
 				reg = <0x0 0x17000000 0x0 0x2000>;
 				reg-names = "csr-reg";
 				csr-offset = <0xc>;
@@ -415,6 +417,7 @@
 
 		reboot: reboot@17000014 {
 			compatible = "syscon-reboot";
+			reg = <0x0 0x17000014 0x0 0x4>;
 			regmap = <&scu>;
 			offset = <0x14>;
 			mask = <0x1>;
@@ -585,16 +588,6 @@
 					0x0 0x7 0x4>;
 		};
 
-		i2cslimpro {
-			compatible = "apm,xgene-slimpro-i2c";
-			mboxes = <&mailbox 0>;
-		};
-
-		hwmonslimpro {
-			compatible = "apm,xgene-slimpro-hwmon";
-			mboxes = <&mailbox 7>;
-		};
-
 		serial0: serial@10600000 {
 			compatible = "ns16550";
 			reg = <0 0x10600000 0x0 0x1000>;
@@ -617,7 +610,7 @@
 		pcie0: pcie@1f2b0000 {
 			status = "disabled";
 			device_type = "pci";
-			compatible = "apm,xgene-pcie", "apm,xgene2-pcie";
+			compatible = "apm,xgene-pcie";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
 			#address-cells = <3>;
@@ -643,7 +636,7 @@
 		pcie1: pcie@1f2c0000 {
 			status = "disabled";
 			device_type = "pci";
-			compatible = "apm,xgene-pcie", "apm,xgene2-pcie";
+			compatible = "apm,xgene-pcie";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
 			#address-cells = <3>;
@@ -807,7 +800,6 @@
 			compatible = "snps,designware-i2c";
 			reg = <0x0 0x10511000 0x0 0x1000>;
 			interrupts = <0 0x45 0x4>;
-			#clock-cells = <1>;
 			clocks = <&sbapbclk 0>;
 		};
 

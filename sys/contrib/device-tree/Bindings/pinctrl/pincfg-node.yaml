@@ -7,7 +7,7 @@ $schema: http://devicetree.org/meta-schemas/core.yaml#
 title: Generic Pin Configuration Node
 
 maintainers:
-  - Linus Walleij <linus.walleij@linaro.org>
+  - Linus Walleij <linusw@kernel.org>
 
 description:
   Many data items that are represented in a pin configuration node are common
@@ -152,5 +152,115 @@ properties:
       and the delay before latching a value to an output
       pin. Typically indicates how many double-inverters are
       used to delay the signal.
+
+  skew-delay-input-ps:
+    description:
+      this affects the expected clock skew in ps on an input pin.
+
+  skew-delay-output-ps:
+    description:
+      this affects the expected delay in ps before latching a value to
+      an output pin.
+
+  input-threshold-voltage-microvolt:
+    description: Specifies the input voltage level of the pin in microvolts.
+      This defines the reference for  VIH (Input High Voltage) and VIL
+      (Input Low Voltage) thresholds for proper signal detection.
+
+allOf:
+  - if:
+      required:
+        - skew-delay
+    then:
+      properties:
+        skew-delay-input-ps: false
+        skew-delay-output-ps: false
+
+  - if:
+      required:
+        - input-disable
+    then:
+      properties:
+        input-enable: false
+        input-threshold-voltage-microvolt: false
+
+  - if:
+      required:
+        - output-disable
+    then:
+      properties:
+        output-enable: false
+        output-impedance-ohms: false
+
+  - if:
+      required:
+        - output-low
+    then:
+      properties:
+        output-high: false
+
+  - if:
+      required:
+        - low-power-enable
+    then:
+      properties:
+        low-power-disable: false
+
+  - if:
+      required:
+        - input-schmitt-disable
+    then:
+      properties:
+        input-schmitt-enable: false
+        input-schmitt-microvolt: false
+
+  - if:
+      required:
+        - drive-strength
+    then:
+      properties:
+        drive-strength-microamp: false
+
+  - if:
+      anyOf:
+        - required:
+            - drive-open-source
+        - required:
+            - drive-open-drain
+        - required:
+            - drive-push-pull
+    then:
+      oneOf:
+        - required:
+            - drive-open-source
+        - required:
+            - drive-open-drain
+        - required:
+            - drive-push-pull
+
+  - if:
+      anyOf:
+        - required:
+            - bias-disable
+        - required:
+            - bias-bus-hold
+        - required:
+            - bias-pull-up
+        - required:
+            - bias-pull-down
+        - required:
+            - bias-pull-pin-default
+    then:
+      oneOf:
+        - required:
+            - bias-disable
+        - required:
+            - bias-bus-hold
+        - required:
+            - bias-pull-up
+        - required:
+            - bias-pull-down
+        - required:
+            - bias-pull-pin-default
 
 additionalProperties: true

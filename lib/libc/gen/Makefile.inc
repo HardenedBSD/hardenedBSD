@@ -63,6 +63,7 @@ SRCS+= \
 	fts.c \
 	fts-compat.c \
 	fts-compat11.c \
+	fts-compat15.c \
 	ftw.c \
 	ftw-compat11.c \
 	getbootfile.c \
@@ -164,6 +165,8 @@ SRCS+= \
 	ualarm.c \
 	uexterr_format.c \
 	uexterr_gettext.c \
+	uexterr_init.c \
+	uexterr_set.c \
 	ulimit.c \
 	uname.c \
 	unvis-compat.c \
@@ -325,6 +328,7 @@ MAN+=	alarm.3 \
 	ualarm.3 \
 	ucontext.3 \
 	uexterr_gettext.3 \
+	uexterror.3 \
 	ulimit.3 \
 	uname.3 \
 	unvis.3 \
@@ -388,6 +392,7 @@ MLINKS+=frexp.3 frexpf.3 \
 MLINKS+=fts.3 fts_children.3 \
 	fts.3 fts_close.3 \
 	fts.3 fts_open.3 \
+	fts.3 fts_openat.3 \
 	fts.3 fts_read.3 \
 	fts.3 fts_set.3 \
 	fts.3 fts_set_clientptr.3 \

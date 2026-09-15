@@ -1,33 +1,14 @@
 #!/bin/sh
-#-
-# Copyright (c) 2016 Devin Teske
-# All rights reserved.
+############################################################ LICENSE
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
+# SPDX-License-Identifier: BSD-2-Clause
 #
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
-# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
-# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-# SUCH DAMAGE.
-#
+# Copyright (c) 2016-2026 Devin Teske <dteske@FreeBSD.org>
 #
 ############################################################ IDENT(1)
 #
 # $Title: if_bridge(4) management script for vnet jails $
+# $Version: 9.2 $
 #
 ############################################################ INFORMATION
 #
@@ -131,6 +112,8 @@
 #
 ############################################################ GLOBALS
 
+VERSION='$Version: 9.2 $'
+
 pgm="${0##*/}" # Program basename
 
 #
@@ -143,10 +126,14 @@ FAILURE=1
 
 usage()
 {
+	local optfmt="\t%-5s %s\n"
 	local action usage descr
 	exec >&2
-	echo "Usage: $pgm action [arguments]"
-	echo "Actions:"
+	printf "Usage: %s [-hv] action [arguments]\n" "$pgm"
+	printf "Options:\n"
+	printf "$optfmt" "-h" "Print this usage statement and exit."
+	printf "$optfmt" "-v" "Print version information and exit."
+	printf "Actions:\n"
 	for action in \
 		addm		\
 		show		\
@@ -171,6 +158,25 @@ action_usage()
 	exit $FAILURE
 }
 
+iface_encode()
+{
+	LC_ALL=C iface="$1" awk 'BEGIN {
+		for (n = 0; n < 256; n++)
+			pack[sprintf("%c", n)] = sprintf("_%02x", n)
+		numbers = "0123456789"
+		uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		lowercase = "abcdefghijklmnopqrstuvwxyz"
+		valid = "[" numbers uppercase lowercase "]"
+		iface = ENVIRON["iface"]
+		len = length(iface)
+		for (n = 1; n <= len; n++) {
+			let = substr(iface, n, 1)
+			_iface = _iface (let ~ valid ? let : pack[let])
+		}
+		print _iface
+	}'
+}
+
 derive_mac()
 {
 	local OPTIND=1 OPTARG __flag
@@ -183,13 +189,16 @@ derive_mac()
 	done
 	shift $(( $OPTIND - 1 ))
 
+	local __iface="$1"
 	if [ ! "$__mac_num" ]; then
-		eval __mac_num=\${_${iface}_num:--1}
+		local __iface_encoded
+		__iface_encoded=$( iface_encode "$__iface" )
+		eval __mac_num=\${_${__iface_encoded}_num:--1}
 		__mac_num=$(( $__mac_num + 1 ))
-		eval _${iface}_num=\$__mac_num
+		eval _${__iface_encoded}_num=\$__mac_num
 	fi
 
-	local __iface="$1" __name="$2" __var_to_set="$3" __var_to_set_b="$4"
+	local __name="$2" __var_to_set="$3" __var_to_set_b="$4"
 	local __iface_devid __new_devid __num __new_devid_b
 	#
 	# Calculate MAC address derived from given iface.
@@ -272,7 +281,7 @@ jib_addm()
 	shift $(( $OPTIND - 1 ))
 
 	local name="$1"
-	[ "${name:-x}" = "${name#*[!0-9a-zA-Z_]}" -a $# -gt 1 ] ||
+	[ "${name:-x}" = "${name#*[![:print:]]}" -a $# -gt 1 ] ||
 		action_usage addm # NOTREACHED
 	shift 1 # name
 
@@ -382,7 +391,7 @@ jib_destroy()
 	done
 	shift $(( $OPTIND -1 ))
 	local name="$1"
-	[ "${name:-x}" = "${name#*[!0-9a-zA-Z_]}" -a $# -eq 1 ] ||
+	[ "${name:-x}" = "${name#*[![:print:]]}" -a $# -eq 1 ] ||
 		action_usage destroy # NOTREACHED
 	mustberoot_to_continue
 	jib_show "$name" | xargs -rn1 -I eiface ifconfig eiface destroy
@@ -399,6 +408,13 @@ action="$1"
 #
 # Validate action argument
 #
+case "$action" in
+-h) usage ;; # NOTREACHED
+-v) VERSION="${VERSION#*: }"
+	echo "${VERSION% $}"
+	exit $SUCCESS ;;
+-*) usage ;; # NOTREACHED
+esac
 if [ "$BASH_VERSION" ]; then
 	type="$( type -t "jib_$action" )" || usage # NOTREACHED
 else

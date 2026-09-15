@@ -1,0 +1,258 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ */
+
+/* X1P42100 is heavily based on hamoa, with some meaningful differences */
+#include "hamoa.dtsi"
+
+/delete-node/ &bwmon_cluster0;
+/delete-node/ &cluster_pd2;
+/delete-node/ &cpu_map_cluster2;
+/delete-node/ &cpu8;
+/delete-node/ &cpu9;
+/delete-node/ &cpu10;
+/delete-node/ &cpu11;
+/delete-node/ &cpu_pd8;
+/delete-node/ &cpu_pd9;
+/delete-node/ &cpu_pd10;
+/delete-node/ &cpu_pd11;
+/delete-node/ &gpu_opp_table;
+/delete-node/ &gpu_speed_bin;
+/delete-node/ &pcie3_phy;
+/delete-node/ &thermal_aoss3;
+/delete-node/ &thermal_cpu2_0_btm;
+/delete-node/ &thermal_cpu2_0_top;
+/delete-node/ &thermal_cpu2_1_btm;
+/delete-node/ &thermal_cpu2_1_top;
+/delete-node/ &thermal_cpu2_2_btm;
+/delete-node/ &thermal_cpu2_2_top;
+/delete-node/ &thermal_cpu2_3_btm;
+/delete-node/ &thermal_cpu2_3_top;
+/delete-node/ &thermal_cpuss2_btm;
+/delete-node/ &thermal_cpuss2_top;
+/delete-node/ &thermal_gpuss_4;
+/delete-node/ &thermal_gpuss_5;
+/delete-node/ &thermal_gpuss_6;
+/delete-node/ &thermal_gpuss_7;
+
+&gcc {
+	compatible = "qcom,x1p42100-gcc", "qcom,x1e80100-gcc";
+};
+
+&gmu {
+	compatible = "qcom,adreno-gmu-x145.0", "qcom,adreno-gmu";
+};
+
+&gpu {
+	compatible = "qcom,adreno-43030c00", "qcom,adreno";
+
+	nvmem-cells = <&gpu_speed_bin>;
+	nvmem-cell-names = "speed_bin";
+
+	gpu_opp_table: opp-table {
+		compatible = "operating-points-v2-adreno", "operating-points-v2";
+
+		opp-1400000000 {
+			opp-hz = /bits/ 64 <1400000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L4>;
+			opp-peak-kBps = <16500000>;
+			qcom,opp-acd-level = <0xa8295ffd>;
+			opp-supported-hw = <0x3>;
+		};
+
+		opp-1250000000 {
+			opp-hz = /bits/ 64 <1250000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L3>;
+			opp-peak-kBps = <16500000>;
+			qcom,opp-acd-level = <0x882a5ffd>;
+			opp-supported-hw = <0x7>;
+		};
+
+		opp-1107000000 {
+			opp-hz = /bits/ 64 <1107000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L1>;
+			opp-peak-kBps = <16500000>;
+			qcom,opp-acd-level = <0x882a5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		opp-1014000000 {
+			opp-hz = /bits/ 64 <1014000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
+			opp-peak-kBps = <14398438>;
+			qcom,opp-acd-level = <0xa82a5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		opp-940000000 {
+			opp-hz = /bits/ 64 <940000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
+			opp-peak-kBps = <14398438>;
+			qcom,opp-acd-level = <0xa82a5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		opp-825000000 {
+			opp-hz = /bits/ 64 <825000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
+			opp-peak-kBps = <12449219>;
+			qcom,opp-acd-level = <0x882b5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		opp-720000000 {
+			opp-hz = /bits/ 64 <720000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_SVS_L2>;
+			opp-peak-kBps = <10687500>;
+			qcom,opp-acd-level = <0xa82c5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		opp-666000000-0 {
+			opp-hz = /bits/ 64 <666000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+			opp-peak-kBps = <8171875>;
+			qcom,opp-acd-level = <0xa82d5ffd>;
+			opp-supported-hw = <0xf>;
+		};
+
+		/* Only applicable for SKUs which has 666Mhz as Fmax */
+		opp-666000000-1 {
+			opp-hz = /bits/ 64 <666000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+			opp-peak-kBps = <16500000>;
+			qcom,opp-acd-level = <0xa82d5ffd>;
+			opp-supported-hw = <0x10>;
+		};
+
+		opp-550000000 {
+			opp-hz = /bits/ 64 <550000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
+			opp-peak-kBps = <6074219>;
+			qcom,opp-acd-level = <0x882e5ffd>;
+			opp-supported-hw = <0x1f>;
+		};
+
+		opp-380000000 {
+			opp-hz = /bits/ 64 <380000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
+			opp-peak-kBps = <3000000>;
+			qcom,opp-acd-level = <0xc82f5ffd>;
+			opp-supported-hw = <0x1f>;
+		};
+
+		opp-280000000 {
+			opp-hz = /bits/ 64 <280000000>;
+			opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS_D1>;
+			opp-peak-kBps = <2136719>;
+			qcom,opp-acd-level = <0xc82f5ffd>;
+			opp-supported-hw = <0x1f>;
+		};
+	};
+
+};
+
+&gpucc {
+	compatible = "qcom,x1p42100-gpucc";
+};
+
+/* PCIe3 has half the lanes compared to X1E80100 */
+&pcie3 {
+	num-lanes = <4>;
+};
+
+&pcie6a_phy {
+	compatible = "qcom,x1p42100-qmp-gen4x4-pcie-phy";
+};
+
+&qfprom {
+	gpu_speed_bin: gpu-speed-bin@119 {
+		reg = <0x119 0x2>;
+		bits = <7 9>;
+	};
+};
+
+&soc {
+	/* The PCIe3 PHY on X1P42100 uses a different IP block */
+	pcie3_phy: phy@1bd4000 {
+		compatible = "qcom,x1p42100-qmp-gen4x4-pcie-phy";
+		reg = <0x0 0x01bd4000 0x0 0x2000>,
+		      <0x0 0x01bd6000 0x0 0x2000>;
+
+		clocks = <&gcc GCC_PCIE_3_PHY_AUX_CLK>,
+			 <&gcc GCC_PCIE_3_CFG_AHB_CLK>,
+			 <&tcsr TCSR_PCIE_8L_CLKREF_EN>,
+			 <&gcc GCC_PCIE_3_PHY_RCHNG_CLK>,
+			 <&gcc GCC_PCIE_3_PIPE_CLK>,
+			 <&gcc GCC_PCIE_3_PIPEDIV2_CLK>;
+		clock-names = "aux",
+			      "cfg_ahb",
+			      "ref",
+			      "rchng",
+			      "pipe",
+			      "pipediv2";
+
+		resets = <&gcc GCC_PCIE_3_PHY_BCR>,
+			 <&gcc GCC_PCIE_3_NOCSR_COM_PHY_BCR>;
+		reset-names = "phy",
+			      "phy_nocsr";
+
+		assigned-clocks = <&gcc GCC_PCIE_3_PHY_RCHNG_CLK>;
+		assigned-clock-rates = <100000000>;
+
+		power-domains = <&gcc GCC_PCIE_3_PHY_GDSC>;
+
+		#clock-cells = <0>;
+		clock-output-names = "pcie3_pipe_clk";
+
+		#phy-cells = <0>;
+
+		status = "disabled";
+	};
+};
+
+&thermal_camera0 {
+	thermal-sensors = <&tsens2 9>;
+};
+
+&thermal_camera1 {
+	thermal-sensors = <&tsens2 10>;
+};
+
+&thermal_gpuss_0 {
+	thermal-sensors = <&tsens2 5>;
+};
+
+&thermal_gpuss_1 {
+	thermal-sensors = <&tsens2 6>;
+};
+
+&thermal_gpuss_2 {
+	thermal-sensors = <&tsens2 7>;
+};
+
+&thermal_gpuss_3 {
+	thermal-sensors = <&tsens2 8>;
+};
+
+&thermal_nsp0 {
+	thermal-sensors = <&tsens2 1>;
+};
+
+&thermal_nsp1 {
+	thermal-sensors = <&tsens2 2>;
+};
+
+&thermal_nsp2 {
+	thermal-sensors = <&tsens2 3>;
+};
+
+&thermal_nsp3 {
+	thermal-sensors = <&tsens2 4>;
+};
+
+/* While physically present, this controller is left unconfigured and unused */
+&tsens3 {
+	status = "disabled";
+};

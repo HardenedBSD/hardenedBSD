@@ -87,6 +87,7 @@
 #define	PT_SC_REMOTE	44	/* Execute a syscall */
 #define	PT_SET_SC_RET	45	/* Set (fake) syscall results */
 #define	PT_GET_CHILDREN	46	/* Report children */
+#define	PT_GET_ABI_NAME	47	/* Report ABI name */
 
 #define PT_FIRSTMACH    64	/* for machine-specific requests */
 #define	PT_LASTMACH     127
@@ -291,8 +292,11 @@ int	proc_write_dbregs32(struct thread *_td, struct dbreg32 *_dbreg32);
 #endif
 
 void	ptrace_unsuspend(struct proc *p);
+int	ptrace_action(struct thread *td, int req, bool pd_mode, pid_t pid,
+	    int pfd, lwpid_t lwpid, void *addr, int data);
 
 extern bool allow_ptrace;
+extern bool allow_ptrace_in_cap_mode;
 
 #else /* !_KERNEL */
 

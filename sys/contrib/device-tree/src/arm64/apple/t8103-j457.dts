@@ -15,10 +15,19 @@
 / {
 	compatible = "apple,j457", "apple,t8103", "apple,arm-platform";
 	model = "Apple iMac (24-inch, 2x USB-C, M1, 2021)";
+	chassis-type = "all-in-one";
 
 	aliases {
 		ethernet0 = &ethernet0;
 	};
+};
+
+/*
+ * Adjust pcie0's iommu-map to account for the disabled port01.
+ */
+&pcie0 {
+	iommu-map = <0x100 &pcie0_dart_0 1 1>,
+			<0x200 &pcie0_dart_2 1 1>;
 };
 
 &bluetooth0 {
@@ -30,16 +39,28 @@
 };
 
 /*
+ * Provide labels for the USB type C ports.
+ */
+
+&typec0 {
+	label = "USB-C Back-right";
+};
+
+&typec1 {
+	label = "USB-C Back-left";
+};
+
+/*
  * Force the bus number assignments so that we can declare some of the
  * on-board devices and properties that are populated by the bootloader
  * (such as MAC addresses).
  */
 
 &port02 {
-	bus-range = <3 3>;
+	bus-range = <2 2>;
 	status = "okay";
 	ethernet0: ethernet@0,0 {
-		reg = <0x30000 0x0 0x0 0x0 0x0>;
+		reg = <0x20000 0x0 0x0 0x0 0x0>;
 		/* To be filled by the loader */
 		local-mac-address = [00 10 18 00 00 00];
 	};

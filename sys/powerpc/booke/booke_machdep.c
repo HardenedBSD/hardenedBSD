@@ -97,6 +97,7 @@
 #include <sys/kdb.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
+#include <sys/malloc.h>
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/sysctl.h>
@@ -390,12 +391,39 @@ booke_init(u_long arg1, u_long arg2)
 #define RES_GRANULE cacheline_size
 extern uintptr_t tlb0_miss_locks[];
 
+/*
+ * Stack for critical-class interrupts taken in kernel mode on the boot CPU.
+ * It is static because the boot CPU is initialised long before the VM is
+ * running; APs reach cpu_pcpu_init() at SI_SUB_CPU and can allocate.  Sizing a
+ * MAXCPU array here would reserve megabytes for CPUs that do not exist.
+ */
+static char booke_boot_critstack[BOOKE_CRITSTACK_SIZE] __aligned(16);
+static char booke_boot_mchkstack[BOOKE_CRITSTACK_SIZE] __aligned(16);
+static bool booke_boot_critstack_used;
+
 /* Initialise a struct pcpu. */
 void
 cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t sz)
 {
+	char *critstack, *mchkstack;
 
 	pcpu->pc_booke.tid_next = TID_MIN;
+
+	/*
+	 * Machine check and critical interrupts have their own stacks with
+	 * their own stack pointer, because regular mode registers cannot be
+	 * trusted.
+	 */
+	if (!booke_boot_critstack_used) {
+		booke_boot_critstack_used = true;
+		critstack = booke_boot_critstack;
+		mchkstack = booke_boot_mchkstack;
+	} else {
+		critstack = malloc(BOOKE_CRITSTACK_SIZE, M_DEVBUF, M_WAITOK);
+		mchkstack = malloc(BOOKE_CRITSTACK_SIZE, M_DEVBUF, M_WAITOK);
+	}
+	pcpu->pc_booke.critstack = critstack + BOOKE_CRITSTACK_SIZE;
+	pcpu->pc_booke.mchkstack = mchkstack + BOOKE_CRITSTACK_SIZE;
 
 #ifdef SMP
 	uintptr_t *ptr;
@@ -407,6 +435,54 @@ cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t sz)
 	*(ptr + 1) = 0;		/* recurse counter */
 #endif
 }
+
+#ifdef DDB
+/*
+ * Dump an exception save area.  In a nested save, R31 holds the DEAR of the
+ * outer exception.
+ */
+static void
+db_show_booke_save(const char *name, register_t *sv)
+{
+
+	db_printf("%s r30 %#jx r31 %#jx dear %#jx esr %#jx\n", name,
+	    (uintmax_t)sv[CPUSAVE_R30], (uintmax_t)sv[CPUSAVE_R31],
+	    (uintmax_t)sv[CPUSAVE_BOOKE_DEAR],
+	    (uintmax_t)sv[CPUSAVE_BOOKE_ESR]);
+	db_printf("%s srr0 %#jx srr1 %#jx\n", name,
+	    (uintmax_t)sv[CPUSAVE_SRR0], (uintmax_t)sv[CPUSAVE_SRR1]);
+}
+
+void
+cpu_db_show_mdpcpu(struct pcpu *pc)
+{
+	register_t *tlbsave;
+	int i;
+
+	db_printf("tid_next = %d tlb_level = %#jx critstack = %p\n",
+	    pc->pc_booke.tid_next, (uintmax_t)pc->pc_booke.tlb_level,
+	    pc->pc_booke.critstack);
+	db_show_booke_save("tempsave", pc->pc_tempsave);
+	db_show_booke_save("disisave", pc->pc_disisave);
+	db_show_booke_save("critsave", pc->pc_booke.critsave);
+	/*
+	 * In critsave, CPUSAVE_SRR0-1 hold the interrupt's own CSRR0-1 (DSRR0-1
+	 * for the enhanced-debug vector); the non-critical SRR0-1 that were
+	 * live at the time are kept separately.
+	 */
+	db_printf("critsave held srr0 %#jx srr1 %#jx\n",
+	    (uintmax_t)pc->pc_booke.critsave[BOOKE_CRITSAVE_SRR0],
+	    (uintmax_t)pc->pc_booke.critsave[BOOKE_CRITSAVE_SRR1]);
+	db_show_booke_save("mchksave", pc->pc_booke.mchksave);
+	for (i = 0; i < BOOKE_TLB_MAXNEST &&
+	    i < (int)pc->pc_booke.tlb_level; i++) {
+		tlbsave = &pc->pc_booke.tlbsave[i * BOOKE_TLB_SAVELEN];
+		db_printf("tlbsave%d srr0 %#jx srr1 %#jx\n", i,
+		    (uintmax_t)tlbsave[TLBSAVE_BOOKE_SRR0],
+		    (uintmax_t)tlbsave[TLBSAVE_BOOKE_SRR1]);
+	}
+}
+#endif /* DDB */
 
 /* Shutdown the CPU as much as possible. */
 void

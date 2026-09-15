@@ -9,12 +9,21 @@ title: Renesas RZ/V2H(P) Renesas Serial Peripheral Interface (RSPI)
 maintainers:
   - Fabrizio Castro <fabrizio.castro.jz@renesas.com>
 
-allOf:
-  - $ref: spi-controller.yaml#
-
 properties:
   compatible:
-    const: renesas,r9a09g057-rspi # RZ/V2H(P)
+    oneOf:
+      - enum:
+          - renesas,r9a08g046-rspi # RZ/G3L
+          - renesas,r9a09g057-rspi # RZ/V2H(P)
+          - renesas,r9a09g077-rspi # RZ/T2H
+      - items:
+          - enum:
+              - renesas,r9a09g047-rspi # RZ/G3E
+              - renesas,r9a09g056-rspi # RZ/V2N
+          - const: renesas,r9a09g057-rspi
+      - items:
+          - const: renesas,r9a09g087-rspi # RZ/N2H
+          - const: renesas,r9a09g077-rspi # RZ/T2H
 
   reg:
     maxItems: 1
@@ -36,13 +45,12 @@ properties:
       - const: tx
 
   clocks:
+    minItems: 2
     maxItems: 3
 
   clock-names:
-    items:
-      - const: pclk
-      - const: pclk_sfr
-      - const: tclk
+    minItems: 2
+    maxItems: 3
 
   resets:
     maxItems: 2
@@ -51,6 +59,21 @@ properties:
     items:
       - const: presetn
       - const: tresetn
+
+  dmas:
+    minItems: 2
+    maxItems: 10
+    description:
+      Must contain a list of pairs of references to DMA specifiers, one for
+      transmission, and one for reception.
+
+  dma-names:
+    minItems: 2
+    maxItems: 10
+    items:
+      enum:
+        - rx
+        - tx
 
   power-domains:
     maxItems: 1
@@ -62,11 +85,85 @@ required:
   - interrupt-names
   - clocks
   - clock-names
-  - resets
-  - reset-names
   - power-domains
   - '#address-cells'
   - '#size-cells'
+
+allOf:
+  - $ref: spi-controller.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - renesas,r9a08g046-rspi
+    then:
+      properties:
+        clocks:
+          maxItems: 2
+
+        clock-names:
+          items:
+            - const: pclk
+            - const: tclk
+
+        dmas:
+          maxItems: 2
+
+        dma-names:
+          items:
+            - const: rx
+            - const: tx
+
+      required:
+        - resets
+        - reset-names
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - renesas,r9a09g057-rspi
+    then:
+      properties:
+        clocks:
+          minItems: 3
+
+        clock-names:
+          items:
+            - const: pclk
+            - const: pclk_sfr
+            - const: tclk
+
+      required:
+        - resets
+        - reset-names
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - renesas,r9a09g077-rspi
+    then:
+      properties:
+        clocks:
+          maxItems: 2
+
+        clock-names:
+          items:
+            - const: pclk
+            - const: pclkspi
+
+        resets: false
+        reset-names: false
+
+        dmas:
+          maxItems: 6
+
+        dma-names:
+          maxItems: 6
 
 unevaluatedProperties: false
 

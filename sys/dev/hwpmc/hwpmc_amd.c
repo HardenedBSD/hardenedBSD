@@ -64,7 +64,7 @@ struct amd_descr {
 };
 
 static int amd_npmcs;
-static int amd_core_npmcs, amd_l3_npmcs, amd_df_npmcs;
+static int amd_core_npmcs, amd_l3_npmcs, amd_df_npmcs, amd_umc_npmcs;
 static struct amd_descr amd_pmcdesc[AMD_NPMCS_MAX];
 struct amd_event_code_map {
 	enum pmc_event	pe_ev;	 /* enum value */
@@ -186,10 +186,12 @@ static struct amd_cpu **amd_pcpu;
 static uint64_t amd_core_allowed_mask;
 static uint64_t amd_l3_allowed_mask;
 static uint64_t amd_df_allowed_mask;
+static uint64_t amd_umc_allowed_mask;
 
 static uint64_t amd_core_extra_mask;
 static uint64_t amd_l3_extra_mask;
 static uint64_t amd_df_extra_mask;
+static uint64_t amd_umc_extra_mask;
 
 SYSCTL_DECL(_kern_hwpmc);
 
@@ -205,6 +207,10 @@ SYSCTL_U64(_kern_hwpmc, OID_AUTO, amd_df_extra_mask, CTLFLAG_RDTUN,
     &amd_df_extra_mask, 0,
     "Extra allowed bits in AMD DF PMU control (override; default 0)");
 
+SYSCTL_U64(_kern_hwpmc, OID_AUTO, amd_umc_extra_mask, CTLFLAG_RDTUN,
+    &amd_umc_extra_mask, 0,
+    "Extra allowed bits in AMD UMC PMU control (override; default 0)");
+
 static void
 amd_init_policy(void)
 {
@@ -219,6 +225,8 @@ amd_init_policy(void)
 
 	amd_df_allowed_mask = (family <= 0x19) ?
 	    AMD_PMC_DF_FAMILY17_MASK : AMD_PMC_DF_FAMILY1A_MASK;
+
+	amd_umc_allowed_mask = AMD_PMC_UMC_MASK;
 }
 
 static uint64_t
@@ -234,6 +242,8 @@ amd_config_mask(enum sub_class subclass, uint64_t caps)
 		return (amd_l3_allowed_mask | amd_l3_extra_mask);
 	case PMC_AMD_SUB_CLASS_DATA_FABRIC:
 		return (amd_df_allowed_mask | amd_df_extra_mask);
+	case PMC_AMD_SUB_CLASS_UMC:
+		return (amd_umc_allowed_mask | amd_umc_extra_mask);
 	default:
 		return (0);
 	}
@@ -403,9 +413,6 @@ amd_allocate_pmc(int cpu __unused, int ri, struct pmc *pm,
 	if (pd->pd_class != a->pm_class)
 		return (EINVAL);
 
-	if ((a->pm_flags & PMC_F_EV_PMU) == 0)
-		return (EINVAL);
-
 	caps = pm->pm_caps;
 
 	PMCDBG2(MDP, ALL, 1,"amd-allocate ri=%d caps=0x%x", ri, caps);
@@ -418,7 +425,8 @@ amd_allocate_pmc(int cpu __unused, int ri, struct pmc *pm,
 	    ((pd->pd_caps & PMC_CAP_PRECISE) == 0))
 		return (EINVAL);
 
-	if (strlen(pmc_cpuid) != 0) {
+	/* PMC_F_EV_PMU: config comes from pmu-events tables. */
+	if ((a->pm_flags & PMC_F_EV_PMU) != 0) {
 		config = a->pm_md.pm_amd.pm_amd_config;
 		if ((config & ~amd_config_mask(amd_pmcdesc[ri].pm_subclass,
 		    caps)) != 0)
@@ -528,16 +536,24 @@ amd_start_pmc(int cpu __diagused, int ri, struct pmc *pm)
 	PMCDBG2(MDP, STA, 1, "amd-start cpu=%d ri=%d", cpu, ri);
 
 	/*
-	 * Triggered by DF counters because all DF MSRs are shared.  We need to
-	 * change the code to honor the per-package flag in the JSON event
-	 * definitions.
+	 * Asserts triggered by DF/UMC counters because all DF/UMC MSRs are
+	 * shared.  While userspace now honors the per-node flags, we should
+	 * enforce this in the kernel.
 	 */
-	KASSERT(AMD_PMC_IS_STOPPED(pd->pm_evsel),
-	    ("[amd,%d] pmc%d,cpu%d: Starting active PMC \"%s\"", __LINE__,
-	    ri, cpu, pd->pm_descr.pd_name));
-
 	/* turn on the PMC ENABLE bit */
-	config = pm->pm_md.pm_amd.pm_amd_evsel | AMD_PMC_ENABLE;
+	if (pd->pm_subclass == PMC_AMD_SUB_CLASS_UMC) {
+		KASSERT(AMD_PMC_UMC_IS_STOPPED(pd->pm_evsel),
+		    ("[amd,%d] pmc%d,cpu%d: Starting active PMC \"%s\"",
+		    __LINE__, ri, cpu, pd->pm_descr.pd_name));
+
+		config = pm->pm_md.pm_amd.pm_amd_evsel | AMD_PMC_UMC_ENABLE;
+	} else {
+		KASSERT(AMD_PMC_IS_STOPPED(pd->pm_evsel),
+		    ("[amd,%d] pmc%d,cpu%d: Starting active PMC \"%s\"",
+		    __LINE__, ri, cpu, pd->pm_descr.pd_name));
+
+		config = pm->pm_md.pm_amd.pm_amd_evsel | AMD_PMC_ENABLE;
+	}
 
 	PMCDBG1(MDP, STA, 2, "amd-start config=0x%x", config);
 
@@ -562,14 +578,22 @@ amd_stop_pmc(int cpu __diagused, int ri, struct pmc *pm)
 
 	pd = &amd_pmcdesc[ri];
 
-	KASSERT(!AMD_PMC_IS_STOPPED(pd->pm_evsel),
-	    ("[amd,%d] PMC%d, CPU%d \"%s\" already stopped",
-		__LINE__, ri, cpu, pd->pm_descr.pd_name));
-
 	PMCDBG1(MDP, STO, 1, "amd-stop ri=%d", ri);
 
 	/* turn off the PMC ENABLE bit */
-	config = pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_ENABLE;
+	if (pd->pm_subclass == PMC_AMD_SUB_CLASS_UMC) {
+		KASSERT(!AMD_PMC_UMC_IS_STOPPED(pd->pm_evsel),
+		    ("[amd,%d] PMC%d, CPU%d \"%s\" already stopped",
+		    __LINE__, ri, cpu, pd->pm_descr.pd_name));
+
+		config = pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_UMC_ENABLE;
+	} else {
+		KASSERT(!AMD_PMC_IS_STOPPED(pd->pm_evsel),
+		    ("[amd,%d] PMC%d, CPU%d \"%s\" already stopped",
+		    __LINE__, ri, cpu, pd->pm_descr.pd_name));
+
+		config = pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_ENABLE;
+	}
 	wrmsr(pd->pm_evsel, config);
 
 	/*
@@ -656,12 +680,22 @@ amd_intr(struct trapframe *tf)
 		v       = pm->pm_sc.pm_reloadcount;
 		config  = rdmsr(evsel);
 
-		KASSERT((config & ~AMD_PMC_ENABLE) ==
-		    (pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_ENABLE),
-		    ("[amd,%d] config mismatch reg=0x%jx pm=0x%jx", __LINE__,
-			 (uintmax_t)config, (uintmax_t)pm->pm_md.pm_amd.pm_amd_evsel));
 
-		wrmsr(evsel, config & ~AMD_PMC_ENABLE);
+		if (amd_pmcdesc[i].pm_subclass == PMC_AMD_SUB_CLASS_UMC) {
+			KASSERT((config & ~AMD_PMC_UMC_ENABLE) ==
+			    (pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_UMC_ENABLE),
+			    ("[amd,%d] config mismatch reg=0x%jx pm=0x%jx", __LINE__,
+			    (uintmax_t)config, (uintmax_t)pm->pm_md.pm_amd.pm_amd_evsel));
+
+			wrmsr(evsel, config & ~AMD_PMC_UMC_ENABLE);
+		} else {
+			KASSERT((config & ~AMD_PMC_ENABLE) ==
+			    (pm->pm_md.pm_amd.pm_amd_evsel & ~AMD_PMC_ENABLE),
+			    ("[amd,%d] config mismatch reg=0x%jx pm=0x%jx", __LINE__,
+			    (uintmax_t)config, (uintmax_t)pm->pm_md.pm_amd.pm_amd_evsel));
+
+			wrmsr(evsel, config & ~AMD_PMC_ENABLE);
+		}
 		wrmsr(perfctr, AMD_RELOAD_COUNT_TO_PERFCTR_VALUE(v));
 
 		/* Restart the counter if logging succeeded. */
@@ -955,6 +989,7 @@ pmc_amd_initialize(void)
 	int ncpus, nclasses, i;
 	int family, model, stepping;
 	int error;
+	int pmcs_per_umc;
 
 	/*
 	 * The presence of hardware performance counters on the AMD
@@ -998,12 +1033,16 @@ pmc_amd_initialize(void)
 	}
 	amd_l3_npmcs = AMD_PMC_L3_DEFAULT;
 	amd_df_npmcs = AMD_PMC_DF_DEFAULT;
+	amd_umc_npmcs = 0;
+	pmcs_per_umc = 0;
 
 	if (cpu_exthigh >= CPUID_EXTPERFMON) {
 		do_cpuid(CPUID_EXTPERFMON, regs);
 		if (regs[1] != 0) {
 			amd_core_npmcs = EXTPERFMON_CORE_PMCS(regs[1]);
 			amd_df_npmcs = EXTPERFMON_DF_PMCS(regs[1]);
+			amd_umc_npmcs = EXTPERFMON_UMC_PMCS(regs[1]);
+			pmcs_per_umc = amd_umc_npmcs / popcntq(regs[2]);
 		}
 	}
 
@@ -1066,6 +1105,19 @@ pmc_amd_initialize(void)
 		amd_npmcs += amd_df_npmcs;
 	}
 
+	for (i = 0; i < amd_umc_npmcs; i++) {
+		d = &amd_pmcdesc[amd_npmcs + i];
+		snprintf(d->pm_descr.pd_name, PMC_NAME_MAX,
+		    "K8-UMC%d-%d", i / pmcs_per_umc, i);
+		d->pm_descr.pd_class = PMC_CLASS_K8;
+		d->pm_descr.pd_caps = AMD_PMC_UMC_CAPS;
+		d->pm_descr.pd_width = 48;
+		d->pm_evsel = AMD_PMC_UMC_BASE + 2 * i;
+		d->pm_perfctr = AMD_PMC_UMC_BASE + 2 * i + 1;
+		d->pm_subclass = PMC_AMD_SUB_CLASS_UMC;
+	}
+	amd_npmcs += amd_umc_npmcs;
+
 	/*
 	 * Sanity check that the hardware is safe to use.  Do not read or write
 	 * any of the PMC MSRs until after this check passes.
@@ -1083,12 +1135,24 @@ pmc_amd_initialize(void)
 
 	/*
 	 * These processors have two or three classes of PMCs: the TSC,
-	 * programmable PMCs, and AMD IBS.
+	 * programmable PMCs, and AMD IBS.  One extra class slot is reserved
+	 * for the optional RAPL energy counters.
 	 */
 	if ((amd_feature2 & AMDID2_IBS) != 0) {
-		nclasses = 3;
+		nclasses = 4;
 	} else {
-		nclasses = 2;
+		nclasses = 3;
+	}
+
+	/*
+	 * Detect support for MPERF and APERF MSRs. tsc_perf_stat is set by the
+	 * kernel's generic TSC initialization (start_TSC(), called at boot via
+	 * cpu_startup() -> startrtclock()), not by hwpmc's TSC PMC class. It is
+	 * set only after confirming both MSRs actually increment (some emulators
+	 * expose the CPUID bit without real MSR support).
+	 */
+	if ((cpu_power_ecx & CPUID_PERF_STAT) && (tsc_perf_stat == 1)) {
+		nclasses++;
 	}
 
 	pmc_mdep = pmc_mdep_alloc(nclasses);
@@ -1134,11 +1198,19 @@ pmc_amd_initialize(void)
 
 	PMCDBG0(MDP, INI, 0, "amd-initialize");
 
-	if (nclasses >= 3) {
+	if ((amd_feature2 & AMDID2_IBS) != 0) {
 		error = pmc_ibs_initialize(pmc_mdep, ncpus);
 		if (error != 0)
 			goto error;
 	}
+
+	/* Initialize PERF class. */
+	pmc_perf_initialize(pmc_mdep, ncpus, nclasses - 1);
+
+	/* RAPL takes the reserved last slot; drop it if the probe fails. */
+	error = pmc_rapl_initialize(pmc_mdep, ncpus, pmc_mdep->pmd_nclass - 1);
+	if (error != 0)
+		pmc_mdep->pmd_nclass--;
 
 	return (pmc_mdep);
 
@@ -1155,7 +1227,12 @@ pmc_amd_finalize(struct pmc_mdep *md)
 {
 	PMCDBG0(MDP, INI, 1, "amd-finalize");
 
+	/* Safe even if the RAPL class was skipped at initialize time. */
+	pmc_rapl_finalize(md);
+
 	pmc_tsc_finalize(md);
+
+	pmc_perf_finalize(md);
 
 	for (int i = 0; i < pmc_cpu_max(); i++)
 		KASSERT(amd_pcpu[i] == NULL,

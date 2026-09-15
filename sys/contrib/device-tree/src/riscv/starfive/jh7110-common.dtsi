@@ -135,29 +135,6 @@
 	clock-frequency = <49152000>;
 };
 
-&camss {
-	assigned-clocks = <&ispcrg JH7110_ISPCLK_DOM4_APB_FUNC>,
-			  <&ispcrg JH7110_ISPCLK_MIPI_RX0_PXL>;
-	assigned-clock-rates = <49500000>, <198000000>;
-
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		port@0 {
-			reg = <0>;
-		};
-
-		port@1 {
-			reg = <1>;
-
-			camss_from_csi2rx: endpoint {
-				remote-endpoint = <&csi2rx_to_camss>;
-			};
-		};
-	};
-};
-
 &csi2rx {
 	assigned-clocks = <&ispcrg JH7110_ISPCLK_VIN_SYS>;
 	assigned-clock-rates = <297000000>;
@@ -175,9 +152,7 @@
 		port@1 {
 			reg = <1>;
 
-			csi2rx_to_camss: endpoint {
-				remote-endpoint = <&camss_from_csi2rx>;
-			};
+			/* remote CAMSS endpoint */
 		};
 	};
 };
@@ -281,15 +256,8 @@
 	assigned-clock-rates = <50000000>;
 	bus-width = <8>;
 	bootph-pre-ram;
-	cap-mmc-highspeed;
-	mmc-ddr-1_8v;
-	mmc-hs200-1_8v;
-	cap-mmc-hw-reset;
-	post-power-on-delay-ms = <200>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc0_pins>;
-	vmmc-supply = <&vcc_3v3>;
-	vqmmc-supply = <&emmc_vdd>;
 	status = "okay";
 };
 
@@ -299,12 +267,7 @@
 	assigned-clock-rates = <50000000>;
 	bus-width = <4>;
 	bootph-pre-ram;
-	no-sdio;
-	no-mmc;
-	cd-gpios = <&sysgpio 41 GPIO_ACTIVE_LOW>;
-	disable-wp;
 	cap-sd-highspeed;
-	post-power-on-delay-ms = <200>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc1_pins>;
 	status = "okay";
@@ -448,17 +411,6 @@
 	};
 
 	mmc0_pins: mmc0-0 {
-		 rst-pins {
-			pinmux = <GPIOMUX(62, GPOUT_SYS_SDIO0_RST,
-					      GPOEN_ENABLE,
-					      GPI_NONE)>;
-			bias-pull-up;
-			drive-strength = <12>;
-			input-disable;
-			input-schmitt-disable;
-			slew-rate = <0>;
-		};
-
 		mmc-pins {
 			pinmux = <PINMUX(PAD_SD0_CLK, 0)>,
 				 <PINMUX(PAD_SD0_CMD, 0)>,

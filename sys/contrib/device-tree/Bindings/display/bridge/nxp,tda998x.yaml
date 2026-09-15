@@ -19,6 +19,9 @@ properties:
   interrupts:
     maxItems: 1
 
+  clocks:
+    maxItems: 1
+
   video-ports:
     $ref: /schemas/types.yaml#/definitions/uint32
     default: 0x230145
@@ -81,7 +84,10 @@ oneOf:
   - required:
       - ports
 
-additionalProperties: false
+allOf:
+  - $ref: /schemas/sound/dai-common.yaml#
+
+unevaluatedProperties: false
 
 examples:
   - |

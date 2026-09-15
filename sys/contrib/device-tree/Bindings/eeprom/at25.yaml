@@ -25,11 +25,13 @@ properties:
     oneOf:
       - items:
           - enum:
+              - anvo,anv32c81w
               - anvo,anv32e61w
               - atmel,at25256B
               - fujitsu,mb85rs1mt
               - fujitsu,mb85rs256
               - fujitsu,mb85rs64
+              - microchip,25aa010a
               - microchip,at25160bn
               - microchip,25lc040
               - st,m95m02
@@ -56,6 +58,7 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     description:
       Total eeprom size in bytes.
+      Also used for FRAMs without device ID where the size cannot be detected.
 
   address-width:
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -145,5 +148,12 @@ examples:
             compatible = "cypress,fm25", "atmel,at25";
             reg = <1>;
             spi-max-frequency = <40000000>;
+        };
+
+        fram@2 {
+            compatible = "cypress,fm25", "atmel,at25";
+            reg = <2>;
+            spi-max-frequency = <20000000>;
+            size = <2048>;
         };
     };

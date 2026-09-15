@@ -209,6 +209,7 @@ tcp_usr_detach(struct socket *so)
 	    tp->t_state < TCPS_SYN_SENT,
 	    ("%s: inp %p not disconnected or embryonic", __func__, inp));
 
+	TCPSTATES_DEC(tp->t_state);
 	tcp_discardcb(tp);
 	in_pcbfree(inp);
 }
@@ -1592,7 +1593,6 @@ tcp_fill_info(const struct tcpcb *tp, struct tcp_info *ti)
  */
 #define INP_WLOCK_RECHECK_CLEANUP(inp, cleanup) do {			\
 	INP_WLOCK(inp);							\
-	tp = intotcpcb(inp);						\
 	if (tp->t_flags & TF_DISCONNECTED) {				\
 		INP_WUNLOCK(inp);					\
 		cleanup;						\
@@ -2401,7 +2401,6 @@ unlock_and_done:
 		break;
 
 	case SOPT_GET:
-		tp = intotcpcb(inp);
 		switch (sopt->sopt_name) {
 #if defined(IPSEC_SUPPORT) || defined(TCP_SIGNATURE)
 		case TCP_MD5SIG:
@@ -2939,16 +2938,24 @@ DB_SHOW_ALL_COMMAND(tcpcbs, db_show_all_tcpcbs)
 	show_inpcb = strchr(modif, 'i') != NULL;
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
-		for (u_int i = 0; i <= V_tcbinfo.ipi_porthashmask; i++)
-			CK_LIST_FOREACH(inp, &V_tcbinfo.ipi_porthashbase[i],
-			    inp_portlist) {
+		for (u_int i = 0; i <= V_tcbinfo.ipi_hashmask; i++)
+			CK_LIST_FOREACH(inp, &V_tcbinfo.ipi_hash_exact[i].head,
+			    inp_hash_exact) {
+				db_print_tcpcb(intotcpcb(inp), "tcpcb", 0,
+				    show_bblog, show_inpcb, only_locked);
+				if (db_pager_quit)
+					goto break_hash;
+			}
+		for (u_int i = 0; i <= V_tcbinfo.ipi_hashmask; i++)
+			CK_LIST_FOREACH(inp, &V_tcbinfo.ipi_hash_wild[i].head,
+			    inp_hash_wild) {
 				db_print_tcpcb(intotcpcb(inp), "tcpcb", 0,
 				    show_bblog, show_inpcb, only_locked);
 				if (db_pager_quit)
 					goto break_hash;
 			}
 break_hash:
-		CK_LIST_FOREACH(inp, &V_tcbinfo.ipi_list_unconn,
+		CK_LIST_FOREACH(inp, &V_tcbinfo.ipi_list_unconn.head,
 		    inp_unconn_list) {
 			db_print_tcpcb(intotcpcb(inp), "tcpcb", 0,
 			    show_bblog, show_inpcb, only_locked);

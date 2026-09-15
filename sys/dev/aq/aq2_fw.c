@@ -32,14 +32,22 @@
 #include "aq_hw_llh.h"
 #include "aq2_hw.h"
 #include "aq_fw.h"
+#include "aq_dbg.h"
 
 static int aq2_fw_reset(struct aq_hw *hw);
 static int aq2_fw_set_mode(struct aq_hw *hw, enum aq_hw_fw_mpi_state mode,
     enum aq_fw_link_speed speed);
 static int aq2_fw_get_mode(struct aq_hw *hw, enum aq_hw_fw_mpi_state *mode,
     enum aq_fw_link_speed *speed, enum aq_fw_link_fc *fc);
+static int aq2_fw_get_link_info(struct aq_hw *hw, struct aq_hw_link_info *info);
 static int aq2_fw_get_mac_addr(struct aq_hw *hw, uint8_t *mac);
 static int aq2_fw_get_stats(struct aq_hw *hw, struct aq_hw_stats *stats);
+static int aq2_fw_get_link_counters(struct aq_hw *hw, uint32_t *up,
+    uint32_t *down);
+static int aq2_fw_get_temp(struct aq_hw *hw, int *temp_mc);
+static int aq2_fw_get_thermal_limit(struct aq_hw *hw, int *limit_mc);
+static int aq2_fw_thermal_arm(struct aq_hw *hw, bool enable);
+static int aq2_fw_get_phy_hot_warning(struct aq_hw *hw, bool *hot);
 
 /* Coherent OUT-window read, bracketed by the transaction id. */
 static int
@@ -97,6 +105,7 @@ aq2_fw_reboot(struct aq_hw *hw)
 		device_printf(hw->dev, "A2 firmware reboot timeout\n");
 		return (ETIMEDOUT);
 	}
+	trace(hw, dbg_init, "aq2> F/W boot started, %d ms", (20000 - timo) / 100);
 
 	for (timo = 200000; timo > 0; timo--) {
 		v = AQ_READ_REG(hw, AQ2_MIF_BOOT_REG);
@@ -111,6 +120,8 @@ aq2_fw_reboot(struct aq_hw *hw)
 		device_printf(hw->dev, "A2 firmware restart timeout\n");
 		return (ETIMEDOUT);
 	}
+	trace(hw, dbg_init, "aq2> F/W boot complete, %d ms",
+	    (200000 - timo) / 100);
 
 	v = AQ_READ_REG(hw, AQ2_MIF_BOOT_REG);
 	if (v & AQ2_MIF_BOOT_FAILED) {
@@ -152,9 +163,12 @@ aq2_fw_reboot(struct aq_hw *hw)
 		iface = "unknown";
 		break;
 	}
-	device_printf(hw->dev, "Atlantic 2 %s, firmware %u.%u.%u\n", iface,
-	    hw->fw_version.major_version, hw->fw_version.minor_version,
-	    hw->fw_version.build_number);
+	if (!hw->fw_announced || bootverbose) {
+		device_printf(hw->dev, "Atlantic 2 %s, firmware %u.%u.%u\n",
+		    iface, hw->fw_version.major_version,
+		    hw->fw_version.minor_version, hw->fw_version.build_number);
+		hw->fw_announced = true;
+	}
 
 	/* Base row added to every action-resolver-table index. */
 	err = aq2_fw_interface_buffer_read(hw,
@@ -165,6 +179,8 @@ aq2_fw_reboot(struct aq_hw *hw)
 	hw->art_filter_base_index = ((filter_caps[2] &
 	    AQ2_FW_INTERFACE_OUT_FILTER_CAPS3_RESOLVER_BASE_INDEX) >>
 	    AQ2_FW_INTERFACE_OUT_FILTER_CAPS3_RESOLVER_BASE_INDEX_SHIFT) * 8;
+	trace(hw, dbg_init, "aq2> ART filter base index = %u",
+	    hw->art_filter_base_index);
 
 	return (0);
 }
@@ -173,11 +189,17 @@ aq2_fw_reboot(struct aq_hw *hw)
 static int
 aq2_fw_wait_shared_ack(struct aq_hw *hw)
 {
+	int err;
+
 	AQ_WRITE_REG(hw, AQ2_MIF_HOST_FINISHED_STATUS_WRITE_REG,
 	    AQ2_MIF_HOST_FINISHED_STATUS_ACK);
-	return (AQ_HW_WAIT_FOR((AQ_READ_REG(hw,
+	err = AQ_HW_WAIT_FOR((AQ_READ_REG(hw,
 	    AQ2_MIF_HOST_FINISHED_STATUS_READ_REG) &
-	    AQ2_MIF_HOST_FINISHED_STATUS_ACK) == 0, 100, 1000));
+	    AQ2_MIF_HOST_FINISHED_STATUS_ACK) == 0, 100, 1000);
+	if (err != 0)
+		trace_error(hw, dbg_fw, "aq2> shared buffer ack timed out");
+
+	return (err);
 }
 
 static int
@@ -203,6 +225,9 @@ aq2_fw_reset(struct aq_hw *hw)
 	v &= ~AQ2_FW_INTERFACE_IN_REQUEST_POLICY_PROMISC_RX_QUEUE_TX_INDEX;
 	AQ_WRITE_REG(hw, AQ2_FW_INTERFACE_IN_REQUEST_POLICY_REG, v);
 
+	trace(hw, dbg_init, "aq2> reset: mtu %u, request policy %#x",
+	    HW_ATL_B0_MTU_JUMBO, v);
+
 	err = aq2_fw_wait_shared_ack(hw);
 	if (err != 0)
 		device_printf(hw->dev, "A2 firmware reset timed out\n");
@@ -225,9 +250,11 @@ aq2_fw_get_mac_addr(struct aq_hw *hw, uint8_t *mac)
 	mac_addr[0] = htole32(mac_addr[0]);
 	mac_addr[1] = htole32(mac_addr[1]);
 	memcpy(mac, (uint8_t *)mac_addr, ETHER_ADDR_LEN);
+	trace(hw, dbg_init, "aq2> MAC addr %6D", mac, ":");
 	return (0);
 }
 
+/* No fw_mtx: the IN window is written only from iflib-serialised paths. */
 static int
 aq2_fw_set_mode(struct aq_hw *hw, enum aq_hw_fw_mpi_state mode,
     enum aq_fw_link_speed speed)
@@ -278,6 +305,9 @@ aq2_fw_set_mode(struct aq_hw *hw, enum aq_hw_fw_mpi_state mode,
 		    AQ2_FW_INTERFACE_IN_LINK_CONTROL_MODE, 0,
 		    AQ2_FW_INTERFACE_IN_LINK_CONTROL_MODE_SHUTDOWN);
 	}
+
+	trace(hw, dbg_init, "aq2> set mode %d, speed mask %#x, link options %#x",
+	    mode, speed, v);
 
 	/* Options acked before ACTIVE so bring-up negotiates the new mask. */
 	AQ_WRITE_REG(hw, AQ2_FW_INTERFACE_IN_LINK_OPTIONS_REG, v);
@@ -337,6 +367,24 @@ aq2_fw_get_mode(struct aq_hw *hw, enum aq_hw_fw_mpi_state *modep,
 		fc |= aq_fw_fc_ENABLE_RX;
 	if (fcp != NULL)
 		*fcp = fc;
+
+	trace_detail(hw, dbg_init,
+	    "aq2> get mode: link status %#x, speed %d, fc %d", v, speed, fc);
+
+	return (0);
+}
+
+static int
+aq2_fw_get_link_info(struct aq_hw *hw, struct aq_hw_link_info *info)
+{
+	uint32_t v;
+
+	v = AQ_READ_REG(hw, AQ2_FW_INTERFACE_OUT_LINK_STATUS_REG);
+
+	info->full_duplex =
+	    (v & AQ2_FW_INTERFACE_OUT_LINK_STATUS_DUPLEX) != 0;
+	info->eee = (v & AQ2_FW_INTERFACE_OUT_LINK_STATUS_EEE) != 0;
+	info->state = v & AQ2_FW_INTERFACE_OUT_LINK_STATUS_STATE;
 
 	return (0);
 }
@@ -400,8 +448,11 @@ aq2_fw_get_stats(struct aq_hw *hw, struct aq_hw_stats *stats)
 
 	err = aq2_fw_interface_buffer_read(hw, AQ2_FW_INTERFACE_OUT_STATS_REG,
 	    (uint32_t *)&u, sizeof(u));
-	if (err != 0)
+	if (err != 0) {
+		trace_error(hw, dbg_fw,
+		    "aq2> statistics read FAILED, error %d", err);
 		return (err);
+	}
 
 	if (hw->aq2_iface == AQ2_FW_INTERFACE_OUT_VERSION_IFACE_VER_A0) {
 		stats->uprc = u.a0.rx_unicast_frames;
@@ -434,7 +485,156 @@ aq2_fw_get_stats(struct aq_hw *hw, struct aq_hw_stats *stats)
 		stats->bptc = u.b0.tx_broadcast_frames;
 		stats->erpt = u.b0.tx_errors;
 		stats->ptc = u.b0.tx_good_frames;
+	} else {
+		trace_warn(hw, dbg_fw,
+		    "aq2> unknown F/W interface version %u, no statistics",
+		    hw->aq2_iface);
 	}
+
+	return (0);
+}
+
+/* Only the A0 interface layout carries the link transition counters. */
+static int
+aq2_fw_get_link_counters(struct aq_hw *hw, uint32_t *up, uint32_t *down)
+{
+	union aq2_fw_statistics u;
+	int err;
+
+	if (hw->aq2_iface != AQ2_FW_INTERFACE_OUT_VERSION_IFACE_VER_A0)
+		return (ENOTSUP);
+
+	err = aq2_fw_interface_buffer_read(hw, AQ2_FW_INTERFACE_OUT_STATS_REG,
+	    (uint32_t *)&u, sizeof(u));
+	if (err != 0) {
+		trace_error(hw, dbg_fw,
+		    "aq2> link counter read FAILED, error %d", err);
+		return (err);
+	}
+
+	*up = u.a0.link_up;
+	*down = u.a0.link_down;
+
+	return (0);
+}
+
+static int
+aq2_fw_get_temp(struct aq_hw *hw, int *temp_mc)
+{
+	uint32_t raw;
+	int err;
+
+	err = aq2_fw_interface_buffer_read(hw,
+	    AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_REG, &raw, sizeof(raw));
+	if (err != 0)
+		return (err);
+
+	/* The F/W zeroes the block until the PHY reports in. */
+	if ((raw & AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_READY) == 0) {
+		trace_detail(hw, dbg_fw, "aq2> PHY health monitor not ready");
+		return (ENXIO);
+	}
+
+	/* F/W reports whole degrees Celsius, signed. */
+	*temp_mc = (int)(int8_t)((raw &
+	    AQ2_FW_INTERFACE_OUT_PHY_TEMPERATURE) >>
+	    AQ2_FW_INTERFACE_OUT_PHY_TEMPERATURE_S) * 1000;
+
+	return (0);
+}
+
+/* interface-in thermal_shutdown.enable; the F/W boots with it set. */
+static int
+aq2_fw_thermal_arm(struct aq_hw *hw, bool enable)
+{
+	uint32_t v, want;
+	int err, limit_mc;
+
+	/* No threshold means an unpopulated word or a departed adapter. */
+	err = aq2_fw_get_thermal_limit(hw, &limit_mc);
+	if (err != 0)
+		return (err);
+
+	mtx_lock(&hw->fw_mtx);
+	v = AQ_READ_REG(hw, AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_REG);
+	if (enable)
+		want = v | AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_ENABLE;
+	else
+		want = v & ~AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_ENABLE;
+	if (want != v) {
+		AQ_WRITE_REG(hw, AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_REG,
+		    want);
+		err = aq2_fw_wait_shared_ack(hw);
+		/* Unacked: put the word back so the next poll retries. */
+		if (err != 0)
+			AQ_WRITE_REG(hw,
+			    AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_REG, v);
+	}
+	mtx_unlock(&hw->fw_mtx);
+
+	return (err);
+}
+
+/* interface-in thermal_shutdown.shutdown_temperature, whole degC. */
+static int
+aq2_fw_get_thermal_limit(struct aq_hw *hw, int *limit_mc)
+{
+	uint32_t v;
+	int temp_c;
+
+	v = AQ_READ_REG(hw, AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_REG);
+	temp_c = (v & AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_TEMP) >>
+	    AQ2_FW_INTERFACE_IN_THERMAL_SHUTDOWN_TEMP_S;
+	if (temp_c == 0 || temp_c == 0xff)
+		return (ENXIO);
+	*limit_mc = temp_c * 1000;
+
+	return (0);
+}
+
+static int
+aq2_fw_get_phy_fault(struct aq_hw *hw, uint16_t *fault)
+{
+	uint32_t health, code;
+	int err;
+
+	err = aq2_fw_interface_buffer_read(hw,
+	    AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_REG, &health,
+	    sizeof(health));
+	if (err != 0)
+		return (err);
+
+	if ((health & AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_FAULT) == 0) {
+		*fault = 0;
+		return (0);
+	}
+
+	err = aq2_fw_interface_buffer_read(hw,
+	    AQ2_FW_INTERFACE_OUT_PHY_FAULT_CODE_REG, &code, sizeof(code));
+	if (err != 0)
+		return (err);
+
+	*fault = (uint16_t)(code & AQ2_FW_INTERFACE_OUT_PHY_FAULT_CODE);
+
+	return (0);
+}
+
+static int
+aq2_fw_get_phy_hot_warning(struct aq_hw *hw, bool *hot)
+{
+	uint32_t health;
+	int err;
+
+	err = aq2_fw_interface_buffer_read(hw,
+	    AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_REG, &health,
+	    sizeof(health));
+	if (err != 0)
+		return (err);
+
+	if ((health & AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_READY) == 0)
+		return (ENXIO);
+
+	*hot = (health & AQ2_FW_INTERFACE_OUT_PHY_HEALTH_MONITOR_HOT) != 0;
 
 	return (0);
 }
@@ -443,7 +643,15 @@ const struct aq_firmware_ops aq2_fw_ops = {
 	.reset = aq2_fw_reset,
 	.set_mode = aq2_fw_set_mode,
 	.get_mode = aq2_fw_get_mode,
+	.get_link_info = aq2_fw_get_link_info,
 	.get_mac_addr = aq2_fw_get_mac_addr,
 	.get_stats = aq2_fw_get_stats,
+	.get_link_counters = aq2_fw_get_link_counters,
+	.get_temp = aq2_fw_get_temp,
+	.get_phy_fault = aq2_fw_get_phy_fault,
+	.get_phy_hot_warning = aq2_fw_get_phy_hot_warning,
+	.phy_reset = NULL,	/* A2 clears thermal shutdown on its own reset */
+	.thermal_arm = aq2_fw_thermal_arm,
+	.get_thermal_limit = aq2_fw_get_thermal_limit,
 	.led_control = NULL,
 };

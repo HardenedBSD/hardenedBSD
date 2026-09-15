@@ -126,6 +126,7 @@ static int 	asmc_mbp_sysctl_light_right(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mbp_sysctl_light_control(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mbp_sysctl_light_left_10byte(SYSCTL_HANDLER_ARGS);
 static int	asmc_aupo_sysctl(SYSCTL_HANDLER_ARGS);
+static int	asmc_sil_sysctl(SYSCTL_HANDLER_ARGS);
 
 static int	asmc_key_getinfo(device_t, const char *, uint8_t *, char *);
 
@@ -427,17 +428,13 @@ asmc_probe(device_t dev)
 }
 
 /*
- * Try PIO first; fall back to MMIO for T2 Macs.
+ * Try MMIO first; the legacy PIO range can be claimable but dead.
+ * Fall back to PIO if MMIO probe fails or the resource is absent.
  */
 static int
 asmc_try_probe(device_t dev)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
-
-	sc->sc_ioport = bus_alloc_resource_any(dev, SYS_RES_IOPORT,
-	    &sc->sc_rid_port, RF_ACTIVE);
-	if (sc->sc_ioport != NULL)
-		return (0);
 
 	sc->sc_rid_mem = 0;
 	sc->sc_iomem = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -445,7 +442,8 @@ asmc_try_probe(device_t dev)
 	if (sc->sc_iomem != NULL) {
 		if (asmc_mmio_probe(dev) == 0) {
 			sc->sc_is_mmio = true;
-			device_printf(dev, "using MMIO backend (T2)\n");
+			if (bootverbose)
+				device_printf(dev, "using MMIO backend\n");
 			return (0);
 		}
 		bus_release_resource(dev, SYS_RES_MEMORY,
@@ -453,7 +451,12 @@ asmc_try_probe(device_t dev)
 		sc->sc_iomem = NULL;
 	}
 
-	device_printf(dev, "unable to allocate IO port\n");
+	sc->sc_ioport = bus_alloc_resource_any(dev, SYS_RES_IOPORT,
+	    &sc->sc_rid_port, RF_ACTIVE);
+	if (sc->sc_ioport != NULL)
+		return (0);
+
+	device_printf(dev, "unable to allocate IO port or MMIO\n");
 	return (ENOMEM);
 }
 
@@ -935,6 +938,16 @@ asmc_init(device_t dev)
 		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
 		    dev, 0, asmc_aupo_sysctl, "I",
 		    "Auto power-on after AC power loss (0=off, 1=on)");
+	}
+
+	/* Sleep Indicator LED (SIL) control via MSLD/MSLS keys. */
+	if (asmc_key_read(dev, ASMC_KEY_MSLD, buf, 1) == 0) {
+		SYSCTL_ADD_PROC(sysctlctx,
+		    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
+		    OID_AUTO, "sil",
+		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
+		    dev, 0, asmc_sil_sysctl, "I",
+		    "Sleep indicator LED (0=off, 1=on)");
 	}
 
 	sc->sc_nfan = asmc_fan_count(dev);
@@ -2531,6 +2544,40 @@ asmc_aupo_sysctl(SYSCTL_HANDLER_ARGS)
 
 	aupo = (val != 0) ? 1 : 0;
 	if (asmc_key_write(dev, ASMC_KEY_AUPO, &aupo, 1) != 0)
+		return (EIO);
+
+	return (0);
+}
+
+/* Sleep Indicator LED (SIL) control; see ASMC_KEY_MSLD/MSLS in asmcvar.h. */
+static int
+asmc_sil_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	device_t dev = (device_t)arg1;
+	uint8_t msld;
+	int val, error;
+
+	if (asmc_key_read(dev, ASMC_KEY_MSLD, &msld, 1) != 0)
+		return (EIO);
+
+	/* MSLD 0xff means off, anything else means on */
+	val = (msld != 0xff) ? 1 : 0;
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+
+	if (val != 0) {
+		/* Turn on: unlatch MSLS first, then set MSLD duty */
+		uint8_t msls = 0x01;
+		if (asmc_key_write(dev, ASMC_KEY_MSLS, &msls, 1) != 0)
+			return (EIO);
+		msld = 0x01;
+	} else {
+		/* Turn off: just set MSLD to 0xff */
+		msld = 0xff;
+	}
+
+	if (asmc_key_write(dev, ASMC_KEY_MSLD, &msld, 1) != 0)
 		return (EIO);
 
 	return (0);

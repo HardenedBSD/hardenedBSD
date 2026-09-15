@@ -5,7 +5,7 @@
 
 /dts-v1/;
 
-#include "x1e80100.dtsi"
+#include "hamoa.dtsi"
 #include "x1-crd.dtsi"
 
 / {
@@ -15,4 +15,8 @@
 
 &gpu_zap_shader {
 	firmware-name = "qcom/x1e80100/gen70500_zap.mbn";
+};
+
+&iris {
+	status = "okay";
 };

@@ -36,9 +36,6 @@
  * @date 2017.12.07  @author roman.agafonov@aquantia.com
  */
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
 #include <sys/errno.h>
 
 #include "aq_common.h"
@@ -112,7 +109,7 @@ aq_fw_reset(struct aq_hw* hw)
 
 	hw->rbl_enabled = boot_exit_code != 0;
 
-	trace(dbg_init, "RBL enabled = %d", hw->rbl_enabled);
+	trace(hw, dbg_init, "RBL enabled = %d", hw->rbl_enabled);
 
 	/* Having FW version 0 is an indicator that cold start
 	 * is in progress. This means two things:
@@ -135,12 +132,12 @@ aq_fw_reset(struct aq_hw* hw)
 
 	switch (mode) {
 	case boot_mode_flb:
-		aq_log("FLB> F/W successfully loaded from flash.");
+		aq_log(hw, "FLB> F/W successfully loaded from flash.");
 		hw->flash_present = true;
 		return wait_init_mac_firmware(hw);
 
 	case boot_mode_rbl_flash:
-		aq_log("RBL> F/W loaded from flash. Host Bootload disabled.");
+		aq_log(hw, "RBL> F/W loaded from flash. Host Bootload disabled.");
 		hw->flash_present = true;
 		return wait_init_mac_firmware(hw);
 
@@ -153,7 +150,7 @@ aq_fw_reset(struct aq_hw* hw)
 		device_printf(hw->dev, "RBL> Host Bootload mode: this driver does not support Host Boot\n");
 		return (ENOTSUP);
 #else
-		trace(dbg_init, "RBL> Host Bootload mode");
+		trace(hw, dbg_init, "RBL> Host Bootload mode");
 		break;
 #endif // HOST_BOOT_DISABLE
 	}
@@ -172,16 +169,16 @@ aq_fw_ops_init(struct aq_hw* hw)
 	if (hw->fw_version.raw == 0)
 		hw->fw_version.raw = AQ_READ_REG(hw, 0x18);
 
-	aq_log("MAC F/W version is %d.%d.%d",
+	aq_log(hw, "MAC F/W version is %d.%d.%d",
 	    hw->fw_version.major_version, hw->fw_version.minor_version,
 	    hw->fw_version.build_number);
 
 	if (hw->fw_version.major_version == 1) {
-		trace(dbg_init, "using F/W ops v1.x");
+		trace(hw, dbg_init, "using F/W ops v1.x");
 		hw->fw_ops = &aq_fw1x_ops;
 		return (0);
 	} else if (hw->fw_version.major_version >= 2) {
-		trace(dbg_init, "using F/W ops v2.x");
+		trace(hw, dbg_init, "using F/W ops v2.x");
 		hw->fw_ops = &aq_fw2x_ops;
 		return (0);
 	}
@@ -253,12 +250,12 @@ mac_soft_reset_flb(struct aq_hw* hw)
 		}
 
 		if (flb_status == 0) {
-			trace_error(dbg_init,
+			trace_error(hw, dbg_init,
 			    "FLB> MAC kickstart failed: timed out");
 			return (ETIMEDOUT);
 		}
 
-		trace(dbg_init, "FLB> MAC kickstart done, %d ms", k);
+		trace(hw, dbg_init, "FLB> MAC kickstart done, %d ms", k);
 		/* FW reset */
 		reg_global_ctl2_set(hw, 0x80e0);
 		// Let Felicity hardware complete SMBUS transaction before
@@ -284,18 +281,18 @@ mac_soft_reset_flb(struct aq_hw* hw)
 	}
 
 	if (!restart_completed) {
-		trace_error(dbg_init, "FLB> Global Soft Reset failed");
+		trace_error(hw, dbg_init, "FLB> Global Soft Reset failed");
 		return (ETIMEDOUT);
 	}
 
-	trace(dbg_init, "FLB> F/W restart: %d ms", k * 10);
+	trace(hw, dbg_init, "FLB> F/W restart: %d ms", k * 10);
 	return (0);
 }
 
 static int
 mac_soft_reset_rbl(struct aq_hw* hw, enum aq_fw_bootloader_mode* mode)
 {
-	trace(dbg_init, "RBL> MAC reset STARTED!");
+	trace(hw, dbg_init, "RBL> MAC reset STARTED!");
 
 	reg_global_ctl2_set(hw, 0x40e1);
 	reg_glb_cpu_sem_set(hw, 1, 0);
@@ -329,20 +326,20 @@ mac_soft_reset_rbl(struct aq_hw* hw, enum aq_fw_bootloader_mode* mode)
 	}
 
 	if (rbl_status == 0 || rbl_status == 0xDEAD) {
-		trace_error(dbg_init, "RBL> RBL restart failed: timeout");
+		trace_error(hw, dbg_init, "RBL> RBL restart failed: timeout");
 		return (EBUSY);
 	}
 
 	if (rbl_status == RBL_STATUS_SUCCESS) {
 		if (mode)
 			*mode = boot_mode_rbl_flash;
-		trace(dbg_init, "RBL> reset complete! [Flash]");
+		trace(hw, dbg_init, "RBL> reset complete! [Flash]");
 	} else if (rbl_status == RBL_STATUS_HOST_BOOT) {
 		if (mode)
 			*mode = boot_mode_rbl_host_bootload;
-		trace(dbg_init, "RBL> reset complete! [Host Bootload]");
+		trace(hw, dbg_init, "RBL> reset complete! [Host Bootload]");
 	} else {
-		trace_error(dbg_init, "unknown RBL status 0x%x", rbl_status);
+		trace_error(hw, dbg_init, "unknown RBL status 0x%x", rbl_status);
 		return (EBUSY);
 	}
 
@@ -359,7 +356,7 @@ wait_init_mac_firmware(struct aq_hw* hw)
 		DELAY((1) * 1000);
 	}
 
-	trace_error(dbg_init,
+	trace_error(hw, dbg_init,
 	    "timeout waiting for reg 0x18. MAC f/w NOT READY");
 	return (EBUSY);
 }

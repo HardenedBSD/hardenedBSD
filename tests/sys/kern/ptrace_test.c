@@ -53,6 +53,8 @@
 #include <unistd.h>
 #include <atf-c.h>
 
+#include "freebsd_test_suite/macros.h"
+
 /*
  * Architectures with a user-visible breakpoint().
  */
@@ -4232,7 +4234,7 @@ ATF_TC_BODY(ptrace__proc_reparent, tc)
 	pid_t traced, debuger, wpid;
 	int pd, status;
 
-	traced = pdfork(&pd, 0);
+	traced = pdfork(&pd, PD_NOWAITPID);
 	ATF_REQUIRE(traced >= 0);
 	if (traced == 0) {
 		raise(SIGSTOP);
@@ -4305,12 +4307,11 @@ ATF_TC_BODY(ptrace__procdesc_wait_child, tc)
 	ATF_REQUIRE(ptrace(PT_CONTINUE, child, (caddr_t)1, 0) != -1);
 
 	/*
-	 * If process was created by pdfork, the return code have to
-	 * be collected through process descriptor.
+	 * If process was created by pdfork but without PD_NOWAITPID,
+	 * the return code is available for wait().
 	 */
 	wpid = wait(&status);
-	REQUIRE_EQ(wpid, -1);
-	REQUIRE_EQ(errno, ECHILD);
+	REQUIRE_EQ(wpid, child);
 
 	ATF_REQUIRE(close(pd) != -1);
 }
@@ -4752,6 +4753,8 @@ ATF_TC_BODY(ptrace__PT_ATTACH_no_EINTR, tc)
 	struct timespec rqt, now, wake;
 	pid_t debuggee;
 	int status;
+
+	ATF_REQUIRE_SYSCTL_INT("debug.ptrace_attach_transparent", 1);
 
 	shm = mmap(NULL, sizeof(*shm), PROT_READ | PROT_WRITE,
 	    MAP_SHARED | MAP_ANON, -1, 0);

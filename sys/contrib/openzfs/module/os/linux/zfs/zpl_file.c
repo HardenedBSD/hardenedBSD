@@ -1,23 +1,13 @@
 // SPDX-License-Identifier: CDDL-1.0
 /*
- * CDDL HEADER START
+ * This file and its contents are supplied under the terms of the
+ * Common Development and Distribution License ("CDDL"), version 1.0.
+ * You may only use this file in accordance with the terms of version
+ * 1.0 of the CDDL.
  *
- * The contents of this file are subject to the terms of the
- * Common Development and Distribution License (the "License").
- * You may not use this file except in compliance with the License.
- *
- * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
- * or https://opensource.org/licenses/CDDL-1.0.
- * See the License for the specific language governing permissions
- * and limitations under the License.
- *
- * When distributing Covered Code, include this CDDL HEADER in each
- * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
- * If applicable, add the following below this CDDL HEADER, with the
- * fields enclosed by brackets "[]" replaced with your own identifying
- * information: Portions Copyright [yyyy] [name of copyright owner]
- *
- * CDDL HEADER END
+ * A full copy of the text of the CDDL should have accompanied this
+ * source.  A copy of the CDDL is also available via the Internet at
+ * https://opensource.org/license/CDDL-1.0.
  */
 /*
  * Copyright (c) 2011, Lawrence Livermore National Security, LLC.
@@ -46,6 +36,31 @@
 #ifdef HAVE_FILELOCK_HEADER
 #include <linux/filelock.h>
 #endif
+
+/*
+ * Per-open-file state, hung off file->private_data.  Allocated lazily the
+ * first time a Direct I/O read on this handle hits a benign checksum verify
+ * failure -- a recycled O_DIRECT buffer whose buffered re-read then succeeded.
+ * Its presence makes zpl_iter_read route subsequent reads through the uncached
+ * buffered path for the remaining lifetime of the handle, which stops the
+ * verify-failure / re-read storm without disabling the verify itself (so
+ * mirror/raidz self-heal for genuine corruption is unaffected).
+ */
+typedef struct zpl_file_data {
+	boolean_t	zfd_dio_read_declined;
+} zpl_file_data_t;
+
+static void
+zpl_dio_read_decline(struct file *filp)
+{
+	if (atomic_load_ptr(&filp->private_data) != NULL)
+		return;
+
+	zpl_file_data_t *zfd = kmem_zalloc(sizeof (*zfd), KM_SLEEP);
+	zfd->zfd_dio_read_declined = B_TRUE;
+	if (atomic_cas_ptr(&filp->private_data, NULL, zfd) != NULL)
+		kmem_free(zfd, sizeof (*zfd));
+}
 
 /*
  * When using fallocate(2) to preallocate space, inflate the requested
@@ -90,6 +105,12 @@ zpl_release(struct inode *ip, struct file *filp)
 	spl_fstrans_unmark(cookie);
 	crfree(cr);
 	ASSERT3S(error, <=, 0);
+
+	zpl_file_data_t *zfd = filp->private_data;
+	if (zfd != NULL) {
+		filp->private_data = NULL;
+		kmem_free(zfd, sizeof (*zfd));
+	}
 
 	return (error);
 }
@@ -191,6 +212,26 @@ zfs_io_flags(struct kiocb *kiocb)
 	return (flags);
 }
 
+static inline uint16_t
+zfs_uio_flags(struct kiocb *kiocb)
+{
+	uint16_t flags = 0;
+
+	/*
+	 * Both RWF_DONTCACHE and POSIX_FADV_NOREUSE say the caller does not
+	 * intend to read the data after this.
+	 */
+#if defined(IOCB_DONTCACHE)
+	if (kiocb->ki_flags & IOCB_DONTCACHE)
+		flags |= UIO_UNCACHED;
+#endif
+#if defined(FMODE_NOREUSE)
+	if (kiocb->ki_filp->f_mode & FMODE_NOREUSE)
+		flags |= UIO_UNCACHED;
+#endif
+	return (flags);
+}
+
 /*
  * If relatime is enabled, call file_accessed() if zfs_relatime_need_update()
  * is true.  This is needed since datasets with inherited "relatime" property
@@ -221,6 +262,15 @@ zpl_iter_read(struct kiocb *kiocb, struct iov_iter *to)
 	zfs_uio_t uio;
 
 	zfs_uio_iov_iter_init(&uio, to, kiocb->ki_pos, count);
+	uio.uio_extflg |= zfs_uio_flags(kiocb);
+
+	/*
+	 * This handle previously declined Direct I/O after a benign read
+	 * verify failure; keep taking the uncached buffered path.
+	 */
+	zpl_file_data_t *zfd = atomic_load_ptr(&filp->private_data);
+	if (zfd != NULL && zfd->zfd_dio_read_declined)
+		uio.uio_extflg |= UIO_DIO_DENY;
 
 	crhold(cr);
 	cookie = spl_fstrans_mark();
@@ -230,6 +280,14 @@ zpl_iter_read(struct kiocb *kiocb, struct iov_iter *to)
 
 	spl_fstrans_unmark(cookie);
 	crfree(cr);
+
+	/*
+	 * A Direct I/O read verify failed benignly (recycled O_DIRECT buffer)
+	 * and the buffered re-read succeeded; decline Direct I/O reads on this
+	 * handle from here on.
+	 */
+	if (uio.uio_extflg & UIO_DIO_CKSUM_RETRIED)
+		zpl_dio_read_decline(filp);
 
 	if (ret < 0)
 		return (ret);
@@ -271,6 +329,7 @@ zpl_iter_write(struct kiocb *kiocb, struct iov_iter *from)
 		return (ret);
 
 	zfs_uio_iov_iter_init(&uio, from, kiocb->ki_pos, count);
+	uio.uio_extflg |= zfs_uio_flags(kiocb);
 
 	crhold(cr);
 	cookie = spl_fstrans_mark();
@@ -820,7 +879,7 @@ zpl_fadvise(struct file *filp, loff_t offset, loff_t len, int advice)
 
 	if (advice == POSIX_FADV_WILLNEED) {
 		loff_t rlen = len ? len : i_size_read(ip) - offset;
-		dmu_prefetch(os, zp->z_id, 0, offset, rlen,
+		dmu_prefetch_user(os, zp->z_id, 0, offset, rlen,
 		    ZIO_PRIORITY_ASYNC_READ);
 		if (!zn_has_cached_data(zp, offset, offset + rlen - 1)) {
 			zfs_exit(zfsvfs, FTAG);
@@ -1019,7 +1078,7 @@ zpl_ioctl_setflags(struct file *filp, void __user *arg)
 
 	crhold(cr);
 	cookie = spl_fstrans_mark();
-	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr, zfs_init_idmap);
+	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr);
 	spl_fstrans_unmark(cookie);
 	crfree(cr);
 
@@ -1067,7 +1126,7 @@ zpl_ioctl_setxattr(struct file *filp, void __user *arg)
 
 	crhold(cr);
 	cookie = spl_fstrans_mark();
-	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr, zfs_init_idmap);
+	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr);
 	spl_fstrans_unmark(cookie);
 	crfree(cr);
 
@@ -1155,7 +1214,7 @@ zpl_ioctl_setdosflags(struct file *filp, void __user *arg)
 
 	crhold(cr);
 	cookie = spl_fstrans_mark();
-	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr, zfs_init_idmap);
+	err = -zfs_setattr(ITOZ(ip), (vattr_t *)&xva, 0, cr);
 	spl_fstrans_unmark(cookie);
 	crfree(cr);
 
@@ -1285,6 +1344,21 @@ const struct file_operations zpl_file_operations = {
 	.dedupe_file_range	= zpl_dedupe_file_range,
 #endif
 	.fadvise	= zpl_fadvise,
+#ifdef HAVE_VFS_FOP_FLAGS
+	.fop_flags	=
+#ifdef FOP_DIO_PARALLEL_WRITE
+	/*
+	 * Writes are serialized by the znode's own per-range lock rather
+	 * than by i_rwsem, so non-overlapping O_DIRECT writes need no
+	 * further serialization from the VFS or from io_uring.
+	 */
+	    FOP_DIO_PARALLEL_WRITE |
+#endif
+#ifdef FOP_DONTCACHE
+	    FOP_DONTCACHE |
+#endif
+	    0,
+#endif
 	.unlocked_ioctl	= zpl_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= zpl_compat_ioctl,

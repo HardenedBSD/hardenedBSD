@@ -16,11 +16,14 @@ properties:
   compatible:
     items:
       - enum:
+          - anbernic,rg-ds-display-bottom
+          - anbernic,rg-ds-display-top
           - chongzhou,cz101b4001
           - kingdisplay,kd101ne3-40ti
           - melfas,lmfbx101117480
           - radxa,display-10hd-ad001
           - radxa,display-8hd-ad002
+          - taiguanck,xti05101-01a
       - const: jadard,jd9365da-h3
 
   reg:
@@ -33,9 +36,8 @@ properties:
     description: supply regulator for VCCIO, usually 1.8V
 
   reset-gpios: true
-
   backlight: true
-
+  rotation: true
   port: true
 
 required:
