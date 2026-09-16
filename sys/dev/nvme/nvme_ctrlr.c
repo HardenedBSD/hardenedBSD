@@ -171,6 +171,10 @@ nvme_ctrlr_construct_io_qpairs(struct nvme_controller *ctrlr)
 	num_entries = min(num_entries, mqes + 1);
 	num_entries = min(num_entries, max_entries);
 
+	/* SHARED_CID_SPACE: IO CIDs must fit within the shared CID table. */
+	if (ctrlr->quirks & QUIRK_APPLE_SHARED_CID_SPACE)
+		num_entries = min(num_entries, NVME_ADMIN_ENTRIES);
+
 	num_trackers = NVME_IO_TRACKERS;
 	TUNABLE_INT_FETCH("hw.nvme.io_trackers", &num_trackers);
 
@@ -182,6 +186,10 @@ nvme_ctrlr_construct_io_qpairs(struct nvme_controller *ctrlr)
 	 * outstanding, hence the "-1" here.
 	 */
 	num_trackers = min(num_trackers, (num_entries-1));
+
+	if (ctrlr->quirks & QUIRK_APPLE_SHARED_CID_SPACE)
+		num_trackers = min(num_trackers,
+		    NVME_ADMIN_ENTRIES - ctrlr->adminq.num_trackers);
 
 	/*
 	 * Our best estimate for the maximum number of I/Os that we should
@@ -747,6 +755,11 @@ nvme_ctrlr_configure_aer(struct nvme_controller *ctrlr)
 	struct nvme_async_event_request		*aer;
 	uint32_t				i;
 
+	if (ctrlr->quirks & QUIRK_APPLE_NO_ASYNC_EVENT) {
+		ctrlr->num_aers = 0;
+		return;
+	}
+
 	ctrlr->async_event_config = NVME_CRIT_WARN_ST_AVAILABLE_SPARE |
 	    NVME_CRIT_WARN_ST_DEVICE_RELIABILITY |
 	    NVME_CRIT_WARN_ST_READ_ONLY |
@@ -1230,6 +1243,16 @@ nvme_ctrlr_aer_task(void *arg, int pending)
 			nvme_ns_construct(ns, id, ctrlr);
 			nvme_notify_ns(ctrlr, id);
 			ns->flags &= ~NVME_NS_CHANGED;
+		}
+		if (nsl->ns[0] == 0 && ctrlr->quirks & QUIRK_EMPTY_NAMESPACE_CHANGED_LOG) {
+			for (int i = 0; i < min(ctrlr->cdata.nn, NVME_MAX_NAMESPACES); i++) {
+				struct nvme_namespace * ns = &ctrlr->ns[i];
+
+				ns->flags |= NVME_NS_CHANGED;
+				nvme_ns_construct(ns, i + 1, ctrlr);
+				nvme_notify_ns(ctrlr, i + 1);
+				ns->flags &= ~NVME_NS_CHANGED;
+			}
 		}
 	}
 

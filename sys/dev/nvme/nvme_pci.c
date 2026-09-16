@@ -93,6 +93,11 @@ static struct _pcsid
 	{ 0xa822144d,		0, 0, "Samsung PM1725a", QUIRK_DELAY_B4_CHK_RDY },
 	{ 0x07f015ad,		0, 0, "VMware NVMe Controller" },
 	{ 0x2003106b,		0, 0, "Apple S3X NVMe Controller" },
+	{ 0x2005106b,		0, 0, "Apple ANS2 NVMe Controller (T2)",
+	    QUIRK_APPLE_IDENTIFY_CNS_BROKEN | QUIRK_APPLE_SHARED_CID_SPACE |
+	    QUIRK_APPLE_NO_ASYNC_EVENT | QUIRK_APPLE_SINGLE_VECTOR },
+	{ 0x80611d0f,		0, 0, "Amazon EBS NVMe Controller",
+	    QUIRK_EMPTY_NAMESPACE_CHANGED_LOG },
 	{ 0x00000000,		0, 0, NULL  }
 };
 
@@ -130,6 +135,9 @@ nvme_pci_probe (device_t device)
 	}
 	if (ep->devid)
 		ctrlr->quirks = ep->quirks;
+
+	if (ctrlr->quirks & QUIRK_APPLE_IDENTIFY_CNS_BROKEN)
+		ctrlr->max_identify_cns = NVME_APPLE_ANS2_MAX_CNS;
 
 	if (ep->desc) {
 		device_set_desc(device, ep->desc);
@@ -322,6 +330,15 @@ nvme_ctrlr_setup_interrupts(struct nvme_controller *ctrlr)
 	TUNABLE_INT_FETCH("hw.nvme.force_intx", &force_intx);
 	if (force_intx)
 		return (nvme_ctrlr_setup_shared(ctrlr, 0));
+
+	if (ctrlr->quirks & QUIRK_APPLE_SINGLE_VECTOR) {
+		int n = 1;
+		if (pci_alloc_msi(dev, &n) == 0) {
+			ctrlr->msi_count = n;
+			return (nvme_ctrlr_setup_shared(ctrlr, 1));
+		}
+		return (nvme_ctrlr_setup_shared(ctrlr, 0));
+	}
 
 	if (pci_msix_count(dev) == 0)
 		goto msi;
