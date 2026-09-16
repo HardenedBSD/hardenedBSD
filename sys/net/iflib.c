@@ -164,9 +164,9 @@ struct iflib_ctx;
  *
  * Only STOPPED establishes that the device can no longer access the mappings;
  * a failed initialization can leave queues active.  IFF_UP separately records
- * administrative intent.  Existing datapath users still use IFF_DRV_RUNNING,
- * but clearing that flag does not establish quiescence: the watchdog clears
- * it before the admin task stops the hardware.  Use this state for lifecycle
+ * administrative intent.  ifc_running separately gates software traffic,
+ * but clearing it does not establish quiescence: the watchdog closes that
+ * gate before the admin task stops the hardware.  Use this state for lifecycle
  * decisions under ifc_ctx_sx, not as an unlocked datapath admission check.
  */
 enum iflib_datapath_state {
@@ -225,6 +225,8 @@ struct iflib_ctx {
 	uint32_t ifc_flags;
 	enum iflib_datapath_state ifc_datapath_state;
 	enum iflib_pm_state ifc_pm_state;
+	/* Atomic software admission snapshot, not proof of DMA quiescence. */
+	u_int ifc_running;
 	uint32_t ifc_max_fl_buf_size;
 	uint32_t ifc_rx_mbuf_sz;
 
@@ -300,6 +302,13 @@ iflib_get_ifp(if_ctx_t ctx)
 {
 
 	return (ctx->ifc_ifp);
+}
+
+bool
+iflib_is_running(if_ctx_t ctx)
+{
+
+	return (atomic_load_acq_int(&ctx->ifc_running) != 0);
 }
 
 struct ifmedia *
@@ -585,7 +594,7 @@ typedef struct if_rxsd {
 #define MAX_SINGLE_PACKET_FRACTION 12
 #define IF_BAD_DMA	((bus_addr_t)-1)
 
-#define CTX_ACTIVE(ctx)	((if_getdrvflags((ctx)->ifc_ifp) & IFF_DRV_RUNNING))
+#define CTX_ACTIVE(ctx)	iflib_is_running(ctx)
 
 #define CTX_LOCK_INIT(_sc)	sx_init(&(_sc)->ifc_ctx_sx, "iflib ctx lock")
 #define CTX_LOCK(ctx)		sx_xlock(&(ctx)->ifc_ctx_sx)
@@ -599,6 +608,20 @@ typedef struct if_rxsd {
 
 #define CALLOUT_LOCK(txq)	mtx_lock(&txq->ift_mtx)
 #define CALLOUT_UNLOCK(txq)	mtx_unlock(&txq->ift_mtx)
+
+static bool
+iflib_admin_enabled(if_ctx_t ctx)
+{
+
+	sx_assert(&ctx->ifc_ctx_sx, SA_XLOCKED);
+	/*
+	 * Before the first stop/init, only drivers with an always-running
+	 * admin path need deferred updates.  Stopped and failed datapaths
+	 * still need link, mailbox and recovery work after that point.
+	 */
+	return (ctx->ifc_datapath_state != IFLIB_DP_UNKNOWN ||
+	    (ctx->ifc_sctx->isc_flags & IFLIB_ADMIN_ALWAYS_RUN) != 0);
+}
 
 /* Our boot-time initialization hook */
 static int	iflib_module_event_handler(module_t, int, void *);
@@ -742,13 +765,13 @@ SYSCTL_INT(_net_iflib, OID_AUTO, fl_refills_large, CTLFLAG_RD,
     &iflib_fl_refills_large, 0, "# large refills");
 
 static int iflib_txq_drain_flushing;
-static int iflib_txq_drain_oactive;
+static int iflib_txq_drain_stopped;
 static int iflib_txq_drain_notready;
 
 SYSCTL_INT(_net_iflib, OID_AUTO, txq_drain_flushing, CTLFLAG_RD,
     &iflib_txq_drain_flushing, 0, "# drain flushes");
-SYSCTL_INT(_net_iflib, OID_AUTO, txq_drain_oactive, CTLFLAG_RD,
-    &iflib_txq_drain_oactive, 0, "# drain oactives");
+SYSCTL_INT(_net_iflib, OID_AUTO, txq_drain_stopped, CTLFLAG_RD,
+    &iflib_txq_drain_stopped, 0, "# drains interrupted by stop");
 SYSCTL_INT(_net_iflib, OID_AUTO, txq_drain_notready, CTLFLAG_RD,
     &iflib_txq_drain_notready, 0, "# drain notready");
 
@@ -799,7 +822,7 @@ iflib_debug_reset(void)
 {
 	iflib_tx_seen = iflib_tx_sent = iflib_tx_encap = iflib_rx_allocs =
 		iflib_fl_refills = iflib_fl_refills_large = iflib_tx_frees =
-		iflib_txq_drain_flushing = iflib_txq_drain_oactive =
+		iflib_txq_drain_flushing = iflib_txq_drain_stopped =
 		iflib_txq_drain_notready =
 		iflib_encap_load_mbuf_fail = iflib_encap_pad_mbuf_fail =
 		iflib_encap_txq_avail_fail = iflib_encap_txd_encap_fail =
@@ -952,7 +975,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 
 	iflib_init_locked(ctx);
 	IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip); // XXX why twice ?
-	status = if_getdrvflags(ifp) & IFF_DRV_RUNNING ? 0 : 1;
+	status = ctx->ifc_datapath_state == IFLIB_DP_RUNNING ? 0 : 1;
 	if (status)
 		nm_clear_native_flags(na);
 	CTX_UNLOCK(ctx);
@@ -2557,6 +2580,28 @@ iflib_rx_sds_free(iflib_rxq_t rxq)
 }
 
 /*
+ * Serialize admission changes and publication of the legacy driver flags.
+ * Opening admission publishes queue setup to lockless readers before device
+ * interrupts are enabled.  Closing it does not wait for existing users:
+ * queue locks, task drains and the driver stop contract still apply.
+ */
+static void
+iflib_set_running(if_ctx_t ctx, bool running)
+{
+
+	mtx_assert(&ctx->ifc_state_mtx, MA_OWNED);
+	if (running) {
+		if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING,
+		    IFF_DRV_OACTIVE);
+		atomic_store_rel_int(&ctx->ifc_running, 1);
+	} else {
+		atomic_store_rel_int(&ctx->ifc_running, 0);
+		if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE,
+		    IFF_DRV_RUNNING);
+	}
+}
+
+/*
  * Timer routine
  */
 static void
@@ -2567,7 +2612,7 @@ iflib_timer(void *arg)
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 	uint64_t this_tick = ticks;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
+	if (!iflib_is_running(ctx))
 		return;
 
 	/*
@@ -2649,8 +2694,7 @@ iflib_timer(void *arg)
 				    txq->ift_id, TXQ_AVAIL(txq),
 				    txq->ift_pidx);
 				STATE_LOCK(ctx);
-				if_setdrvflagbits(ctx->ifc_ifp,
-				    IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+				iflib_set_running(ctx, false);
 				ctx->ifc_flags |=
 				    (IFC_DO_WATCHDOG | IFC_DO_RESET);
 				iflib_admin_intr_deferred(ctx);
@@ -2670,7 +2714,7 @@ iflib_timer(void *arg)
 		GROUPTASK_ENQUEUE(&txq->ift_task);
 
 	sctx->isc_pause_frames = 0;
-	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)
+	if (iflib_is_running(ctx))
 		callout_reset_on(&txq->ift_timer, iflib_timer_default, iflib_timer,
 		    txq, txq->ift_timer.c_cpu);
 }
@@ -2724,7 +2768,9 @@ iflib_init_locked(if_ctx_t ctx)
 	    ("iflib init from datapath state %d", ctx->ifc_datapath_state));
 	ctx->ifc_datapath_state = IFLIB_DP_STARTING;
 
-	if_setdrvflagbits(ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+	STATE_LOCK(ctx);
+	iflib_set_running(ctx, false);
+	STATE_UNLOCK(ctx);
 	IFDI_INTR_DISABLE(ctx);
 
 	/*
@@ -2802,17 +2848,21 @@ iflib_init_locked(if_ctx_t ctx)
 			}
 		}
 	}
-	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
-	IFDI_INTR_ENABLE(ctx);
-	txq = ctx->ifc_txqs;
-	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++) {
-		callout_reset_on(&txq->ift_timer, iflib_timer_default, iflib_timer, txq,
-			txq->ift_timer.c_cpu);
-		if (ctx->ifc_sysctl_simple_tx) {
+	/* Open every TX queue before publishing admission to transmitters. */
+	if (ctx->ifc_sysctl_simple_tx) {
+		for (i = 0, txq = ctx->ifc_txqs; i < scctx->isc_ntxqsets;
+		    i++, txq++)
 			atomic_clear_rel_int(&txq->ift_producers,
 			    IFLIB_TXQ_QUIESCING);
-		}
 	}
+	STATE_LOCK(ctx);
+	iflib_set_running(ctx, true);
+	STATE_UNLOCK(ctx);
+	IFDI_INTR_ENABLE(ctx);
+	txq = ctx->ifc_txqs;
+	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++)
+		callout_reset_on(&txq->ift_timer, iflib_timer_default, iflib_timer, txq,
+			txq->ift_timer.c_cpu);
 
 	/* Re-enable txsync/rxsync. */
 	netmap_enable_all_rings(ifp);
@@ -2843,12 +2893,6 @@ static void
 iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 {
 	if_ctx_t ctx = if_getsoftc(ifp);
-	bool oactive, running;
-
-	STATE_LOCK(ctx);
-	running = (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
-	oactive = (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE);
-	STATE_UNLOCK(ctx);
 
 	CTX_LOCK(ctx);
 	if (ctx->ifc_pm_state != IFLIB_PM_ACTIVE) {
@@ -2862,8 +2906,7 @@ iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 	 * _task_fn_admin(), so only do it if that's not running. That can be quite
 	 * expensive on some drivers.
 	 */
-	if ((!running && !oactive) &&
-	    !(ctx->ifc_sctx->isc_flags & IFLIB_ADMIN_ALWAYS_RUN)) {
+	if (!iflib_admin_enabled(ctx)) {
 		IFDI_UPDATE_ADMIN_STATUS(ctx);
 	}
 	IFDI_MEDIA_STATUS(ctx, ifmr);
@@ -2896,7 +2939,9 @@ iflib_stop(if_ctx_t ctx)
 	}
 
 	/* Tell the stack that the interface is no longer active */
-	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+	STATE_LOCK(ctx);
+	iflib_set_running(ctx, false);
+	STATE_UNLOCK(ctx);
 
 	if (stop_hardware) {
 		ctx->ifc_datapath_state = IFLIB_DP_STOPPING;
@@ -4207,8 +4252,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	int mcast_sent, pkt_sent, reclaimed;
 	bool do_prefetch, rang, ring;
 
-	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
-			    !LINK_ACTIVE(ctx))) {
+	if (__predict_false(!iflib_is_running(ctx) || !LINK_ACTIVE(ctx))) {
 		DBG_COUNTER_INC(txq_drain_notready);
 		return (0);
 	}
@@ -4229,11 +4273,11 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		return (avail);
 	}
 
-	if (__predict_false(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE)) {
+	if (__predict_false(!iflib_is_running(ctx))) {
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
-		DBG_COUNTER_INC(txq_drain_oactive);
+		DBG_COUNTER_INC(txq_drain_stopped);
 		return (0);
 	}
 
@@ -4277,7 +4321,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		DBG_COUNTER_INC(tx_sent);
 		mcast_sent += !!(m->m_flags & M_MCAST);
 
-		if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING)))
+		if (__predict_false(!iflib_is_running(ctx)))
 			break;
 		ETHER_BPF_MTAP(ifp, m);
 		rang = iflib_txd_db_check(txq, false);
@@ -4348,13 +4392,15 @@ _task_fn_tx(void *context)
 {
 	iflib_txq_t txq = context;
 	if_ctx_t ctx = txq->ift_ctx;
+#if defined(DEV_NETMAP) || defined(ALTQ)
 	if_t ifp = ctx->ifc_ifp;
+#endif
 	int abdicate = ctx->ifc_sysctl_tx_abdicate;
 
 #ifdef IFLIB_DIAGNOSTICS
 	txq->ift_cpu_exec_count[curcpu]++;
 #endif
-	if (!(if_getdrvflags(ifp) & IFF_DRV_RUNNING))
+	if (!iflib_is_running(ctx))
 		return;
 #ifdef DEV_NETMAP
 	if ((if_getcapenable(ifp) & IFCAP_NETMAP) &&
@@ -4402,7 +4448,7 @@ _task_fn_rx(void *context)
 	rxq->ifr_cpu_exec_count[curcpu]++;
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
-	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
+	if (__predict_false(!iflib_is_running(ctx)))
 		return;
 #ifdef DEV_NETMAP
 	nmirq = netmap_rx_irq(ctx->ifc_ifp, rxq->ifr_id, &work);
@@ -4425,7 +4471,7 @@ skip_rxeof:
 			IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 		DBG_COUNTER_INC(rx_intr_enables);
 	}
-	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
+	if (__predict_false(!iflib_is_running(ctx)))
 		return;
 
 	if (more & IFLIB_RXEOF_MORE)
@@ -4441,12 +4487,10 @@ _task_fn_admin(void *context, int pending)
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 	iflib_txq_t txq;
 	int i;
-	bool oactive, running, do_reset, do_reset_if_up, do_watchdog;
+	bool do_reset, do_reset_if_up, do_watchdog;
 	bool in_detach;
 
 	STATE_LOCK(ctx);
-	running = (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
-	oactive = (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE);
 	do_reset = (ctx->ifc_flags & IFC_DO_RESET);
 	do_reset_if_up = (ctx->ifc_flags & IFC_DO_RESET_IF_UP);
 	do_watchdog = (ctx->ifc_flags & IFC_DO_WATCHDOG);
@@ -4455,8 +4499,6 @@ _task_fn_admin(void *context, int pending)
 	    IFC_DO_WATCHDOG);
 	STATE_UNLOCK(ctx);
 
-	if ((!running && !oactive) && !(ctx->ifc_sctx->isc_flags & IFLIB_ADMIN_ALWAYS_RUN))
-		return;
 	if (in_detach)
 		return;
 	KFAIL_POINT_CODE_COND(_debug_fail_point_iflib,
@@ -4466,7 +4508,8 @@ _task_fn_admin(void *context, int pending)
 	    iflib_admin_task_fail_device) == 0, FAIL_POINT_NONSLEEPABLE, {});
 
 	CTX_LOCK(ctx);
-	if (ctx->ifc_pm_state != IFLIB_PM_ACTIVE) {
+	if (ctx->ifc_pm_state != IFLIB_PM_ACTIVE ||
+	    !iflib_admin_enabled(ctx)) {
 		CTX_UNLOCK(ctx);
 		return;
 	}
@@ -4507,12 +4550,10 @@ _task_fn_iov(void *context, int pending)
 
 	if (iflib_in_detach(ctx))
 		return;
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) &&
-	    !(ctx->ifc_sctx->isc_flags & IFLIB_ADMIN_ALWAYS_RUN))
-		return;
-
 	CTX_LOCK(ctx);
-	if (ctx->ifc_pm_state != IFLIB_PM_ACTIVE) {
+	if (ctx->ifc_pm_state != IFLIB_PM_ACTIVE ||
+	    (!iflib_is_running(ctx) &&
+	    !(ctx->ifc_sctx->isc_flags & IFLIB_ADMIN_ALWAYS_RUN))) {
 		CTX_UNLOCK(ctx);
 		return;
 	}
@@ -4571,7 +4612,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	int err, qidx;
 	int abdicate;
 
-	if (__predict_false((if_getdrvflags(ifp) & IFF_DRV_RUNNING) == 0 || !LINK_ACTIVE(ctx))) {
+	if (__predict_false(!iflib_is_running(ctx) || !LINK_ACTIVE(ctx))) {
 		DBG_COUNTER_INC(tx_frees);
 		m_freem(m);
 		return (ENETDOWN);
@@ -4789,7 +4830,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 		 */
 		if (avoid_reset) {
 			if_setflagbits(ifp, IFF_UP, 0);
-			if (!(if_getdrvflags(ifp) & IFF_DRV_RUNNING))
+			if (!iflib_is_running(ctx))
 				reinit = 1;
 #ifdef INET
 			if (!(if_getflags(ifp) & IFF_NOARP))
@@ -4826,7 +4867,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		CTX_LOCK(ctx);
 		if (if_getflags(ifp) & IFF_UP) {
-			if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
+			if (iflib_is_running(ctx)) {
 				if ((if_getflags(ifp) ^ ctx->ifc_if_flags) &
 				    (IFF_PROMISC | IFF_ALLMULTI)) {
 					CTX_UNLOCK(ctx);
@@ -4844,13 +4885,13 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
-			CTX_LOCK(ctx);
+		CTX_LOCK(ctx);
+		if (iflib_is_running(ctx)) {
 			IFDI_INTR_DISABLE(ctx);
 			IFDI_MULTI_SET(ctx);
 			IFDI_INTR_ENABLE(ctx);
-			CTX_UNLOCK(ctx);
 		}
+		CTX_UNLOCK(ctx);
 		break;
 	case SIOCSIFMEDIA:
 		CTX_LOCK(ctx);
@@ -6052,7 +6093,9 @@ iflib_device_resume_locked(if_ctx_t ctx)
 	ctx->ifc_pm_state = IFLIB_PM_ACTIVE;
 
 	if ((if_getflags(ifp) & IFF_UP) == 0) {
-		if_setdrvflagbits(ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+		STATE_LOCK(ctx);
+		iflib_set_running(ctx, false);
+		STATE_UNLOCK(ctx);
 		return (0);
 	}
 
@@ -6147,7 +6190,7 @@ iflib_device_resume(device_t dev)
 
 	CTX_LOCK(ctx);
 	error = iflib_device_resume_locked(ctx);
-	running = (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) != 0;
+	running = ctx->ifc_datapath_state == IFLIB_DP_RUNNING;
 	CTX_UNLOCK(ctx);
 	if (running) {
 		for (int i = 0; i < NTXQSETS(ctx); i++, txq++)
@@ -6177,7 +6220,7 @@ iflib_device_iov_init_restart(device_t dev, uint16_t num_vfs,
 {
 	if_ctx_t ctx;
 	if_t ifp;
-	bool restart, running;
+	bool restart;
 	int error;
 
 	ctx = device_get_softc(dev);
@@ -6186,15 +6229,14 @@ iflib_device_iov_init_restart(device_t dev, uint16_t num_vfs,
 	CTX_LOCK(ctx);
 	/*
 	 * Drivers which change the PF queue layout need the complete iflib
-	 * stop/init sequence around their IOV callback when the interface is
-	 * active.  An administratively-down interface has no live queues to
-	 * quiesce, and must remain down after the new layout is installed.
-	 * Keep the transition within one context-lock critical section.
+	 * stop/init sequence around their IOV callback.  Administrative state
+	 * and software admission do not establish DMA quiescence:
+	 * failed initialization or a pending watchdog reset can leave DMA
+	 * active.  Let iflib_stop() decide whether hardware needs quiescing,
+	 * and preserve administrative intent across the layout change.
 	 */
 	restart = (if_getflags(ifp) & IFF_UP) != 0;
-	running = (if_getdrvflags(ifp) & IFF_DRV_RUNNING) != 0;
-	if (restart || running)
-		iflib_stop(ctx);
+	iflib_stop(ctx);
 	error = IFDI_IOV_INIT(ctx, num_vfs, params);
 	if (restart)
 		iflib_init_locked(ctx);
@@ -6222,9 +6264,9 @@ iflib_device_iov_uninit_restart(device_t dev)
 
 	CTX_LOCK(ctx);
 	/*
-	 * RUNNING can be clear while a watchdog reset is pending but the
-	 * hardware is still live.  Always stop before the driver changes its
-	 * queue layout, and use IFF_UP only to preserve administrative state.
+	 * Software admission can be closed while a watchdog reset is pending
+	 * but the hardware is still live.  Always stop before the driver changes
+	 * its queue layout, and use IFF_UP only to preserve administrative intent.
 	 */
 	restart = (if_getflags(ctx->ifc_ifp) & IFF_UP) != 0;
 	iflib_stop(ctx);
@@ -7938,8 +7980,7 @@ iflib_debugnet_transmit(if_t ifp, struct mbuf *m)
 	int pkt_sent = 0;
 
 	ctx = if_getsoftc(ifp);
-	if ((if_getdrvflags(ifp) & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
-	    IFF_DRV_RUNNING)
+	if (!iflib_is_running(ctx))
 		return (EBUSY);
 
 	txq = &ctx->ifc_txqs[0];
@@ -7961,8 +8002,7 @@ iflib_debugnet_poll(if_t ifp, int count)
 	ctx = if_getsoftc(ifp);
 	scctx = &ctx->ifc_softc_ctx;
 
-	if ((if_getdrvflags(ifp) & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
-	    IFF_DRV_RUNNING)
+	if (!iflib_is_running(ctx))
 		return (EBUSY);
 
 	txq = &ctx->ifc_txqs[0];
@@ -8150,8 +8190,7 @@ iflib_simple_drbr_drain(iflib_txq_t txq, u_int quota, int *bytes, int *pkts,
 	mtx_assert(&txq->ift_mtx, MA_OWNED);
 	ctx = txq->ift_ctx;
 	ifp = ctx->ifc_ifp;
-	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
-	    !LINK_ACTIVE(ctx)))
+	if (__predict_false(!iflib_is_running(ctx) || !LINK_ACTIVE(ctx)))
 		return;
 
 #ifdef ALTQ
@@ -8266,8 +8305,7 @@ iflib_simple_transmit(if_t ifp, struct mbuf *m)
 	int bytes_sent = 0, pkt_sent = 0, mcast_sent = 0;
 
 	ctx = if_getsoftc(ifp);
-	if (__predict_false((if_getdrvflags(ifp) & IFF_DRV_RUNNING) == 0
-		|| !LINK_ACTIVE(ctx)))
+	if (__predict_false(!iflib_is_running(ctx) || !LINK_ACTIVE(ctx)))
 		goto net_down;
 
 	txq = iflib_simple_select_queue(ctx, m);
