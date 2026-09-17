@@ -46,6 +46,8 @@
 
 #define HN_GPACNT_MAX			32
 
+#define HN_VLAN_WORDS			128
+
 struct hn_txdesc;
 #ifndef HN_USE_TXDESC_BUFRING
 SLIST_HEAD(hn_txdesc_list, hn_txdesc);
@@ -260,6 +262,13 @@ struct hn_softc {
 	eventhandler_tag	hn_ifnet_atthand;
 	eventhandler_tag	hn_ifnet_dethand;
 	eventhandler_tag	hn_ifnet_lnkhand;
+	eventhandler_tag	hn_vlan_atthand;
+	eventhandler_tag	hn_vlan_dethand;
+
+	/* Applied VLANs and VF lifetime use hn_lock. */
+	u_int			hn_vf_vlans[HN_VLAN_WORDS];
+	bool			hn_vf_detaching;
+	bool			hn_vf_caps_busy;	/* unlocked capability ioctl */
 
 	/*
 	 * Transparent VF delayed initialization.
@@ -271,6 +280,7 @@ struct hn_softc {
 	u_int			hn_vf_active_assoc; /* confirmed VF generation */
 	struct taskqueue	*hn_vf_taskq;
 	struct timeout_task	hn_vf_init;
+	struct task		hn_vf_vlancap;
 
 	/*
 	 * Saved information for VF under transparent mode.
