@@ -120,6 +120,11 @@ CFLAGS+=	${ZERO_REG_FLAG}
 CXXFLAGS+=	${ZERO_REG_FLAG}
 .endif
 
+.if defined(MK_BOUNDS_SAFETY) && ${MK_BOUNDS_SAFETY} != "no"
+CFLAGS+=		${BOUNDS_SAFETY_FLAG}
+CXXFLAGS+=		${BOUNDS_SAFETY_FLAG}
+.endif
+
 #
 # clang currently defaults to dynamic TLS for mips64 binaries
 .if ${MACHINE_ARCH:Mmips64*} && ${COMPILER_TYPE} == "clang"
