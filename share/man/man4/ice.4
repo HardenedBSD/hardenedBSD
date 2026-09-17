@@ -1107,9 +1107,13 @@ If unspecified, the VF will use a randomly generated MAC address and
 .Dq allow-set-mac
 will be set to true.
 .It mac-anti-spoof Pq bool
-Prevent the VF from sending Ethernet frames with a source address
-that does not match its own.
+Prevent the VF from sending Ethernet frames whose source address does not
+match a MAC address installed for that VF.
 Enabled by default.
+The policy is enforced in hardware and replayed after PF and device resets.
+If firmware cannot install it during VF creation, the SR-IOV configuration
+request fails.
+If replay fails during reconstruction, the configured VF remains inactive.
 .It allow-set-mac Pq bool
 Allow the VF to set its own Ethernet MAC address.
 Disallowed by default.
@@ -1154,6 +1158,10 @@ If one VF cannot be reconstructed, it remains configured but uninitialized
 while the PF and its sibling VFs continue recovering.
 A VF function-level reset cannot recreate this PF-owned VSI state; another PF
 or device reset, or SR-IOV configuration recreation, is required.
+If a mandatory stage of an individual VF reset fails, the driver likewise
+leaves that VF inactive instead of publishing incomplete hardware state.
+A later VF reset can retry this recovery; a PF or device reset, or SR-IOV
+configuration recreation, can also recover the VF.
 .Pp
 An up to date list of parameters and their defaults can be found by using
 .Xr iovctl 8
