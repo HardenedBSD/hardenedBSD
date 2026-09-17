@@ -3663,14 +3663,15 @@ do_idle(struct acpi_softc *sc, enum acpi_sleep_state *slp_state,
 static void
 check_post_suspend_to_idle(device_t dev)
 {
+#if defined(__amd64__)
 	devclass_t dc;
-#if defined(__x86_64__)
 	u_int vendor_id = cpu_vendor_id;
 #else
 	u_int vendor_id = 0;
 #endif
 
 	switch (vendor_id) {
+#if defined(__amd64__)
 	case CPU_VENDOR_AMD:
 	case CPU_VENDOR_HYGON:
 		dc = devclass_find("amdsmu");
@@ -3682,6 +3683,7 @@ check_post_suspend_to_idle(device_t dev)
 		    "amdsmu(4) is not attached; unable to verify S0i3 entry. "
 		    "It is unlikely the system entered a deep sleep state.\n");
 		break;
+#endif
 	default:
 		device_printf(dev,
 		    "Resumed from suspend-to-idle on a processor FreeBSD does "

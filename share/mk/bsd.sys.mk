@@ -320,10 +320,6 @@ FORTIFY_SOURCE?=	2
 FORTIFY_SOURCE?=	0
 .endif # SSP
 
-# XXX This should be defaulted to 2 when WITH_SSP is in use after further
-# testing and soak time.
-FORTIFY_SOURCE?=	0
-
 # We want to avoid defining _FORTIFY_SOURCE if it's set to 0, but we rely on
 # deferred-evaluation for ${.IMPSRC} to expand.  The below construction
 # is, unfortunately, necessary.
@@ -341,6 +337,9 @@ CXXFLAGS+=	-fno-delete-null-pointer-checks
 CWARNFLAGS+=	-Werror=format-security
 CXXWARNFLAGS+=	-Werror=format-security
 .endif
+
+# HBSD: Track the -fbounds-safety feature in clang/llvm
+BOUNDS_SAFETY_FLAG?=	-Xclang -fexperimental-bounds-safety
 
 # Additional flags passed in CFLAGS and CXXFLAGS when MK_DEBUG_FILES is
 # enabled.
