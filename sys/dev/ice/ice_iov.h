@@ -41,6 +41,7 @@
 #define _ICE_IOV_H_
 
 #include <sys/types.h>
+#include <sys/bitstring.h>
 #include <sys/bus.h>
 #include <sys/nv.h>
 #include <sys/iov_schema.h>
@@ -69,6 +70,8 @@ enum ice_vf_flags {
 	VF_FLAG_VLAN_CAP		= BIT(2),
 	VF_FLAG_PROMISC_CAP		= BIT(3),
 	VF_FLAG_MAC_ANTI_SPOOF		= BIT(4),
+	VF_FLAG_INITIALIZED		= BIT(5),
+	VF_FLAG_REBUILD_FAILED		= BIT(6),
 };
 
 /**
@@ -89,11 +92,18 @@ struct ice_vf {
 	u16 mac_filter_cnt;
 	u16 vlan_limit;
 	u16 vlan_cnt;
+#define ICE_VF_VLAN_MAP_LEN	(EVL_VLID_MASK + 1)
+	bitstr_t bit_decl(vlans_map, ICE_VF_VLAN_MAP_LEN);
 
 	u16 num_irq_vectors;
 	u16 *vf_imap;
 	struct ice_irq_vector *tx_irqvs;
 	struct ice_irq_vector *rx_irqvs;
+
+	/* VF-relative queue state, indexed by virtchnl queue ID. */
+	u32 txq_configured;
+	u32 rxq_configured;
+	u32 rxq_enabled;
 };
 
 #define ICE_PCIE_DEV_STATUS			0xAA
@@ -114,12 +124,13 @@ int ice_iov_detach(struct ice_softc *sc);
 
 int ice_iov_init(struct ice_softc *sc, uint16_t num_vfs, const nvlist_t *params);
 int ice_iov_add_vf(struct ice_softc *sc, uint16_t vfnum, const nvlist_t *params);
+int ice_iov_rebuild_vf(struct ice_softc *sc, struct ice_vsi *vsi);
 void ice_iov_uninit(struct ice_softc *sc);
 
 void ice_iov_handle_vflr(struct ice_softc *sc);
+void ice_iov_notify_vfs_reset(struct ice_softc *sc);
 
 void ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event);
 void ice_vc_notify_all_vfs_link_state(struct ice_softc *sc);
 
 #endif /* _ICE_IOV_H_ */
-

@@ -2121,7 +2121,7 @@ ice_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to configure the main VSI for Tx: %s\n",
 			      ice_err_str(err));
-		goto err_init_failed;
+		goto err_cleanup_tx;
 	}
 
 	err = ice_cfg_vsi_for_rx(&sc->pf_vsi);
@@ -2135,9 +2135,9 @@ ice_if_init(if_ctx_t ctx)
 	err = ice_control_all_rx_queues(&sc->pf_vsi, true);
 	if (err) {
 		device_printf(dev,
-			      "Unable to enable Rx rings for transmit: %s\n",
+			      "Unable to enable Rx rings for receive: %s\n",
 			      ice_err_str(err));
-		goto err_cleanup_tx;
+		goto err_stop_rx;
 	}
 
 	err = ice_cfg_pf_default_mac_filters(sc);
@@ -2556,6 +2556,11 @@ ice_prepare_for_reset(struct ice_softc *sc)
 	if (ice_test_state(&sc->state, ICE_STATE_RECOVERY_MODE))
 		return;
 
+#ifdef PCI_IOV
+	/* Notify initialized VFs while the mailbox queue is still available. */
+	ice_iov_notify_vfs_reset(sc);
+#endif
+
 	/* Restore identification while the control queues are still usable. */
 	ice_led_restore(sc);
 
@@ -2691,11 +2696,17 @@ ice_rebuild(struct ice_softc *sc)
 	enum ice_ddp_state pkg_state;
 	int status;
 	int err;
+	int i;
 
 	sc->rebuild_ticks = ticks;
 
 	/* If we're rebuilding, then a reset has succeeded. */
 	ice_clear_state(&sc->state, ICE_STATE_RESET_FAILED);
+	/* The reset discarded every firmware VSI before reconstruction. */
+	for (i = 0; i < sc->num_available_vsi; i++) {
+		if (sc->all_vsi[i] != NULL)
+			sc->all_vsi[i]->hw_vsi_created = false;
+	}
 
 	/*
 	 * If the firmware is in recovery mode, only restore the limited
@@ -4519,7 +4530,7 @@ ice_subif_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to configure subif VSI for Tx: %s\n",
 			      ice_err_str(err));
-		goto err_init_failed;
+		goto err_cleanup_tx;
 	}
 
 	err = ice_cfg_vsi_for_rx(vsi);
@@ -4535,7 +4546,7 @@ ice_subif_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to enable subif Rx rings for receive: %s\n",
 			      ice_err_str(err));
-		goto err_cleanup_tx;
+		goto err_stop_rx;
 	}
 
 	ice_configure_all_rxq_interrupts(vsi);
@@ -4544,6 +4555,8 @@ ice_subif_if_init(if_ctx_t ctx)
 	ice_set_state(&mif->state, ICE_STATE_DRIVER_INITIALIZED);
 	return;
 
+err_stop_rx:
+	ice_control_all_rx_queues(vsi, false);
 err_cleanup_tx:
 	ice_vsi_disable_tx(vsi);
 err_init_failed:

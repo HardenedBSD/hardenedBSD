@@ -42,6 +42,7 @@
 
 #include "ice_lib.h"
 #include "ice_iflib.h"
+#include "ice_fault.h"
 #ifdef PCI_IOV
 #include "ice_iov.h"
 #endif
@@ -61,6 +62,33 @@
  * ice driver.
  */
 MALLOC_DEFINE(M_ICE, "ice", "Intel(R) 100Gb Network Driver lib allocations");
+
+#ifdef DRIVER_FAILPOINTS
+
+/*
+ * ICE fail points are global, but only the selected PF may trigger them.  An
+ * empty selector disables every point even if a stale failpoint setting
+ * remains armed.
+ */
+SYSCTL_NODE(_debug_fail_point, OID_AUTO, ice,
+    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "ice driver fail points");
+
+static char ice_fail_device[32];
+SYSCTL_STRING(_debug_fail_point_ice, OID_AUTO, device,
+    CTLFLAG_RW | CTLFLAG_MPSAFE, ice_fail_device,
+    sizeof(ice_fail_device), "device eligible for ice fail points");
+
+bool
+ice_fail_point_device_matches(struct ice_softc *sc)
+{
+	const char *nameunit;
+
+	nameunit = device_get_nameunit(sc->dev);
+	return (ice_fail_device[0] != '\0' && nameunit != NULL &&
+	    strcmp(nameunit, ice_fail_device) == 0);
+}
+
+#endif /* DRIVER_FAILPOINTS */
 
 /*
  * Helper function prototypes
@@ -777,6 +805,7 @@ ice_initialize_vsi(struct ice_vsi *vsi)
 		    ice_aq_str(hw->adminq.sq_last_status));
 		return (EIO);
 	}
+	vsi->hw_vsi_created = true;
 	vsi->info = ctx.info;
 
 	/* Initialize VSI with just 1 TC to start */
@@ -816,6 +845,8 @@ ice_deinit_vsi(struct ice_vsi *vsi)
 
 	/* Assert that the VSI pointer matches in the list */
 	MPASS(vsi == sc->all_vsi[vsi->idx]);
+	if (!vsi->hw_vsi_created)
+		return;
 
 	ctx.info = vsi->info;
 
@@ -837,7 +868,30 @@ ice_deinit_vsi(struct ice_vsi *vsi)
 		    "Free VSI %u AQ call failed, err %s aq_err %s\n",
 		    vsi->idx, ice_status_str(status),
 		    ice_aq_str(hw->adminq.sq_last_status));
+	} else {
+		vsi->hw_vsi_created = false;
 	}
+}
+
+/*
+ * Release the queue maps and storage owned by a VSI.  Callers must remove
+ * the VSI sysctl context before reaching this helper.
+ */
+static void
+ice_free_vsi_resources(struct ice_vsi *vsi)
+{
+	struct ice_softc *sc = vsi->sc;
+	int idx = vsi->idx;
+
+	/* Assert that the VSI pointer matches in the list */
+	MPASS(vsi == sc->all_vsi[idx]);
+
+	ice_free_vsi_qmaps(vsi);
+
+	if (vsi->dynamic)
+		free(sc->all_vsi[idx], M_ICE);
+
+	sc->all_vsi[idx] = NULL;
 }
 
 /**
@@ -851,35 +905,39 @@ ice_deinit_vsi(struct ice_vsi *vsi)
 void
 ice_release_vsi(struct ice_vsi *vsi)
 {
-	struct ice_softc *sc = vsi->sc;
-	int idx = vsi->idx;
-
-	/* Assert that the VSI pointer matches in the list */
-	MPASS(vsi == sc->all_vsi[idx]);
+	MPASS(vsi == vsi->sc->all_vsi[vsi->idx]);
 
 	/* Cleanup RSS configuration */
-	if (ice_is_bit_set(sc->feat_en, ICE_FEATURE_RSS))
+	if (ice_is_bit_set(vsi->sc->feat_en, ICE_FEATURE_RSS))
 		ice_clean_vsi_rss_cfg(vsi);
 
+	/* Drain sysctl handlers before invalidating the hardware VSI. */
 	ice_del_vsi_sysctl_ctx(vsi);
 
-	/* Remove the configured mirror rule, if it exists */
-	ice_remove_vsi_mirroring(vsi);
-
-	/*
-	 * If we unload the driver after a reset fails, we do not need to do
-	 * this step.
-	 */
-	if (!ice_test_state(&sc->state, ICE_STATE_RESET_FAILED))
+	/* Do not issue firmware commands for a missing VSI or failed device. */
+	if (vsi->hw_vsi_created &&
+	    !ice_test_state(&vsi->sc->state, ICE_STATE_RESET_FAILED)) {
+		ice_remove_vsi_mirroring(vsi);
+		ice_remove_vsi_fltr(&vsi->sc->hw, vsi->idx);
 		ice_deinit_vsi(vsi);
-
-	ice_free_vsi_qmaps(vsi);
-
-	if (vsi->dynamic) {
-		free(sc->all_vsi[idx], M_ICE);
 	}
 
-	sc->all_vsi[idx] = NULL;
+	ice_free_vsi_resources(vsi);
+}
+
+/**
+ * ice_release_vsi_resources - Release software resources for a VSI
+ * @vsi: the VSI to release
+ *
+ * Release resources allocated by ice_alloc_vsi() without issuing firmware
+ * commands. This is used when setup fails before ice_initialize_vsi() has
+ * attempted to create the VSI in hardware.
+ */
+void
+ice_release_vsi_resources(struct ice_vsi *vsi)
+{
+	ice_del_vsi_sysctl_ctx(vsi);
+	ice_free_vsi_resources(vsi);
 }
 
 /**
@@ -1929,7 +1987,7 @@ ice_control_rx_queue(struct ice_vsi *vsi, u16 qidx, bool enable)
 int
 ice_control_all_rx_queues(struct ice_vsi *vsi, bool enable)
 {
-	int i, err;
+	int i, err = 0;
 
 	/* TODO: amortize waits by changing all queues up front and then
 	 * checking their status afterwards. This will become more necessary
@@ -1941,7 +1999,7 @@ ice_control_all_rx_queues(struct ice_vsi *vsi, bool enable)
 			break;
 	}
 
-	return (0);
+	return (err);
 }
 
 /**
@@ -5562,7 +5620,7 @@ ice_add_vlan_hw_filters(struct ice_vsi *vsi, u16 *vid, u16 length)
 	}
 
 	status = ice_add_vlan(hw, &vlan_list);
-	if (!status)
+	if (!status || status == ICE_ERR_ALREADY_EXISTS)
 		goto done;
 
 	device_printf(vsi->sc->dev, "Failed to add VLAN filters:\n");
@@ -5627,7 +5685,7 @@ ice_remove_vlan_hw_filters(struct ice_vsi *vsi, u16 *vid, u16 length)
 	}
 
 	status = ice_remove_vlan(hw, &vlan_list);
-	if (!status)
+	if (!status || status == ICE_ERR_DOES_NOT_EXIST)
 		goto done;
 
 	device_printf(vsi->sc->dev, "Failed to remove VLAN filters:\n");
@@ -6462,6 +6520,9 @@ ice_sysctl_request_reset(SYSCTL_HANDLER_ARGS)
 	 * interrupt on all PFs. Initiate the reset now. Preparation and
 	 * rebuild logic will be handled by the admin status task.
 	 */
+#ifdef PCI_IOV
+	ice_iov_notify_vfs_reset(sc);
+#endif
 	status = ice_reset(hw, reset_type);
 
 	/*
@@ -7860,6 +7921,17 @@ ice_replay_all_vsi_cfg(struct ice_softc *sc)
 		if (!vsi)
 			continue;
 
+#ifdef PCI_IOV
+		if (vsi->type == ICE_VSI_VF) {
+			status = ice_iov_rebuild_vf(sc, vsi);
+			if (status != 0)
+				device_printf(sc->dev,
+				    "Failed to rebuild VF %d VSI; leaving VF disabled\n",
+				    vsi->vf_num);
+			continue;
+		}
+#endif
+
 		status = ice_replay_vsi(hw, vsi->idx);
 		if (status) {
 			device_printf(sc->dev, "Failed to replay VSI %d, err %s aq_err %s\n",
@@ -7894,13 +7966,16 @@ ice_clean_vsi_rss_cfg(struct ice_vsi *vsi)
 	device_t dev = sc->dev;
 	int status;
 
-	status = ice_rem_vsi_rss_cfg(hw, vsi->idx);
-	if (status)
-		device_printf(dev,
-			      "Failed to remove RSS configuration for VSI %d, err %s\n",
-			      vsi->idx, ice_status_str(status));
+	if (vsi->hw_vsi_created &&
+	    !ice_test_state(&sc->state, ICE_STATE_RESET_FAILED)) {
+		status = ice_rem_vsi_rss_cfg(hw, vsi->idx);
+		if (status)
+			device_printf(dev,
+			    "Failed to remove RSS configuration for VSI %d, err %s\n",
+			    vsi->idx, ice_status_str(status));
+	}
 
-	/* Remove this VSI from the RSS list */
+	/* Remove software tracking even if the hardware VSI no longer exists. */
 	ice_rem_vsi_rss_list(hw, vsi->idx);
 }
 
