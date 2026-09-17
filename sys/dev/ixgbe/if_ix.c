@@ -5679,10 +5679,16 @@ ixgbe_set_flowcntl(struct ixgbe_softc *sc, int fc)
 		return (EINVAL);
 	}
 
+	sc->hw.fc.requested_mode = fc;
+	/* Don't autoneg if forcing a value. */
+	sc->hw.fc.disable_fc_autoneg = true;
+	/* Init replays the policy; closed admission does not prove DMA stopped. */
+	if (!iflib_is_running(sc->ctx))
+		return (0);
+
 	/* Updating SRRCTL on a live queue is itself an MDD violation. */
 	mdd_active = sc->num_rx_queues > 1 &&
-	    (sc->feat_en & IXGBE_FEATURE_SRIOV) != 0 &&
-	    iflib_is_running(sc->ctx);
+	    (sc->feat_en & IXGBE_FEATURE_SRIOV) != 0;
 	if (mdd_active)
 		ixgbe_disable_mdd(&sc->hw);
 	if (sc->num_rx_queues > 1) {
@@ -5701,10 +5707,6 @@ ixgbe_set_flowcntl(struct ixgbe_softc *sc, int fc)
 		}
 	}
 
-	sc->hw.fc.requested_mode = fc;
-
-	/* Don't autoneg if forcing a value */
-	sc->hw.fc.disable_fc_autoneg = true;
 	ixgbe_fc_enable(&sc->hw);
 
 	return (0);
@@ -5968,11 +5970,13 @@ static int
 ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 {
 	struct ixgbe_softc *sc = (struct ixgbe_softc *)arg1;
-	if_t ifp = iflib_get_ifp(sc->ctx);
+	struct sx *ctx_lock = iflib_ctx_lock_get(sc->ctx);
 	int error;
 	u16 newval;
 
+	sx_xlock(ctx_lock);
 	newval = sc->dmac;
+	sx_xunlock(ctx_lock);
 	error = sysctl_handle_16(oidp, &newval, 0, req);
 	if ((error) || (req->newptr == NULL))
 		return (error);
@@ -5980,11 +5984,10 @@ ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 	switch (newval) {
 	case 0:
 		/* Disabled */
-		sc->dmac = 0;
 		break;
 	case 1:
 		/* Enable and use default */
-		sc->dmac = 1000;
+		newval = 1000;
 		break;
 	case 50:
 	case 100:
@@ -5995,18 +5998,24 @@ ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 	case 5000:
 	case 10000:
 		/* Legal values - allow */
-		sc->dmac = newval;
 		break;
 	default:
 		/* Do nothing, illegal value */
 		return (EINVAL);
 	}
 
-	/* Re-initialize hardware if it's already running */
-	if (iflib_is_running(sc->ctx))
-		if_init(ifp, ifp);
+	sx_xlock(ctx_lock);
+	if (iflib_in_detach(sc->ctx)) {
+		error = ENXIO;
+	} else if (sc->dmac != newval) {
+		sc->dmac = newval;
+		/* Apply through init only if still administratively up. */
+		iflib_request_reset_if_up(sc->ctx);
+		iflib_admin_intr_deferred(sc->ctx);
+	}
+	sx_xunlock(ctx_lock);
 
-	return (0);
+	return (error);
 } /* ixgbe_sysctl_dmac */
 
 #ifdef IXGBE_DEBUG
