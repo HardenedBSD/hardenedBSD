@@ -144,6 +144,8 @@ static device_method_t ixl_methods[] = {
 	DEVMETHOD(device_attach, iflib_device_attach),
 	DEVMETHOD(device_detach, iflib_device_detach),
 	DEVMETHOD(device_shutdown, iflib_device_shutdown),
+	DEVMETHOD(device_suspend, iflib_device_suspend),
+	DEVMETHOD(device_resume, iflib_device_resume),
 #ifdef PCI_IOV
 	DEVMETHOD(pci_iov_init, iflib_device_iov_init),
 	DEVMETHOD(pci_iov_uninit, iflib_device_iov_uninit),
@@ -795,6 +797,7 @@ ixl_if_attach_post(if_ctx_t ctx)
 	ixl_pf_reset_stats(pf);
 	ixl_update_stats_counters(pf);
 	ixl_add_hw_stats(pf);
+	ixl_vsi_reset_stats(vsi);
 
 	/*
 	 * Driver may have been reloaded. Ensure that the link state
@@ -941,15 +944,9 @@ ixl_if_suspend(if_ctx_t ctx)
 static int
 ixl_if_resume(if_ctx_t ctx)
 {
-	if_t ifp = iflib_get_ifp(ctx);
-
 	INIT_DEBUGOUT("ixl_if_resume: begin");
 
 	/* Read & clear wake-up registers */
-
-	/* Required after D3->D0 transition */
-	if (if_getflags(ifp) & IFF_UP)
-		ixl_if_init(ctx);
 
 	return (0);
 }
