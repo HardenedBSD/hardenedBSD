@@ -40,6 +40,43 @@
 #include "ice_iov.h"
 #include "ice_fault.h"
 
+#include <net/if_vf_status.h>
+
+/* Version 1 driver.ice extension schema; documented in ice(4). */
+#define	ICE_VF_STATUS_NAMESPACE			"driver.ice"
+#define	ICE_VF_STATUS_VERSION			1
+#define	ICE_VF_STATUS_MIRROR_CONFIGURED		"mirror-configured"
+#define	ICE_VF_STATUS_MIRROR_SOURCE_VSI		"mirror-source-vsi"
+#define	ICE_VF_STATUS_MIRROR_INGRESS_ACTIVE	"mirror-ingress-active"
+#define	ICE_VF_STATUS_MIRROR_EGRESS_ACTIVE	"mirror-egress-active"
+#define	ICE_VF_STATUS_MDD_BLOCKED		"mdd-blocked"
+#define	ICE_VF_STATUS_MDD_TX_EVENTS		"mdd-tx-events"
+#define	ICE_VF_STATUS_MDD_RX_EVENTS		"mdd-rx-events"
+#define	ICE_VF_STATUS_MBX_BLOCKED		"mailbox-blocked"
+#define	ICE_VF_STATUS_MBX_OVERFLOW_EVENTS	"mailbox-overflow-events"
+#define	ICE_VF_STATUS_MAC_FILTER_COUNT		"mac-filter-count"
+#define	ICE_VF_STATUS_MAC_FILTER_LIMIT		"mac-filter-limit"
+#define	ICE_VF_STATUS_RESET_FAILED		"reset-failed"
+#define	ICE_VF_STATUS_REBUILD_REQUIRED		"rebuild-required"
+
+/* Optional fields are compacted when absent; values define schema order. */
+enum ice_vf_status_field {
+	ICE_VF_STATUS_FIELD_MIRROR_CONFIGURED,
+	ICE_VF_STATUS_FIELD_MIRROR_SOURCE_VSI,
+	ICE_VF_STATUS_FIELD_MIRROR_INGRESS_ACTIVE,
+	ICE_VF_STATUS_FIELD_MIRROR_EGRESS_ACTIVE,
+	ICE_VF_STATUS_FIELD_MDD_BLOCKED,
+	ICE_VF_STATUS_FIELD_MDD_TX_EVENTS,
+	ICE_VF_STATUS_FIELD_MDD_RX_EVENTS,
+	ICE_VF_STATUS_FIELD_MBX_BLOCKED,
+	ICE_VF_STATUS_FIELD_MBX_OVERFLOW_EVENTS,
+	ICE_VF_STATUS_FIELD_MAC_FILTER_COUNT,
+	ICE_VF_STATUS_FIELD_MAC_FILTER_LIMIT,
+	ICE_VF_STATUS_FIELD_RESET_FAILED,
+	ICE_VF_STATUS_FIELD_REBUILD_REQUIRED,
+	ICE_VF_STATUS_NUM_FIELDS,
+};
+
 #define	ICE_VC_MAX_RX_BUFFER			\
 	((16 * 1024) - BIT(ICE_RLAN_CTX_DBUF_S))
 #define	ICE_VIRTCHNL_QUEUE_MAP_SIZE		16
@@ -59,9 +96,12 @@ static int ice_iov_configure_mac_anti_spoof(struct ice_softc *sc,
 static int ice_iov_restore_vf_host_config(struct ice_softc *sc,
     struct ice_vf *vf);
 static void ice_iov_clear_vf_queue_state(struct ice_vf *vf);
+static void ice_iov_clear_vf_mbx(struct ice_softc *sc, struct ice_vf *vf);
+static void ice_iov_complete_vf_reset(struct ice_softc *sc,
+    struct ice_vf *vf, bool restore_mapping);
 static void ice_iov_ready_vf(struct ice_softc *sc, struct ice_vf *vf);
 static int ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf,
-			bool trigger_vflr);
+			bool trigger_reset, bool release_vf);
 static void ice_iov_setup_intr_mapping(struct ice_softc *sc, struct ice_vf *vf);
 
 static void ice_vc_version_msg(struct ice_softc *sc, struct ice_vf *vf,
@@ -103,6 +143,7 @@ static void ice_vc_del_vlan_msg(struct ice_softc *sc, struct ice_vf *vf,
 static int ice_vc_select_vlans(struct ice_vf *vf, u16 *vids, u16 count,
 			       bool add, u16 *selected_count);
 static enum virtchnl_status_code ice_iov_err_to_virt_err(int ice_err);
+static int ice_vf_mac_filter_index(struct ice_vf *vf, const uint8_t *addr);
 static int ice_vf_validate_mac(struct ice_vf *vf, const uint8_t *addr);
 
 #ifdef DRIVER_FAILPOINTS
@@ -173,10 +214,36 @@ ice_iov_attach(struct ice_softc *sc)
 		    "pci_iov_attach failed (error=%s)\n",
 		    ice_err_str(error));
 		ice_clear_bit(ICE_FEATURE_SRIOV, sc->feat_en);
-	} else
+	} else {
 		ice_set_bit(ICE_FEATURE_SRIOV, sc->feat_en);
+		if (ice_is_e830(&sc->hw))
+			ice_iov_reconfigure_mbx(sc);
+		else
+			ice_mbx_init_snapshot(&sc->hw);
+	}
 
 	return (error);
+}
+
+/**
+ * ice_iov_reconfigure_mbx - Restore hardware mailbox flood protection
+ * @sc: device softc structure
+ *
+ * E830 limits each VF's outstanding messages in hardware.  The threshold
+ * register is reset by a core reset and must be restored during rebuild.
+ * Older devices use the software snapshot detector instead.
+ */
+void
+ice_iov_reconfigure_mbx(struct ice_softc *sc)
+{
+	struct ice_hw *hw = &sc->hw;
+
+	if (!ice_is_e830(hw))
+		return;
+
+	wr32(hw, E830_MBX_PF_IN_FLIGHT_VF_MSGS_THRESH,
+	    ICE_MBX_OVERFLOW_WATERMARK);
+	ice_flush(hw);
 }
 
 /**
@@ -222,8 +289,13 @@ ice_iov_init(struct ice_softc *sc, uint16_t num_vfs, const nvlist_t *params __un
 		return (ENOMEM);
 
 	/* Initialize each VF with basic information */
-	for (int i = 0; i < num_vfs; i++)
+	for (int i = 0; i < num_vfs; i++) {
 		sc->vfs[i].vf_num = i;
+		if (ice_is_e830(&sc->hw))
+			ice_mbx_vf_clear_cnt_e830(&sc->hw, i);
+		else
+			ice_mbx_init_vf_info(&sc->hw, &sc->vfs[i].mbx_info);
+	}
 
 	/* Save off number of configured VFs */
 	sc->num_vfs = num_vfs;
@@ -265,6 +337,9 @@ ice_iov_configure_mac_anti_spoof(struct ice_softc *sc, struct ice_vf *vf)
 	struct ice_vsi *vsi = vf->vsi;
 	struct ice_hw *hw = &sc->hw;
 	bool enable;
+#ifdef DRIVER_FAILPOINTS
+	int error;
+#endif
 	int status;
 
 	enable = (atomic_load_acq_32(&vf->vf_flags) &
@@ -277,6 +352,8 @@ ice_iov_configure_mac_anti_spoof(struct ice_softc *sc, struct ice_vf *vf)
 	else
 		ctx.info.sec_flags &= ~ICE_AQ_VSI_SEC_FLAG_ENA_MAC_ANTI_SPOOF;
 
+	ICE_IOV_FAIL_POINT(sc, vf->vf_num, mac_anti_spoof_update, error,
+	    fail);
 	status = ice_update_vsi(hw, vsi->idx, &ctx, NULL);
 	if (status != 0) {
 		device_printf(sc->dev,
@@ -289,6 +366,11 @@ ice_iov_configure_mac_anti_spoof(struct ice_softc *sc, struct ice_vf *vf)
 
 	vsi->info.sec_flags = ctx.info.sec_flags;
 	return (0);
+
+#ifdef DRIVER_FAILPOINTS
+fail:
+	return (error);
+#endif
 }
 
 /**
@@ -510,6 +592,19 @@ ice_iov_add_vf(struct ice_softc *sc, uint16_t vfnum, const nvlist_t *params)
 
 	vf->vlan_limit = nvlist_get_number(params, "max-vlan-allowed");
 	vf->mac_filter_limit = nvlist_get_number(params, "max-mac-filters");
+	if (vf->mac_filter_limit != 0) {
+		vf->mac_filters = mallocarray(vf->mac_filter_limit,
+		    sizeof(*vf->mac_filters), M_ICE, M_NOWAIT | M_ZERO);
+		if (vf->mac_filters == NULL) {
+			device_printf(sc->dev,
+			    "Unable to allocate VF-%d MAC filter memory\n",
+			    vfnum);
+			error = ENOMEM;
+			goto release_imap;
+		}
+	}
+	ICE_IOV_FAIL_POINT(sc, vfnum, add_after_mac_filter_memory, error,
+	    free_mac_filters);
 
 	vf->vf_flags |= VF_FLAG_VLAN_CAP;
 
@@ -518,29 +613,33 @@ ice_iov_add_vf(struct ice_softc *sc, uint16_t vfnum, const nvlist_t *params)
 	if (error) {
 		device_printf(sc->dev, "Unable to initialize VF %d VSI: %s\n",
 			      vfnum, ice_err_str(error));
-		goto release_imap;
+		goto free_mac_filters;
 	}
 	ICE_IOV_FAIL_POINT(sc, vfnum, add_after_vsi_init, error,
-	    release_imap);
+	    free_mac_filters);
 	error = ice_iov_configure_mac_anti_spoof(sc, vf);
 	if (error != 0)
-		goto release_imap;
+		goto free_mac_filters;
 
 	/* Add the broadcast address */
 	error = ice_add_vsi_mac_filter(vsi, broadcastaddr);
 	if (error) {
 		device_printf(sc->dev, "Unable to add broadcast filter VF %d VSI: %s\n",
 			      vfnum, ice_err_str(error));
-		goto release_imap;
+		goto free_mac_filters;
 	}
 	ICE_IOV_FAIL_POINT(sc, vfnum, add_after_broadcast_filter, error,
-	    release_imap);
+	    free_mac_filters);
 
 	atomic_set_32(&vf->vf_flags, VF_FLAG_ENABLED);
 	ice_iov_ready_vf(sc, vf);
 
 	return (0);
 
+free_mac_filters:
+	free(vf->mac_filters, M_ICE);
+	vf->mac_filters = NULL;
+	vf->mac_filter_cnt = 0;
 release_imap:
 	ice_resmgr_release_map(&sc->dev_imgr, vf->vf_imap,
 			       vf->num_irq_vectors);
@@ -570,6 +669,144 @@ release_vsi:
 }
 
 /**
+ * ice_iov_vf_status - report configured VF state
+ * @sc: device private structure
+ * @statusp: returned status snapshot
+ *
+ * The iflib context lock protects VF state and VSI lifetime while this
+ * method constructs the report.
+ */
+int
+ice_iov_vf_status(struct ice_softc *sc, struct if_vf_status **statusp)
+{
+	struct ice_vf *vf;
+	struct ice_vsi *vsi;
+	struct if_vf_extension *extension;
+	struct if_vf_info *info;
+	struct if_vf_status *status;
+	u32 vf_flags;
+	bool mirror_configured, software_mbx_limit;
+	uint32_t field, num_fields;
+	int i;
+
+	if (!ice_is_bit_set(sc->feat_en, ICE_FEATURE_SRIOV))
+		return (EOPNOTSUPP);
+	status = if_vf_status_alloc(sc->num_vfs);
+	if (status == NULL)
+		return (ENOMEM);
+	for (i = 0; i < sc->num_vfs; i++) {
+		vf = &sc->vfs[i];
+		vsi = vf->vsi;
+		vf_flags = atomic_load_acq_32(&vf->vf_flags);
+		info = &status->vfs[i];
+		info->fields = IFVF_F_CONFIGURED | IFVF_F_INITIALIZED |
+		    IFVF_F_TRAFFIC_ALLOWED | IFVF_F_FAULT_BLOCKED |
+		    IFVF_F_LINK_STATE_POLICY |
+		    IFVF_F_VLAN_MODE | IFVF_F_VLAN_COUNT |
+		    IFVF_F_ALLOW_SET_MAC | IFVF_F_ALLOW_SET_VLAN |
+		    IFVF_F_MAC_ANTI_SPOOF | IFVF_F_ALLOW_PROMISC;
+		info->index = i;
+		info->configured =
+		    (vf_flags & VF_FLAG_ENABLED) != 0 && vsi != NULL;
+		info->initialized = info->configured &&
+		    (vf_flags & VF_FLAG_INITIALIZED) != 0;
+		info->traffic_allowed = info->configured &&
+		    (vf_flags & (VF_FLAG_MDD_BLOCKED |
+		    VF_FLAG_MBX_BLOCKED)) == 0;
+		info->fault_blocked = (vf_flags & (VF_FLAG_MDD_BLOCKED |
+		    VF_FLAG_MBX_BLOCKED)) != 0;
+		info->link_state_policy = IFVF_LINK_AUTO;
+		if (info->initialized) {
+			snprintf(info->api_version, sizeof(info->api_version),
+			    "%u.%u", vf->version.major, vf->version.minor);
+			info->fields |= IFVF_F_API_VERSION;
+		}
+		if (!ETHER_IS_ZERO(vf->mac)) {
+			memcpy(info->mac, vf->mac, sizeof(info->mac));
+			info->fields |= IFVF_F_MAC;
+		}
+		/* The ICE IOV schema exposes only VF-managed trunk membership. */
+		info->vlan_mode = IFVF_VLAN_TRUNK;
+		info->vlan_count = vf->vlan_cnt;
+		if (info->configured) {
+			info->vlan_limit = vf->vlan_limit;
+			info->fields |= IFVF_F_VLAN_LIMIT;
+		}
+		if (vsi != NULL) {
+			info->tx_queue_count = vsi->num_tx_queues;
+			info->rx_queue_count = vsi->num_rx_queues;
+			info->fields |= IFVF_F_NUM_TX_QUEUES |
+			    IFVF_F_NUM_RX_QUEUES;
+		}
+
+		mirror_configured = vsi != NULL && vsi->mirror_src_vsi !=
+		    ICE_INVALID_MIRROR_VSI;
+		software_mbx_limit = !ice_is_e830(&sc->hw);
+		num_fields = ICE_VF_STATUS_NUM_FIELDS -
+		    (mirror_configured ? 0 : 1) -
+		    (software_mbx_limit ? 0 : 2) -
+		    (info->configured ? 0 : 1);
+		extension = if_vf_status_add_extension(info,
+		    ICE_VF_STATUS_NAMESPACE, ICE_VF_STATUS_VERSION,
+		    num_fields);
+		if (extension == NULL) {
+			if_vf_status_free(status);
+			return (ENOMEM);
+		}
+		field = ICE_VF_STATUS_FIELD_MIRROR_CONFIGURED;
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_MIRROR_CONFIGURED, mirror_configured);
+		if (mirror_configured)
+			if_vf_extension_set_number(extension, field++,
+			    ICE_VF_STATUS_MIRROR_SOURCE_VSI,
+			    vsi->mirror_src_vsi);
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_MIRROR_INGRESS_ACTIVE,
+		    vsi != NULL &&
+		    vsi->rule_mir_ingress != ICE_INVAL_MIRROR_RULE_ID);
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_MIRROR_EGRESS_ACTIVE,
+		    vsi != NULL &&
+		    vsi->rule_mir_egress != ICE_INVAL_MIRROR_RULE_ID);
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_MDD_BLOCKED,
+		    (vf_flags & VF_FLAG_MDD_BLOCKED) != 0);
+		if_vf_extension_set_number(extension, field++,
+		    ICE_VF_STATUS_MDD_TX_EVENTS, vf->mdd_tx_events);
+		if_vf_extension_set_number(extension, field++,
+		    ICE_VF_STATUS_MDD_RX_EVENTS, vf->mdd_rx_events);
+		if (software_mbx_limit) {
+			if_vf_extension_set_bool(extension, field++,
+			    ICE_VF_STATUS_MBX_BLOCKED,
+			    (vf_flags & VF_FLAG_MBX_BLOCKED) != 0);
+			if_vf_extension_set_number(extension, field++,
+			    ICE_VF_STATUS_MBX_OVERFLOW_EVENTS,
+			    vf->mbx_overflow_events);
+		}
+		if_vf_extension_set_number(extension, field++,
+		    ICE_VF_STATUS_MAC_FILTER_COUNT, vf->mac_filter_cnt);
+		if (info->configured)
+			if_vf_extension_set_number(extension, field++,
+			    ICE_VF_STATUS_MAC_FILTER_LIMIT, vf->mac_filter_limit);
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_RESET_FAILED,
+		    (vf_flags & VF_FLAG_RESET_FAILED) != 0);
+		if_vf_extension_set_bool(extension, field++,
+		    ICE_VF_STATUS_REBUILD_REQUIRED,
+		    (vf_flags & VF_FLAG_REBUILD_REQUIRED) != 0);
+		KASSERT(field == num_fields,
+		    ("ICE VF status field count %u != %u", field, num_fields));
+		info->allow_set_mac = (vf_flags & VF_FLAG_SET_MAC_CAP) != 0;
+		info->allow_set_vlan = (vf_flags & VF_FLAG_VLAN_CAP) != 0;
+		info->mac_anti_spoof =
+		    (vf_flags & VF_FLAG_MAC_ANTI_SPOOF) != 0;
+		info->allow_promisc = (vf_flags & VF_FLAG_PROMISC_CAP) != 0;
+	}
+	*statusp = status;
+	return (0);
+}
+
+/**
  * ice_iov_uninit - Called by the OS when VFs are destroyed
  * @sc: device softc structure
  */
@@ -582,8 +819,13 @@ ice_iov_uninit(struct ice_softc *sc)
 	/* Release per-VF resources */
 	for (int i = 0; i < sc->num_vfs; i++) {
 		vf = &sc->vfs[i];
+		if (!ice_is_e830(&sc->hw))
+			LIST_DEL(&vf->mbx_info.list_entry);
 		atomic_store_rel_32(&vf->vf_flags, 0);
 		vsi = vf->vsi;
+		free(vf->mac_filters, M_ICE);
+		vf->mac_filters = NULL;
+		vf->mac_filter_cnt = 0;
 
 		/* Free VF interrupt reservation */
 		if (vf->vf_imap) {
@@ -643,7 +885,7 @@ ice_iov_handle_vflr(struct ice_softc *sc)
 {
 	struct ice_hw *hw = &sc->hw;
 	struct ice_vf *vf;
-	u32 reg, reg_idx, bit_idx;
+	u32 reg, reg_idx, bit_idx, vf_flags;
 
 	for (int i = 0; i < sc->num_vfs; i++) {
 		vf = &sc->vfs[i];
@@ -653,9 +895,15 @@ ice_iov_handle_vflr(struct ice_softc *sc)
 		reg = rd32(hw, GLGEN_VFLRSTAT(reg_idx));
 		if ((reg & BIT(bit_idx)) == 0)
 			continue;
-		if ((atomic_load_acq_32(&vf->vf_flags) &
-		    VF_FLAG_ENABLED) != 0 && vf->vsi != NULL) {
-			ice_reset_vf(sc, vf, false);
+		vf_flags = atomic_load_acq_32(&vf->vf_flags);
+		if ((vf_flags & VF_FLAG_ENABLED) != 0 && vf->vsi != NULL) {
+			if ((vf_flags & VF_FLAG_REBUILD_REQUIRED) != 0) {
+				/* Consume the event but leave the invalid VF held. */
+				wr32(hw, GLGEN_VFLRSTAT(reg_idx), BIT(bit_idx));
+				ice_flush(hw);
+				continue;
+			}
+			ice_reset_vf(sc, vf, false, true);
 			continue;
 		}
 
@@ -663,6 +911,117 @@ ice_iov_handle_vflr(struct ice_softc *sc)
 		wr32(hw, GLGEN_VFLRSTAT(reg_idx), BIT(bit_idx));
 		ice_flush(hw);
 	}
+}
+
+/**
+ * ice_iov_handle_mdd - Attribute malicious-driver events to VFs
+ * @sc: device softc structure
+ *
+ * Consume every per-VF MDD latch. Block further virtchnl requests and reset a
+ * newly blocked VF without restoring its queues, so even event classes which
+ * only drop the offending packet cannot continue traffic. An optional policy
+ * reconstructs and releases the VF immediately instead.
+ *
+ * @returns a mask of enum ice_mdd_source_bits attributed to configured or
+ * unconfigured VFs of this PF.
+ */
+u32
+ice_iov_handle_mdd(struct ice_softc *sc)
+{
+	static const struct timeval log_interval = { 2, 0 };
+	struct ice_hw *hw = &sc->hw;
+	struct virtchnl_pf_event event = {};
+	struct ice_vf *vf;
+	u32 reg, sources, vf_sources, tx_events, rx_events, vf_flags;
+	bool newly_blocked;
+	int error;
+
+	event.event = VIRTCHNL_EVENT_RESET_IMPENDING;
+	event.severity = PF_EVENT_SEVERITY_CERTAIN_DOOM;
+	vf_sources = 0;
+	for (int i = 0; i < sc->num_vfs; i++) {
+		vf = &sc->vfs[i];
+		sources = 0;
+		tx_events = 0;
+		rx_events = 0;
+
+		reg = rd32(hw, VP_MDET_TX_PQM(vf->vf_num));
+		if ((reg & VP_MDET_TX_PQM_VALID_M) != 0) {
+			wr32(hw, VP_MDET_TX_PQM(vf->vf_num), 0xffff);
+			sources |= ICE_MDD_TX_PQM;
+			tx_events++;
+		}
+		reg = rd32(hw, VP_MDET_TX_TCLAN(vf->vf_num));
+		if ((reg & VP_MDET_TX_TCLAN_VALID_M) != 0) {
+			wr32(hw, VP_MDET_TX_TCLAN(vf->vf_num), 0xffff);
+			sources |= ICE_MDD_TX_TCLAN;
+			tx_events++;
+		}
+		reg = rd32(hw, VP_MDET_TX_TDPU(vf->vf_num));
+		if ((reg & VP_MDET_TX_TDPU_VALID_M) != 0) {
+			wr32(hw, VP_MDET_TX_TDPU(vf->vf_num), 0xffff);
+			sources |= ICE_MDD_TX_TDPU;
+			tx_events++;
+		}
+		reg = rd32(hw, VP_MDET_RX(vf->vf_num));
+		if ((reg & VP_MDET_RX_VALID_M) != 0) {
+			wr32(hw, VP_MDET_RX(vf->vf_num), 0xffff);
+			sources |= ICE_MDD_RX;
+			rx_events++;
+		}
+		if (tx_events == 0 && rx_events == 0)
+			continue;
+		vf_sources |= sources;
+
+		vf_flags = atomic_load_acq_32(&vf->vf_flags);
+		if ((vf_flags & VF_FLAG_ENABLED) == 0 || vf->vsi == NULL)
+			continue;
+		vf->mdd_tx_events += tx_events;
+		vf->mdd_rx_events += rx_events;
+		newly_blocked = (vf_flags & VF_FLAG_MDD_BLOCKED) == 0;
+		atomic_set_32(&vf->vf_flags, VF_FLAG_MDD_BLOCKED);
+
+		if (ratecheck(&vf->last_mdd_log, &log_interval)) {
+			device_printf(sc->dev,
+			    "malicious-driver event from VF-%d "
+			    "(tx %ju, rx %ju); %s\n", vf->vf_num,
+			    (uintmax_t)vf->mdd_tx_events,
+			    (uintmax_t)vf->mdd_rx_events,
+			    sc->mdd_auto_reset_vf && newly_blocked ?
+			    "resetting VF" : "VF remains blocked");
+		}
+		if (!newly_blocked)
+			continue;
+
+		/* Ignore notification failure; reset does not require VF help. */
+		if (sc->mdd_auto_reset_vf &&
+		    (vf_flags & VF_FLAG_INITIALIZED) != 0 &&
+		    ice_check_sq_alive(hw, &hw->mailboxq)) {
+			(void)ice_aq_send_msg_to_vf(hw, vf->vf_num,
+			    VIRTCHNL_OP_EVENT, VIRTCHNL_STATUS_SUCCESS,
+			    (u8 *)&event, sizeof(event), NULL);
+		}
+		/*
+		 * TDPU MDD drops only the offending packet. Reset the entire VF so
+		 * the software blocked state always means that traffic is actually
+		 * fenced. The opt-in policy reconstructs its queues immediately.
+		 */
+		error = ice_reset_vf(sc, vf, true, sc->mdd_auto_reset_vf);
+		if (error != 0) {
+			device_printf(sc->dev,
+			    "failed to quiesce MDD-blocked VF-%d: %d\n",
+			    vf->vf_num, error);
+		} else if (!sc->mdd_auto_reset_vf) {
+			/*
+			 * Complete VFR without restoring queues. This leaves the VF
+			 * inactive and DMA-fenced, but permits a later physical FLR to
+			 * create a new reset edge and recover it.
+			 */
+			ice_iov_complete_vf_reset(sc, vf, false);
+		}
+	}
+	ice_flush(hw);
+	return (vf_sources);
 }
 
 /**
@@ -708,6 +1067,54 @@ ice_iov_clear_vf_queue_state(struct ice_vf *vf)
 }
 
 /**
+ * ice_iov_clear_vf_mdd - Clear hardware MDD latches for a reset VF
+ * @sc: device softc structure
+ * @vf: driver's VF structure for the VF to update
+ *
+ * Function reset can generate a spurious anti-spoof MDD indication. Consume
+ * all per-VF latches before releasing reset so it cannot re-block a VF which
+ * has just been reconstructed successfully.
+ */
+static void
+ice_iov_clear_vf_mdd(struct ice_softc *sc, struct ice_vf *vf)
+{
+	struct ice_hw *hw = &sc->hw;
+
+	wr32(hw, VP_MDET_TX_PQM(vf->vf_num), 0xffff);
+	wr32(hw, VP_MDET_TX_TCLAN(vf->vf_num), 0xffff);
+	wr32(hw, VP_MDET_TX_TDPU(vf->vf_num), 0xffff);
+	wr32(hw, VP_MDET_RX(vf->vf_num), 0xffff);
+	ice_flush(hw);
+}
+
+/**
+ * ice_iov_complete_vf_reset - Complete a VF reset
+ * @sc: device softc structure
+ * @vf: driver's VF structure for the VF to update
+ * @restore_mapping: restore the VF queue and interrupt mappings
+ *
+ * Clear VFSWR after the hardware drain, optionally restore the VF mappings,
+ * and then publish VFACTIVE. The mapping registers do not retain writes made
+ * while VFSWR remains asserted. Callers may instead leave a software-blocked
+ * VF with no queue or interrupt mappings.
+ */
+static void
+ice_iov_complete_vf_reset(struct ice_softc *sc, struct ice_vf *vf,
+    bool restore_mapping)
+{
+	struct ice_hw *hw = &sc->hw;
+	u32 reg;
+
+	reg = rd32(hw, VPGEN_VFRTRIG(vf->vf_num));
+	reg &= ~VPGEN_VFRTRIG_VFSWR_M;
+	wr32(hw, VPGEN_VFRTRIG(vf->vf_num), reg);
+	if (restore_mapping)
+		ice_iov_setup_intr_mapping(sc, vf);
+	wr32(hw, VFGEN_RSTAT(vf->vf_num), VIRTCHNL_VFR_VFACTIVE);
+	ice_flush(hw);
+}
+
+/**
  * ice_iov_ready_vf - Setup VF interrupts and mark it as ready
  * @sc: device softc structure
  * @vf: driver's VF structure for the VF to update
@@ -719,24 +1126,28 @@ ice_iov_clear_vf_queue_state(struct ice_vf *vf)
 static void
 ice_iov_ready_vf(struct ice_softc *sc, struct ice_vf *vf)
 {
-	struct ice_hw *hw = &sc->hw;
-	u32 reg;
-
 	/* A VF or PF reset discards all queue configuration and state. */
 	ice_iov_clear_vf_queue_state(vf);
+	ice_iov_clear_vf_mdd(sc, vf);
+	atomic_clear_32(&vf->vf_flags, VF_FLAG_MDD_BLOCKED);
+	ice_iov_clear_vf_mbx(sc, vf);
 
-	/* Clear the triggering bit */
-	reg = rd32(hw, VPGEN_VFRTRIG(vf->vf_num));
-	reg &= ~VPGEN_VFRTRIG_VFSWR_M;
-	wr32(hw, VPGEN_VFRTRIG(vf->vf_num), reg);
+	ice_iov_complete_vf_reset(sc, vf, true);
+}
 
-	/* Setup VF interrupt allocation and mapping */
-	ice_iov_setup_intr_mapping(sc, vf);
-
-	/* Indicate to the VF that reset is done */
-	wr32(hw, VFGEN_RSTAT(vf->vf_num), VIRTCHNL_VFR_VFACTIVE);
-
-	ice_flush(hw);
+/**
+ * ice_iov_clear_vf_mbx - Release mailbox isolation after a completed reset
+ * @sc: device softc structure
+ * @vf: VF whose mailbox state should be cleared
+ */
+static void
+ice_iov_clear_vf_mbx(struct ice_softc *sc, struct ice_vf *vf)
+{
+	if (ice_is_e830(&sc->hw))
+		ice_mbx_vf_clear_cnt_e830(&sc->hw, vf->vf_num);
+	else
+		ice_mbx_clear_malvf(&vf->mbx_info);
+	atomic_clear_32(&vf->vf_flags, VF_FLAG_MBX_BLOCKED);
 }
 
 /**
@@ -760,7 +1171,7 @@ ice_iov_rebuild_vf(struct ice_softc *sc, struct ice_vsi *vsi)
 	MPASS(vsi->type == ICE_VSI_VF);
 	vf = ice_iov_get_vf(sc, vsi->vf_num);
 	atomic_clear_32(&vf->vf_flags, VF_FLAG_INITIALIZED);
-	atomic_set_32(&vf->vf_flags, VF_FLAG_REBUILD_FAILED);
+	atomic_set_32(&vf->vf_flags, VF_FLAG_REBUILD_REQUIRED);
 	ice_iov_clear_vf_queue_state(vf);
 	ICE_IOV_FAIL_POINT(sc, vf->vf_num, rebuild_before_initialize, error,
 	    fail);
@@ -789,7 +1200,7 @@ ice_iov_rebuild_vf(struct ice_softc *sc, struct ice_vsi *vsi)
 	}
 
 	atomic_clear_32(&vf->vf_flags,
-	    VF_FLAG_REBUILD_FAILED | VF_FLAG_RESET_FAILED);
+	    VF_FLAG_REBUILD_REQUIRED | VF_FLAG_RESET_FAILED);
 	ice_iov_ready_vf(sc, vf);
 	return (0);
 
@@ -803,56 +1214,43 @@ fail:
  * ice_reset_vf - Perform a hardware reset (VFR) on a VF
  * @sc: device softc structure
  * @vf: driver's VF structure for VF to be reset
- * @trigger_vflr: trigger a reset or only handle already executed reset
+ * @trigger_reset: trigger a reset or only handle an already executed reset
+ * @release_vf: publish VFACTIVE after reset; otherwise leave the VF held
  *
  * Performs a VFR for the given VF. This function busy waits until the reset
  * completes in the HW and publishes VFACTIVE only after every mandatory
- * reset stage succeeds.
+ * reset stage succeeds. In quiesce mode, it returns with VFSWR asserted and
+ * without restoring interrupt mappings or publishing VFACTIVE.
  *
- * @remark This also sets up the PF<->VF interrupt mapping and allocations in
- * the hardware after the hardware reset is finished, via
+ * @remark Release mode also sets up the PF<->VF interrupt mapping and
+ * allocations in the hardware after the hardware reset is finished, via
  * ice_iov_setup_intr_mapping()
  */
 static int
-ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_vflr)
+ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_reset,
+    bool release_vf)
 {
 	u16 global_vf_num, reg_idx, bit_idx;
 	struct ice_hw *hw = &sc->hw;
+	bool reset_done;
 	int error, status;
 	u32 reg;
-	int i;
+	int bit, i;
+
+	/* A VFR cannot recover PF-owned VSI state lost during PF rebuild. */
+	if (release_vf && (atomic_load_acq_32(&vf->vf_flags) &
+	    VF_FLAG_REBUILD_REQUIRED) != 0)
+		return (EIO);
 
 	global_vf_num = vf->vf_num + hw->func_caps.vf_base_id;
 	atomic_clear_32(&vf->vf_flags, VF_FLAG_INITIALIZED);
 	error = 0;
 
-	if (trigger_vflr) {
+	if (trigger_reset) {
 		reg = rd32(hw, VPGEN_VFRTRIG(vf->vf_num));
 		reg |= VPGEN_VFRTRIG_VFSWR_M;
 		wr32(hw, VPGEN_VFRTRIG(vf->vf_num), reg);
-	}
-
-	/* clear the VFLR bit for the VF in a GLGEN_VFLRSTAT register */
-	reg_idx = (global_vf_num) / 32;
-	bit_idx = (global_vf_num) % 32;
-	wr32(hw, GLGEN_VFLRSTAT(reg_idx), BIT(bit_idx));
-	ice_flush(hw);
-
-	/* Wait until there are no pending PCI transactions */
-	wr32(hw, PF_PCI_CIAA,
-	     ICE_PCIE_DEV_STATUS | (global_vf_num << PF_PCI_CIAA_VF_NUM_S));
-
-	for (i = 0; i < ICE_PCI_CIAD_WAIT_COUNT; i++) {
-		reg = rd32(hw, PF_PCI_CIAD);
-		if (!(reg & PCIEM_STA_TRANSACTION_PND))
-			break;
-
-		DELAY(ICE_PCI_CIAD_WAIT_DELAY_US);
-	}
-	if (i == ICE_PCI_CIAD_WAIT_COUNT) {
-		device_printf(sc->dev,
-			"VF-%d PCI transactions stuck\n", vf->vf_num);
-		error = ETIMEDOUT;
+		ice_flush(hw);
 	}
 
 	/*
@@ -871,6 +1269,11 @@ ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_vflr)
 	/* This zero-queue command is required to complete every VF reset. */
 	status = ice_dis_vsi_txq(hw->port_info, vf->vsi->idx, 0, 0,
 	    NULL, NULL, NULL, ICE_VF_RESET, vf->vf_num, NULL);
+	ICE_FAIL_POINT_CODE_COND(sc, _debug_fail_point_ice_iov,
+	    vf_reset_tx_disable, ice_iov_fail_vf_matches(vf->vf_num),
+	    FAIL_POINT_NONSLEEPABLE, {
+		status = ICE_ERR_AQ_ERROR;
+	});
 	if (status) {
 		device_printf(sc->dev,
 		    "%s: Failed to disable LAN Tx queues: err %s aq_err %s\n",
@@ -880,17 +1283,70 @@ ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_vflr)
 			error = EIO;
 	}
 
-	/* Then check for the VF reset to finish in HW */
+	/* Then check for the VF reset to finish in HW. */
+	reset_done = false;
 	for (i = 0; i < ICE_VPGEN_VFRSTAT_WAIT_COUNT; i++) {
 		reg = rd32(hw, VPGEN_VFRSTAT(vf->vf_num));
-		if ((reg & VPGEN_VFRSTAT_VFRD_M))
+		if ((reg & VPGEN_VFRSTAT_VFRD_M)) {
+			reset_done = true;
 			break;
+		}
 
 		DELAY(ICE_VPGEN_VFRSTAT_WAIT_DELAY_US);
 	}
-	if (i == ICE_VPGEN_VFRSTAT_WAIT_COUNT) {
+	ICE_FAIL_POINT_CODE_COND(sc, _debug_fail_point_ice_iov,
+	    vf_reset_vfr_timeout, ice_iov_fail_vf_matches(vf->vf_num),
+	    FAIL_POINT_NONSLEEPABLE, {
+		reset_done = false;
+	});
+	if (!reset_done) {
 		device_printf(sc->dev,
 			"VF-%d Reset is stuck\n", vf->vf_num);
+		if (error == 0)
+			error = ETIMEDOUT;
+	} else {
+		/* VFLR status is W1C only after the hardware drain completes. */
+		reg_idx = global_vf_num / 32;
+		bit_idx = global_vf_num % 32;
+		wr32(hw, GLGEN_VFLRSTAT(reg_idx), BIT(bit_idx));
+		ice_flush(hw);
+
+		/* Hardware resets Tx queues; the PF must disable every Rx. */
+		for (bit = 0; bit < vf->vsi->num_rx_queues; bit++) {
+			status = ice_control_rx_queue(vf->vsi, bit, false);
+			ICE_FAIL_POINT_CODE_COND(sc,
+			    _debug_fail_point_ice_iov, vf_reset_rx_disable,
+			    ice_iov_fail_vf_matches(vf->vf_num),
+			    FAIL_POINT_NONSLEEPABLE, {
+				status = EIO;
+			});
+			if (status != 0) {
+				device_printf(sc->dev,
+				    "Unable to disable VF-%d Rx queue %d: %s\n",
+				    vf->vf_num, bit, ice_err_str(status));
+				if (error == 0)
+					error = status;
+			}
+		}
+	}
+
+	/* Verify that post-drain cleanup left no outstanding DMA. */
+	wr32(hw, PF_PCI_CIAA,
+	    ICE_PCIE_DEV_STATUS | (global_vf_num << PF_PCI_CIAA_VF_NUM_S));
+	for (i = 0; i < ICE_PCI_CIAD_WAIT_COUNT; i++) {
+		reg = rd32(hw, PF_PCI_CIAD);
+		if (!(reg & PCIEM_STA_TRANSACTION_PND))
+			break;
+		DELAY(ICE_PCI_CIAD_WAIT_DELAY_US);
+	}
+	ICE_FAIL_POINT_CODE_COND(sc, _debug_fail_point_ice_iov,
+	    vf_reset_pcie_pending, ice_iov_fail_vf_matches(vf->vf_num),
+	    FAIL_POINT_NONSLEEPABLE, {
+		i = ICE_PCI_CIAD_WAIT_COUNT;
+	});
+	if (i == ICE_PCI_CIAD_WAIT_COUNT) {
+		device_printf(sc->dev,
+		    "VF-%d PCI transactions remain after reset\n", vf->vf_num);
 		if (error == 0)
 			error = ETIMEDOUT;
 	}
@@ -900,12 +1356,12 @@ ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_vflr)
 		return (error);
 	}
 
-	atomic_clear_32(&vf->vf_flags, VF_FLAG_RESET_FAILED);
-
-	/* A VFR cannot recover PF-owned VSI state lost during PF rebuild. */
-	if ((atomic_load_acq_32(&vf->vf_flags) &
-	    VF_FLAG_REBUILD_FAILED) != 0)
-		return (EIO);
+	if (!release_vf) {
+		/* Discard any anti-spoof MDD indication caused by the reset. */
+		ice_iov_clear_vf_mdd(sc, vf);
+		atomic_clear_32(&vf->vf_flags, VF_FLAG_RESET_FAILED);
+		return (0);
+	}
 
 	error = ice_iov_restore_vf_host_config(sc, vf);
 	if (error != 0) {
@@ -913,8 +1369,71 @@ ice_reset_vf(struct ice_softc *sc, struct ice_vf *vf, bool trigger_vflr)
 		return (error);
 	}
 
+	atomic_clear_32(&vf->vf_flags, VF_FLAG_RESET_FAILED);
 	ice_iov_ready_vf(sc, vf);
 	return (0);
+}
+
+/**
+ * ice_iov_quiesce_vfs_for_reset - Hold configured VFs before device reset
+ * @sc: device softc structure
+ *
+ * Gate VF master accesses, drain each VF data path, and leave VFSWR asserted.
+ * Process VFs serially to remain below the E810 limit of four concurrent
+ * VM/VF reset flows. A successful VSI rebuild releases each VF individually.
+ */
+int
+ice_iov_quiesce_vfs_for_reset(struct ice_softc *sc)
+{
+	struct virtchnl_pf_event event = {};
+	struct ice_hw *hw = &sc->hw;
+	struct ice_vf *vf;
+	int error, first_error;
+	u32 reg, vf_flags;
+	bool notify;
+
+	notify = ice_check_sq_alive(hw, &hw->mailboxq);
+	event.event = VIRTCHNL_EVENT_RESET_IMPENDING;
+	event.severity = PF_EVENT_SEVERITY_CERTAIN_DOOM;
+
+	/* Notify and then gate each VF before it can release its buffers. */
+	for (int i = 0; i < sc->num_vfs; i++) {
+		vf = &sc->vfs[i];
+		vf_flags = atomic_load_acq_32(&vf->vf_flags);
+		if ((vf_flags & VF_FLAG_ENABLED) == 0 || vf->vsi == NULL)
+			continue;
+		if (notify && (vf_flags & VF_FLAG_INITIALIZED) != 0)
+			ice_aq_send_msg_to_vf(hw, vf->vf_num,
+			    VIRTCHNL_OP_EVENT, VIRTCHNL_STATUS_SUCCESS,
+			    (u8 *)&event, sizeof(event), NULL);
+
+		/* Block mailbox reconfiguration before asserting reset. */
+		atomic_clear_32(&vf->vf_flags, VF_FLAG_INITIALIZED);
+		atomic_set_32(&vf->vf_flags, VF_FLAG_REBUILD_REQUIRED);
+		reg = rd32(hw, VPGEN_VFRTRIG(vf->vf_num));
+		reg |= VPGEN_VFRTRIG_VFSWR_M;
+		wr32(hw, VPGEN_VFRTRIG(vf->vf_num), reg);
+	}
+	ice_flush(hw);
+
+	/* Firmware data-path drains remain serialized below its limit. */
+	first_error = 0;
+	for (int i = 0; i < sc->num_vfs; i++) {
+		vf = &sc->vfs[i];
+		vf_flags = atomic_load_acq_32(&vf->vf_flags);
+		if ((vf_flags & VF_FLAG_ENABLED) == 0 || vf->vsi == NULL)
+			continue;
+		error = ice_reset_vf(sc, vf, false, false);
+		if (error != 0) {
+			device_printf(sc->dev,
+			    "Failed to quiesce VF-%d for device reset: %d\n",
+			    vf->vf_num, error);
+			if (first_error == 0)
+				first_error = error;
+		}
+	}
+
+	return (first_error);
 }
 
 /**
@@ -1059,6 +1578,25 @@ ice_vf_validate_mac(struct ice_vf *vf, const uint8_t *addr)
 }
 
 /**
+ * ice_vf_mac_filter_index - Find a VF-owned MAC filter
+ * @vf: VF tracking structure
+ * @addr: MAC address to find
+ *
+ * The administrator-assigned address does not consume the configurable VF
+ * filter quota and is therefore not stored in this array.
+ */
+static int
+ice_vf_mac_filter_index(struct ice_vf *vf, const uint8_t *addr)
+{
+
+	for (u16 i = 0; i < vf->mac_filter_cnt; i++) {
+		if (memcmp(vf->mac_filters[i].addr, addr, ETHER_ADDR_LEN) == 0)
+			return (i);
+	}
+	return (-1);
+}
+
+/**
  * ice_vc_add_eth_addr_msg - Handle VIRTCHNL_OP_ADD_ETH_ADDR msg from VF
  * @sc: device private structure
  * @vf: VF tracking structure
@@ -1073,38 +1611,50 @@ ice_vc_add_eth_addr_msg(struct ice_softc *sc, struct ice_vf *vf, u8 *msg_buf)
 	enum virtchnl_status_code v_status = VIRTCHNL_STATUS_SUCCESS;
 	struct virtchnl_ether_addr_list *addr_list;
 	struct ice_hw *hw = &sc->hw;
-	u16 added_addr_cnt = 0;
+	u16 new_filters;
 	int error = 0;
 
 	addr_list = (struct virtchnl_ether_addr_list *)msg_buf;
 
-	if (addr_list->num_elements >
-	    (vf->mac_filter_limit - vf->mac_filter_cnt)) {
+	/* Validate the entire batch and charge only unique, absent filters. */
+	new_filters = 0;
+	for (int i = 0; i < addr_list->num_elements; i++) {
+		u8 *addr = addr_list->list[i].addr;
+		int j;
+
+		error = ice_vf_validate_mac(vf, addr);
+		if (error != 0) {
+			device_printf(sc->dev,
+			    "%s: VF-%d: invalid or unauthorized MAC for VSI %d\n",
+			    __func__, vf->vf_num, vf->vsi->idx);
+			v_status = VIRTCHNL_STATUS_ERR_PARAM;
+			goto done;
+		}
+		for (j = 0; j < i; j++) {
+			if (memcmp(addr_list->list[j].addr, addr,
+			    ETHER_ADDR_LEN) == 0)
+				break;
+		}
+		if (j != i || memcmp(addr, vf->mac, ETHER_ADDR_LEN) == 0 ||
+		    ice_vf_mac_filter_index(vf, addr) >= 0)
+			continue;
+		new_filters++;
+	}
+	if ((u32)vf->mac_filter_cnt + new_filters > vf->mac_filter_limit) {
 		v_status = VIRTCHNL_STATUS_ERR_NO_MEMORY;
 		goto done;
 	}
 
 	for (int i = 0; i < addr_list->num_elements; i++) {
 		u8 *addr = addr_list->list[i].addr;
+		bool assigned;
 
 		/* The type flag is currently ignored; every MAC address is
 		 * treated as the LEGACY type
 		 */
-
-		error = ice_vf_validate_mac(vf, addr);
-		if (error == EPERM) {
-			device_printf(sc->dev,
-			    "%s: VF-%d: Not permitted to add MAC addr for VSI %d\n",
-			    __func__, vf->vf_num, vf->vsi->idx);
-			v_status = VIRTCHNL_STATUS_ERR_PARAM;
+		assigned = memcmp(addr, vf->mac, ETHER_ADDR_LEN) == 0;
+		if (!assigned && ice_vf_mac_filter_index(vf, addr) >= 0)
 			continue;
-		} else if (error) {
-			device_printf(sc->dev,
-			    "%s: VF-%d: Did not add invalid MAC addr for VSI %d\n",
-			    __func__, vf->vf_num, vf->vsi->idx);
-			v_status = VIRTCHNL_STATUS_ERR_PARAM;
-			continue;
-		}
 
 		error = ice_add_vsi_mac_filter(vf->vsi, addr);
 		if (error) {
@@ -1114,12 +1664,13 @@ ice_vc_add_eth_addr_msg(struct ice_softc *sc, struct ice_vf *vf, u8 *msg_buf)
 			v_status = VIRTCHNL_STATUS_ERR_PARAM;
 			continue;
 		}
-		/* Don't count VF's MAC against its MAC filter limit */
-		if (memcmp(addr, vf->mac, ETHER_ADDR_LEN))
-			added_addr_cnt++;
+		if (!assigned) {
+			MPASS(vf->mac_filter_cnt < vf->mac_filter_limit);
+			memcpy(vf->mac_filters[vf->mac_filter_cnt].addr, addr,
+			    ETHER_ADDR_LEN);
+			vf->mac_filter_cnt++;
+		}
 	}
-
-	vf->mac_filter_cnt += added_addr_cnt;
 
 done:
 	ice_aq_send_msg_to_vf(hw, vf->vf_num, VIRTCHNL_OP_ADD_ETH_ADDR,
@@ -1141,13 +1692,29 @@ ice_vc_del_eth_addr_msg(struct ice_softc *sc, struct ice_vf *vf, u8 *msg_buf)
 	enum virtchnl_status_code v_status = VIRTCHNL_STATUS_SUCCESS;
 	struct virtchnl_ether_addr_list *addr_list;
 	struct ice_hw *hw = &sc->hw;
-	u16 deleted_addr_cnt = 0;
 	int error = 0;
 
 	addr_list = (struct virtchnl_ether_addr_list *)msg_buf;
 
 	for (int i = 0; i < addr_list->num_elements; i++) {
-		error = ice_remove_vsi_mac_filter(vf->vsi, addr_list->list[i].addr);
+		u8 *addr = addr_list->list[i].addr;
+		bool assigned;
+		int index;
+
+		error = ice_vf_validate_mac(vf, addr);
+		if (error != 0) {
+			v_status = VIRTCHNL_STATUS_ERR_PARAM;
+			continue;
+		}
+		assigned = memcmp(addr, vf->mac, ETHER_ADDR_LEN) == 0;
+		if (assigned &&
+		    (vf->vf_flags & VF_FLAG_SET_MAC_CAP) == 0)
+			continue;
+		index = assigned ? -1 : ice_vf_mac_filter_index(vf, addr);
+		if (!assigned && index < 0)
+			continue;
+
+		error = ice_remove_vsi_mac_filter(vf->vsi, addr);
 		if (error) {
 			device_printf(sc->dev,
 			    "%s: VF-%d: Error removing MAC addr for VSI %d\n",
@@ -1155,15 +1722,16 @@ ice_vc_del_eth_addr_msg(struct ice_softc *sc, struct ice_vf *vf, u8 *msg_buf)
 			v_status = VIRTCHNL_STATUS_ERR_PARAM;
 			continue;
 		}
-		/* Don't count VF's MAC against its MAC filter limit */
-		if (memcmp(addr_list->list[i].addr, vf->mac, ETHER_ADDR_LEN))
-			deleted_addr_cnt++;
+		if (!assigned) {
+			if (index + 1 < vf->mac_filter_cnt) {
+				memmove(&vf->mac_filters[index],
+				    &vf->mac_filters[index + 1],
+				    (vf->mac_filter_cnt - index - 1) *
+				    sizeof(*vf->mac_filters));
+			}
+			vf->mac_filter_cnt--;
+		}
 	}
-
-	if (deleted_addr_cnt >= vf->mac_filter_cnt)
-		vf->mac_filter_cnt = 0;
-	else
-		vf->mac_filter_cnt -= deleted_addr_cnt;
 
 	ice_aq_send_msg_to_vf(hw, vf->vf_num, VIRTCHNL_OP_DEL_ETH_ADDR,
 	    v_status, NULL, 0, NULL);
@@ -2365,16 +2933,97 @@ ice_vc_notify_vf_link_state(struct ice_softc *sc, struct ice_vf *vf)
 }
 
 /**
+ * ice_iov_mbx_overflow - Detect and isolate a VF flooding the PF mailbox
+ * @sc: device private structure
+ * @vf: VF which sent the current message
+ * @mbx_data: software mailbox snapshot data, or NULL on E830
+ *
+ * E830 enforces the per-VF watermark in hardware.  On older devices, reset
+ * and block a VF after the Intel snapshot detector first attributes an
+ * overflow.  A later external VF reset, PF reset, or SR-IOV recreation
+ * releases it.
+ *
+ * @returns true if the current message must be discarded.
+ */
+static bool
+ice_iov_mbx_overflow(struct ice_softc *sc, struct ice_vf *vf,
+    struct ice_mbx_data *mbx_data)
+{
+	struct ice_hw *hw = &sc->hw;
+	bool report_malvf;
+	u32 reg, vf_flags;
+	int error, status;
+
+	if (mbx_data == NULL)
+		return (false);
+
+	/* Every message advances the snapshot, including a blocked VF's. */
+	report_malvf = false;
+	status = ice_mbx_vf_state_handler(hw, mbx_data, &vf->mbx_info,
+	    &report_malvf);
+	if ((atomic_load_acq_32(&vf->vf_flags) & VF_FLAG_MBX_BLOCKED) != 0)
+		return (true);
+	ICE_FAIL_POINT_CODE_COND(sc, _debug_fail_point_ice_iov,
+	    mailbox_overflow, ice_iov_fail_vf_matches(vf->vf_num),
+	    FAIL_POINT_NONSLEEPABLE, {
+		status = 0;
+		vf->mbx_info.malicious = 1;
+		report_malvf = true;
+	});
+	if (status != 0) {
+		device_printf(sc->dev,
+		    "Unable to check VF %u mailbox overflow, err %s\n",
+		    vf->vf_num, ice_status_str(status));
+		return (false);
+	}
+	if (!report_malvf)
+		return (vf->mbx_info.malicious != 0);
+
+	vf->mbx_overflow_events++;
+	atomic_set_32(&vf->vf_flags, VF_FLAG_MBX_BLOCKED);
+	device_printf(sc->dev,
+	    "VF %u exceeded the mailbox message limit; resetting and blocking it\n",
+	    vf->vf_num);
+
+	vf_flags = atomic_load_acq_32(&vf->vf_flags);
+	if ((vf_flags & VF_FLAG_ENABLED) != 0 && vf->vsi != NULL) {
+		error = ice_reset_vf(sc, vf, true, false);
+		if (error != 0) {
+			device_printf(sc->dev,
+			    "Unable to isolate VF %u after mailbox overflow: %s\n",
+			    vf->vf_num, ice_err_str(error));
+		} else {
+			/*
+			 * Leave queues and mailbox requests blocked, but complete VFR
+			 * so a later physical FLR can create a new reset edge and
+			 * recover the VF.
+			 */
+			ice_iov_complete_vf_reset(sc, vf, false);
+		}
+	} else {
+		/* An incompletely configured VF has no queues to drain. */
+		reg = rd32(hw, VPGEN_VFRTRIG(vf->vf_num));
+		reg |= VPGEN_VFRTRIG_VFSWR_M;
+		wr32(hw, VPGEN_VFRTRIG(vf->vf_num), reg);
+		ice_flush(hw);
+	}
+
+	return (true);
+}
+
+/**
  * ice_vc_handle_vf_msg - Handle a message from a VF
  * @sc: device private structure
  * @event: event received from the HW MBX queue
+ * @mbx_data: software overflow-detection data, or NULL on E830
  *
  * Called whenever an event is received from a VF on the HW mailbox queue.
  * Responsible for handling these messages as well as responding to the
  * VF afterwards, depending on the received message type.
  */
 void
-ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event)
+ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event,
+    struct ice_mbx_data *mbx_data)
 {
 	struct ice_hw *hw = &sc->hw;
 	device_t dev = sc->dev;
@@ -2394,6 +3043,8 @@ ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event)
 	}
 
 	vf = &sc->vfs[v_id];
+	if (ice_iov_mbx_overflow(sc, vf, mbx_data))
+		return;
 
 	/* Perform basic checks on the msg */
 	err = virtchnl_vc_validate_vf_msg(&vf->version, v_opcode, msg, msglen);
@@ -2407,9 +3058,15 @@ ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event)
 	vf_flags = atomic_load_acq_32(&vf->vf_flags);
 	if ((vf_flags & VF_FLAG_ENABLED) == 0 || vf->vsi == NULL)
 		return;
+	/* Only a reset outside this dispatcher may release an isolated VF. */
+	if ((vf_flags & (VF_FLAG_MDD_BLOCKED | VF_FLAG_MBX_BLOCKED)) != 0)
+		return;
 
-	/* Only a later PF rebuild can restore an invalid firmware VSI. */
-	if ((vf_flags & (VF_FLAG_REBUILD_FAILED | VF_FLAG_RESET_FAILED)) != 0 &&
+	/*
+	 * Permit only reset negotiation while VF hardware state is unsafe.
+	 * A VFR can retry RESET_FAILED; REBUILD_REQUIRED needs a PF rebuild.
+	 */
+	if ((vf_flags & (VF_FLAG_REBUILD_REQUIRED | VF_FLAG_RESET_FAILED)) != 0 &&
 	    v_opcode != VIRTCHNL_OP_VERSION &&
 	    v_opcode != VIRTCHNL_OP_RESET_VF) {
 		ice_aq_send_msg_to_vf(hw, v_id, v_opcode,
@@ -2422,7 +3079,7 @@ ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event)
 		ice_vc_version_msg(sc, vf, msg);
 		break;
 	case VIRTCHNL_OP_RESET_VF:
-		ice_reset_vf(sc, vf, true);
+		ice_reset_vf(sc, vf, true, true);
 		break;
 	case VIRTCHNL_OP_GET_VF_RESOURCES:
 		ice_vc_get_vf_res_msg(sc, vf, msg);
