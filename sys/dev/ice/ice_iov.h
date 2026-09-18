@@ -71,8 +71,14 @@ enum ice_vf_flags {
 	VF_FLAG_PROMISC_CAP		= BIT(3),
 	VF_FLAG_MAC_ANTI_SPOOF		= BIT(4),
 	VF_FLAG_INITIALIZED		= BIT(5),
-	VF_FLAG_REBUILD_FAILED		= BIT(6),
+	VF_FLAG_REBUILD_REQUIRED	= BIT(6),
 	VF_FLAG_RESET_FAILED		= BIT(7),
+	VF_FLAG_MDD_BLOCKED		= BIT(8),
+	VF_FLAG_MBX_BLOCKED		= BIT(9),
+};
+
+struct ice_vf_mac_filter {
+	u8 addr[ETHER_ADDR_LEN];
 };
 
 /**
@@ -91,6 +97,7 @@ struct ice_vf {
 
 	u16 mac_filter_limit;
 	u16 mac_filter_cnt;
+	struct ice_vf_mac_filter *mac_filters;
 	u16 vlan_limit;
 	u16 vlan_cnt;
 #define ICE_VF_VLAN_MAP_LEN	(EVL_VLID_MASK + 1)
@@ -105,6 +112,12 @@ struct ice_vf {
 	u32 txq_configured;
 	u32 rxq_configured;
 	u32 rxq_enabled;
+
+	u64 mdd_tx_events;
+	u64 mdd_rx_events;
+	struct ice_mbx_vf_info mbx_info;
+	u64 mbx_overflow_events;
+	struct timeval last_mdd_log;
 };
 
 #define ICE_PCIE_DEV_STATUS			0xAA
@@ -126,12 +139,18 @@ int ice_iov_detach(struct ice_softc *sc);
 int ice_iov_init(struct ice_softc *sc, uint16_t num_vfs, const nvlist_t *params);
 int ice_iov_add_vf(struct ice_softc *sc, uint16_t vfnum, const nvlist_t *params);
 int ice_iov_rebuild_vf(struct ice_softc *sc, struct ice_vsi *vsi);
+struct if_vf_status;
+int ice_iov_vf_status(struct ice_softc *sc, struct if_vf_status **statusp);
 void ice_iov_uninit(struct ice_softc *sc);
 
 void ice_iov_handle_vflr(struct ice_softc *sc);
+u32 ice_iov_handle_mdd(struct ice_softc *sc);
 void ice_iov_notify_vfs_reset(struct ice_softc *sc);
+int ice_iov_quiesce_vfs_for_reset(struct ice_softc *sc);
+void ice_iov_reconfigure_mbx(struct ice_softc *sc);
 
-void ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event);
+void ice_vc_handle_vf_msg(struct ice_softc *sc, struct ice_rq_event_info *event,
+    struct ice_mbx_data *mbx_data);
 void ice_vc_notify_all_vfs_link_state(struct ice_softc *sc);
 
 #endif /* _ICE_IOV_H_ */
