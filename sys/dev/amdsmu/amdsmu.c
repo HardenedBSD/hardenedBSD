@@ -317,6 +317,74 @@ amdsmu_resume(device_t dev, enum power_stype stype)
 	amdsmu_fetch_idlemask(dev);
 }
 
+static void
+amdsmu_resume_check(device_t dev, enum power_stype stype)
+{
+	struct amdsmu_softc *sc = device_get_softc(dev);
+	struct amdsmu_metrics *m = &sc->metrics;
+	bool any_blocking = false;
+	const struct amdsmu_diagnostics *d;
+
+	if (stype != POWER_STYPE_SUSPEND_TO_IDLE)
+		return;
+	if (m->s0i3_last_entry_status != 0)
+		return;
+
+	device_printf(dev,
+	    "failed to enter S0i3 during last suspend; "
+	    "battery drain will be excessive\n");
+
+	if (sc->product->amdsmu_deviceid != PCI_DEVICEID_AMD_PHOENIX_ROOT) {
+		device_printf(dev, "only limited diagnostic information "
+		    "available for %x:%x; check dev.amdsmu.0 sysctl tree\n",
+		    sc->product->amdsmu_vendorid,
+		    sc->product->amdsmu_deviceid);
+		return;
+	}
+
+	for (size_t i = 0; i < sc->product->ip_block_count; i++) {
+		/*
+		 * An IP block only truly blocked S0i3 entry if it was active
+		 * for the entire time spent in "SWDRIPS".
+		 */
+		if (m->ip_block_last_active_time[i] < m->time_last_in_sw_drips)
+			continue;
+		/* Check if this IP block should be ignored. */
+		d = NULL;
+		for (size_t j = 0; j < nitems(amdsmu_diagnostics); j++) {
+			if (strcmp(amdsmu_diagnostics[j].blocking_ip_block,
+			    sc->product->ip_blocks_names[i]) != 0)
+				continue;
+			d = &amdsmu_diagnostics[j];
+			break;
+		}
+		if (d != NULL && d->ignore)
+			continue;
+
+		if (!any_blocking) {
+			device_printf(dev,
+			    "IP blocks that blocked S0i3 entry:\n");
+			any_blocking = true;
+		}
+		device_printf(dev, "  %s (active for %ju us)\n",
+		    sc->product->ip_blocks_names[i],
+		    (uintmax_t)m->ip_block_last_active_time[i]);
+
+		if (d == NULL)
+			continue;
+		if (d->expected_module != NULL &&
+		    devclass_find(d->expected_module) == NULL)
+			device_printf(dev,
+			    "    hint: load %s to allow this block to "
+			    "suspend\n", d->expected_module);
+		if (d->extra != NULL)
+			device_printf(dev, "    hint: %s\n", d->extra);
+	}
+
+	if (!any_blocking)
+		device_printf(dev, "no IP block info available\n");
+}
+
 static int
 amdsmu_attach(device_t dev)
 {
@@ -461,6 +529,8 @@ amdsmu_attach(device_t dev)
 	    amdsmu_suspend, dev, EVENTHANDLER_PRI_LAST);
 	sc->eh_resume = EVENTHANDLER_REGISTER(acpi_pre_dev_resume,
 	    amdsmu_resume, dev, EVENTHANDLER_PRI_FIRST);
+	sc->eh_resume_check = EVENTHANDLER_REGISTER(power_resume_check,
+	    amdsmu_resume_check, dev, EVENTHANDLER_PRI_ANY);
 #endif
 
 	return (0);
@@ -482,6 +552,7 @@ amdsmu_detach(device_t dev)
 #if defined(DEV_ACPI)
 	EVENTHANDLER_DEREGISTER(acpi_post_dev_suspend, sc->eh_suspend);
 	EVENTHANDLER_DEREGISTER(acpi_pre_dev_resume, sc->eh_resume);
+	EVENTHANDLER_DEREGISTER(power_resume_check, sc->eh_resume_check);
 #endif
 
 	bus_space_unmap(sc->bus_tag, sc->smu_space, SMU_MEM_SIZE);
