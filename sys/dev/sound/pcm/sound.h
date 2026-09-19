@@ -189,8 +189,8 @@ struct snddev_info {
 	device_t dev;
 	char status[SND_STATUSLEN];
 	struct mtx lock;
-	struct cdev *mixer_dev;
 	struct cdev *dsp_dev;
+	struct snd_mixer *mixer;
 	uint32_t pvchanrate, pvchanformat, pvchanmode;
 	uint32_t rvchanrate, rvchanformat, rvchanmode;
 	int32_t eqpreamp;
