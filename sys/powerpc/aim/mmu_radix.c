@@ -3498,19 +3498,19 @@ mmu_radix_enter_quick(pmap_t pmap, vm_offset_t va, vm_page_t m,
 	PMAP_UNLOCK(pmap);
 }
 
-vm_paddr_t
-mmu_radix_extract(pmap_t pmap, vm_offset_t va)
+static vm_paddr_t
+mmu_radix_extract_locked(pmap_t pmap, vm_offset_t va)
 {
 	pml3_entry_t *l3e;
 	pt_entry_t *pte;
 	vm_paddr_t pa;
 
+	PMAP_LOCK_ASSERT(pmap, MA_OWNED);
 	l3e = pmap_pml3e(pmap, va);
 	if (__predict_false(l3e == NULL))
 		return (0);
 	if (be64toh(*l3e) & RPTE_LEAF) {
 		pa = (be64toh(*l3e) & PG_PS_FRAME) | (va & L3_PAGE_MASK);
-		pa |= (va & L3_PAGE_MASK);
 	} else {
 		/*
 		 * Beware of a concurrent promotion that changes the
@@ -3525,8 +3525,18 @@ mmu_radix_extract(pmap_t pmap, vm_offset_t va)
 			return (0);
 		pa = be64toh(*pte);
 		pa = (pa & PG_FRAME) | (va & PAGE_MASK);
-		pa |= (va & PAGE_MASK);
 	}
+	return (pa);
+}
+
+vm_paddr_t
+mmu_radix_extract(pmap_t pmap, vm_offset_t va)
+{
+	vm_paddr_t pa;
+
+	PMAP_LOCK(pmap);
+	pa = mmu_radix_extract_locked(pmap, va);
+	PMAP_UNLOCK(pmap);
 	return (pa);
 }
 
@@ -5985,8 +5995,9 @@ mmu_radix_sync_icache(pmap_t pm, vm_offset_t va, vm_size_t sz)
 	if (__predict_false(pm == NULL))
 		pm = &curthread->td_proc->p_vmspace->vm_pmap;
 
+	PMAP_LOCK(pm);
 	while (sz > 0) {
-		pa = pmap_extract(pm, va);
+		pa = mmu_radix_extract_locked(pm, va);
 		sync_sz = PAGE_SIZE - (va & PAGE_MASK);
 		sync_sz = min(sync_sz, sz);
 		if (pa != 0) {
@@ -5996,6 +6007,7 @@ mmu_radix_sync_icache(pmap_t pm, vm_offset_t va, vm_size_t sz)
 		va += sync_sz;
 		sz -= sync_sz;
 	}
+	PMAP_UNLOCK(pm);
 }
 
 static __inline void
