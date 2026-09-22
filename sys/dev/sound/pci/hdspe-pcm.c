@@ -705,15 +705,6 @@ hdspechan_init(kobj_t obj, void *devinfo, struct snd_dbuf *b,
 
 	/* Allocate maximum buffer size. */
 	ch->size = HDSPE_CHANBUF_SIZE * hdspe_channel_count(ch->ports, 8);
-<<<<<<< HEAD
-	ch->data = malloc(ch->size, M_HDSPE, M_NOWAIT);
-	if (ch->data == NULL) {
-		device_printf(scp->dev, "Can't allocate data.\n");
-		mtx_unlock(&sc->lock);
-		return (NULL);
-	}
-=======
->>>>>>> rad/freebsd/15-stable/main
 	ch->position = 0;
 
 	ch->buffer = b;
