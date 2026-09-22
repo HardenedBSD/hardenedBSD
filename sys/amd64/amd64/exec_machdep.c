@@ -405,6 +405,15 @@ x86_clear_dbregs(struct pcb *pcb)
 	clear_pcb_flags(pcb, PCB_DBREGS);
 }
 
+void
+exec_splitlock(struct thread *td)
+{
+	if (ia32_splitlock_force)
+		enable_splitlock(td);
+	else if (ia32_splitlock)
+		disable_splitlock(td);
+}
+
 /*
  * Reset registers to default values on exec.
  */
@@ -442,6 +451,7 @@ exec_setregs(struct thread *td, struct image_params *imgp, uintptr_t stack)
 	regs->tf_flags = TF_HASSEGS;
 
 	x86_clear_dbregs(pcb);
+	exec_splitlock(td);
 
 	/*
 	 * Drop the FP state if we hold it, so that the process gets a
