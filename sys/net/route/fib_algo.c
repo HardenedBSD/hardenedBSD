@@ -849,8 +849,10 @@ handle_rtable_change_cb(struct rib_head *rnh, struct rib_cmd_info *rc,
 	 */
 	if (rc->rc_nh_new != NULL) {
 		if (fib_ref_nhop(fd, rc->rc_nh_new) == 0) {
-			/* ran out of indexes */
-			schedule_fd_rebuild(fd, "ran out of nhop indexes");
+			if (immediate_sync)
+				rebuild_fd(fd, "ran out of nhop indexes");
+			else
+				schedule_fd_rebuild(fd, "ran out of nhop indexes");
 			return;
 		}
 	}
@@ -1884,8 +1886,6 @@ fib_ref_nhop(struct fib_data *fd, struct nhop_object *nh)
 		    ("out of nhop index spaces for %s", print_family(family)));
 		nt = &fd->fd_af[fd->fd_num_af++];
 		nt->nhaf_family = family;
-		nt->nhaf_count = 0;
-		nt->nhaf_base = 0;
 	}
 
 	idx = get_nhop_idx(nh);
