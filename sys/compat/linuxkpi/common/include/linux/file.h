@@ -184,7 +184,15 @@ static inline struct fd fdget(unsigned int fd)
 	return (struct fd){f};
 }
 
+LINUXKPI_DEFINE_CLASS(fd, struct fd, fdput(_T), fdget(fd), int fd)
+
 #define	fd_file(fd)	((fd).linux_file)
+
+static inline bool
+fd_empty(struct fd fd)
+{
+	return (fd_file(fd) == NULL);
+}
 
 #define	file		linux_file
 #define	fget(...)	linux_fget(__VA_ARGS__)
