@@ -204,6 +204,66 @@ vm_extra_pkg_rmcache() {
 buildfs() {
 	local md tmppool
 
+<<<<<<< HEAD
+=======
+	# Copy entries from METALOG.pkg into METALOG, but first check to
+	# make sure that filesystem objects still exist; some things may
+	# have been logged which no longer exist if a package was removed.
+	if [ -f ${DESTDIR}/METALOG.pkg ]; then
+		while read F REST; do
+			if [ -e "${DESTDIR}/${F}" ] ||
+			    [ -L "${DESTDIR}/${F}" ]; then
+				echo "${F} ${REST}" >> ${DESTDIR}/METALOG
+			fi
+		done < ${DESTDIR}/METALOG.pkg
+	fi
+
+	# Check for any directories in the staging tree which weren't
+	# recorded in METALOG, and record them now.  This is a quick hack
+	# to avoid creating unusable VM images and should go away once
+	# the bugs which produce such unlogged directories are gone.
+	grep type=dir ${DESTDIR}/METALOG |
+	    cut -f 1 -d ' ' |
+	    sort -u > ${DESTDIR}/METALOG.dirs
+	( cd ${DESTDIR} && find . -type d ) |
+	    sort |
+	    comm -23 - ${DESTDIR}/METALOG.dirs > ${DESTDIR}/METALOG.missingdirs
+	if [ -s ${DESTDIR}/METALOG.missingdirs ]; then
+		echo "WARNING: Directories exist but were not in METALOG"
+		cat ${DESTDIR}/METALOG.missingdirs
+	fi
+	while read DIR; do
+		metalog_add_data ${DIR}
+	done < ${DESTDIR}/METALOG.missingdirs
+
+	if [ -z "${NOPKGBASE}" ]; then
+		# Add some database files which are created by pkg triggers;
+		# at some point in the future the tools which create these
+		# files should probably learn how to record them in METALOG
+		# (which would simplify no-root installworld as well).
+		metalog_add_data ./etc/login.conf.db
+		metalog_add_data ./etc/passwd
+		metalog_add_data ./etc/pwd.db
+		metalog_add_data ./etc/spwd.db 600
+		metalog_add_data ./var/db/services.db
+	fi
+
+	if [ -n "${MISSING_METALOGS}" ]; then
+		# Hack to allow VM configurations to add files which
+		# weren't being added to METALOG appropriately.  This
+		# is mainly a workaround for the @sample bug and it
+		# should go away before FreeBSD 15.1 ships.
+		for P in ${MISSING_METALOGS}; do
+			metalog_add_data ${P}
+		done
+	fi
+
+	# Sort METALOG file; makefs produces directories with 000 permissions
+	# if their contents are seen before the directories themselves.
+	env -i LC_COLLATE=C sort -u ${DESTDIR}/METALOG > ${DESTDIR}/METALOG.sorted
+	mv ${DESTDIR}/METALOG.sorted ${DESTDIR}/METALOG
+
+>>>>>>> rad/freebsd/15-stable/main
 	case "${VMFS}" in
 	ufs)
 		makefs ${MAKEFSARGS} -o label=rootfs -o version=2 -o softupdates=1 \
