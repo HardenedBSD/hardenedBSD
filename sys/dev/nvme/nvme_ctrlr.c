@@ -1291,7 +1291,7 @@ nvme_ctrlr_aer_task(void *arg, int pending)
 	case NVME_LOG_ERROR: {
 		struct nvme_error_information_entry *err =
 		    (struct nvme_error_information_entry *)aer->log_page_buffer;
-		for (int i = 0; i < (aer->ctrlr->cdata.elpe + 1); i++)
+		for (uint32_t i = 0; i < aer->log_page_size / sizeof(*err); i++)
 			nvme_error_information_entry_swapbytes(err++);
 		break;
 	}
@@ -1405,9 +1405,12 @@ nvme_ctrlr_shared_handler(void *arg)
 {
 	struct nvme_controller *ctrlr = arg;
 
-	nvme_mmio_write_4(ctrlr, intms, 1);
+	/* INTMS/INTMC are undefined when configured for MSI-X. */
+	if (!ctrlr->is_msix)
+		nvme_mmio_write_4(ctrlr, intms, 1);
 	nvme_ctrlr_poll(ctrlr);
-	nvme_mmio_write_4(ctrlr, intmc, 1);
+	if (!ctrlr->is_msix)
+		nvme_mmio_write_4(ctrlr, intmc, 1);
 }
 
 #define NVME_MAX_PAGES  (int)(1024 / sizeof(vm_page_t))
