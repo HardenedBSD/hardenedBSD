@@ -204,8 +204,6 @@ vm_extra_pkg_rmcache() {
 buildfs() {
 	local md tmppool
 
-<<<<<<< HEAD
-=======
 	# Copy entries from METALOG.pkg into METALOG, but first check to
 	# make sure that filesystem objects still exist; some things may
 	# have been logged which no longer exist if a package was removed.
@@ -263,7 +261,6 @@ buildfs() {
 	env -i LC_COLLATE=C sort -u ${DESTDIR}/METALOG > ${DESTDIR}/METALOG.sorted
 	mv ${DESTDIR}/METALOG.sorted ${DESTDIR}/METALOG
 
->>>>>>> rad/freebsd/15-stable/main
 	case "${VMFS}" in
 	ufs)
 		makefs ${MAKEFSARGS} -o label=rootfs -o version=2 -o softupdates=1 \
