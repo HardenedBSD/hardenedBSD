@@ -83,6 +83,10 @@ enum {
 	PFNL_CMD_SOURCE_NGET = 45,
 	PFNL_CMD_SOURCE_CLEAR = 46,
 	PFNL_CMD_TABLE_TEST_ADDRS = 47,
+	PFNL_CMD_INA_DEFINE = 48,
+	PFNL_CMD_OSFP_FLUSH = 49,
+	PFNL_CMD_OSFP_GET = 50,
+	PFNL_CMD_OSFP_ADD = 51,
 	__PFNL_CMD_MAX,
 };
 #define PFNL_CMD_MAX (__PFNL_CMD_MAX -1)
@@ -591,6 +595,34 @@ enum pf_source_clear_t {
 	PF_SC_RDOMAIN		= 3, /* u32 */
 	PF_SC_AF		= 4, /* u8 */
 	PF_SC_ADDR		= 5, /* in6_addr */
+};
+
+enum pf_ina_define_t {
+	PF_ID_UNSPEC,
+	PF_ID_TABLE		= 1, /* pfr_table */
+	PF_ID_TICKET		= 2, /* u32 */
+	PF_ID_FLAGS		= 3, /* u32 */
+	PF_ID_ADDR		= 4, /* pfr_addr */
+	PF_ID_NADD		= 5, /* u32 */
+	PF_ID_NADDR		= 6, /* u32 */
+};
+
+enum pf_osfp_t {
+	PF_OFP_UNSPEC,
+	PF_OFP_IDX		= 1, /* u32 */
+	PF_OFP_OS_OS		= 2, /* u32 */
+	PF_OFP_OS_ENFLAGS	= 3, /* u32 */
+	PF_OFP_OS_CLASS		= 4, /* string */
+	PF_OFP_OS_VERSION	= 5, /* string */
+	PF_OFP_OS_SUBTYPE	= 6, /* string */
+	PF_OFP_TCPOPTS		= 7, /* u64 */
+	PF_OFP_WSIZE		= 8, /* u16 */
+	PF_OFP_PSIZE		= 9, /* u16 */
+	PF_OFP_MSS		= 10, /* u16 */
+	PF_OFP_FLAGS		= 11, /* u16 */
+	PF_OFP_OPTCNT		= 12, /* u8 */
+	PF_OFP_WSCALE		= 13, /* u8 */
+	PF_OFP_TTL		= 14, /* u8 */
 };
 
 #ifdef _KERNEL
