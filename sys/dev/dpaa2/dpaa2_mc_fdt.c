@@ -345,6 +345,11 @@ dpaa2_mc_fdt_get_phy_dev(device_t dev, device_t *phy_dev, uint32_t id)
 static const struct ofw_bus_devinfo *
 dpaa2_mc_simplebus_get_devinfo(device_t bus, device_t child)
 {
+	struct dpaa2_mc_softc *sc;
+
+	sc = device_get_softc(bus);
+	if (child == sc->rcdev)
+		return (NULL);
 
 	return (OFW_BUS_GET_DEVINFO(device_get_parent(bus), child));
 }
@@ -391,7 +396,7 @@ static device_method_t dpaa2_mc_fdt_methods[] = {
 	DEVMETHOD_END
 };
 
-DEFINE_CLASS_1(dpaa2_mc, dpaa2_mc_fdt_driver, dpaa2_mc_fdt_methods,
-    sizeof(struct dpaa2_mc_softc), dpaa2_mc_driver);
+DEFINE_CLASS_2(dpaa2_mc, dpaa2_mc_fdt_driver, dpaa2_mc_fdt_methods,
+    sizeof(struct dpaa2_mc_softc), dpaa2_mc_driver, simplebus_driver);
 
 DRIVER_MODULE(dpaa2_mc, simplebus, dpaa2_mc_fdt_driver, 0, 0);
