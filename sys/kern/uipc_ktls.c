@@ -141,6 +141,11 @@ SYSCTL_BOOL(_kern_ipc_tls, OID_AUTO, enable, CTLFLAG_RWTUN,
     &ktls_offload_enable, 0,
     "Enable support for kernel TLS offload");
 
+static bool ktls_rx_offload_enable = true;
+SYSCTL_BOOL(_kern_ipc_tls, OID_AUTO, rx_enable, CTLFLAG_RWTUN,
+    &ktls_rx_offload_enable, 0,
+    "Enable support for kernel TLS receive offload");
+
 static bool ktls_cbc_enable = true;
 SYSCTL_BOOL(_kern_ipc_tls, OID_AUTO, cbc_enable, CTLFLAG_RWTUN,
     &ktls_cbc_enable, 1,
@@ -1290,7 +1295,7 @@ ktls_enable_rx(struct socket *so, struct tls_enable *en)
 	struct ktls_session *tls;
 	int error;
 
-	if (!ktls_offload_enable)
+	if (!ktls_offload_enable || !ktls_rx_offload_enable)
 		return (ENOTSUP);
 
 	counter_u64_add(ktls_offload_enable_calls, 1);
@@ -2404,14 +2409,14 @@ tls13_find_record_type(struct ktls_session *tls, struct mbuf *m, int tls_len,
 			m_len--;
 		if (m_len > 0) {
 			record_type = cp[m_len - 1];
-			last_offset = offset + m_len;
+			last_offset = offset + m_len - 1;
 		}
 	}
 	if (last_offset < tls->params.tls_hlen)
 		return (EBADMSG);
 
 	*record_typep = record_type;
-	*trailer_len = tls_len - last_offset + 1;
+	*trailer_len = tls_len - last_offset;
 	return (0);
 }
 
