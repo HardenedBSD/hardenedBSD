@@ -383,6 +383,29 @@ wrmsr(u_int msr, uint64_t newval)
 }
 
 static __inline void
+wrmsrns(u_int msr, uint64_t newval)
+{
+	uint32_t low, high;
+
+	low = newval;
+	high = newval >> 32;
+	__asm __volatile("wrmsrns" : : "a" (low), "d" (high), "c" (msr));
+}
+
+#if defined(__clang__) && \
+    (__clang_major__ > 20 || (__clang_major__ == 20 && __clang_minor__ >= 1))
+#define	wrmsr_imm(msr, val) \
+    __asm __volatile("wrmsrns %0, %1" : : "r" (val), "i" (msr))
+#else
+/*
+ * When Clang does not support the immediate form of wrmsr, decay it
+ * to plain wrmsr.
+ */
+#define	wrmsr_imm(msr, val) \
+    wrmsr((msr), (val));
+#endif
+
+static __inline void
 load_cr0(u_long data)
 {
 
