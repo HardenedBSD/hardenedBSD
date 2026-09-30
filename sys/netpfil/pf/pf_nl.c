@@ -723,7 +723,7 @@ nlattr_add_timeout(struct nl_writer *nw, int attrtype,
 		return (false);
 
 	for (int i = 0; i < PFTM_MAX; i++)
-		nlattr_add_u32(nw, PF_RT_TIMEOUT, timeout[i]);
+		nlattr_add_u32(nw, PF_TT_TIMEOUT, timeout[i]);
 
 	nlattr_set_len(nw, off);
 
@@ -2315,6 +2315,7 @@ nlattr_add_pfr_addr(struct nl_writer *nw, int attr, const struct pfr_addr *a)
 	nlattr_add_u8(nw, PFR_A_NET, a->pfra_net);
 	nlattr_add_bool(nw, PFR_A_NOT, a->pfra_not);
 	nlattr_add_in6_addr(nw, PFR_A_ADDR, &a->pfra_u._pfra_ip6addr);
+	nlattr_add_u8(nw, PFR_A_FBACK, a->pfra_fback);
 
 	nlattr_set_len(nw, off);
 
