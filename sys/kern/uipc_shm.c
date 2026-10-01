@@ -724,12 +724,7 @@ static int
 shm_partial_page_invalidate(vm_object_t object, vm_pindex_t idx, int base,
     int end)
 {
-	int error;
-
-	error = vm_page_grab_zero_partial(object, idx, base, end);
-	if (error == EIO)
-		VM_OBJECT_WUNLOCK(object);
-	return (error);
+	return (vm_page_grab_zero_partial(object, idx, base, end));
 }
 
 static int
@@ -2113,7 +2108,7 @@ shm_deallocate(struct shmfd *shmfd, off_t *offset, off_t *length, int flags)
 	}
 
 out:
-	VM_OBJECT_WUNLOCK(shmfd->shm_object);
+	VM_OBJECT_WUNLOCK(object);
 	*offset = off;
 	*length = len;
 	return (error);
