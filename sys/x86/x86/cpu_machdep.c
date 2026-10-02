@@ -75,8 +75,9 @@
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
-#include <machine/specialreg.h>
+#include <machine/ifunc.h>
 #include <machine/md_var.h>
+#include <machine/specialreg.h>
 #include <machine/trap.h>
 #include <machine/tss.h>
 #ifdef SMP
@@ -86,7 +87,6 @@
 #include <machine/elan_mmcr.h>
 #endif
 #include <x86/acpica_machdep.h>
-#include <x86/ifunc.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
