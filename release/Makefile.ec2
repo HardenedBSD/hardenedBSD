@@ -89,12 +89,8 @@ ec2ami-${_FL}-${_FS}: cw-ec2-${_FL}-${_FS} ${CW_EC2_PORTINSTALL}
 	@false
 .endif
 	/usr/local/bin/bsdec2-image-upload ${PUBLISH} ${PUBLICSNAP} \
-<<<<<<< HEAD
-	    ${EC2ARCH} ${SSMOPTS_${_FL}_${_FS}} ${BOOTMODEOPT} --sriov --ena \
-=======
 	    ${EC2ARCH} ${SSMOPTS_${_FL}_${_FS}} ${SSMOPTSEXTRA_${_FL}_${_FS}} \
 	    ${BOOTMODEOPT} ${EC2_VMDK} --sriov --ena \
->>>>>>> rad/freebsd/current/main
 	    ${.OBJDIR}/${EC2-${_FL:tu}${_FS:tu}IMAGE} \
 	    "${AMIBASENAME} ${_FL} ${_FS:tu}" \
 	    "${TYPE}/${TARGET} ${GITBRANCH}@${GITREV}" \
