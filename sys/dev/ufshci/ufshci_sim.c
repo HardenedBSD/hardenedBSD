@@ -10,9 +10,12 @@
 #include <cam/cam.h>
 #include <cam/cam_ccb.h>
 #include <cam/cam_debug.h>
+#include <cam/cam_periph.h>
 #include <cam/cam_sim.h>
+#include <cam/cam_xpt_periph.h>
 #include <cam/cam_xpt_sim.h>
 #include <cam/scsi/scsi_all.h>
+#include <cam/scsi/scsi_message.h>
 
 #include "ufshci_private.h"
 
@@ -44,6 +47,11 @@ ufshci_sim_scsiio_done(void *ccb_arg, const struct ufshci_completion *cpl,
 
 	ccb->ccb_h.status &= ~CAM_SIM_QUEUED;
 	if (error) {
+		printf("ufshci: SCSI command completion error, Status(0x%x)"
+		       " Key(0x%x), ASC(0x%x), ASCQ(0x%x)\n",
+		    cpl->response_upiu.cmd_response_upiu.header
+			.ext_iid_or_status,
+		    sense_data[2], sense_data[12], sense_data[13]);
 		ccb->ccb_h.status = CAM_REQ_CMP_ERR;
 		xpt_done(ccb);
 	} else {
@@ -70,6 +78,41 @@ ufshci_sim_illegal_request(union ccb *ccb)
 	    CAM_DEV_QFRZN;
 	xpt_freeze_devq(ccb->ccb_h.path, 1);
 	xpt_done(ccb);
+}
+
+/*
+ * The SCSI LUN format and the UFS UPIU LUN format are different.
+ * This function converts the SCSI LUN format to the UFS UPIU LUN format.
+ */
+uint8_t
+ufshci_sim_translate_scsi_to_ufs_lun(lun_id_t scsi_lun)
+{
+	const int address_format_offset = 8;
+	uint8_t address_format = scsi_lun >> address_format_offset;
+
+	/* Well known logical unit */
+	if (((address_format & RPL_LUNDATA_ATYP_MASK) ==
+		RPL_LUNDATA_ATYP_EXTLUN) &&
+	    ((address_format & RPL_LUNDATA_EXT_EAM_MASK) ==
+		RPL_LUNDATA_EXT_EAM_WK))
+		return ((scsi_lun & UFSHCI_UPIU_UNIT_NUMBER_ID_MASK) |
+		    UFSHCI_UPIU_WLUN_ID_MASK);
+
+	/* Logical unit */
+	return (scsi_lun & UFSHCI_UPIU_UNIT_NUMBER_ID_MASK);
+}
+
+uint64_t
+ufshci_sim_translate_ufs_to_scsi_lun(uint8_t ufs_lun)
+{
+	/* Logical unit */
+	if (!(ufs_lun & UFSHCI_UPIU_WLUN_ID_MASK)) {
+		return ufs_lun;
+	}
+
+	/* Well known logical unit */
+	return (((uint64_t)ufs_lun & ~UFSHCI_UPIU_WLUN_ID_MASK) |
+	    (RPL_LUNDATA_ATYP_EXTLUN | RPL_LUNDATA_EXT_EAM_WK) << 8);
 }
 
 static void
@@ -101,6 +144,17 @@ ufshchi_sim_scsiio(struct cam_sim *sim, union ccb *ccb)
 	payload_len = csio->dxfer_len;
 	is_write = csio->ccb_h.flags & CAM_DIR_OUT;
 
+	if (csio->ccb_h.flags & CAM_CDB_POINTER)
+		cdb = csio->cdb_io.cdb_ptr;
+	else
+		cdb = csio->cdb_io.cdb_bytes;
+
+	if (cdb == NULL || csio->cdb_len > sizeof(upiu->cdb)) {
+		ccb->ccb_h.status = CAM_REQ_INVALID;
+		xpt_done(ccb);
+		return;
+	}
+
 	/* TODO: Check other data type */
 	if ((csio->ccb_h.flags & CAM_DATA_MASK) == CAM_DATA_BIO)
 		req = ufshci_allocate_request_bio((struct bio *)payload,
@@ -108,6 +162,11 @@ ufshchi_sim_scsiio(struct cam_sim *sim, union ccb *ccb)
 	else
 		req = ufshci_allocate_request_vaddr(payload, payload_len,
 		    M_NOWAIT, ufshci_sim_scsiio_done, ccb);
+	if (req == NULL) {
+		ccb->ccb_h.status = CAM_RESRC_UNAVAIL;
+		xpt_done(ccb);
+		return;
+	}
 
 	req->request_size = sizeof(struct ufshci_cmd_command_upiu);
 	req->response_size = sizeof(struct ufshci_cmd_response_upiu);
@@ -123,38 +182,31 @@ ufshchi_sim_scsiio(struct cam_sim *sim, union ccb *ccb)
 		data_direction = UFSHCI_DATA_DIRECTION_NO_DATA_TRANSFER;
 	}
 	req->data_direction = data_direction;
+	req->is_admin = false;
 
 	upiu = (struct ufshci_cmd_command_upiu *)&req->request_upiu;
 	memset(upiu, 0, req->request_size);
 	upiu->header.trans_type = UFSHCI_UPIU_TRANSACTION_CODE_COMMAND;
 	upiu->header.operational_flags = is_write ? UFSHCI_OPERATIONAL_FLAG_W :
 						    UFSHCI_OPERATIONAL_FLAG_R;
-	upiu->header.lun = csio->ccb_h.target_lun;
+	upiu->header.lun = ufshci_sim_translate_scsi_to_ufs_lun(
+	    csio->ccb_h.target_lun);
 	upiu->header.cmd_set_type = UFSHCI_COMMAND_SET_TYPE_SCSI;
 
 	upiu->expected_data_transfer_length = htobe32(payload_len);
 
-	ccb->ccb_h.status |= CAM_SIM_QUEUED;
-
-	if (csio->ccb_h.flags & CAM_CDB_POINTER)
-		cdb = csio->cdb_io.cdb_ptr;
-	else
-		cdb = csio->cdb_io.cdb_bytes;
-
-	if (cdb == NULL || csio->cdb_len > sizeof(upiu->cdb)) {
-		ccb->ccb_h.status = CAM_REQ_INVALID;
-		xpt_done(ccb);
-		return;
-	}
 	memcpy(upiu->cdb, cdb, csio->cdb_len);
 
-	error = ufshci_ctrlr_submit_io_request(ctrlr, req);
+	ccb->ccb_h.status |= CAM_SIM_QUEUED;
+	error = ufshci_ctrlr_submit_transfer_request(ctrlr, req);
 	if (error == EBUSY) {
 		ccb->ccb_h.status = CAM_SCSI_BUSY;
+		ufshci_free_request(req);
 		xpt_done(ccb);
 		return;
 	} else if (error) {
 		ccb->ccb_h.status = CAM_REQ_INVALID;
+		ufshci_free_request(req);
 		xpt_done(ccb);
 		return;
 	}
@@ -208,14 +260,18 @@ ufshci_cam_action(struct cam_sim *sim, union ccb *ccb)
 		return;
 	case XPT_PATH_INQ: {
 		struct ccb_pathinq *cpi = &ccb->cpi;
+		uint32_t need_scan_wluns = 0;
+
+		if (!(ctrlr->quirks & UFSHCI_QUIRK_SKIP_WELL_KNOWN_LUNS))
+			need_scan_wluns = PIM_WLUNS;
 
 		cpi->version_num = 1;
 		cpi->hba_inquiry = PI_SDTR_ABLE | PI_TAG_ABLE;
 		cpi->target_sprt = 0;
-		cpi->hba_misc = PIM_UNMAPPED | PIM_NO_6_BYTE;
+		cpi->hba_misc = need_scan_wluns | PIM_UNMAPPED | PIM_NO_6_BYTE;
 		cpi->hba_eng_cnt = 0;
 		cpi->max_target = 0;
-		cpi->max_lun = ctrlr->max_lun_count;
+		cpi->max_lun = ctrlr->max_lun_count - 1;
 		cpi->async_flags = 0;
 		cpi->maxio = ctrlr->max_xfer_size;
 		cpi->initiator_id = 1;
@@ -232,16 +288,16 @@ ufshci_cam_action(struct cam_sim *sim, union ccb *ccb)
 		break;
 	}
 	case XPT_RESET_BUS:
+	case XPT_RESET_DEV:
+		/*
+		 * This callback cannot sleep: CAM calls it with the SIM
+		 * lock and the CAM device lock held. It cannot reset the
+		 * device here. Report success so CAM keeps going, like
+		 * nvme_sim(4) does.
+		 */
 		ccb->ccb_h.status = CAM_REQ_CMP;
 		break;
-	case XPT_RESET_DEV:
-		if (ufshci_dev_reset(ctrlr))
-			ccb->ccb_h.status = CAM_REQ_CMP_ERR;
-		else
-			ccb->ccb_h.status = CAM_REQ_CMP;
-		break;
 	case XPT_ABORT:
-		/* TODO: Implement Task Management CMD*/
 		ccb->ccb_h.status = CAM_FUNC_NOTAVAIL;
 		break;
 	case XPT_SET_TRAN_SETTINGS:
@@ -317,8 +373,9 @@ ufshci_sim_attach(struct ufshci_controller *ctrlr)
 
 	mtx_lock(&ctrlr->sc_mtx);
 	if (xpt_bus_register(ctrlr->ufshci_sim, ctrlr->dev, 0) != CAM_SUCCESS) {
+		/* cam_sim_free() with free_devq also frees the devq. */
 		cam_sim_free(ctrlr->ufshci_sim, /*free_devq*/ TRUE);
-		cam_simq_free(devq);
+		ctrlr->ufshci_sim = NULL;
 		mtx_unlock(&ctrlr->sc_mtx);
 		printf("Failed to create a bus\n");
 		return (ENOMEM);
@@ -329,7 +386,7 @@ ufshci_sim_attach(struct ufshci_controller *ctrlr)
 		CAM_LUN_WILDCARD) != CAM_REQ_CMP) {
 		xpt_bus_deregister(cam_sim_path(ctrlr->ufshci_sim));
 		cam_sim_free(ctrlr->ufshci_sim, /*free_devq*/ TRUE);
-		cam_simq_free(devq);
+		ctrlr->ufshci_sim = NULL;
 		mtx_unlock(&ctrlr->sc_mtx);
 		printf("Failed to create a path\n");
 		return (ENOMEM);
@@ -337,6 +394,20 @@ ufshci_sim_attach(struct ufshci_controller *ctrlr)
 	mtx_unlock(&ctrlr->sc_mtx);
 
 	return (0);
+}
+
+/*
+ * Drop the cached WLUN periph reference. cam_periph_release() takes the
+ * CAM device lock itself, so call this without sc_mtx held: CAM takes
+ * the device lock before the SIM lock, not the other way around.
+ */
+void
+ufshci_sim_release_wlun_periph(struct ufshci_controller *ctrlr)
+{
+	if (ctrlr->ufs_device_wlun_periph != NULL) {
+		cam_periph_release(ctrlr->ufs_device_wlun_periph);
+		ctrlr->ufs_device_wlun_periph = NULL;
+	}
 }
 
 void
@@ -369,4 +440,119 @@ ufshci_sim_detach(struct ufshci_controller *ctrlr)
 		cam_sim_free(ctrlr->ufshci_sim, /* free_devq */ TRUE);
 		ctrlr->ufshci_sim = NULL;
 	}
+}
+
+/*
+ * On success this returns a referenced periph; the caller is responsible
+ * for dropping the reference with cam_periph_release().
+ */
+struct cam_periph *
+ufshci_sim_find_periph(struct ufshci_controller *ctrlr, uint8_t wlun)
+{
+	struct cam_path *path;
+	struct cam_periph *periph = NULL;
+	uint64_t scsi_lun;
+	uint64_t timeout;
+
+	/* The reset path can get here before the SIM is attached. */
+	if (ctrlr->ufshci_sim == NULL)
+		return (NULL);
+
+	scsi_lun = ufshci_sim_translate_ufs_to_scsi_lun(wlun);
+
+	if (xpt_create_path(&path, /*periph*/ NULL,
+		cam_sim_path(ctrlr->ufshci_sim), 0, scsi_lun) != CAM_REQ_CMP) {
+		return NULL;
+	}
+
+	/* Wait for the perip device to be found */
+	timeout = ticks + MSEC_2_TICKS(ctrlr->device_init_timeout_in_ms);
+
+	while (1) {
+		xpt_path_lock(path);
+		periph = cam_periph_find(path, "pass");
+		if (periph != NULL && cam_periph_acquire(periph) != 0)
+			periph = NULL;
+		xpt_path_unlock(path);
+
+		if (periph)
+			break;
+
+		if (timeout - ticks < 0) {
+			ufshci_printf(ctrlr,
+			    "Failed to find the Well known LUN(0x%x)\n", wlun);
+			break;
+		}
+
+		pause_sbt("ufshci_find_periph", ustosbt(100), 0, C_PREL(1));
+	}
+
+	xpt_free_path(path);
+
+	return periph;
+}
+
+/* This function is called during suspend/resume. */
+int
+ufshci_sim_send_ssu(struct ufshci_controller *ctrlr, bool start,
+    uint8_t power_condition, bool immed)
+{
+	struct cam_periph *periph = ctrlr->ufs_device_wlun_periph;
+	union ccb *ccb;
+	int err;
+
+	/* Acquire a periph reference for the duration of this call. */
+	if (periph != NULL && cam_periph_acquire(periph) != 0) {
+		/* The cached periph is going away; drop its reference. */
+		cam_periph_release(periph);
+		ctrlr->ufs_device_wlun_periph = NULL;
+		periph = NULL;
+	}
+
+	if (periph == NULL) {
+		/*
+		 * If the periph device does not exist, try to find it again.
+		 * The reference returned by ufshci_sim_find_periph() is used
+		 * for this call; take an extra one for the cached pointer.
+		 */
+		periph = ufshci_sim_find_periph(ctrlr,
+		    (uint8_t)UFSHCI_WLUN_UFS_DEVICE);
+		if (periph != NULL && cam_periph_acquire(periph) == 0)
+			ctrlr->ufs_device_wlun_periph = periph;
+	}
+
+	if (periph == NULL) {
+		ufshci_printf(ctrlr,
+		    "Well-known LUN `UFS Device (0x50)` not found\n");
+		return ENODEV;
+	}
+	cam_periph_lock(periph);
+	ccb = cam_periph_getccb(periph, CAM_PRIORITY_NORMAL);
+	if (!ccb) {
+		cam_periph_unlock(periph);
+		cam_periph_release(periph);
+		return ENOMEM;
+	}
+
+	scsi_start_stop_pc(&ccb->csio,
+	    /*retries*/ 4,
+	    /*cbfcnp*/ NULL,
+	    /*tag_action*/ MSG_SIMPLE_Q_TAG,
+	    /*start*/ start ? 1 : 0,
+	    /*load_eject*/ 0,
+	    /*immediate*/ immed ? 1 : 0,
+	    /*power_condition*/ power_condition, SSD_MIN_SIZE,
+	    ctrlr->device_init_timeout_in_ms);
+
+	ccb->ccb_h.flags |= CAM_DIR_NONE | CAM_DEV_QFRZDIS;
+
+	err = cam_periph_runccb(ccb, NULL, 0, SF_RETRY_UA, NULL);
+
+	xpt_release_ccb(ccb);
+
+	cam_periph_unlock(periph);
+	/* Release periph reference */
+	cam_periph_release(periph);
+
+	return (err == 0) ? 0 : EIO;
 }
