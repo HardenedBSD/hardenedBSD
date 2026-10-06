@@ -12,8 +12,180 @@
 #include "ufshci_private.h"
 #include "ufshci_reg.h"
 
+static void
+ufshci_ctrlr_fail(struct ufshci_controller *ctrlr)
+{
+	/*
+	 * The attach thread and the reset task can both fail the
+	 * controller. A second queue walk would complete the same
+	 * trackers again.
+	 */
+	if (atomic_swap_32(&ctrlr->is_failed, 1) != 0)
+		return;
+
+	ufshci_req_queue_fail(ctrlr, &ctrlr->task_mgmt_req_queue);
+	ufshci_req_queue_fail(ctrlr, &ctrlr->transfer_req_queue);
+}
+
+/* Some controllers require a reinit after switching to the max gear. */
 static int
-ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
+ufshci_ctrlr_reinit_after_max_gear_switch(struct ufshci_controller *ctrlr)
+{
+	int error;
+
+	/* Reset device */
+	ufshci_utmr_req_queue_disable(ctrlr);
+	ufshci_utr_req_queue_disable(ctrlr);
+
+	error = ufshci_ctrlr_disable(ctrlr);
+	if (error != 0)
+		return (error);
+
+	error = ufshci_ctrlr_enable(ctrlr);
+	if (error != 0)
+		return (error);
+
+	error = ufshci_utmr_req_queue_enable(ctrlr);
+	if (error != 0)
+		return (error);
+
+	error = ufshci_utr_req_queue_enable(ctrlr);
+	if (error != 0)
+		return (error);
+
+	error = ufshci_ctrlr_send_nop(ctrlr);
+	if (error != 0)
+		return (error);
+
+	/* Reinit the target device. */
+	error = ufshci_dev_init(ctrlr);
+	if (error != 0)
+		return (error);
+
+	/* Initialize Reference Clock */
+	error = ufshci_dev_init_reference_clock(ctrlr);
+	if (error != 0)
+		return (error);
+
+	/* Initialize unipro */
+	return (ufshci_dev_init_unipro(ctrlr));
+}
+
+static void
+ufshci_ctrlr_start(struct ufshci_controller *ctrlr, bool resetting)
+{
+	TSENTER();
+
+	/*
+	 * If `resetting` is true, we are on the reset path.
+	 * Re-enable request queues here because ufshci_ctrlr_reset_task()
+	 * disables them during reset.
+	 */
+	if (resetting) {
+		if (ufshci_utmr_req_queue_enable(ctrlr) != 0) {
+			ufshci_ctrlr_fail(ctrlr);
+			return;
+		}
+		if (ufshci_utr_req_queue_enable(ctrlr) != 0) {
+			ufshci_ctrlr_fail(ctrlr);
+			return;
+		}
+	}
+
+	if (ufshci_ctrlr_send_nop(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	/* Initialize UFS target drvice */
+	if (ufshci_dev_init(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	/* Initialize Reference Clock */
+	if (ufshci_dev_init_reference_clock(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	/* Initialize unipro */
+	if (ufshci_dev_init_unipro(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	/*
+	 * Initialize UIC Power Mode
+	 * QEMU UFS devices do not support unipro and power mode.
+	 */
+	if (!(ctrlr->quirks & UFSHCI_QUIRK_IGNORE_UIC_POWER_MODE) &&
+	    ufshci_dev_init_uic_power_mode(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	ufshci_dev_init_uic_link_state(ctrlr);
+
+	if (ctrlr->quirks & UFSHCI_QUIRK_REINIT_AFTER_MAX_GEAR_SWITCH) {
+		uint32_t probe;
+
+		/*
+		 * The reinit is only needed when the link did not survive
+		 * the gear switch. A local readback still shows HS when the
+		 * peer is dead. Only peer traffic proves the link works.
+		 */
+		if (ufshci_uic_send_dme_peer_get(ctrlr, PA_Granularity,
+		    &probe) != 0) {
+			ufshci_printf(ctrlr,
+			    "link probe failed after the gear switch, "
+			    "reinitializing\n");
+			if (ufshci_ctrlr_reinit_after_max_gear_switch(
+			    ctrlr) != 0) {
+				ufshci_ctrlr_fail(ctrlr);
+				return;
+			}
+		}
+	}
+
+	/* Read Controller Descriptor (Device, Geometry) */
+	if (ufshci_dev_get_descriptor(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	if (ufshci_dev_config_write_booster(ctrlr)) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	ufshci_dev_init_auto_hibernate(ctrlr);
+
+	/* TODO: Configure Write Protect */
+
+	/* TODO: Configure Background Operations */
+
+	/*
+	 * A reset normally arrives after the SIM is attached. But if the
+	 * first start attempt failed early, the reset path runs without a
+	 * SIM. Attach it whenever it does not exist yet.
+	 */
+	if (ctrlr->ufshci_sim == NULL && ufshci_sim_attach(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	/* Initialize UFS Power Mode */
+	if (ufshci_dev_init_ufs_power_mode(ctrlr) != 0) {
+		ufshci_ctrlr_fail(ctrlr);
+		return;
+	}
+
+	TSEXIT();
+}
+
+static int
+ufshci_ctrlr_disable_host_ctrlr(struct ufshci_controller *ctrlr)
 {
 	int timeout = ticks + MSEC_2_TICKS(ctrlr->device_init_timeout_in_ms);
 	sbintime_t delta_t = SBT_1US;
@@ -27,6 +199,35 @@ ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
 		ufshci_mmio_write_4(ctrlr, hce, hce);
 	}
 
+	/* Wait for the HCE flag to change */
+	while (1) {
+		hce = ufshci_mmio_read_4(ctrlr, hce);
+		if (!UFSHCIV(UFSHCI_HCE_REG_HCE, hce))
+			break;
+		if (timeout - ticks < 0) {
+			ufshci_printf(ctrlr,
+			    "host controller failed to disable "
+			    "within %d ms\n",
+			    ctrlr->device_init_timeout_in_ms);
+			return (ENXIO);
+		}
+
+		pause_sbt("ufshci_disable_hce", delta_t, 0, C_PREL(1));
+		delta_t = min(SBT_1MS, delta_t * 3 / 2);
+	}
+
+	return (0);
+}
+
+static int
+ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
+{
+	int timeout = ticks + MSEC_2_TICKS(ctrlr->device_init_timeout_in_ms);
+	sbintime_t delta_t = SBT_1US;
+	uint32_t hce;
+
+	hce = ufshci_mmio_read_4(ctrlr, hce);
+
 	/* Enable UFS host controller */
 	hce |= UFSHCIM(UFSHCI_HCE_REG_HCE);
 	ufshci_mmio_write_4(ctrlr, hce, hce);
@@ -36,7 +237,7 @@ ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
 	 * unstable, so we need to read the HCE value after some time after
 	 * initialization is complete.
 	 */
-	pause_sbt("ufshci_hce", ustosbt(100), 0, C_PREL(1));
+	pause_sbt("ufshci_enable_hce", ustosbt(100), 0, C_PREL(1));
 
 	/* Wait for the HCE flag to change */
 	while (1) {
@@ -51,7 +252,7 @@ ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
 			return (ENXIO);
 		}
 
-		pause_sbt("ufshci_hce", delta_t, 0, C_PREL(1));
+		pause_sbt("ufshci_enable_hce", delta_t, 0, C_PREL(1));
 		delta_t = min(SBT_1MS, delta_t * 3 / 2);
 	}
 
@@ -59,9 +260,99 @@ ufshci_ctrlr_enable_host_ctrlr(struct ufshci_controller *ctrlr)
 }
 
 int
+ufshci_ctrlr_disable(struct ufshci_controller *ctrlr)
+{
+	int error;
+
+	/* Disable all interrupts */
+	ufshci_mmio_write_4(ctrlr, ie, 0);
+
+	error = ufshci_ctrlr_disable_host_ctrlr(ctrlr);
+	return (error);
+}
+
+int
+ufshci_ctrlr_enable(struct ufshci_controller *ctrlr)
+{
+	uint32_t ie, hcs;
+	int error;
+
+	error = ufshci_ctrlr_enable_host_ctrlr(ctrlr);
+	if (error)
+		return (error);
+
+	/* Send DME_LINKSTARTUP command to start the link startup procedure */
+	error = ufshci_uic_send_dme_link_startup(ctrlr);
+	if (error)
+		return (error);
+
+	/*
+	 * The device_present(UFSHCI_HCS_REG_DP) bit becomes true if the host
+	 * controller has successfully received a Link Startup UIC command
+	 * response and the UFS device has found a physical link to the
+	 * controller.
+	 */
+	hcs = ufshci_mmio_read_4(ctrlr, hcs);
+	if (!UFSHCIV(UFSHCI_HCS_REG_DP, hcs)) {
+		ufshci_printf(ctrlr, "UFS device not found\n");
+		return (ENXIO);
+	}
+
+	/* Enable additional interrupts by programming the IE register. */
+	ie = ufshci_mmio_read_4(ctrlr, ie);
+	ie |= UFSHCIM(UFSHCI_IE_REG_UTRCE);  /* UTR Completion */
+	ie |= UFSHCIM(UFSHCI_IE_REG_UEE);    /* UIC Error */
+	ie |= UFSHCIM(UFSHCI_IE_REG_UTMRCE); /* UTMR Completion */
+	ie |= UFSHCIM(UFSHCI_IE_REG_DFEE);   /* Device Fatal Error */
+	ie |= UFSHCIM(UFSHCI_IE_REG_UTPEE);  /* UTP Error */
+	ie |= UFSHCIM(UFSHCI_IE_REG_HCFEE);  /* Host Ctrlr Fatal Error */
+	ie |= UFSHCIM(UFSHCI_IE_REG_SBFEE);  /* System Bus Fatal Error */
+	ie |= UFSHCIM(UFSHCI_IE_REG_CEFEE);  /* Crypto Engine Fatal Error */
+	ufshci_mmio_write_4(ctrlr, ie, ie);
+
+	/* TODO: Initialize interrupt Aggregation Control Register (UTRIACR) */
+
+	return (0);
+}
+
+static int
+ufshci_ctrlr_hw_reset(struct ufshci_controller *ctrlr)
+{
+	int error;
+
+	error = ufshci_ctrlr_disable(ctrlr);
+	if (error)
+		return (error);
+
+	error = ufshci_ctrlr_enable(ctrlr);
+	return (error);
+}
+
+static void
+ufshci_ctrlr_reset_task(void *arg, int pending)
+{
+	struct ufshci_controller *ctrlr = arg;
+	int error;
+
+	/* A failed controller must not be re-enabled. */
+	if (ctrlr->is_failed)
+		return;
+
+	/* Release resources */
+	ufshci_utmr_req_queue_disable(ctrlr);
+	ufshci_utr_req_queue_disable(ctrlr);
+
+	error = ufshci_ctrlr_hw_reset(ctrlr);
+	if (error)
+		return (ufshci_ctrlr_fail(ctrlr));
+
+	ufshci_ctrlr_start(ctrlr, true);
+}
+
+int
 ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 {
-	uint32_t ver, cap, hcs, ie, ahit;
+	uint32_t ver, cap, ahit;
 	uint32_t timeout_period, retry_count;
 	int error;
 
@@ -87,15 +378,25 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 
 	/* Read Device Capabilities */
 	ctrlr->cap = cap = ufshci_mmio_read_4(ctrlr, cap);
-	ctrlr->is_single_db_supported = UFSHCIV(UFSHCI_CAP_REG_LSDBS, cap);
-	/*
-	 * TODO: This driver does not yet support multi-queue.
-	 * Check the UFSHCI_CAP_REG_MCQS bit in the future to determine if
-	 * multi-queue support is available.
-	 */
-	ctrlr->is_mcq_supported = false;
-	if (!(ctrlr->is_single_db_supported == 0 || ctrlr->is_mcq_supported))
+	if (ctrlr->quirks & UFSHCI_QUIRK_BROKEN_LSDBS_MCQS_CAP) {
+		ctrlr->is_single_db_supported = true;
+		ctrlr->is_mcq_supported = true;
+	} else {
+		ctrlr->is_single_db_supported = (UFSHCIV(UFSHCI_CAP_REG_LSDBS,
+						     cap) == 0);
+		ctrlr->is_mcq_supported = (UFSHCIV(UFSHCI_CAP_REG_MCQS, cap) ==
+		    1);
+	}
+	if (!(ctrlr->is_single_db_supported || ctrlr->is_mcq_supported))
 		return (ENXIO);
+
+	/* Every device table entry must name the HS series. */
+	if (ctrlr->hs_series == 0) {
+		ufshci_printf(ctrlr,
+		    "hs_series is missing from the device table\n");
+		return (ENXIO);
+	}
+
 	/*
 	 * The maximum transfer size supported by UFSHCI spec is 65535 * 256 KiB
 	 * However, we limit the maximum transfer size to 1MiB(256 * 4KiB) for
@@ -114,16 +415,15 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 	TUNABLE_INT_FETCH("hw.ufshci.retry_count", &retry_count);
 	ctrlr->retry_count = retry_count;
 
-	/* Disable all interrupts */
-	ufshci_mmio_write_4(ctrlr, ie, 0);
+	ctrlr->enable_aborts = 1;
+	if (ctrlr->quirks & UFSHCI_QUIRK_NOT_SUPPORT_ABORT_TASK)
+		ctrlr->enable_aborts = 0;
+	else
+		TUNABLE_INT_FETCH("hw.ufshci.enable_aborts",
+		    &ctrlr->enable_aborts);
 
-	/* Enable Host Controller */
-	error = ufshci_ctrlr_enable_host_ctrlr(ctrlr);
-	if (error)
-		return (error);
-
-	/* Send DME_LINKSTARTUP command to start the link startup procedure */
-	error = ufshci_uic_send_dme_link_startup(ctrlr);
+	/* Reset the UFSHCI controller */
+	error = ufshci_ctrlr_hw_reset(ctrlr);
 	if (error)
 		return (error);
 
@@ -133,18 +433,6 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 	/* Disable Auto-hibernate */
 	ahit = 0;
 	ufshci_mmio_write_4(ctrlr, ahit, ahit);
-
-	/*
-	 * The device_present(UFSHCI_HCS_REG_DP) bit becomes true if the host
-	 * controller has successfully received a Link Startup UIC command
-	 * response and the UFS device has found a physical link to the
-	 * controller.
-	 */
-	hcs = ufshci_mmio_read_4(ctrlr, hcs);
-	if (!UFSHCIV(UFSHCI_HCS_REG_DP, hcs)) {
-		ufshci_printf(ctrlr, "UFS device not found\n");
-		return (ENXIO);
-	}
 
 	/* Allocate and initialize UTP Task Management Request List. */
 	error = ufshci_utmr_req_queue_construct(ctrlr);
@@ -156,26 +444,24 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 	if (error)
 		return (error);
 
-	/* Enable additional interrupts by programming the IE register. */
-	ie = ufshci_mmio_read_4(ctrlr, ie);
-	ie |= UFSHCIM(UFSHCI_IE_REG_UTRCE);  /* UTR Completion */
-	ie |= UFSHCIM(UFSHCI_IE_REG_UEE);    /* UIC Error */
-	ie |= UFSHCIM(UFSHCI_IE_REG_UTMRCE); /* UTMR Completion */
-	ie |= UFSHCIM(UFSHCI_IE_REG_DFEE);   /* Device Fatal Error */
-	ie |= UFSHCIM(UFSHCI_IE_REG_UTPEE);  /* UTP Error */
-	ie |= UFSHCIM(UFSHCI_IE_REG_HCFEE);  /* Host Ctrlr Fatal Error */
-	ie |= UFSHCIM(UFSHCI_IE_REG_SBFEE);  /* System Bus Fatal Error */
-	ie |= UFSHCIM(UFSHCI_IE_REG_CEFEE);  /* Crypto Engine Fatal Error */
-	ufshci_mmio_write_4(ctrlr, ie, ie);
-
-	/* TODO: Initialize interrupt Aggregation Control Register (UTRIACR) */
-
 	/* TODO: Separate IO and Admin slot */
+
 	/*
 	 * max_hw_pend_io is the number of slots in the transfer_req_queue.
 	 * Reduce num_entries by one to reserve an admin slot.
 	 */
 	ctrlr->max_hw_pend_io = ctrlr->transfer_req_queue.num_entries - 1;
+
+	/* Create a thread for the taskqueue. */
+	ctrlr->taskqueue = taskqueue_create("ufshci_taskq", M_WAITOK,
+	    taskqueue_thread_enqueue, &ctrlr->taskqueue);
+	taskqueue_start_threads(&ctrlr->taskqueue, 1, PI_DISK, "ufshci taskq");
+
+	TASK_INIT(&ctrlr->reset_task, 0, ufshci_ctrlr_reset_task, ctrlr);
+
+	error = ufshci_ioctl_construct(ctrlr, dev);
+	if (error)
+		return (error);
 
 	return (0);
 }
@@ -183,6 +469,8 @@ ufshci_ctrlr_construct(struct ufshci_controller *ctrlr, device_t dev)
 void
 ufshci_ctrlr_destruct(struct ufshci_controller *ctrlr, device_t dev)
 {
+	ufshci_ioctl_destruct(ctrlr);
+
 	if (ctrlr->resource == NULL)
 		goto nores;
 
@@ -199,6 +487,17 @@ ufshci_ctrlr_destruct(struct ufshci_controller *ctrlr, device_t dev)
 		bus_release_resource(ctrlr->dev, SYS_RES_IRQ,
 		    rman_get_rid(ctrlr->res), ctrlr->res);
 
+	/*
+	 * The interrupt and the timers are gone, so nothing enqueues new
+	 * tasks. Free the taskqueue before the SIM teardown below.
+	 */
+	if (ctrlr->taskqueue != NULL) {
+		taskqueue_free(ctrlr->taskqueue);
+		ctrlr->taskqueue = NULL;
+	}
+
+	ufshci_sim_release_wlun_periph(ctrlr);
+
 	mtx_lock(&ctrlr->sc_mtx);
 
 	ufshci_sim_detach(ctrlr);
@@ -208,50 +507,21 @@ ufshci_ctrlr_destruct(struct ufshci_controller *ctrlr, device_t dev)
 	bus_release_resource(dev, SYS_RES_MEMORY, ctrlr->resource_id,
 	    ctrlr->resource);
 nores:
+	KASSERT(!mtx_owned(&ctrlr->uic_cmd_lock),
+	    ("destroying uic_cmd_lock while still owned"));
 	mtx_destroy(&ctrlr->uic_cmd_lock);
+
+	KASSERT(!mtx_owned(&ctrlr->sc_mtx),
+	    ("destroying sc_mtx while still owned"));
 	mtx_destroy(&ctrlr->sc_mtx);
 
 	return;
 }
 
-int
+void
 ufshci_ctrlr_reset(struct ufshci_controller *ctrlr)
 {
-	uint32_t ie;
-	int error;
-
-	/* Backup and disable all interrupts */
-	ie = ufshci_mmio_read_4(ctrlr, ie);
-	ufshci_mmio_write_4(ctrlr, ie, 0);
-
-	/* Release resources */
-	ufshci_utmr_req_queue_destroy(ctrlr);
-	ufshci_utr_req_queue_destroy(ctrlr);
-
-	/* Reset Host Controller */
-	error = ufshci_ctrlr_enable_host_ctrlr(ctrlr);
-	if (error)
-		return (error);
-
-	/* Send DME_LINKSTARTUP command to start the link startup procedure */
-	error = ufshci_uic_send_dme_link_startup(ctrlr);
-	if (error)
-		return (error);
-
-	/* Enable interrupts */
-	ufshci_mmio_write_4(ctrlr, ie, ie);
-
-	/* Allocate and initialize UTP Task Management Request List. */
-	error = ufshci_utmr_req_queue_construct(ctrlr);
-	if (error)
-		return (error);
-
-	/* Allocate and initialize UTP Transfer Request List or SQ/CQ. */
-	error = ufshci_utr_req_queue_construct(ctrlr);
-	if (error)
-		return (error);
-
-	return (0);
+	taskqueue_enqueue(ctrlr->taskqueue, &ctrlr->reset_task);
 }
 
 int
@@ -259,33 +529,29 @@ ufshci_ctrlr_submit_task_mgmt_request(struct ufshci_controller *ctrlr,
     struct ufshci_request *req)
 {
 	return (
-	    ufshci_req_queue_submit_request(&ctrlr->task_mgmt_req_queue, req,
-		/*is_admin*/ false));
+	    ufshci_req_queue_submit_request(&ctrlr->task_mgmt_req_queue, req));
 }
 
 int
-ufshci_ctrlr_submit_admin_request(struct ufshci_controller *ctrlr,
+ufshci_ctrlr_submit_transfer_request(struct ufshci_controller *ctrlr,
     struct ufshci_request *req)
 {
-	return (ufshci_req_queue_submit_request(&ctrlr->transfer_req_queue, req,
-	    /*is_admin*/ true));
-}
-
-int
-ufshci_ctrlr_submit_io_request(struct ufshci_controller *ctrlr,
-    struct ufshci_request *req)
-{
-	return (ufshci_req_queue_submit_request(&ctrlr->transfer_req_queue, req,
-	    /*is_admin*/ false));
+	return (
+	    ufshci_req_queue_submit_request(&ctrlr->transfer_req_queue, req));
 }
 
 int
 ufshci_ctrlr_send_nop(struct ufshci_controller *ctrlr)
 {
 	struct ufshci_completion_poll_status status;
+	int error;
 
 	status.done = 0;
-	ufshci_ctrlr_cmd_send_nop(ctrlr, ufshci_completion_poll_cb, &status);
+	error = ufshci_ctrlr_cmd_send_nop(ctrlr, ufshci_completion_poll_cb,
+	    &status);
+	if (error)
+		return (error);
+
 	ufshci_completion_poll(&status);
 	if (status.error) {
 		ufshci_printf(ctrlr, "ufshci_ctrlr_send_nop failed!\n");
@@ -293,84 +559,6 @@ ufshci_ctrlr_send_nop(struct ufshci_controller *ctrlr)
 	}
 
 	return (0);
-}
-
-static void
-ufshci_ctrlr_fail(struct ufshci_controller *ctrlr, bool admin_also)
-{
-	printf("ufshci(4): ufshci_ctrlr_fail\n");
-
-	ctrlr->is_failed = true;
-
-	/* TODO: task_mgmt_req_queue should be handled as fail */
-
-	ufshci_req_queue_fail(ctrlr,
-	    &ctrlr->transfer_req_queue.hwq[UFSHCI_SDB_Q]);
-}
-
-static void
-ufshci_ctrlr_start(struct ufshci_controller *ctrlr)
-{
-	TSENTER();
-
-	if (ufshci_ctrlr_send_nop(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* Initialize UFS target drvice */
-	if (ufshci_dev_init(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* Initialize Reference Clock */
-	if (ufshci_dev_init_reference_clock(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* Initialize unipro */
-	if (ufshci_dev_init_unipro(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/*
-	 * Initialize UIC Power Mode
-	 * QEMU UFS devices do not support unipro and power mode.
-	 */
-	if (!(ctrlr->quirks & UFSHCI_QUIRK_IGNORE_UIC_POWER_MODE) &&
-	    ufshci_dev_init_uic_power_mode(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* Initialize UFS Power Mode */
-	if (ufshci_dev_init_ufs_power_mode(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* Read Controller Descriptor (Device, Geometry) */
-	if (ufshci_dev_get_descriptor(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	if (ufshci_dev_config_write_booster(ctrlr)) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	/* TODO: Configure Background Operations */
-
-	if (ufshci_sim_attach(ctrlr) != 0) {
-		ufshci_ctrlr_fail(ctrlr, false);
-		return;
-	}
-
-	TSEXIT();
 }
 
 void
@@ -382,9 +570,9 @@ ufshci_ctrlr_start_config_hook(void *arg)
 
 	if (ufshci_utmr_req_queue_enable(ctrlr) == 0 &&
 	    ufshci_utr_req_queue_enable(ctrlr) == 0)
-		ufshci_ctrlr_start(ctrlr);
+		ufshci_ctrlr_start(ctrlr, false);
 	else
-		ufshci_ctrlr_fail(ctrlr, false);
+		ufshci_ctrlr_fail(ctrlr);
 
 	ufshci_sysctl_initialize_ctrlr(ctrlr);
 	config_intrhook_disestablish(&ctrlr->config_hook);
@@ -520,4 +708,70 @@ ufshci_reg_dump(struct ufshci_controller *ctrlr)
 	UFSHCI_DUMP_REG(ctrlr, uecdme);
 
 	ufshci_printf(ctrlr, "========================================\n");
+}
+
+int
+ufshci_ctrlr_suspend(struct ufshci_controller *ctrlr, enum power_stype stype)
+{
+	int error;
+
+	if (!ctrlr->ufs_dev.power_mode_supported)
+		return (0);
+
+	/* TODO: Need to flush the request queue */
+
+	if (ctrlr->ufs_device_wlun_periph) {
+		ctrlr->ufs_dev.power_mode = power_map[stype].dev_pwr;
+		error = ufshci_sim_send_ssu(ctrlr, /*start*/ false,
+		    power_map[stype].ssu_pc, /*immed*/ false);
+		if (error) {
+			ufshci_printf(ctrlr,
+			    "Failed to send SSU in suspend handler\n");
+			return (error);
+		}
+	}
+
+	/* Change the link state */
+	error = ufshci_dev_link_state_transition(ctrlr,
+	    power_map[stype].link_state);
+	if (error) {
+		ufshci_printf(ctrlr,
+		    "Failed to transition link state in suspend handler\n");
+		return (error);
+	}
+
+	return (0);
+}
+
+int
+ufshci_ctrlr_resume(struct ufshci_controller *ctrlr, enum power_stype stype)
+{
+	int error;
+
+	if (!ctrlr->ufs_dev.power_mode_supported)
+		return (0);
+
+	/* Change the link state */
+	error = ufshci_dev_link_state_transition(ctrlr,
+	    power_map[stype].link_state);
+	if (error) {
+		ufshci_printf(ctrlr,
+		    "Failed to transition link state in resume handler\n");
+		return (error);
+	}
+
+	if (ctrlr->ufs_device_wlun_periph) {
+		ctrlr->ufs_dev.power_mode = power_map[stype].dev_pwr;
+		error = ufshci_sim_send_ssu(ctrlr, /*start*/ false,
+		    power_map[stype].ssu_pc, /*immed*/ false);
+		if (error) {
+			ufshci_printf(ctrlr,
+			    "Failed to send SSU in resume handler\n");
+			return (error);
+		}
+	}
+
+	ufshci_dev_enable_auto_hibernate(ctrlr);
+
+	return (0);
 }

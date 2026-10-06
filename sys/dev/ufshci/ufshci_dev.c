@@ -13,12 +13,35 @@
 #include "ufshci_reg.h"
 
 static int
+ufshci_dev_send_query(struct ufshci_controller *ctrlr,
+    struct ufshci_query_param param,
+    struct ufshci_completion_poll_status *status, const char *fail_msg)
+{
+	int error;
+
+	status->done = 0;
+	error = ufshci_ctrlr_cmd_send_query_request(ctrlr,
+	    ufshci_completion_poll_cb, status, param);
+	if (error)
+		return (error);
+
+	ufshci_completion_poll(status);
+	if (status->error) {
+		ufshci_printf(ctrlr, "%s failed!\n", fail_msg);
+		return (ENXIO);
+	}
+
+	return (0);
+}
+
+static int
 ufshci_dev_read_descriptor(struct ufshci_controller *ctrlr,
     enum ufshci_descriptor_type desc_type, uint8_t index, uint8_t selector,
     void *desc, size_t desc_size)
 {
 	struct ufshci_completion_poll_status status;
 	struct ufshci_query_param param;
+	int error;
 
 	param.function = UFSHCI_QUERY_FUNC_STANDARD_READ_REQUEST;
 	param.opcode = UFSHCI_QUERY_OPCODE_READ_DESCRIPTOR;
@@ -28,14 +51,9 @@ ufshci_dev_read_descriptor(struct ufshci_controller *ctrlr,
 	param.value = 0;
 	param.desc_size = desc_size;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_read_descriptor failed!\n");
-		return (ENXIO);
-	}
+	error = ufshci_dev_send_query(ctrlr, param, &status, __func__);
+	if (error)
+		return (error);
 
 	memcpy(desc, status.cpl.response_upiu.query_response_upiu.command_data,
 	    desc_size);
@@ -73,6 +91,7 @@ ufshci_dev_read_flag(struct ufshci_controller *ctrlr,
 {
 	struct ufshci_completion_poll_status status;
 	struct ufshci_query_param param;
+	int error;
 
 	param.function = UFSHCI_QUERY_FUNC_STANDARD_READ_REQUEST;
 	param.opcode = UFSHCI_QUERY_OPCODE_READ_FLAG;
@@ -80,15 +99,11 @@ ufshci_dev_read_flag(struct ufshci_controller *ctrlr,
 	param.index = 0;
 	param.selector = 0;
 	param.value = 0;
+	param.desc_size = 0;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_read_flag failed!\n");
-		return (ENXIO);
-	}
+	error = ufshci_dev_send_query(ctrlr, param, &status, __func__);
+	if (error)
+		return (error);
 
 	*flag = status.cpl.response_upiu.query_response_upiu.flag_value;
 
@@ -108,17 +123,9 @@ ufshci_dev_set_flag(struct ufshci_controller *ctrlr,
 	param.index = 0;
 	param.selector = 0;
 	param.value = 0;
+	param.desc_size = 0;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_set_flag failed!\n");
-		return (ENXIO);
-	}
-
-	return (0);
+	return (ufshci_dev_send_query(ctrlr, param, &status, __func__));
 }
 
 static int
@@ -134,17 +141,9 @@ ufshci_dev_clear_flag(struct ufshci_controller *ctrlr,
 	param.index = 0;
 	param.selector = 0;
 	param.value = 0;
+	param.desc_size = 0;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_clear_flag failed!\n");
-		return (ENXIO);
-	}
-
-	return (0);
+	return (ufshci_dev_send_query(ctrlr, param, &status, __func__));
 }
 
 static int
@@ -154,6 +153,7 @@ ufshci_dev_read_attribute(struct ufshci_controller *ctrlr,
 {
 	struct ufshci_completion_poll_status status;
 	struct ufshci_query_param param;
+	int error;
 
 	param.function = UFSHCI_QUERY_FUNC_STANDARD_READ_REQUEST;
 	param.opcode = UFSHCI_QUERY_OPCODE_READ_ATTRIBUTE;
@@ -161,17 +161,13 @@ ufshci_dev_read_attribute(struct ufshci_controller *ctrlr,
 	param.index = index;
 	param.selector = selector;
 	param.value = 0;
+	param.desc_size = 0;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_read_attribute failed!\n");
-		return (ENXIO);
-	}
+	error = ufshci_dev_send_query(ctrlr, param, &status, __func__);
+	if (error)
+		return (error);
 
-	*value = status.cpl.response_upiu.query_response_upiu.value_64;
+	*value = be64toh(status.cpl.response_upiu.query_response_upiu.value_64);
 
 	return (0);
 }
@@ -190,17 +186,9 @@ ufshci_dev_write_attribute(struct ufshci_controller *ctrlr,
 	param.index = index;
 	param.selector = selector;
 	param.value = value;
+	param.desc_size = 0;
 
-	status.done = 0;
-	ufshci_ctrlr_cmd_send_query_request(ctrlr, ufshci_completion_poll_cb,
-	    &status, param);
-	ufshci_completion_poll(&status);
-	if (status.error) {
-		ufshci_printf(ctrlr, "ufshci_dev_write_attribute failed!\n");
-		return (ENXIO);
-	}
-
-	return (0);
+	return (ufshci_dev_send_query(ctrlr, param, &status, __func__));
 }
 
 int
@@ -254,9 +242,26 @@ ufshci_dev_init_reference_clock(struct ufshci_controller *ctrlr)
 {
 	int error;
 	uint8_t index, selector;
+	uint64_t value;
 
 	index = 0;    /* bRefClkFreq is device type attribute */
 	selector = 0; /* bRefClkFreq is device type attribute */
+
+	/*
+	 * bRefClkFreq is a persistent attribute. Skip the write when
+	 * the device already holds the wanted value.
+	 */
+	error = ufshci_dev_read_attribute(ctrlr, UFSHCI_ATTR_B_REF_CLK_FREQ,
+	    index, selector, &value);
+	if (error != 0) {
+		ufshci_printf(ctrlr, "bRefClkFreq read failed, writing %u\n",
+		    ctrlr->ref_clk);
+	} else if ((uint32_t)value == ctrlr->ref_clk) {
+		return (0);
+	} else {
+		ufshci_printf(ctrlr, "changing bRefClkFreq from %u to %u\n",
+		    (uint32_t)value, ctrlr->ref_clk);
+	}
 
 	error = ufshci_dev_write_attribute(ctrlr, UFSHCI_ATTR_B_REF_CLK_FREQ,
 	    index, selector, ctrlr->ref_clk);
@@ -272,40 +277,31 @@ ufshci_dev_init_unipro(struct ufshci_controller *ctrlr)
 	uint32_t pa_granularity, peer_pa_granularity;
 	uint32_t t_activate, pear_t_activate;
 
-	/*
-	 * Unipro Version:
-	 * - 7~15 = Above 2.0, 6 = 2.0, 5 = 1.8, 4 = 1.61, 3 = 1.6, 2 = 1.41,
-	 * 1 = 1.40, 0 = Reserved
-	 */
-	if (ufshci_uic_send_dme_get(ctrlr, PA_LocalVerInfo,
-		&ctrlr->unipro_version))
-		return (ENXIO);
-	if (ufshci_uic_send_dme_get(ctrlr, PA_RemoteVerInfo,
-		&ctrlr->ufs_dev.unipro_version))
-		return (ENXIO);
-
-	/*
-	 * PA_Granularity: Granularity for PA_TActivate and PA_Hibern8Time
-	 * - 1=1us, 2=4us, 3=8us, 4=16us, 5=32us, 6=100us
-	 */
-	if (ufshci_uic_send_dme_get(ctrlr, PA_Granularity, &pa_granularity))
-		return (ENXIO);
-	if (ufshci_uic_send_dme_peer_get(ctrlr, PA_Granularity,
-		&peer_pa_granularity))
-		return (ENXIO);
-
-	/*
-	 * PA_TActivate: Time to wait before activating a burst in order to
-	 * wake-up peer M-RX
-	 * UniPro automatically sets timing information such as PA_TActivate
-	 * through the PACP_CAP_EXT1_ind command during Link Startup operation.
-	 */
-	if (ufshci_uic_send_dme_get(ctrlr, PA_TActivate, &t_activate))
-		return (ENXIO);
-	if (ufshci_uic_send_dme_peer_get(ctrlr, PA_TActivate, &pear_t_activate))
-		return (ENXIO);
-
 	if (ctrlr->quirks & UFSHCI_QUIRK_LONG_PEER_PA_TACTIVATE) {
+		/*
+		 * PA_Granularity: Granularity for PA_TActivate and
+		 * PA_Hibern8Time
+		 * - 1=1us, 2=4us, 3=8us, 4=16us, 5=32us, 6=100us
+		 */
+		if (ufshci_uic_send_dme_get(ctrlr, PA_Granularity,
+			&pa_granularity))
+			return (ENXIO);
+		if (ufshci_uic_send_dme_peer_get(ctrlr, PA_Granularity,
+			&peer_pa_granularity))
+			return (ENXIO);
+
+		/*
+		 * PA_TActivate: Time to wait before activating a burst in order
+		 * to wake-up peer M-RX UniPro automatically sets timing
+		 * information such as PA_TActivate through the
+		 * PACP_CAP_EXT1_ind command during Link Startup operation.
+		 */
+		if (ufshci_uic_send_dme_get(ctrlr, PA_TActivate, &t_activate))
+			return (ENXIO);
+		if (ufshci_uic_send_dme_peer_get(ctrlr, PA_TActivate,
+			&pear_t_activate))
+			return (ENXIO);
+
 		/*
 		 * Intel Lake-field UFSHCI has a quirk. We need to add 200us to
 		 * the PEER's PA_TActivate.
@@ -324,8 +320,6 @@ ufshci_dev_init_unipro(struct ufshci_controller *ctrlr)
 int
 ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 {
-	/* HSSerise: A = 1, B = 2 */
-	const uint32_t hs_series = 2;
 	/*
 	 * TX/RX PWRMode:
 	 * - TX[3:0], RX[7:4]
@@ -333,7 +327,7 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 	 */
 	const uint32_t fast_mode = 1;
 	const uint32_t rx_bit_shift = 4;
-	uint32_t power_mode, peer_granularity;
+	uint32_t peer_granularity;
 
 	/* Update lanes with available TX/RX lanes */
 	if (ufshci_uic_send_dme_get(ctrlr, PA_AvailTxDataLanes,
@@ -360,9 +354,11 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 
 	if (ctrlr->quirks & UFSHCI_QUIRK_CHANGE_LANE_AND_GEAR_SEPARATELY) {
 		/* Before changing gears, first change the number of lanes. */
-		if (ufshci_uic_send_dme_get(ctrlr, PA_PWRMode, &power_mode))
+		if (ufshci_uic_send_dme_get(ctrlr, PA_PWRMode,
+			&ctrlr->tx_rx_power_mode))
 			return (ENXIO);
-		if (ufshci_uic_send_dme_set(ctrlr, PA_PWRMode, power_mode))
+		if (ufshci_uic_send_dme_set(ctrlr, PA_PWRMode,
+			ctrlr->tx_rx_power_mode))
 			return (ENXIO);
 
 		/* Wait for power mode changed. */
@@ -388,8 +384,13 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 	if (ufshci_uic_send_dme_set(ctrlr, PA_RxTermination, true))
 		return (ENXIO);
 
-	/* Set HSSerise (A = 1, B = 2) */
-	if (ufshci_uic_send_dme_set(ctrlr, PA_HSSeries, hs_series))
+	/* Set HSSeries */
+	if (ufshci_uic_send_dme_set(ctrlr, PA_HSSeries, ctrlr->hs_series))
+		return (ENXIO);
+
+	/* HS-G4 and above need initial adaptation. */
+	if (ctrlr->hs_gear >= 4 &&
+	    ufshci_uic_send_dme_set(ctrlr, PA_TxHsAdaptType, PA_INITIAL_ADAPT))
 		return (ENXIO);
 
 	/* Set Timeout values */
@@ -423,8 +424,8 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 		return (ENXIO);
 
 	/* Set TX/RX PWRMode */
-	power_mode = (fast_mode << rx_bit_shift) | fast_mode;
-	if (ufshci_uic_send_dme_set(ctrlr, PA_PWRMode, power_mode))
+	ctrlr->tx_rx_power_mode = (fast_mode << rx_bit_shift) | fast_mode;
+	if (ufshci_uic_send_dme_set(ctrlr, PA_PWRMode, ctrlr->tx_rx_power_mode))
 		return (ENXIO);
 
 	/* Wait for power mode changed. */
@@ -432,9 +433,6 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 		ufshci_reg_dump(ctrlr);
 		return (ENXIO);
 	}
-
-	/* Clear 'Power Mode completion status' */
-	ufshci_mmio_write_4(ctrlr, is, UFSHCIM(UFSHCI_IS_REG_UPMS));
 
 	if (ctrlr->quirks & UFSHCI_QUIRK_WAIT_AFTER_POWER_MODE_CHANGE) {
 		/*
@@ -452,10 +450,60 @@ ufshci_dev_init_uic_power_mode(struct ufshci_controller *ctrlr)
 	return (0);
 }
 
+void
+ufshci_dev_enable_auto_hibernate(struct ufshci_controller *ctrlr)
+{
+	if (!ctrlr->ufs_dev.auto_hibernation_supported)
+		return;
+
+	ufshci_mmio_write_4(ctrlr, ahit, ctrlr->ufs_dev.ahit);
+}
+
+void
+ufshci_dev_init_auto_hibernate(struct ufshci_controller *ctrlr)
+{
+	ctrlr->ufs_dev.auto_hibernation_supported =
+	    UFSHCIV(UFSHCI_CAP_REG_AUTOH8, ctrlr->cap) &&
+	    !(ctrlr->quirks & UFSHCI_QUIRK_BROKEN_AUTO_HIBERNATE);
+
+	if (!ctrlr->ufs_dev.auto_hibernation_supported)
+		return;
+
+	/* The default value for auto hibernation is 150 ms */
+	ctrlr->ufs_dev.ahit = 0;
+	ctrlr->ufs_dev.ahit |= UFSHCIF(UFSHCI_AHIT_REG_AH8ITV, 150);
+	ctrlr->ufs_dev.ahit |= UFSHCIF(UFSHCI_AHIT_REG_TS, 3);
+
+	ufshci_dev_enable_auto_hibernate(ctrlr);
+}
+
+void
+ufshci_dev_init_uic_link_state(struct ufshci_controller *ctrlr)
+{
+	ctrlr->ufs_dev.link_state = UFSHCI_UIC_LINK_STATE_ACTIVE;
+}
+
 int
 ufshci_dev_init_ufs_power_mode(struct ufshci_controller *ctrlr)
 {
-	/* TODO: Need to implement */
+	ctrlr->ufs_dev.power_mode_supported = false;
+
+	if (ctrlr->quirks & UFSHCI_QUIRK_SKIP_WELL_KNOWN_LUNS)
+		return (0);
+
+	if (ctrlr->ufs_device_wlun_periph == NULL) {
+		/* The returned reference is kept by the cached pointer. */
+		ctrlr->ufs_device_wlun_periph = ufshci_sim_find_periph(ctrlr,
+		    UFSHCI_WLUN_UFS_DEVICE);
+		if (ctrlr->ufs_device_wlun_periph == NULL) {
+			ufshci_printf(ctrlr,
+			    "Well-known LUN `UFS Device (0x50)` not found\n");
+			return (0);
+		}
+	}
+
+	ctrlr->ufs_dev.power_mode_supported = true;
+	ctrlr->ufs_dev.power_mode = UFSHCI_DEV_PWR_ACTIVE;
 
 	return (0);
 }
@@ -680,7 +728,7 @@ ufshci_dev_config_write_booster(struct ufshci_controller *ctrlr)
 {
 	struct ufshci_device *dev = &ctrlr->ufs_dev;
 	uint32_t extended_ufs_feature_support;
-	uint32_t alloc_units;
+	uint32_t alloc_units = 0;
 	struct ufshci_unit_descriptor unit_desc;
 	uint8_t lun;
 	bool is_life_time_left;
@@ -775,3 +823,87 @@ out:
 	return (error);
 }
 
+int
+ufshci_dev_get_current_power_mode(struct ufshci_controller *ctrlr,
+    uint8_t *power_mode)
+{
+	uint64_t value;
+	int err;
+
+	err = ufshci_dev_read_attribute(ctrlr, UFSHCI_ATTR_B_CURRENT_POWER_MODE,
+	    /*index*/ 0, /*selector*/ 0, &value);
+	if (err)
+		return (err);
+
+	*power_mode = (uint8_t)value;
+
+	return (0);
+}
+
+static int
+ufshci_dev_hibernate_enter(struct ufshci_controller *ctrlr)
+{
+	int error;
+
+	error = ufshci_uic_send_dme_hibernate_enter(ctrlr);
+	if (error)
+		return (error);
+
+	return (ufshci_uic_hibernation_ready(ctrlr));
+}
+
+static int
+ufshci_dev_hibernate_exit(struct ufshci_controller *ctrlr)
+{
+	int error;
+
+	error = ufshci_uic_send_dme_hibernate_exit(ctrlr);
+	if (error)
+		return (error);
+
+	return (ufshci_uic_hibernation_ready(ctrlr));
+}
+
+int
+ufshci_dev_link_state_transition(struct ufshci_controller *ctrlr,
+    enum ufshci_uic_link_state target_state)
+{
+	struct ufshci_device *dev = &ctrlr->ufs_dev;
+	int error = 0;
+
+	if (dev->link_state == target_state)
+		return (0);
+
+	switch (target_state) {
+	case UFSHCI_UIC_LINK_STATE_OFF:
+		error = ufshci_dev_hibernate_enter(ctrlr);
+		if (error)
+			break;
+		error = ufshci_ctrlr_disable(ctrlr);
+		break;
+	case UFSHCI_UIC_LINK_STATE_ACTIVE:
+		if (dev->link_state == UFSHCI_UIC_LINK_STATE_HIBERNATE)
+			error = ufshci_dev_hibernate_exit(ctrlr);
+		else
+			error = EINVAL;
+		break;
+	case UFSHCI_UIC_LINK_STATE_HIBERNATE:
+		if (dev->link_state == UFSHCI_UIC_LINK_STATE_ACTIVE)
+			error = ufshci_dev_hibernate_enter(ctrlr);
+		else
+			error = EINVAL;
+		break;
+	case UFSHCI_UIC_LINK_STATE_BROKEN:
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	if (error)
+		return (error);
+
+	dev->link_state = target_state;
+
+	return (0);
+}
