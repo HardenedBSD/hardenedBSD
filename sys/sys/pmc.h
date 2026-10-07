@@ -60,7 +60,7 @@
  * The patch version is incremented for every bug fix.
  */
 #define	PMC_VERSION_MAJOR	0x0A
-#define	PMC_VERSION_MINOR	0x00
+#define	PMC_VERSION_MINOR	0x01
 #define	PMC_VERSION_PATCH	0x0000
 
 #define	PMC_VERSION		(PMC_VERSION_MAJOR << 24 |		\
@@ -348,7 +348,8 @@ enum pmc_event {
 	__PMC_OP(PMCSTOP, "Stop a PMC")					\
 	__PMC_OP(WRITELOG, "Write a cookie to the log file")		\
 	__PMC_OP(CLOSELOG, "Close log file")				\
-	__PMC_OP(GETDYNEVENTINFO, "Get dynamic events list")
+	__PMC_OP(GETDYNEVENTINFO, "Get dynamic events list")		\
+	__PMC_OP(GETCAPS, "Get capabilities")
 
 enum pmc_ops {
 #undef	__PMC_OP
@@ -637,6 +638,17 @@ struct pmc_op_getdyneventinfo {
 	enum pmc_class			pm_class;
 	unsigned int			pm_nevent;
 	struct pmc_dyn_event_descr	pm_events[PMC_EV_DYN_COUNT];
+};
+
+/*
+ * OP GETCAPS
+ *
+ * Retrieve the PMC capabilties flags for this type of counter.
+ */
+
+struct pmc_op_caps {
+	pmc_id_t	pm_pmcid;	/* allocated pmc id */
+	uint32_t	pm_caps;	/* capabilities */
 };
 
 #ifdef _KERNEL
@@ -1031,6 +1043,7 @@ struct pmc_classdep {
 	/* description */
 	int (*pcd_describe)(int _cpu, int _ri, struct pmc_info *_pi,
 		struct pmc **_ppmc);
+	int (*pcd_get_caps)(int _ri, uint32_t *_caps);
 
 	/* class-dependent initialization & finalization */
 	int (*pcd_pcpu_init)(struct pmc_mdep *_md, int _cpu);
