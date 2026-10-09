@@ -318,7 +318,7 @@ SUBDIR=	\
 	${_padlock} \
 	${_padlock_rng} \
 	${_pchtherm} \
-	${_pcfclock} \
+	pcfclock \
 	${_pf} \
 	${_pflog} \
 	${_pflow} \
@@ -916,7 +916,6 @@ _3dfx=		3dfx
 _3dfx_linux=	3dfx_linux
 _glxiic=	glxiic
 _glxsb=		glxsb
-_pcfclock=	pcfclock
 _pst=		pst
 _sbni=		sbni
 .endif
