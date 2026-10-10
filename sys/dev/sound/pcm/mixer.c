@@ -334,7 +334,7 @@ mixer_get_recroute(struct snd_mixer *m, int *route)
  *
  * This function sets a recording source based on a recording device's
  * routing number.  Said number is translated to an old school recdev
- * mask and passed over mixer_setrecsrc. 
+ * mask and passed over mixer_setrecsrc.
  *
  * @param m	mixer context container thing
  *
@@ -925,10 +925,10 @@ mixer_ioctl_cmd(struct cdev *i_dev, unsigned long cmd, caddr_t arg, int mode,
 			return (0);
 		case SNDCTL_CARDINFO:
 			return (sound_oss_card_info((oss_card_info *)arg));
-	    	case SNDCTL_AUDIOINFO:
+		case SNDCTL_AUDIOINFO:
 			return (dsp_oss_audioinfo(i_dev, (oss_audioinfo *)arg,
 			    false));
-	    	case SNDCTL_AUDIOINFO_EX:
+		case SNDCTL_AUDIOINFO_EX:
 			return (dsp_oss_audioinfo(i_dev, (oss_audioinfo *)arg,
 			    true));
 		case SNDCTL_ENGINEINFO:
