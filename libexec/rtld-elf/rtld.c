@@ -200,7 +200,7 @@ static char *origin_subst_one(Obj_Entry *, char *, const char *, const char *,
     bool);
 static char *origin_subst(Obj_Entry *, const char *);
 static bool obj_resolve_origin(Obj_Entry *obj);
-static void preinit_main(void);
+static void preinit_main(RtldLockState *lockstate);
 static void rtld_recalc_bind_not(const char *);
 static void rtld_recalc_dangerous_ld_env(void);
 static void rtld_recalc_debug(const char *);
@@ -1095,13 +1095,13 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 
 	dbg("resolving ifuncs");
 	if (initlist_objects_ifunc(&initlist,
-		ld_bind_now != NULL && *ld_bind_now != '\0', SYMLOOK_EARLY,
-		&lockstate) == -1)
+	    ld_bind_now != NULL && *ld_bind_now != '\0', SYMLOOK_EARLY,
+	    &lockstate) == -1)
 		rtld_die();
 
 	rtld_exit_ptr = rtld_exit;
 	if (obj_main->crt_no_init)
-		preinit_main();
+		preinit_main(&lockstate);
 	objlist_call_init(&initlist, &lockstate);
 	_r_debug_postinit(&obj_main->linkmap);
 	objlist_clear(&initlist);
@@ -3325,7 +3325,7 @@ obj_from_addr(const void *addr)
 }
 
 static void
-preinit_main(void)
+preinit_main(RtldLockState *lockstate)
 {
 	uintptr_t *preinit_addr;
 	int index;
@@ -3334,6 +3334,7 @@ preinit_main(void)
 	if (preinit_addr == NULL)
 		return;
 
+	lock_release(rtld_bind_lock, lockstate);
 	for (index = 0; index < obj_main->preinit_array_num; index++) {
 		if (preinit_addr[index] != 0 && preinit_addr[index] != 1) {
 			dbg("calling preinit function for %s at %p",
@@ -3343,6 +3344,7 @@ preinit_main(void)
 			call_init_pointer(obj_main, preinit_addr[index]);
 		}
 	}
+	wlock_acquire(rtld_bind_lock, lockstate);
 }
 
 /*
