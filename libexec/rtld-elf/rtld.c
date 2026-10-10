@@ -1844,6 +1844,12 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, caddr_t entry, const char *path)
 			break;
 
 		case PT_TLS:
+			if (ph->p_memsz < ph->p_filesz) {
+				_rtld_error("%s: invalid PT_TLS segment",
+				    path);
+				return (NULL);
+			}
+
 			obj->tlsindex = 1;
 			obj->tlssize = ph->p_memsz;
 			obj->tlsalign = ph->p_align;
@@ -2613,9 +2619,7 @@ init_rtld(caddr_t mapbase, Elf_Auxinfo **aux_info)
 	objtmp.path = NULL;
 	objtmp.rtld = true;
 	objtmp.mapbase = mapbase;
-#ifdef PIC
 	objtmp.relocbase = mapbase;
-#endif
 
 	objtmp.dynamic = rtld_dynamic(&objtmp);
 	digest_dynamic1(&objtmp, 1, &dyn_rpath, &dyn_soname, &dyn_runpath);
@@ -3226,6 +3230,7 @@ do_load_object(int fd, const char *name, char *path, struct stat *sbp,
 
 errp:
 	munmap(obj->mapbase, obj->mapsize);
+	obj->path = NULL;	/* obj->path is owned and freed by caller */
 	obj_free(obj);
 	return (NULL);
 }
