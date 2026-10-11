@@ -209,9 +209,13 @@ if [ ! -f $BSDINSTALL_DISTDIR/MANIFEST ]; then
 	PKGBASE=yes
 else
 	bsddialog --backtitle "$OSNAME Installer" --title "Select Installation Type" \
+<<<<<<< HEAD
 		--yes-label "Distribution Sets" --no-label "Packages (HBSD: Please no)" --yesno \
+=======
+		--yes-label "Distribution Sets" --no-label "Packages" --yesno \
+>>>>>>> rad/freebsd/15-stable/main
 		$PKGBASE_DEFAULT_BUTTON \
-		"Would you like to install the base system using traditional distribution sets or packages (technology preview)?" 0 0
+		"Would you like to install the base system using legacy distribution sets or packages?" 0 0
 	if [ $? -eq 1 ]; then
 		PKGBASE=yes
 	fi

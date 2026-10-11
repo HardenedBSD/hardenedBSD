@@ -444,6 +444,11 @@ static int	igb_if_rx_queue_intr_enable(if_ctx_t, uint16_t);
 static int	igb_if_tx_queue_intr_enable(if_ctx_t, uint16_t);
 static void	em_handle_fatal_error_intr(struct e1000_softc *, u32);
 static bool	em_handle_fatal_error_admin(struct e1000_softc *);
+static u32	igb_device_reset_intr_mask(struct e1000_softc *);
+static bool	igb_device_reset_pending(struct e1000_softc *);
+static bool	igb_handle_device_reset(struct e1000_softc *, u32);
+static void	igb_prepare_device_reset(struct e1000_softc *);
+static bool	igb_finish_device_reset(struct e1000_softc *, u32);
 static void	em_prepare_fatal_error_reset(struct e1000_softc *);
 static void	em_finish_fatal_error_reset(struct e1000_softc *);
 static void	em_configure_peind_memory_errors(struct e1000_softc *);
@@ -488,8 +493,13 @@ static void	em_release_manageability(struct e1000_softc *);
 static void	em_get_hw_control(struct e1000_softc *);
 static void	em_release_hw_control(struct e1000_softc *);
 static void	em_get_wakeup(if_ctx_t);
-static void	em_enable_wakeup(if_ctx_t);
-static int	em_enable_phy_wakeup(struct e1000_softc *);
+static void	em_fill_wakeup_mta(struct e1000_hw *);
+static int	em_enable_wakeup(if_ctx_t);
+static void	em_configure_sx_low_power(struct e1000_softc *, u32);
+static int	em_enable_phy_wakeup(struct e1000_softc *, u32);
+static int	em_disable_phy_wakeup(struct e1000_softc *, u16 *);
+static void	em_power_up_wakeup_link(struct e1000_softc *);
+static void	em_power_down_wakeup_link(struct e1000_softc *);
 static void	em_disable_aspm(struct e1000_softc *);
 
 int		em_intr(void *);
@@ -501,6 +511,15 @@ enum em_fatal_error_state {
 	EM_FATAL_ERROR_RESET_REQUESTED,
 	EM_FATAL_ERROR_RESET_PREPARED,
 };
+
+enum igb_device_reset_state {
+	IGB_DEVICE_RESET_NONE,
+	IGB_DEVICE_RESET_DETECTED,
+	IGB_DEVICE_RESET_REQUESTED,
+	IGB_DEVICE_RESET_PREPARED,
+};
+
+#define IGB_DEVICE_RESET_TIMEOUT_MS	100
 
 /* MSI-X handlers */
 static int	em_if_msix_intr_assign(if_ctx_t, int);
@@ -1048,7 +1067,7 @@ em_if_attach_pre(if_ctx_t ctx)
 	    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_NEEDGIANT, sc, 0,
 	    em_get_rs, "I", "Dump RS indexes");
 
-	if (hw->mac.type >= e1000_i350) {
+	if (hw->mac.type >= e1000_i350 && hw->mac.type != e1000_i211) {
 		SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "dmac",
 		    CTLTYPE_INT | CTLFLAG_RW, sc, 0,
 		    igb_sysctl_dmac, "I", "DMA Coalesce");
@@ -1414,12 +1433,12 @@ em_if_attach_pre(if_ctx_t ctx)
 	/*
 	 * Get Wake-on-Lan and Management info for later use
 	 */
-	em_get_wakeup(ctx);
-
-	/* Enable only WOL MAGIC by default */
-	scctx->isc_capenable &= ~IFCAP_WOL;
-	if (sc->wol != 0)
-		scctx->isc_capenable |= IFCAP_WOL_MAGIC;
+	if (sc->vf_ifp) {
+		scctx->isc_capabilities &= ~IFCAP_WOL;
+		scctx->isc_capenable &= ~IFCAP_WOL;
+	} else {
+		em_get_wakeup(ctx);
+	}
 
 	iflib_set_mac(ctx, hw->mac.addr);
 
@@ -1519,7 +1538,13 @@ em_if_detach(if_ctx_t ctx)
 static int
 em_if_shutdown(if_ctx_t ctx)
 {
-	return em_if_suspend(ctx);
+	int error;
+
+	error = em_if_suspend(ctx);
+	if (error != 0)
+		device_printf(iflib_get_dev(ctx),
+		    "Wake configuration failed during shutdown: %d\n", error);
+	return (0);
 }
 
 /*
@@ -1529,22 +1554,53 @@ static int
 em_if_suspend(if_ctx_t ctx)
 {
 	struct e1000_softc *sc = iflib_get_softc(ctx);
+	int error;
 
+	error = em_enable_wakeup(ctx);
 	em_release_manageability(sc);
 	em_release_hw_control(sc);
-	em_enable_wakeup(ctx);
-	return (0);
+	return (error);
 }
 
 static int
 em_if_resume(if_ctx_t ctx)
 {
 	struct e1000_softc *sc = iflib_get_softc(ctx);
+	u32 wus;
+	u16 phy_wus;
+	int error;
 
-	if (sc->hw.mac.type == e1000_pch2lan)
+	if (sc->hw.mac.type >= e1000_pch2lan &&
+	    sc->hw.mac.type < igb_mac_min)
 		e1000_resume_workarounds_pchlan(&sc->hw);
 
-	return(0);
+	if (sc->wol_phy_armed) {
+		/*
+		 * The PHY wake sequence requires an LCD reset before host wake
+		 * ownership is cleared.  Wake registers survive this reset.
+		 */
+		(void)e1000_phy_hw_reset(&sc->hw);
+		error = em_disable_phy_wakeup(sc, &phy_wus);
+		if (error != E1000_SUCCESS)
+			device_printf(sc->dev,
+			    "Could not clear PHY wakeup state: %d\n", error);
+		else if (phy_wus != 0)
+			device_printf(sc->dev, "PHY wakeup status: %#06x\n",
+			    phy_wus);
+	}
+	if (!sc->vf_ifp && sc->hw.mac.type >= e1000_82544) {
+		wus = E1000_READ_REG(&sc->hw, E1000_WUS);
+		if (!sc->wol_phy_wakeup && wus != 0)
+			device_printf(sc->dev, "MAC wakeup status: %#010x\n",
+			    wus);
+		E1000_WRITE_REG(&sc->hw, E1000_WUFC, 0);
+		E1000_WRITE_REG(&sc->hw, E1000_WUC, 0);
+		E1000_WRITE_REG(&sc->hw, E1000_WUS, ~0U);
+	}
+	/* Clear PME after its MAC or PHY wake source has been removed. */
+	pci_clear_pme(sc->dev);
+
+	return (0);
 }
 
 static int
@@ -1615,9 +1671,12 @@ em_if_init(if_ctx_t ctx)
 	if_softc_ctx_t scctx = sc->shared;
 	if_t ifp = iflib_get_ifp(ctx);
 	struct em_tx_queue *tx_que;
+	u32 icr;
 	int i;
 
 	INIT_DEBUGOUT("em_if_init: begin");
+	if (sc->suspend_link_powered_down)
+		em_power_up_wakeup_link(sc);
 
 	/* Get the latest mac address, User can use a LAA */
 	bcopy(if_getlladdr(ifp), sc->hw.mac.addr, ETHER_ADDR_LEN);
@@ -1707,10 +1766,6 @@ em_if_init(if_ctx_t ctx)
 	if (sc->hw.mac.type >= igb_mac_min)
 		igb_initialize_interrupt_rate(sc);
 
-	/* this clears any pending interrupts */
-	E1000_READ_REG(&sc->hw, E1000_ICR);
-	E1000_WRITE_REG(&sc->hw, E1000_ICS, E1000_ICS_LSC);
-
 	/* AMT based hardware can now take control from firmware */
 	if (sc->has_manage && sc->has_amt)
 		em_get_hw_control(sc);
@@ -1726,6 +1781,18 @@ em_if_init(if_ctx_t ctx)
 	em_configure_peind_memory_errors(sc);
 	em_configure_82575_memory_errors(sc);
 	em_configure_82580_memory_errors(sc);
+
+	/*
+	 * Drain stale causes only after register reconstruction is complete.
+	 * DRSTA and DEV_RST_SET together close the window in which another
+	 * device reset can arrive while interrupts are masked.
+	 */
+	icr = E1000_READ_REG(&sc->hw, E1000_ICR);
+	if (igb_finish_device_reset(sc, icr)) {
+		iflib_init_failed(ctx);
+		return;
+	}
+	E1000_WRITE_REG(&sc->hw, E1000_ICS, E1000_ICS_LSC);
 }
 
 /*
@@ -2596,6 +2663,203 @@ em_handle_fatal_error_admin(struct e1000_softc *sc)
 }
 
 /*
+ * ICR bit 30 is reserved on 82575 and is the TCP timer on 82576.  It becomes
+ * the Device Reset Asserted interrupt starting with 82580.
+ */
+static u32
+igb_device_reset_intr_mask(struct e1000_softc *sc)
+{
+
+	return (!sc->vf_ifp && sc->hw.mac.type >= e1000_82580 ?
+	    E1000_IMS_DRSTA : 0);
+}
+
+/* Keep interrupt-side work quiesced until device-reset recovery completes. */
+static bool
+igb_device_reset_pending(struct e1000_softc *sc)
+{
+
+	return (!sc->vf_ifp && igb_device_reset_intr_mask(sc) != 0 &&
+	    atomic_load_acq_32(&sc->device_reset_state) !=
+	    IGB_DEVICE_RESET_NONE);
+}
+
+/*
+ * CTRL.DEV_RST resets every port in the device.  ICR.DRSTA tells the other
+ * ports that their registers and descriptor rings must be reinitialized.
+ */
+static bool
+igb_handle_device_reset(struct e1000_softc *sc, u32 icr)
+{
+	u32 state;
+
+	if (sc->vf_ifp || igb_device_reset_intr_mask(sc) == 0 ||
+	    (icr & E1000_ICR_DRSTA) == 0)
+		return (false);
+	state = atomic_swap_32(&sc->device_reset_state,
+	    IGB_DEVICE_RESET_DETECTED);
+	if (state == IGB_DEVICE_RESET_DETECTED)
+		return (true);
+
+	iflib_admin_intr_deferred(sc->ctx);
+	return (true);
+}
+
+/*
+ * A device reset can leave a sibling port accessible before its internal
+ * reset and PCIe transactions have completed.  For 82580 and newer parts,
+ * wait for that device-wide reset to finish and acknowledge it before any
+ * ordinary port register programming.  I350 and newer parts also publish
+ * explicit EEPROM autoload and PF-reset completion indications.
+ *
+ * The wait is bounded because the only useful fallback for a controller
+ * that never completes the device reset is the port reset already requested
+ * by the interrupt handler.
+ */
+static void
+igb_prepare_device_reset(struct e1000_softc *sc)
+{
+	struct e1000_hw *hw;
+	u32 state;
+	u32 eecd, gcr, status;
+	int i;
+
+	hw = &sc->hw;
+	state = atomic_load_acq_32(&sc->device_reset_state);
+	if (state != IGB_DEVICE_RESET_DETECTED &&
+	    state != IGB_DEVICE_RESET_REQUESTED &&
+	    hw->mac.type >= e1000_82580) {
+		/*
+		 * A reset can start while this interface has interrupts disabled.
+		 * GCR is the documented gate before ordinary port accesses.  STATUS
+		 * also detects a reset that completed while this interface was down
+		 * or after an earlier preparation pass.
+		 */
+		gcr = E1000_READ_REG(hw, E1000_GCR);
+		if (gcr != 0xffffffff &&
+		    (gcr & E1000_GCR_DEV_RST_IN_PROGRESS) != 0) {
+			atomic_store_rel_32(&sc->device_reset_state,
+			    IGB_DEVICE_RESET_DETECTED);
+			state = IGB_DEVICE_RESET_DETECTED;
+		} else if (gcr != 0xffffffff) {
+			status = E1000_READ_REG(hw, E1000_STATUS);
+			if (status != 0xffffffff &&
+			    (status & E1000_STAT_DEV_RST_SET) != 0) {
+				atomic_store_rel_32(&sc->device_reset_state,
+				    IGB_DEVICE_RESET_DETECTED);
+				state = IGB_DEVICE_RESET_DETECTED;
+			}
+		}
+	}
+	if (state != IGB_DEVICE_RESET_DETECTED &&
+	    state != IGB_DEVICE_RESET_REQUESTED)
+		return;
+
+	if (hw->mac.type >= e1000_82580) {
+		for (i = 0; i < IGB_DEVICE_RESET_TIMEOUT_MS; i++) {
+			gcr = E1000_READ_REG(hw, E1000_GCR);
+			if (gcr != 0xffffffff &&
+			    (gcr & E1000_GCR_DEV_RST_IN_PROGRESS) == 0)
+				break;
+			msec_delay(1);
+		}
+		if (i == IGB_DEVICE_RESET_TIMEOUT_MS) {
+			device_printf(sc->dev,
+			    "device-wide reset did not complete; "
+			    "attempting port reset\n");
+			goto prepared;
+		}
+
+		/* STATUS.DEV_RST_SET is write-one-to-clear. */
+		E1000_WRITE_REG(hw, E1000_STATUS, E1000_STAT_DEV_RST_SET);
+
+		if (hw->mac.type >= e1000_i350) {
+			for (i = 0; i < IGB_DEVICE_RESET_TIMEOUT_MS; i++) {
+				eecd = E1000_READ_REG(hw, E1000_EECD);
+				status = E1000_READ_REG(hw, E1000_STATUS);
+				if (eecd != 0xffffffff && status != 0xffffffff &&
+				    (eecd & E1000_EECD_AUTO_RD) != 0 &&
+				    (status & E1000_STATUS_RST_DONE) != 0)
+					break;
+				msec_delay(1);
+			}
+			if (i == IGB_DEVICE_RESET_TIMEOUT_MS)
+				device_printf(sc->dev,
+				    "device-wide reset did not finish EEPROM "
+				    "autoload or port reset; attempting port "
+				    "reset\n");
+		}
+	}
+
+prepared:
+	atomic_store_rel_32(&sc->device_reset_state,
+	    IGB_DEVICE_RESET_PREPARED);
+}
+
+/*
+ * A second device reset can arrive while the port is being initialized.
+ * Leave its status latched for the next preparation pass and do not let
+ * iflib publish this incomplete initialization as a running datapath.
+ */
+static bool
+igb_finish_device_reset(struct e1000_softc *sc, u32 icr)
+{
+	bool reset_again;
+	u32 gcr, state, status;
+
+	if (igb_device_reset_intr_mask(sc) == 0)
+		return (false);
+
+	state = atomic_load_acq_32(&sc->device_reset_state);
+	reset_again = icr != 0xffffffff &&
+	    (icr & E1000_ICR_DRSTA) != 0;
+	if (sc->hw.mac.type >= e1000_82580) {
+		gcr = E1000_READ_REG(&sc->hw, E1000_GCR);
+		if (gcr != 0xffffffff &&
+		    (gcr & E1000_GCR_DEV_RST_IN_PROGRESS) != 0)
+			reset_again = true;
+		status = E1000_READ_REG(&sc->hw, E1000_STATUS);
+		if (status == 0xffffffff &&
+		    state != IGB_DEVICE_RESET_NONE) {
+			/*
+			 * MMIO can disappear briefly while SR-IOV is changing, but
+			 * config space remains readable.  If both are gone, retain the
+			 * stopped state without queueing an endless reset loop.
+			 */
+			if (pci_read_config(sc->dev, PCIR_VENDOR, 2) == 0xffff) {
+				atomic_store_rel_32(&sc->device_reset_state,
+				    IGB_DEVICE_RESET_DETECTED);
+				device_printf(sc->dev,
+				    "device unavailable after device-wide reset; "
+				    "leaving interface stopped\n");
+				return (true);
+			}
+			reset_again = true;
+		} else if (status != 0xffffffff &&
+		    (status & E1000_STAT_DEV_RST_SET) != 0)
+			reset_again = true;
+	}
+	if (state == IGB_DEVICE_RESET_DETECTED ||
+	    state == IGB_DEVICE_RESET_REQUESTED)
+		reset_again = true;
+	if (!reset_again) {
+		if (state == IGB_DEVICE_RESET_PREPARED &&
+		    !atomic_cmpset_rel_32(&sc->device_reset_state,
+		    IGB_DEVICE_RESET_PREPARED, IGB_DEVICE_RESET_NONE))
+			return (true);
+		return (false);
+	}
+
+	state = atomic_swap_32(&sc->device_reset_state,
+	    IGB_DEVICE_RESET_DETECTED);
+	if (state != IGB_DEVICE_RESET_DETECTED) {
+		iflib_request_reset_if_up(sc->ctx);
+		iflib_admin_intr_deferred(sc->ctx);
+	}
+	return (true);
+}
+
+/*
  * A PCIe-region parity failure stops PCIe and DMA traffic.  I350, I354,
  * I210, and I211 require a port reset before master disable in this case.
  * 82580 stops PCIe traffic for a fatal error in any host-owned region, so use
@@ -2798,14 +3062,18 @@ em_intr(void *arg)
 	if (hw->mac.type >= e1000_82571 &&
 	    (reg_icr & E1000_ICR_INT_ASSERTED) == 0)
 		return FILTER_STRAY;
+	if (igb_handle_device_reset(sc, reg_icr))
+		return (FILTER_HANDLED);
+	if (igb_device_reset_pending(sc))
+		return (FILTER_HANDLED);
 
 	/*
-	 * Only MSI-X interrupts have one-shot behavior by taking advantage
-	 * of the EIAC register.  Thus, explicitly disable interrupts.  This
-	 * also works around the MSI message reordering errata on certain
-	 * systems.
+	 * IAM auto-masks igb shared interrupts when ICR is read.  Older em
+	 * hardware still needs an explicit disable, which also works around
+	 * MSI message reordering errata on certain systems.
 	 */
-	IFDI_INTR_DISABLE(ctx);
+	if (sc->vf_ifp || hw->mac.type < igb_mac_min)
+		IFDI_INTR_DISABLE(ctx);
 
 	/* Link status change */
 	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC))
@@ -2848,6 +3116,8 @@ igb_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
 	struct e1000_softc *sc = iflib_get_softc(ctx);
 	struct em_rx_queue *rxq = &sc->rx_queues[rxqid];
 
+	if (igb_device_reset_pending(sc))
+		return (0);
 	E1000_WRITE_REG(&sc->hw, E1000_EIMS, rxq->eims);
 	return (0);
 }
@@ -2858,6 +3128,8 @@ igb_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid)
 	struct e1000_softc *sc = iflib_get_softc(ctx);
 	struct em_tx_queue *txq = &sc->tx_queues[txqid];
 
+	if (igb_device_reset_pending(sc))
+		return (0);
 	E1000_WRITE_REG(&sc->hw, E1000_EIMS, txq->eims);
 	return (0);
 }
@@ -2876,6 +3148,8 @@ em_msix_que(void *arg)
 
 	++que->irqs;
 
+	if (igb_device_reset_pending(sc))
+		return (FILTER_HANDLED);
 	em_newitr(sc, que, rxr);
 
 	return (FILTER_SCHEDULE_THREAD);
@@ -2895,6 +3169,14 @@ em_msix_link(void *arg)
 	++sc->link_irq;
 	MPASS(sc->hw.back != NULL);
 	reg_icr = E1000_READ_REG(&sc->hw, E1000_ICR);
+	if (igb_device_reset_pending(sc))
+		return (FILTER_HANDLED);
+
+	/* Ignore transient all-ones MMIO reads as interrupt causes. */
+	if (__predict_false(reg_icr == 0xffffffff))
+		goto rearm;
+	if (igb_handle_device_reset(sc, reg_icr))
+		return (FILTER_HANDLED);
 
 	if (reg_icr & E1000_ICR_RXO)
 		sc->rx_overruns++;
@@ -2903,10 +3185,12 @@ em_msix_link(void *arg)
 		em_handle_link(sc->ctx);
 	em_handle_fatal_error_intr(sc, reg_icr);
 
+rearm:
 	/* Re-arm unconditionally */
 	if (sc->hw.mac.type >= igb_mac_min) {
 		E1000_WRITE_REG(&sc->hw, E1000_IMS,
-		    E1000_IMS_LSC | em_fatal_error_intr_mask(sc));
+		    E1000_IMS_LSC | igb_device_reset_intr_mask(sc) |
+		    em_fatal_error_intr_mask(sc));
 		E1000_WRITE_REG(&sc->hw, E1000_EIMS, sc->link_mask);
 	} else if (sc->hw.mac.type == e1000_82574) {
 		E1000_WRITE_REG(&sc->hw, E1000_IMS,
@@ -3092,6 +3376,19 @@ em_copy_maddr(void *arg, struct sockaddr_dl *sdl, u_int idx)
 	return (1);
 }
 
+/* Make every multicast hash eligible on parts whose wake matcher needs MTA. */
+static void
+em_fill_wakeup_mta(struct e1000_hw *hw)
+{
+	int i;
+
+	memset(hw->mac.mta_shadow, 0xff, sizeof(hw->mac.mta_shadow));
+	for (i = hw->mac.mta_reg_count - 1; i >= 0; i--)
+		E1000_WRITE_REG_ARRAY(hw, E1000_MTA, i,
+		    hw->mac.mta_shadow[i]);
+	E1000_WRITE_FLUSH(hw);
+}
+
 /*********************************************************************
  *  Multicast Update
  *
@@ -3183,6 +3480,24 @@ em_if_update_admin_status(if_ctx_t ctx)
 
 	if (em_handle_fatal_error_admin(sc))
 		return;
+	/* A sibling-port reset invalidated the port registers. */
+	if (atomic_cmpset_acq_32(&sc->device_reset_state,
+	    IGB_DEVICE_RESET_DETECTED, IGB_DEVICE_RESET_REQUESTED)) {
+		if (sc->link_state == EM_LINK_STATE_UP)
+			iflib_link_state_change(ctx, LINK_STATE_DOWN, 0);
+		sc->link_speed = 0;
+		sc->link_duplex = 0;
+		sc->link_state = EM_LINK_STATE_DOWN_RESET_PENDING;
+		/* Request the reset here; interrupt filters cannot take STATE_LOCK. */
+		iflib_request_reset_if_up(ctx);
+		/* Re-enter the admin task so it observes the reset request. */
+		iflib_admin_intr_deferred(ctx);
+		return;
+	}
+	if (atomic_load_acq_32(&sc->device_reset_state) !=
+	    IGB_DEVICE_RESET_NONE)
+		return;
+
 	link_check = thstat = ctrl = 0;
 	/* Get the cached link value or read phy for real */
 	switch (hw->phy.media_type) {
@@ -3839,6 +4154,18 @@ lem_smartspeed(struct e1000_softc *sc)
 		sc->smartspeed = 0;
 }
 
+static void
+igb_disable_dmac(struct e1000_hw *hw)
+{
+	u32 reg;
+
+	reg = E1000_READ_REG(hw, E1000_DMACR);
+	reg &= ~E1000_DMACR_DMAC_EN;
+	/* Retain the documented Lx policy and I210 reserved encoding. */
+	reg |= E1000_DMACR_DMAC_LX_MASK;
+	E1000_WRITE_REG(hw, E1000_DMACR, reg);
+}
+
 /*********************************************************************
  *
  *  Initialize the DMA Coalescing feature
@@ -3849,7 +4176,7 @@ igb_init_dmac(struct e1000_softc *sc, u32 pba)
 {
 	device_t	dev = sc->dev;
 	struct e1000_hw *hw = &sc->hw;
-	u32 		dmac, reg = ~E1000_DMACR_DMAC_EN;
+	u32		dmac, dmacwt, reg, ttlx;
 	u16		hwm;
 	u16		max_frame_size;
 
@@ -3860,7 +4187,7 @@ igb_init_dmac(struct e1000_softc *sc, u32 pba)
 	if (hw->mac.type > e1000_82580) {
 
 		if (sc->dmac == 0) { /* Disabling it */
-			E1000_WRITE_REG(hw, E1000_DMACR, reg);
+			igb_disable_dmac(hw);
 			return;
 		} else
 			device_printf(dev, "DMA Coalescing enabled\n");
@@ -3882,52 +4209,64 @@ igb_init_dmac(struct e1000_softc *sc, u32 pba)
 		if (dmac < pba - 10)
 			dmac = pba - 10;
 		reg = E1000_READ_REG(hw, E1000_DMACR);
-		reg &= ~E1000_DMACR_DMACTHR_MASK;
+		reg &= ~(E1000_DMACR_DMACWT_MASK |
+		    E1000_DMACR_DMACTHR_MASK | E1000_DMACR_DMAC_LX_MASK |
+		    E1000_DMACR_DMAC_EN | E1000_DMACR_DC_LPBKW_EN |
+		    E1000_DMACR_DC_BMC2OSW_EN);
 		reg |= ((dmac << E1000_DMACR_DMACTHR_SHIFT)
 		    & E1000_DMACR_DMACTHR_MASK);
 
-		/* transition to L0x or L1 if available..*/
+		/* Transition to L0s or L1 if available. */
 		reg |= (E1000_DMACR_DMAC_EN | E1000_DMACR_DMAC_LX_MASK);
 
-		/* Check if status is 2.5Gb backplane connection
-		* before configuration of watchdog timer, which is
-		* in msec values in 12.8usec intervals
-		* watchdog timer= msec values in 32usec intervals
-		* for non 2.5Gb connection
-		*/
+		/*
+		 * The watchdog uses 12.8 usec units on an I354 2.5 Gb/s
+		 * backplane connection and 32 usec units otherwise.
+		 */
 		if (hw->mac.type == e1000_i354) {
 			int status = E1000_READ_REG(hw, E1000_STATUS);
 			if ((status & E1000_STATUS_2P5_SKU) &&
 			    (!(status & E1000_STATUS_2P5_SKU_OVER)))
-				reg |= ((sc->dmac * 5) >> 6);
+				dmacwt = (sc->dmac * 5) >> 6;
 			else
-				reg |= (sc->dmac >> 5);
+				dmacwt = sc->dmac >> 5;
 		} else {
-			reg |= (sc->dmac >> 5);
+			dmacwt = sc->dmac >> 5;
 		}
+		reg |= dmacwt & E1000_DMACR_DMACWT_MASK;
+		if (hw->mac.type == e1000_i350 ||
+		    hw->mac.type == e1000_i354)
+			reg |= E1000_DMACR_DC_LPBKW_EN;
+		if (hw->mac.type == e1000_i354)
+			reg |= E1000_DMACR_DC_BMC2OSW_EN;
 
 		E1000_WRITE_REG(hw, E1000_DMACR, reg);
 
 		E1000_WRITE_REG(hw, E1000_DMCRTRH, 0);
 
-		/* Set the interval before transition */
+		/* Set the interval before transition. */
 		reg = E1000_READ_REG(hw, E1000_DMCTLX);
+		reg &= ~E1000_DMCTLX_TTLX_MASK;
 		if (hw->mac.type == e1000_i350)
 			reg |= IGB_DMCTLX_DCFLUSH_DIS;
 		/*
-		** in 2.5Gb connection, TTLX unit is 0.4 usec
-		** which is 0x4*2 = 0xA. But delay is still 4 usec
-		*/
-		if (hw->mac.type == e1000_i354) {
+		 * I210 documents TTLX as reserved with a required value of 0x20.
+		 * At 2.5 Gb/s the I354 unit is 0.4 usec, so ten ticks retain
+		 * the four usec interval used at other speeds.
+		 */
+		if (hw->mac.type == e1000_i210) {
+			ttlx = 0x20;
+		} else if (hw->mac.type == e1000_i354) {
 			int status = E1000_READ_REG(hw, E1000_STATUS);
 			if ((status & E1000_STATUS_2P5_SKU) &&
 			    (!(status & E1000_STATUS_2P5_SKU_OVER)))
-				reg |= 0xA;
+				ttlx = 0xA;
 			else
-				reg |= 0x4;
+				ttlx = 0x4;
 		} else {
-			reg |= 0x4;
+			ttlx = 0x4;
 		}
+		reg |= ttlx & E1000_DMCTLX_TTLX_MASK;
 
 		E1000_WRITE_REG(hw, E1000_DMCTLX, reg);
 
@@ -3937,7 +4276,7 @@ igb_init_dmac(struct e1000_softc *sc, u32 pba)
 
 		/* make low power state decision controlled by DMA coal */
 		reg = E1000_READ_REG(hw, E1000_PCIEMISC);
-		reg &= ~E1000_PCIEMISC_LX_DECISION;
+		reg |= E1000_PCIEMISC_LX_DECISION;
 		E1000_WRITE_REG(hw, E1000_PCIEMISC, reg);
 
 	} else if (hw->mac.type == e1000_82580) {
@@ -5448,16 +5787,24 @@ igb_if_intr_enable(if_ctx_t ctx)
 	struct e1000_hw *hw = &sc->hw;
 	u32 mask;
 
+	if (igb_device_reset_pending(sc))
+		return;
 	if (__predict_true(sc->intr_type == IFLIB_INTR_MSIX)) {
 		mask = (sc->que_mask | sc->link_mask);
 		E1000_WRITE_REG(hw, E1000_EIAC, mask);
 		E1000_WRITE_REG(hw, E1000_EIAM, mask);
 		E1000_WRITE_REG(hw, E1000_EIMS, mask);
 		E1000_WRITE_REG(hw, E1000_IMS,
-		    E1000_IMS_LSC | em_fatal_error_intr_mask(sc));
-	} else
-		E1000_WRITE_REG(hw, E1000_IMS,
-		    IMS_ENABLE_MASK | em_fatal_error_intr_mask(sc));
+		    E1000_IMS_LSC | igb_device_reset_intr_mask(sc) |
+		    em_fatal_error_intr_mask(sc));
+	} else {
+		mask = IMS_ENABLE_MASK | igb_device_reset_intr_mask(sc) |
+		    em_fatal_error_intr_mask(sc);
+		/* Reading ICR masks every shared interrupt before the filter runs. */
+		if (!sc->vf_ifp)
+			E1000_WRITE_REG(hw, E1000_IAM, mask);
+		E1000_WRITE_REG(hw, E1000_IMS, mask);
+	}
 	E1000_WRITE_FLUSH(hw);
 }
 
@@ -5467,10 +5814,15 @@ igb_if_intr_disable(if_ctx_t ctx)
 	struct e1000_softc *sc = iflib_get_softc(ctx);
 	struct e1000_hw *hw = &sc->hw;
 
+	/* This is the first CTX-owned register access after ICR.DRSTA. */
+	if (!sc->vf_ifp)
+		igb_prepare_device_reset(sc);
+
 	if (__predict_true(sc->intr_type == IFLIB_INTR_MSIX)) {
 		E1000_WRITE_REG(hw, E1000_EIMC, 0xffffffff);
 		E1000_WRITE_REG(hw, E1000_EIAC, 0);
-	}
+	} else if (!sc->vf_ifp)
+		E1000_WRITE_REG(hw, E1000_IAM, 0);
 	E1000_WRITE_REG(hw, E1000_IMC, 0xffffffff);
 	E1000_WRITE_FLUSH(hw);
 }
@@ -5640,11 +5992,15 @@ static void
 em_get_wakeup(if_ctx_t ctx)
 {
 	struct e1000_softc *sc = iflib_get_softc(ctx);
+	if_softc_ctx_t scctx = iflib_get_softc_ctx(ctx);
 	device_t dev = iflib_get_dev(ctx);
 	u16 eeprom_data = 0, device_id, apme_mask;
+	bool apme;
+	int error, wol_capabilities;
 
 	sc->has_manage = e1000_enable_mng_pass_thru(&sc->hw);
-	apme_mask = EM_EEPROM_APME;
+	apme_mask = EM_EEPROM_APME_HIGH;
+	error = E1000_SUCCESS;
 
 	switch (sc->hw.mac.type) {
 	case e1000_82542:
@@ -5653,18 +6009,26 @@ em_get_wakeup(if_ctx_t ctx)
 	case e1000_vfadapt_i350:
 		break;
 	case e1000_82544:
-		e1000_read_nvm(&sc->hw,
+		error = e1000_read_nvm(&sc->hw,
 		    NVM_INIT_CONTROL2_REG, 1, &eeprom_data);
-		apme_mask = EM_82544_APME;
+		apme_mask = EM_EEPROM_APME_LOW;
+		break;
+	case e1000_82541:
+	case e1000_82547:
+		error = e1000_read_nvm(&sc->hw,
+		    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
+		/* The EI parts place APM Enable in the low byte. */
+		if (sc->hw.device_id != E1000_DEV_ID_82541ER_LOM)
+			apme_mask = EM_EEPROM_APME_LOW;
 		break;
 	case e1000_82546:
 	case e1000_82546_rev_3:
 		if (sc->hw.bus.func == 1) {
-			e1000_read_nvm(&sc->hw,
+			error = e1000_read_nvm(&sc->hw,
 			    NVM_INIT_CONTROL3_PORT_B, 1, &eeprom_data);
 			break;
 		} else
-			e1000_read_nvm(&sc->hw,
+			error = e1000_read_nvm(&sc->hw,
 			    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
 		break;
 	case e1000_82573:
@@ -5675,11 +6039,11 @@ em_get_wakeup(if_ctx_t ctx)
 	case e1000_82572:
 	case e1000_80003es2lan:
 		if (sc->hw.bus.func == 1) {
-			e1000_read_nvm(&sc->hw,
+			error = e1000_read_nvm(&sc->hw,
 			    NVM_INIT_CONTROL3_PORT_B, 1, &eeprom_data);
 			break;
 		} else
-			e1000_read_nvm(&sc->hw,
+			error = e1000_read_nvm(&sc->hw,
 			    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
 		break;
 	case e1000_ich8lan:
@@ -5689,170 +6053,465 @@ em_get_wakeup(if_ctx_t ctx)
 	case e1000_pch2lan:
 	case e1000_pch_lpt:
 	case e1000_pch_spt:
-	case e1000_82575:	/* listing all igb devices */
+	case e1000_pch_cnp:
+	case e1000_pch_tgp:
+	case e1000_pch_adp:
+	case e1000_pch_mtp:
+	case e1000_pch_ptp:
+	case e1000_pch_nvp:
+		apme_mask = E1000_WUC_APME;
+		sc->has_amt = true;
+		eeprom_data = E1000_READ_REG(&sc->hw, E1000_WUC);
+		if (sc->hw.mac.type > e1000_ich10lan &&
+		    (eeprom_data & E1000_WUC_PHY_WAKE) != 0)
+			sc->wol_phy_wakeup = true;
+		break;
+	case e1000_82575:
 	case e1000_82576:
+		if (sc->hw.bus.func == 1)
+			error = e1000_read_nvm(&sc->hw,
+			    NVM_INIT_CONTROL3_PORT_B, 1, &eeprom_data);
+		else
+			error = e1000_read_nvm(&sc->hw,
+			    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
+		sc->has_amt = true;
+		break;
 	case e1000_82580:
 	case e1000_i350:
 	case e1000_i354:
 	case e1000_i210:
 	case e1000_i211:
-		apme_mask = E1000_WUC_APME;
+		error = e1000_read_nvm(&sc->hw,
+		    NVM_INIT_CONTROL3_PORT_A +
+		    NVM_82580_LAN_FUNC_OFFSET(sc->hw.bus.func), 1,
+		    &eeprom_data);
 		sc->has_amt = true;
-		eeprom_data = E1000_READ_REG(&sc->hw, E1000_WUC);
 		break;
 	default:
-		e1000_read_nvm(&sc->hw,
+		error = e1000_read_nvm(&sc->hw,
 		    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
 		break;
 	}
-	if (eeprom_data & apme_mask)
-		sc->wol = (E1000_WUFC_MAG | E1000_WUFC_MC);
-	/*
-	 * We have the eeprom settings, now apply the special cases
-	 * where the eeprom may be wrong or the board won't support
-	 * wake on lan on a particular port
-	 */
+	if (error != E1000_SUCCESS && bootverbose)
+		device_printf(dev, "NVM read failed while checking WoL: %d\n",
+		    error);
+	if ((sc->hw.mac.type == e1000_i210 ||
+	    sc->hw.mac.type == e1000_i211) &&
+	    sc->hw.nvm.type == e1000_nvm_invm) {
+		/* The shared reader does not expose the optional iNVM word. */
+		apme = (E1000_READ_REG(&sc->hw, E1000_WUC) &
+		    E1000_WUC_APME) != 0;
+	} else {
+		apme = error == E1000_SUCCESS &&
+		    (eeprom_data & apme_mask) != 0;
+	}
+	wol_capabilities = pci_has_pme(dev, PCI_POWERSTATE_D3_HOT) ?
+	    IFCAP_WOL : 0;
+	if (sc->hw.mac.type == e1000_82542 ||
+	    sc->hw.mac.type == e1000_82543)
+		wol_capabilities = 0;
+
+	/* APME selects the default; board and port restrictions select support. */
 	device_id = pci_get_device(dev);
 	switch (device_id) {
+	case E1000_DEV_ID_82542:
+	case E1000_DEV_ID_82543GC_FIBER:
+	case E1000_DEV_ID_82543GC_COPPER:
+	case E1000_DEV_ID_82541ER:
+	case E1000_DEV_ID_82541ER_LOM:
+	case E1000_DEV_ID_82544EI_FIBER:
+	case E1000_DEV_ID_82545EM_COPPER:
+	case E1000_DEV_ID_82545EM_FIBER:
+	case E1000_DEV_ID_82546EB_QUAD_COPPER:
+	case E1000_DEV_ID_82546GB_QUAD_COPPER:
 	case E1000_DEV_ID_82546GB_PCIE:
-		sc->wol = 0;
+		wol_capabilities = 0;
 		break;
 	case E1000_DEV_ID_82546EB_FIBER:
 	case E1000_DEV_ID_82546GB_FIBER:
-		/* Wake events only supported on port A for dual fiber
-		 * regardless of eeprom setting */
-		if (E1000_READ_REG(&sc->hw, E1000_STATUS) &
-		    E1000_STATUS_FUNC_1)
-			sc->wol = 0;
+		/*
+		 * Wake events are supported only on port A for dual fiber,
+		 * regardless of the NVM setting.
+		 */
+		if (sc->hw.bus.func == 1)
+			wol_capabilities = 0;
 		break;
 	case E1000_DEV_ID_82546GB_QUAD_COPPER_KSP3:
 		/* if quad port adapter, disable WoL on all but port A */
 		if (global_quad_port_a != 0)
-			sc->wol = 0;
+			wol_capabilities = 0;
+		else
+			wol_capabilities &= ~IFCAP_WOL_UCAST;
 		/* Reset for multiple quad port adapters */
 		if (++global_quad_port_a == 4)
 			global_quad_port_a = 0;
 		break;
+	case E1000_DEV_ID_82571EB_COPPER:
 	case E1000_DEV_ID_82571EB_FIBER:
-		/* Wake events only supported on port A for dual fiber
-		 * regardless of eeprom setting */
-		if (E1000_READ_REG(&sc->hw, E1000_STATUS) &
-		    E1000_STATUS_FUNC_1)
-			sc->wol = 0;
+	case E1000_DEV_ID_82571EB_SERDES:
+		/* These dual-port adapters support wake only on port A. */
+		if (sc->hw.bus.func == 1)
+			wol_capabilities = 0;
+		break;
+	case E1000_DEV_ID_82571EB_SERDES_QUAD:
+		wol_capabilities = 0;
 		break;
 	case E1000_DEV_ID_82571EB_QUAD_COPPER:
 	case E1000_DEV_ID_82571EB_QUAD_FIBER:
 	case E1000_DEV_ID_82571EB_QUAD_COPPER_LP:
+	case E1000_DEV_ID_82571PT_QUAD_COPPER:
 		/* if quad port adapter, disable WoL on all but port A */
 		if (global_quad_port_a != 0)
-			sc->wol = 0;
+			wol_capabilities = 0;
 		/* Reset for multiple quad port adapters */
 		if (++global_quad_port_a == 4)
 			global_quad_port_a = 0;
 		break;
+	case E1000_DEV_ID_82575GB_QUAD_COPPER:
+		wol_capabilities = 0;
+		break;
+	case E1000_DEV_ID_82575EB_FIBER_SERDES:
+	case E1000_DEV_ID_82576_FIBER:
+	case E1000_DEV_ID_82576_SERDES:
+		if (sc->hw.bus.func == 1)
+			wol_capabilities = 0;
+		break;
+	case E1000_DEV_ID_82576_QUAD_COPPER:
+	case E1000_DEV_ID_82576_QUAD_COPPER_ET2:
+		if (global_quad_port_a != 0)
+			wol_capabilities = 0;
+		if (++global_quad_port_a == 4)
+			global_quad_port_a = 0;
+		break;
+	default:
+		break;
 	}
+	/* Legacy and igb non-primary ports require an explicit NVM setting. */
+	if ((sc->hw.mac.type < e1000_82571 ||
+	    sc->hw.mac.type >= igb_mac_min) && sc->hw.bus.func != 0 &&
+	    !apme)
+		wol_capabilities = 0;
+
+	/* Some I350-family systems expose wake support but default it off. */
+	if ((sc->hw.mac.type == e1000_i350 &&
+	    pci_get_subvendor(dev) == EM_SUBVENDOR_HP) ||
+	    ((sc->hw.mac.type == e1000_i350 ||
+	    sc->hw.mac.type == e1000_i354) &&
+	    pci_get_subvendor(dev) == EM_SUBVENDOR_DELL) ||
+	    (sc->hw.mac.type == e1000_i350 &&
+	    ((pci_get_subdevice(dev) == EM_I350_SUBDEVICE_WOL_2 ||
+	    pci_get_subdevice(dev) == EM_I350_SUBDEVICE_WOL_3) &&
+	    sc->hw.bus.func == 0))) {
+		wol_capabilities = pci_has_pme(dev, PCI_POWERSTATE_D3_HOT) ?
+		    IFCAP_WOL : 0;
+		apme = false;
+	}
+	if (sc->hw.mac.type == e1000_i350 &&
+	    pci_get_subdevice(dev) == EM_I350_SUBDEVICE_WOL_1)
+		wol_capabilities = pci_has_pme(dev, PCI_POWERSTATE_D3_HOT) ?
+		    IFCAP_WOL : 0;
+
+	scctx->isc_capabilities &= ~IFCAP_WOL;
+	scctx->isc_capabilities |= wol_capabilities;
+	scctx->isc_capenable &= ~IFCAP_WOL;
+	if (wol_capabilities != 0 && apme)
+		scctx->isc_capenable |= IFCAP_WOL_MAGIC;
 }
 
-
-/*
- * Enable PCI Wake On Lan capability
- */
-static void
+/* Configure the requested PCI Wake-on-LAN filters for suspend. */
+static int
 em_enable_wakeup(if_ctx_t ctx)
 {
 	struct e1000_softc *sc = iflib_get_softc(ctx);
 	device_t dev = iflib_get_dev(ctx);
 	if_t ifp = iflib_get_ifp(ctx);
-	int error = 0;
-	u32 ctrl, ctrl_ext, rctl;
+	int enabled, error = 0, master_error, mcnt;
+	u32 ctrl, ctrl_ext, rctl, saved_rctl, wuc, wufc;
+	bool manage, rctl_modified;
 
-	if (!pci_has_pm(dev))
-		return;
+	if (sc->vf_ifp)
+		return (0);
+	if (!pci_has_pme(dev, PCI_POWERSTATE_D3_HOT))
+		return (0);
 
-	/*
-	 * Determine type of Wakeup: note that wol
-	 * is set with all bits on by default.
-	 */
-	if ((if_getcapenable(ifp) & IFCAP_WOL_MAGIC) == 0)
-		sc->wol &= ~E1000_WUFC_MAG;
-
-	if ((if_getcapenable(ifp) & IFCAP_WOL_UCAST) == 0)
-		sc->wol &= ~E1000_WUFC_EX;
-
-	if ((if_getcapenable(ifp) & IFCAP_WOL_MCAST) == 0)
-		sc->wol &= ~E1000_WUFC_MC;
-	else {
-		rctl = E1000_READ_REG(&sc->hw, E1000_RCTL);
-		rctl |= E1000_RCTL_MPE;
-		E1000_WRITE_REG(&sc->hw, E1000_RCTL, rctl);
+	enabled = if_getcapenable(ifp) & if_getcapabilities(ifp) & IFCAP_WOL;
+	manage = e1000_enable_mng_pass_thru(&sc->hw);
+	rctl_modified = false;
+	wuc = 0;
+	/* Early 82545EM/82546EB need APM clocks for D3 manageability. */
+	if (manage && (sc->hw.mac.type == e1000_82545 ||
+	    sc->hw.mac.type == e1000_82546))
+		wuc = E1000_WUC_APME;
+	wufc = 0;
+	if ((enabled & IFCAP_WOL_MAGIC) != 0)
+		wufc |= E1000_WUFC_MAG;
+	if ((enabled & IFCAP_WOL_UCAST) != 0)
+		wufc |= E1000_WUFC_EX;
+	if ((enabled & IFCAP_WOL_MCAST) != 0) {
+		wufc |= E1000_WUFC_MC;
+		bzero(sc->mta, ETHER_ADDR_LEN *
+		    MAX_NUM_MULTICAST_ADDRESSES);
+		mcnt = if_foreach_llmaddr(ifp, em_copy_maddr, sc->mta);
+		if (mcnt < MAX_NUM_MULTICAST_ADDRESSES) {
+			e1000_update_mc_addr_list(&sc->hw, sc->mta, mcnt);
+		} else {
+			switch (sc->hw.mac.type) {
+			case e1000_82544:
+			case e1000_82540:
+			case e1000_82545:
+			case e1000_82545_rev_3:
+			case e1000_82546:
+			case e1000_82546_rev_3:
+			case e1000_82541:
+			case e1000_82541_rev_2:
+			case e1000_82547:
+			case e1000_82547_rev_2:
+			case e1000_82575:
+			case e1000_82576:
+			case e1000_82580:
+				/* These parts require an MTA hit for WUFC_MC. */
+				em_fill_wakeup_mta(&sc->hw);
+				break;
+			default:
+				break;
+			}
+		}
 	}
 
-	if (!(sc->wol & (E1000_WUFC_EX | E1000_WUFC_MAG | E1000_WUFC_MC)))
+	if (wufc == 0) {
+		if (sc->hw.mac.type >= e1000_82544) {
+			E1000_WRITE_REG(&sc->hw, E1000_WUFC, 0);
+			E1000_WRITE_REG(&sc->hw, E1000_WUC, wuc);
+			E1000_WRITE_REG(&sc->hw, E1000_WUS, ~0U);
+		}
+		if (sc->wol_phy_wakeup && sc->wol_phy_armed)
+			(void)em_disable_phy_wakeup(sc, NULL);
+		if (manage) {
+			if (sc->suspend_link_powered_down)
+				em_power_up_wakeup_link(sc);
+			em_configure_sx_low_power(sc, 0);
+			pci_enable_pme(dev);
+		} else {
+			em_power_down_wakeup_link(sc);
+			pci_clear_pme(dev);
+		}
+		goto master_disable;
+	}
+	bcopy(if_getlladdr(ifp), sc->hw.mac.addr, ETHER_ADDR_LEN);
+	error = e1000_rar_set(&sc->hw, sc->hw.mac.addr, 0);
+	if (error != E1000_SUCCESS) {
+		device_printf(dev,
+		    "Could not restore unicast wake address: %d\n", error);
 		goto pme;
+	}
+	saved_rctl = E1000_READ_REG(&sc->hw, E1000_RCTL);
+	rctl = saved_rctl;
+	rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_MO_3);
+	rctl |= E1000_RCTL_EN | E1000_RCTL_BAM |
+	    (sc->hw.mac.mc_filter_type << E1000_RCTL_MO_SHIFT);
+	if ((wufc & E1000_WUFC_MC) != 0)
+		rctl |= E1000_RCTL_MPE;
+	E1000_WRITE_REG(&sc->hw, E1000_RCTL, rctl);
+	rctl_modified = true;
 
 	/* Advertise the wakeup capability */
-	ctrl = E1000_READ_REG(&sc->hw, E1000_CTRL);
-	ctrl |= (E1000_CTRL_SWDPIN2 | E1000_CTRL_SWDPIN3);
-	E1000_WRITE_REG(&sc->hw, E1000_CTRL, ctrl);
+	if (sc->hw.mac.type >= e1000_82540) {
+		ctrl = E1000_READ_REG(&sc->hw, E1000_CTRL);
+		ctrl |= E1000_CTRL_ADVD3WUC;
+		if (sc->hw.mac.type < igb_mac_min && !sc->wol_phy_wakeup)
+			ctrl |= E1000_CTRL_EN_PHY_PWR_MGMT;
+		E1000_WRITE_REG(&sc->hw, E1000_CTRL, ctrl);
+	}
 
-	/* Keep the laser running on Fiber adapters */
-	if (sc->hw.phy.media_type == e1000_media_type_fiber ||
-	    sc->hw.phy.media_type == e1000_media_type_internal_serdes) {
+	/* Keep the laser running on legacy fiber and SerDes adapters. */
+	if (sc->hw.mac.type < igb_mac_min &&
+	    (sc->hw.phy.media_type == e1000_media_type_fiber ||
+	    sc->hw.phy.media_type == e1000_media_type_internal_serdes)) {
 		ctrl_ext = E1000_READ_REG(&sc->hw, E1000_CTRL_EXT);
 		ctrl_ext |= E1000_CTRL_EXT_SDP3_DATA;
 		E1000_WRITE_REG(&sc->hw, E1000_CTRL_EXT, ctrl_ext);
 	}
+	E1000_WRITE_REG(&sc->hw, E1000_WUS, ~0U);
+	em_power_up_wakeup_link(sc);
 
-	if ((sc->hw.mac.type == e1000_ich8lan) ||
-	    (sc->hw.mac.type == e1000_pchlan) ||
-	    (sc->hw.mac.type == e1000_ich9lan) ||
-	    (sc->hw.mac.type == e1000_ich10lan))
+	if (sc->hw.mac.type >= e1000_ich8lan &&
+	    sc->hw.mac.type < igb_mac_min)
 		e1000_suspend_workarounds_ich8lan(&sc->hw);
 
-	if ( sc->hw.mac.type >= e1000_pchlan) {
-		error = em_enable_phy_wakeup(sc);
+	if (sc->wol_phy_wakeup) {
+		error = em_enable_phy_wakeup(sc, wufc);
 		if (error)
 			goto pme;
 	} else {
 		/* Enable wakeup by the MAC */
-		E1000_WRITE_REG(&sc->hw, E1000_WUC, E1000_WUC_PME_EN);
-		E1000_WRITE_REG(&sc->hw, E1000_WUFC, sc->wol);
+		E1000_WRITE_REG(&sc->hw, E1000_WUC,
+		    wuc | E1000_WUC_PME_EN);
+		E1000_WRITE_REG(&sc->hw, E1000_WUFC, wufc);
 	}
 
-	if (sc->hw.phy.type == e1000_phy_igp_3)
+	/* The IGP3 D3 power-down workaround is specific to the em family. */
+	if (sc->hw.mac.type < igb_mac_min &&
+	    sc->hw.phy.type == e1000_phy_igp_3)
 		e1000_igp3_phy_powerdown_workaround_ich8lan(&sc->hw);
+	em_configure_sx_low_power(sc, wufc);
 
 pme:
-	if (!error && (if_getcapenable(ifp) & IFCAP_WOL))
+	if (!error)
 		pci_enable_pme(dev);
+	else {
+		E1000_WRITE_REG(&sc->hw, E1000_WUFC, 0);
+		E1000_WRITE_REG(&sc->hw, E1000_WUC, wuc);
+		if (rctl_modified)
+			E1000_WRITE_REG(&sc->hw, E1000_RCTL, saved_rctl);
+		pci_clear_pme(dev);
+	}
 
-	return;
+master_disable:
+	master_error = e1000_disable_pcie_master(&sc->hw);
+	if (master_error != E1000_SUCCESS)
+		device_printf(dev, "PCIe master disable timed out: %d\n",
+		    master_error);
+	master_error = pci_disable_busmaster(dev);
+	if (master_error != 0)
+		device_printf(dev, "PCI bus-master disable failed: %d\n",
+		    master_error);
+
+	return (error == E1000_SUCCESS ? 0 : EIO);
 }
 
-/*
- * WOL in the newer chipset interfaces (pchlan)
- * require thing to be copied into the phy
- */
-static int
-em_enable_phy_wakeup(struct e1000_softc *sc)
+/* Configure the PCH low-power link modes used while the system sleeps. */
+static void
+em_configure_sx_low_power(struct e1000_softc *sc, u32 wufc)
 {
 	struct e1000_hw *hw = &sc->hw;
-	u32 mreg, ret = 0;
-	u16 preg;
+	struct e1000_dev_spec_ich8lan *dev_spec;
+	s32 error;
+	u16 eee_advert, lpi_ctrl;
 
-	/* copy MAC RARs to PHY RARs */
-	e1000_copy_rx_addrs_to_phy_ich8lan(hw);
+	if (hw->mac.type < e1000_pch_lpt || hw->mac.type >= igb_mac_min ||
+	    sc->suspend_link_powered_down)
+		return;
+
+	if (wufc != 0 &&
+	    (wufc & (E1000_WUFC_EX | E1000_WUFC_MC | E1000_WUFC_BC)) == 0) {
+		/* ULP cannot preserve directed or broad multicast wake. */
+		error = e1000_enable_ulp_lpt_lp(hw, true);
+		if (error != E1000_SUCCESS) {
+			device_printf(sc->dev,
+			    "Could not enter PHY ultra-low-power mode: %d\n",
+			    error);
+			return;
+		}
+	}
+
+	dev_spec = &hw->dev_spec.ich8lan;
+	if (hw->phy.type != e1000_phy_i217 || dev_spec->eee_disable ||
+	    dev_spec->eee_lp_ability == 0)
+		return;
+
+	error = hw->phy.ops.acquire(hw);
+	if (error != E1000_SUCCESS)
+		goto out;
+	error = hw->phy.ops.read_reg_locked(hw, I82579_LPI_CTRL, &lpi_ctrl);
+	if (error != E1000_SUCCESS)
+		goto release;
+	error = e1000_read_emi_reg_locked(hw, I217_EEE_ADVERTISEMENT,
+	    &eee_advert);
+	if (error != E1000_SUCCESS)
+		goto release;
+
+	if ((eee_advert & dev_spec->eee_lp_ability &
+	    I82579_EEE_100_SUPPORTED) != 0)
+		lpi_ctrl |= I82579_LPI_CTRL_100_ENABLE;
+	if ((eee_advert & dev_spec->eee_lp_ability &
+	    I82579_EEE_1000_SUPPORTED) != 0)
+		lpi_ctrl |= I82579_LPI_CTRL_1000_ENABLE;
+	error = hw->phy.ops.write_reg_locked(hw, I82579_LPI_CTRL, lpi_ctrl);
+release:
+	hw->phy.ops.release(hw);
+out:
+	if (error != E1000_SUCCESS)
+		device_printf(sc->dev,
+		    "Could not configure Energy Efficient Ethernet for sleep: %d\n",
+		    error);
+}
+
+static void
+em_power_up_wakeup_link(struct e1000_softc *sc)
+{
+	struct e1000_hw *hw = &sc->hw;
+
+	if (hw->mac.type < igb_mac_min)
+		e1000_power_up_phy(hw);
+	else if (hw->phy.media_type == e1000_media_type_copper)
+		e1000_power_up_phy(hw);
+	else {
+		e1000_power_up_fiber_serdes_link(hw);
+		(void)e1000_setup_link(hw);
+	}
+	sc->suspend_link_powered_down = false;
+}
+
+/* Drop the unused suspend link through the controller's shared-code hook. */
+static void
+em_power_down_wakeup_link(struct e1000_softc *sc)
+{
+	struct e1000_hw *hw = &sc->hw;
+
+	if (hw->mac.type >= igb_mac_min &&
+	    hw->phy.media_type != e1000_media_type_copper)
+		e1000_shutdown_fiber_serdes_link(hw);
+	else
+		e1000_power_down_phy(hw);
+	sc->suspend_link_powered_down = true;
+}
+
+/* PCH PHY wake requires the MAC receive state on the BM wake page. */
+static int
+em_enable_phy_wakeup(struct e1000_softc *sc, u32 wufc)
+{
+	struct e1000_hw *hw = &sc->hw;
+	u32 mreg, wuc;
+	u16 preg, wuc_enable;
+	s32 error, restore_error;
+
+	/* Copy MAC RARs to PHY RARs before selecting the BM wake page. */
+	error = e1000_copy_rx_addrs_to_phy_ich8lan(hw);
+	if (error != E1000_SUCCESS)
+		goto out;
+
+	error = hw->phy.ops.acquire(hw);
+	if (error != E1000_SUCCESS) {
+		device_printf(sc->dev, "Could not acquire PHY for wakeup\n");
+		goto out;
+	}
+
+	error = e1000_enable_phy_wakeup_reg_access_bm(hw, &wuc_enable);
+	if (error != E1000_SUCCESS)
+		goto release;
+
+	/* Wake status is RW1C and survives controller reset. */
+	error = hw->phy.ops.write_reg_page(hw, BM_WUS, 0xffff);
+	if (error != E1000_SUCCESS)
+		goto restore;
 
 	/* copy MAC MTA to PHY MTA */
 	for (int i = 0; i < hw->mac.mta_reg_count; i++) {
 		mreg = E1000_READ_REG_ARRAY(hw, E1000_MTA, i);
-		e1000_write_phy_reg(hw, BM_MTA(i), (u16)(mreg & 0xFFFF));
-		e1000_write_phy_reg(hw, BM_MTA(i) + 1,
-		    (u16)((mreg >> 16) & 0xFFFF));
+		error = hw->phy.ops.write_reg_page(hw, BM_MTA(i),
+		    (u16)(mreg & 0xffff));
+		if (error != E1000_SUCCESS)
+			goto restore;
+		error = hw->phy.ops.write_reg_page(hw, BM_MTA(i) + 1,
+		    (u16)(mreg >> 16));
+		if (error != E1000_SUCCESS)
+			goto restore;
 	}
 
 	/* configure PHY Rx Control register */
-	e1000_read_phy_reg(hw, BM_RCTL, &preg);
+	error = hw->phy.ops.read_reg_page(hw, BM_RCTL, &preg);
+	if (error != E1000_SUCCESS)
+		goto restore;
 	mreg = E1000_READ_REG(hw, E1000_RCTL);
 	if (mreg & E1000_RCTL_UPE)
 		preg |= BM_RCTL_UPE;
@@ -5869,38 +6528,79 @@ em_enable_phy_wakeup(struct e1000_softc *sc)
 	mreg = E1000_READ_REG(hw, E1000_CTRL);
 	if (mreg & E1000_CTRL_RFCE)
 		preg |= BM_RCTL_RFCE;
-	e1000_write_phy_reg(hw, BM_RCTL, preg);
+	error = hw->phy.ops.write_reg_page(hw, BM_RCTL, preg);
+	if (error != E1000_SUCCESS)
+		goto restore;
+
+	wuc = E1000_WUC_PME_EN;
+	if ((wufc & (E1000_WUFC_MAG | E1000_WUFC_LNKC)) != 0)
+		wuc |= E1000_WUC_APME;
 
 	/* enable PHY wakeup in MAC register */
-	E1000_WRITE_REG(hw, E1000_WUC,
-	    E1000_WUC_PHY_WAKE | E1000_WUC_PME_EN | E1000_WUC_APME);
-	E1000_WRITE_REG(hw, E1000_WUFC, sc->wol);
+	E1000_WRITE_REG(hw, E1000_WUFC, wufc);
+	E1000_WRITE_REG(hw, E1000_WUC, E1000_WUC_PHY_WAKE |
+	    E1000_WUC_APMPME | E1000_WUC_PME_STATUS | wuc);
 
 	/* configure and enable PHY wakeup in PHY registers */
-	e1000_write_phy_reg(hw, BM_WUFC, sc->wol);
-	e1000_write_phy_reg(hw, BM_WUC, E1000_WUC_PME_EN);
+	error = hw->phy.ops.write_reg_page(hw, BM_WUFC, wufc);
+	if (error != E1000_SUCCESS)
+		goto restore;
+	error = hw->phy.ops.write_reg_page(hw, BM_WUC, wuc);
+	if (error != E1000_SUCCESS)
+		goto restore;
 
-	/* activate PHY wakeup */
-	ret = hw->phy.ops.acquire(hw);
-	if (ret) {
-		printf("Could not acquire PHY\n");
-		return ret;
-	}
-	e1000_write_phy_reg_mdic(hw, IGP01E1000_PHY_PAGE_SELECT,
-	                         (BM_WUC_ENABLE_PAGE << IGP_PAGE_SHIFT));
-	ret = e1000_read_phy_reg_mdic(hw, BM_WUC_ENABLE_REG, &preg);
-	if (ret) {
-		printf("Could not read PHY page 769\n");
-		goto out;
-	}
-	preg |= BM_WUC_ENABLE_BIT | BM_WUC_HOST_WU_BIT;
-	ret = e1000_write_phy_reg_mdic(hw, BM_WUC_ENABLE_REG, preg);
-	if (ret)
-		printf("Could not set PHY Host Wakeup bit\n");
-out:
+restore:
+	/* Restore the page selector and expose only a complete setup. */
+	if (error == E1000_SUCCESS)
+		wuc_enable |= BM_WUC_ENABLE_BIT | BM_WUC_HOST_WU_BIT;
+	else
+		wuc_enable &= ~BM_WUC_HOST_WU_BIT;
+	restore_error = e1000_disable_phy_wakeup_reg_access_bm(hw,
+	    &wuc_enable);
+	if (error == E1000_SUCCESS)
+		error = restore_error;
+release:
 	hw->phy.ops.release(hw);
+out:
+	sc->wol_phy_armed = error == E1000_SUCCESS;
+	if (error != E1000_SUCCESS)
+		device_printf(sc->dev, "Could not configure PHY wakeup: %d\n",
+		    error);
 
-	return ret;
+	return (error);
+}
+
+/* Clear host ownership and sticky status without disturbing ME wake. */
+static int
+em_disable_phy_wakeup(struct e1000_softc *sc, u16 *wus)
+{
+	struct e1000_hw *hw = &sc->hw;
+	s32 error, restore_error;
+	u16 phy_wus, wuc_enable;
+
+	error = hw->phy.ops.acquire(hw);
+	if (error != E1000_SUCCESS)
+		return (error);
+	error = e1000_enable_phy_wakeup_reg_access_bm(hw, &wuc_enable);
+	if (error != E1000_SUCCESS)
+		goto release;
+
+	error = hw->phy.ops.read_reg_page(hw, BM_WUS, &phy_wus);
+	if (error == E1000_SUCCESS)
+		error = hw->phy.ops.write_reg_page(hw, BM_WUS, 0xffff);
+	wuc_enable &= ~BM_WUC_HOST_WU_BIT;
+	restore_error = e1000_disable_phy_wakeup_reg_access_bm(hw,
+	    &wuc_enable);
+	if (error == E1000_SUCCESS)
+		error = restore_error;
+release:
+	hw->phy.ops.release(hw);
+	if (error == E1000_SUCCESS) {
+		sc->wol_phy_armed = false;
+		if (wus != NULL)
+			*wus = phy_wus;
+	}
+	return (error);
 }
 
 static void
