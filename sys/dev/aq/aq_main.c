@@ -506,12 +506,13 @@ aq_if_attach_post(if_ctx_t ctx)
 	aq_add_stats_sysctls(softc);
 	/* RSS */
 	uint32_t rss_qs = MIN(softc->rx_rings_count, HW_ATL_RSS_INDIRECTION_QUEUES_MAX);
-#ifdef RSS
+	_Static_assert(sizeof(softc->rss_key) == RSS_KEYSIZE,
+	    "RSS key size mismatch");
 	rss_getkey(softc->rss_key);
+#ifdef RSS
 	for (int i = nitems(softc->rss_table); i--;)
 		softc->rss_table[i] = rss_get_indirection_to_bucket(i) % rss_qs;
 #else
-	arc4rand(softc->rss_key, HW_ATL_RSS_HASHKEY_SIZE, 0);
 	for (int i = nitems(softc->rss_table); i--;)
 		softc->rss_table[i] = i % rss_qs;
 #endif
@@ -774,9 +775,7 @@ aq_if_init(if_ctx_t ctx)
 	    softc->scctx->isc_intr == IFLIB_INTR_MSIX);
 	if (err != 0) {
 		device_printf(softc->dev, "aq_hw_init: %d\n", err);
-		softc->init_failed = true;
-		AQ_DBG_EXIT(err);
-		return;
+		goto fail;
 	}
 	softc->init_failed = false;
 	softc->init_retries = 0;
@@ -799,11 +798,13 @@ aq_if_init(if_ctx_t ctx)
 		if (err) {
 			device_printf(softc->dev,
 			    "aq_ring_tx_init: %d\n", err);
+			goto fail;
 		}
 		err = aq_ring_tx_start(hw, ring);
 		if (err != 0) {
 			device_printf(softc->dev,
 			    "aq_ring_tx_start: %d\n", err);
+			goto fail;
 		}
 	}
 	for (i = 0; i < softc->rx_rings_count; i++) {
@@ -813,19 +814,23 @@ aq_if_init(if_ctx_t ctx)
 		if (err) {
 			device_printf(softc->dev,
 			    "aq_ring_rx_init: %d\n", err);
+			goto fail;
 		}
 		err = aq_ring_rx_start(hw, ring);
 		if (err != 0) {
 			device_printf(softc->dev,
 			    "aq_ring_rx_start: %d\n", err);
+			goto fail;
 		}
 		aq_if_rx_queue_intr_enable(ctx, i);
 	}
 
 	err = aq_hw_start(hw);
-	if (err != 0)
+	if (err != 0) {
 		device_printf(softc->dev, "could not start the datapath: %d\n",
 		    err);
+		goto fail;
+	}
 	aq_if_enable_intr(ctx);
 	err = aq_hw_rss_hash_set(&softc->hw, softc->rss_key);
 	if (err != 0)
@@ -854,6 +859,13 @@ aq_if_init(if_ctx_t ctx)
 		device_printf(softc->dev, "could not restore promiscuous mode\n");
 
 	AQ_DBG_EXIT(0);
+	return;
+
+fail:
+	aq_if_stop(ctx);
+	softc->init_failed = true;
+	iflib_init_failed(ctx);
+	AQ_DBG_EXIT(err);
 }
 
 
@@ -884,6 +896,10 @@ aq_if_stop(if_ctx_t ctx)
 			device_printf(softc->dev,
 			    "could not stop RX ring %d\n", i);
 	}
+
+	if (aq_hw_invalidate_descriptor_cache(hw) != 0)
+		device_printf(softc->dev,
+		    "could not invalidate the RX descriptor cache\n");
 
 	if (aq_hw_reset(&softc->hw, true) != 0)
 		device_printf(softc->dev, "could not reset the MAC on stop\n");
