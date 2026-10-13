@@ -51,6 +51,9 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20261013: HBSD: Garbage collect old DNSSEC root key material
+OLD_FILES+=usr/share/keys/hbsd-update/trusted/dnssec.key-2016-07-30
+
 # 20260925: lesskey(1) removed, lesskey(5) man page added
 OLD_FILES+=usr/bin/lesskey
 OLD_FILES+=usr/share/man/man1/lesskey.1.gz

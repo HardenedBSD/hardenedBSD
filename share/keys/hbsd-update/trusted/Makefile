@@ -1,4 +1,4 @@
-FILES=	ca.hardenedbsd.org dnssec.key-2016-07-30 dnssec.key-2026-10-13
+FILES=	ca.hardenedbsd.org dnssec.key-2026-10-13
 
 FILESDIR=	${SHAREDIR}/keys/hbsd-update/trusted
 FILESMODE=	444
