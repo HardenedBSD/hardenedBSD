@@ -446,7 +446,7 @@ __thr_get_main_stack_base(char **base)
 	size_t len;
 	int mib[2];
 
-	if (elf_aux_info(AT_USRSTACKBASE, base, sizeof(*base)) == 0)
+	if (_elf_aux_info(AT_USRSTACKBASE, base, sizeof(*base)) == 0)
 		return (true);
 
 	mib[0] = CTL_KERN;
@@ -463,7 +463,7 @@ __thr_get_main_stack_lim(size_t *lim)
 {
 	struct rlimit rlim;
 
-	if (elf_aux_info(AT_USRSTACKLIM, lim, sizeof(*lim)) == 0)
+	if (_elf_aux_info(AT_USRSTACKLIM, lim, sizeof(*lim)) == 0)
 		return (true);
 
 	if (getrlimit(RLIMIT_STACK, &rlim) == 0) {
