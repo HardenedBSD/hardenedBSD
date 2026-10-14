@@ -440,8 +440,6 @@ init_main_thread(struct pthread *thread)
 	/* Others cleared to zero by thr_alloc() */
 }
 
-<<<<<<< HEAD
-=======
 bool
 __thr_get_main_stack_base(char **base)
 {
@@ -494,7 +492,6 @@ getenv_int(const char *name, int mn, int mx, int *result)
 	return (true);
 }
 
->>>>>>> rad/freebsd/current/main
 static void
 init_private(void)
 {
