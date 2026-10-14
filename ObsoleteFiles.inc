@@ -51,6 +51,9 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20261013: HBSD: Garbage collect old DNSSEC root key material
+OLD_FILES+=usr/share/keys/hbsd-update/trusted/dnssec.key-2016-07-30
+
 # 20261012: Removed <sys/kpilite.h>
 OLD_FILES+=usr/include/sys/kpilite.h
 
