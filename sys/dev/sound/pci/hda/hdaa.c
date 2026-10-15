@@ -2008,8 +2008,8 @@ hdaa_audio_setup(struct hdaa_chan *ch)
 			/* Write HDMI/DisplayPort audio infoframe. */
 			hda_command(ch->devinfo->dev,
 			    HDA_CMD_SET_HDMI_DIP_INDEX(0, nid, 0x00));
-			if (w->eld != NULL && w->eld_len >= 6 &&
-			    ((w->eld[5] >> 2) & 0x3) == 1) { /* DisplayPort */
+			if (wp->eld != NULL && wp->eld_len >= 6 &&
+			    ((wp->eld[5] >> 2) & 0x3) == 1) { /* DisplayPort */
 				hda_command(ch->devinfo->dev,
 				    HDA_CMD_SET_HDMI_DIP_DATA(0, nid, 0x84));
 				hda_command(ch->devinfo->dev,
@@ -2080,6 +2080,7 @@ hdaa_channel_setfragments(kobj_t obj, void *data,
 					uint32_t blksz, uint32_t blkcnt)
 {
 	struct hdaa_chan *ch = data;
+	int error;
 
 	blksz -= blksz % lcm(HDA_DMA_ALIGNMENT, ch->b->align);
 
@@ -2101,11 +2102,12 @@ hdaa_channel_setfragments(kobj_t obj, void *data,
 			break;
 	}
 
-	if ((ch->b->blksz != blksz ||
-	    ch->b->blkcnt != blkcnt) &&
-	    sndbuf_resize(ch->b, blkcnt, blksz) != 0)
+	if ((ch->b->blksz != blksz || ch->b->blkcnt != blkcnt) &&
+	    (error = sndbuf_resize(ch->b, blkcnt, blksz)) != 0) {
 		device_printf(ch->devinfo->dev, "%s: failed blksz=%u blkcnt=%u\n",
 		    __func__, blksz, blkcnt);
+		return (error);
+	}
 
 	ch->blksz = ch->b->blksz;
 	ch->blkcnt = ch->b->blkcnt;
@@ -2118,7 +2120,9 @@ hdaa_channel_setblocksize(kobj_t obj, void *data, uint32_t blksz)
 {
 	struct hdaa_chan *ch = data;
 
-	hdaa_channel_setfragments(obj, data, blksz, ch->pdevinfo->chan_blkcnt);
+	if (hdaa_channel_setfragments(obj, data, blksz,
+	    ch->pdevinfo->chan_blkcnt) != 0)
+		return (0);
 
 	return (ch->blksz);
 }
