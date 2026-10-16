@@ -439,6 +439,12 @@ struct iwm_softc {
 
 	struct task		init_task;
 
+	/* Task for ERP/HT prot/slot-time/EDCA updates. */
+	struct task		mac_ctxt_task;
+
+	/* Task for HT 20/40 MHz channel width updates. */
+	struct task		phy_ctxt_task;
+
 	struct resource		*sc_irq;
 	struct resource		*sc_mem;
 	bus_space_tag_t		sc_st;
@@ -455,6 +461,7 @@ struct iwm_softc {
 	struct iwm_tx_ring	txq[IWM_MAX_QUEUES];
 	struct iwm_rx_ring	rxq;
 	int			qfullmsk;
+	int			qenablemsk;
 	int			cmdqid;
 
 	/* ICT table. */
