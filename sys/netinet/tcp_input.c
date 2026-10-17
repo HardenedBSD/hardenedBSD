@@ -647,7 +647,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 	isipv6 = mtod(m, struct ip *)->ip_v == 6;
 	if (isipv6) {
 		ip6 = mtod(m, struct ip6_hdr *);
-		th = (struct tcphdr *)((caddr_t)ip6 + off0);
+		th = (struct tcphdr *)((char *)ip6 + off0);
 		tlen = sizeof(*ip6) + ntohs(ip6->ip6_plen) - off0;
 		if (port)
 			goto skip6_csum;
@@ -709,7 +709,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 			}
 		}
 		ip = mtod(m, struct ip *);
-		th = (struct tcphdr *)((caddr_t)ip + off0);
+		th = (struct tcphdr *)((char *)ip + off0);
 		tlen = ntohs(ip->ip_len) - off0;
 
 		iptos = ip->ip_tos;
@@ -784,7 +784,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 					return (IPPROTO_DONE);
 				}
 				ip6 = mtod(m, struct ip6_hdr *);
-				th = (struct tcphdr *)((caddr_t)ip6 + off0);
+				th = (struct tcphdr *)((char *)ip6 + off0);
 			}
 		}
 #endif
@@ -800,7 +800,7 @@ tcp_input_with_port(struct mbuf **mp, int *offp, int proto, uint16_t port)
 					return (IPPROTO_DONE);
 				}
 				ip = mtod(m, struct ip *);
-				th = (struct tcphdr *)((caddr_t)ip + off0);
+				th = (struct tcphdr *)((char *)ip + off0);
 			}
 		}
 #endif
@@ -3597,7 +3597,7 @@ tcp_pulloutofband(struct socket *so, struct tcphdr *th, struct mbuf *m,
 
 	while (cnt >= 0) {
 		if (m->m_len > cnt) {
-			char *cp = mtod(m, caddr_t) + cnt;
+			char *cp = mtod(m, char *) + cnt;
 			struct tcpcb *tp = sototcpcb(so);
 
 			INP_WLOCK_ASSERT(tptoinpcb(tp));
