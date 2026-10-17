@@ -157,6 +157,7 @@ kernel.txz:
 
 src.txz:
 	mkdir -p ${DISTDIR}/usr
+<<<<<<< HEAD
 	ln -fs ${WORLDDIR} ${DISTDIR}/usr/src
 	( cd ${DISTDIR} && ${TAR_CMD} cLvf - --exclude .svn --exclude .zfs \
 	    --exclude .git --exclude @ --exclude usr/src/release/dist usr/src | \
@@ -167,6 +168,21 @@ ports.txz:
 	ln -fs ${PORTSDIR} ${DISTDIR}/usr/ports
 	( cd ${DISTDIR} && ${TAR_CMD} cLvf - \
 	    --exclude .git --exclude .svn \
+=======
+	rm -f ${DISTDIR}/usr/src
+	ln -s ${WORLDDIR} ${DISTDIR}/usr/src
+	( cd ${DISTDIR} && ${TAR_XZ_CMD} -cLvf ${.OBJDIR}/src.txz \
+	    --exclude .svn --exclude .zfs \
+	    --exclude .git --exclude .got --exclude @ --exclude usr/src/release/dist \
+	    --exclude usr/src/release/obj usr/src )
+
+ports.txz:
+	mkdir -p ${DISTDIR}/usr
+	rm -f ${DISTDIR}/usr/ports
+	ln -s ${PORTSDIR} ${DISTDIR}/usr/ports
+	( cd ${DISTDIR} && ${TAR_XZ_CMD} -cLvf ${.OBJDIR}/ports.txz \
+	    --exclude .git --exclude .got --exclude .svn \
+>>>>>>> rad/freebsd/current/main
 	    --exclude usr/ports/distfiles --exclude usr/ports/packages \
 	    --exclude 'usr/ports/INDEX*' --exclude work usr/ports | \
 	    ${XZ_CMD} > ${.OBJDIR}/ports.txz )
