@@ -335,17 +335,10 @@ fi
 
 [ ${include_metadata} = "if-modified" -a ${modified} = "yes" ] && include_metadata=yes
 if [ ${include_metadata} != "yes" ]; then
-<<<<<<< HEAD
-	VERINFO="${VERSION}${hbsdv}${svn}${git}${gitup}${hg} ${i}"
+	VERINFO="${VERSION}${hbsdv}${svn}${git}${gitup}${got}${hg} ${i}"
 	VERSTR="${VERINFO}\\n"
 else
-	VERINFO="${VERSION} #${v}${hbsdv}${svn}${git}${gitup}${hg}: ${t}"
-=======
-	VERINFO="${VERSION}${svn}${git}${gitup}${got}${hg} ${i}"
-	VERSTR="${VERINFO}\\n"
-else
-	VERINFO="${VERSION} #${v}${svn}${git}${gitup}${got}${hg}: ${t}"
->>>>>>> rad/freebsd/current/main
+	VERINFO="${VERSION}${hbsdv} #${v}${svn}${git}${gitup}${got}${hg}: ${t}"
 	VERSTR="${VERINFO}\\n    ${u}@${h}:${d}\\n"
 fi
 
