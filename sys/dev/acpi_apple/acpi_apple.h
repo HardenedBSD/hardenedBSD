@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#ifndef	_APPLE_ACPI_H_
-#define	_APPLE_ACPI_H_
+#ifndef	_ACPI_APPLE_H_
+#define	_ACPI_APPLE_H_
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -21,8 +21,10 @@
 #include <dev/acpica/acpivar.h>
 #include <dev/backlight/backlight.h>
 
-#define	ACPI_APPLE_PLATFORM	0x01	/* WoL + lid (APP000B/APP9876) */
-#define	ACPI_APPLE_BACKLIGHT	0x02	/* panel backlight (APP0002) */
+enum acpi_apple_mode {
+	ACPI_APPLE_PLATFORM,		/* WoL + lid (APP000B/APP9876) */
+	ACPI_APPLE_BACKLIGHT,		/* panel backlight (APP0002) */
+};
 
 /*
  * Apple GMUX (GPU multiplexer) registers.
@@ -116,7 +118,7 @@ struct apple_bl_hw {
 struct acpi_apple_softc {
 	device_t		dev;
 	ACPI_HANDLE		handle;
-	int			mode;
+	enum acpi_apple_mode	mode;
 
 	/* Backlight */
 	struct mtx		bl_mtx;		/* protects hw access + cache */
@@ -130,11 +132,11 @@ struct acpi_apple_softc {
 	uint32_t		bl_brightness;	/* cached percent 0..100 */
 };
 
-/* apple_platform.c */
+/* acpi_apple_platform.c */
 int	acpi_apple_platform_attach(struct acpi_apple_softc *sc);
 void	acpi_apple_platform_detach(struct acpi_apple_softc *sc);
 
-/* apple_backlight.c */
+/* acpi_apple_bl.c */
 int	acpi_apple_backlight_attach(struct acpi_apple_softc *sc);
 void	acpi_apple_backlight_detach(struct acpi_apple_softc *sc);
 void	acpi_apple_backlight_restore(void);
@@ -146,4 +148,4 @@ int	acpi_apple_bl_get_status(device_t dev,
 int	acpi_apple_bl_get_info(device_t dev,
 	    struct backlight_info *info);
 
-#endif /* _APPLE_ACPI_H_ */
+#endif /* _ACPI_APPLE_H_ */

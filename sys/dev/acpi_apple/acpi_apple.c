@@ -27,7 +27,7 @@
 
 #include <sys/cdefs.h>
 #include "opt_acpi.h"
-#include "apple_acpi.h"
+#include "acpi_apple.h"
 
 #include "backlight_if.h"
 
@@ -77,10 +77,13 @@ acpi_apple_attach(device_t dev)
 	else
 		sc->mode = ACPI_APPLE_PLATFORM;
 
-	if (sc->mode == ACPI_APPLE_PLATFORM)
+	switch (sc->mode) {
+	case ACPI_APPLE_PLATFORM:
 		return (acpi_apple_platform_attach(sc));
-	else
+	case ACPI_APPLE_BACKLIGHT:
 		return (acpi_apple_backlight_attach(sc));
+	}
+	return (ENXIO);
 }
 
 static int
@@ -89,10 +92,14 @@ acpi_apple_detach(device_t dev)
 	struct acpi_apple_softc *sc;
 
 	sc = device_get_softc(dev);
-	if (sc->mode == ACPI_APPLE_PLATFORM)
+	switch (sc->mode) {
+	case ACPI_APPLE_PLATFORM:
 		acpi_apple_platform_detach(sc);
-	else
+		break;
+	case ACPI_APPLE_BACKLIGHT:
 		acpi_apple_backlight_detach(sc);
+		break;
+	}
 	return (0);
 }
 
