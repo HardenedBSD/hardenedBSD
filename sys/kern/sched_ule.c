@@ -509,19 +509,21 @@ normalize_ts_off(int offset)
 static inline void
 tdq_runq_add(struct tdq *tdq, struct thread *td, int flags)
 {
-	struct td_sched *ts;
 	u_char pri, idx;
 
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
 	THREAD_LOCK_BLOCKED_ASSERT(td, MA_OWNED);
 
-	pri = td->td_priority;
-	ts = td_get_sched(td);
 	TD_SET_RUNQ(td);
+
 	if (THREAD_CAN_MIGRATE(td)) {
+		struct td_sched *const ts = td_get_sched(td);
+
 		tdq->tdq_transferable++;
 		ts->ts_flags |= TSF_XFERABLE;
 	}
+
+	pri = td->td_priority;
 	if (PRI_MIN_BATCH <= pri && pri <= PRI_MAX_BATCH) {
 		/*
 		 * The queues allocated to the batch range are not used as
@@ -1240,7 +1242,7 @@ tdq_notify(struct tdq *tdq, int lowpri)
 
 	/*
 	 * Try to figure out if we can signal the idle thread instead of sending
-	 * an IPI.  This check is racy; at worst, we will deliever an IPI
+	 * an IPI.  This check is racy; at worst, we will deliver an IPI
 	 * unnecessarily.
 	 */
 	cpu = TDQ_ID(tdq);
@@ -1618,7 +1620,7 @@ sched_setup_smp(void)
 	int i;
 
 	CPU_FOREACH(i) {
-		tdq = DPCPU_ID_PTR(i, tdq);
+		tdq = TDQ_CPU(i);
 		tdq_setup(tdq, i);
 		tdq->tdq_cg = smp_topo_find(cpu_top, i);
 		if (tdq->tdq_cg == NULL)
@@ -2658,6 +2660,7 @@ sched_ule_preempt(struct thread *td)
 	struct tdq *tdq;
 	int flags;
 
+	MPASS(td == curthread);
 	SDT_PROBE2(sched, , , surrender, td, td->td_proc);
 
 	thread_lock(td);
@@ -3006,17 +3009,19 @@ static void
 sched_ule_affinity(struct thread *td)
 {
 #ifdef SMP
-	struct td_sched *ts;
+	struct td_sched *const ts = td_get_sched(td);
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
-	ts = td_get_sched(td);
+
 	if (THREAD_CAN_SCHED(td, ts->ts_cpu))
 		return;
+
 	if (TD_ON_RUNQ(td)) {
 		sched_rem(td);
 		sched_add(td, SRQ_BORING | SRQ_HOLDTD);
 		return;
 	}
+
 	if (!TD_IS_RUNNING(td))
 		return;
 	/*
