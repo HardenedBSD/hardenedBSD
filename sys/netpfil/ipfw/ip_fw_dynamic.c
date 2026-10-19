@@ -111,19 +111,10 @@
  * passes through the firewall. XXX check the latter!!!
  */
 
-/* By default use jenkins hash function */
-#define	IPFIREWALL_JENKINSHASH
-
 #define	DYN_COUNTER_INC(d, dir, pktlen)	do {	\
 	(d)->pcnt_ ## dir++;			\
 	(d)->bcnt_ ## dir += pktlen;		\
 	} while (0)
-
-#define	DYN_REFERENCED		0x01
-/*
- * DYN_REFERENCED flag is used to show that state keeps reference to named
- * object, and this reference should be released when state becomes expired.
- */
 
 struct dyn_data {
 	void		*parent;	/* pointer to parent rule */
@@ -133,7 +124,8 @@ struct dyn_data {
 	uint32_t	hashval;	/* hash value used for hash resize */
 	uint16_t	fibnum;		/* fib used to send keepalives */
 	uint8_t		_pad;
-	uint8_t		flags;		/* internal flags */
+	uint8_t		flags;
+#define	DYN_REFERENCED	0x01		/* holds reference to named object */
 	uint32_t	rulenum;	/* parent rule number */
 	uint32_t	ruleid;		/* parent rule id */
 
@@ -778,34 +770,6 @@ static struct opcode_obj_rewrite dyn_opcodes[] = {
  * in source and destination (ip,port), because rules are bidirectional
  * and we want to find both in the same bucket.
  */
-#ifndef IPFIREWALL_JENKINSHASH
-static __inline uint32_t
-hash_packet(const struct ipfw_flow_id *id)
-{
-	uint32_t i;
-
-#ifdef INET6
-	if (IS_IP6_FLOW_ID(id))
-		i = ntohl((id->dst_ip6.__u6_addr.__u6_addr32[2]) ^
-		    (id->dst_ip6.__u6_addr.__u6_addr32[3]) ^
-		    (id->src_ip6.__u6_addr.__u6_addr32[2]) ^
-		    (id->src_ip6.__u6_addr.__u6_addr32[3]));
-	else
-#endif /* INET6 */
-	i = (id->dst_ip) ^ (id->src_ip);
-	i ^= (id->dst_port) ^ (id->src_port);
-	return (i);
-}
-
-static __inline uint32_t
-hash_parent(const struct ipfw_flow_id *id, const void *rule)
-{
-
-	return (hash_packet(id) ^ ((uintptr_t)rule));
-}
-
-#else /* IPFIREWALL_JENKINSHASH */
-
 VNET_DEFINE_STATIC(uint32_t, dyn_hashseed);
 #define	V_dyn_hashseed		VNET(dyn_hashseed)
 
@@ -900,7 +864,6 @@ hash_parent(const struct ipfw_flow_id *id, const void *rule)
 	return (jenkins_hash32((const uint32_t *)&rule,
 	    sizeof(rule) / sizeof(uint32_t), hash_packet(id)));
 }
-#endif /* IPFIREWALL_JENKINSHASH */
 
 /*
  * Print customizable flow id description via log(9) facility.
@@ -3179,9 +3142,7 @@ void
 ipfw_dyn_init(struct ip_fw_chain *chain)
 {
 
-#ifdef IPFIREWALL_JENKINSHASH
 	V_dyn_hashseed = arc4random();
-#endif
 	V_dyn_max = 16384;		/* max # of states */
 	V_dyn_parent_max = 4096;	/* max # of parent states */
 	V_dyn_buckets_max = 8192;	/* must be power of 2 */
