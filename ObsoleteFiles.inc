@@ -51,10 +51,6 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
-<<<<<<< HEAD
-# 20261013: HBSD: Garbage collect old DNSSEC root key material
-OLD_FILES+=usr/share/keys/hbsd-update/trusted/dnssec.key-2016-07-30
-=======
 # 20261020: Regenerate trust store
 OLD_FILES+=usr/share/certs/trusted/Atos_TrustedRoot_2011.pem
 OLD_FILES+=usr/share/certs/trusted/SecureSign_Root_CA12.pem
@@ -63,7 +59,9 @@ OLD_FILES+=usr/share/certs/trusted/emSign_ECC_Root_CA_-_C3.pem
 OLD_FILES+=usr/share/certs/trusted/emSign_ECC_Root_CA_-_G3.pem
 OLD_FILES+=usr/share/certs/trusted/emSign_Root_CA_-_C1.pem
 OLD_FILES+=usr/share/certs/untrusted/Entrust_Root_Certification_Authority.pem
->>>>>>> rad/freebsd/current/main
+
+# 20261013: HBSD: Garbage collect old DNSSEC root key material
+OLD_FILES+=usr/share/keys/hbsd-update/trusted/dnssec.key-2016-07-30
 
 # 20261012: Removed <sys/kpilite.h>
 OLD_FILES+=usr/include/sys/kpilite.h
