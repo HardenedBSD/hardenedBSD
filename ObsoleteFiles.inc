@@ -63,9 +63,6 @@ OLD_FILES+=usr/share/certs/untrusted/Entrust_Root_Certification_Authority.pem
 # 20261013: HBSD: Garbage collect old DNSSEC root key material
 OLD_FILES+=usr/share/keys/hbsd-update/trusted/dnssec.key-2016-07-30
 
-# 20261012: Removed <sys/kpilite.h>
-OLD_FILES+=usr/include/sys/kpilite.h
-
 # 20260925: lesskey(1) removed, lesskey(5) man page added
 OLD_FILES+=usr/bin/lesskey
 OLD_FILES+=usr/share/man/man1/lesskey.1.gz
