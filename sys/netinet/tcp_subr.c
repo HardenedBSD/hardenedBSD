@@ -293,8 +293,8 @@ static int	tcp_soreceive_stream;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, soreceive_stream, CTLFLAG_RDTUN,
     &tcp_soreceive_stream, 0, "Using soreceive_stream for TCP sockets");
 
-VNET_DEFINE(uma_zone_t, sack_hole_zone);
-#define	V_sack_hole_zone		VNET(sack_hole_zone)
+uma_zone_t tcp_sack_hole_zone;
+
 VNET_DEFINE(uint32_t, tcp_map_entries_limit) = 0;	/* unlimited */
 static int
 sysctl_net_inet_tcp_map_limit_check(SYSCTL_HANDLER_ARGS)
@@ -1458,10 +1458,8 @@ tcp_vnet_init(void *arg __unused)
 	tcp_hc_init();
 
 	TUNABLE_INT_FETCH("net.inet.tcp.sack.enable", &V_tcp_do_sack);
-	V_sack_hole_zone = uma_zcreate("sackhole", sizeof(struct sackhole),
-	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 
-	tcp_fastopen_init();
+	tcp_fastopen_vnet_init();
 
 	COUNTER_ARRAY_ALLOC(V_tcps_states, TCP_NSTATES, M_WAITOK);
 	VNET_PCPUSTAT_ALLOC(tcpstat, M_WAITOK);
@@ -1581,12 +1579,16 @@ tcp_init(void *arg __unused)
 #ifdef INET6
 	IP6PROTO_REGISTER(IPPROTO_TCP, tcp6_input, tcp6_ctlinput);
 #endif
+
+	tcp_fastopen_init();
+	tcp_sack_hole_zone = uma_zcreate("sackhole", sizeof(struct sackhole),
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 }
 SYSINIT(tcp_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_THIRD, tcp_init, NULL);
 
 #ifdef VIMAGE
 static void
-tcp_destroy(void *unused __unused)
+tcp_vnet_destroy(void *unused __unused)
 {
 #ifdef TCP_HHOOK
 	int error;
@@ -1595,14 +1597,12 @@ tcp_destroy(void *unused __unused)
 	tcp_hc_destroy();
 	syncache_destroy();
 	in_pcbinfo_destroy(&V_tcbinfo);
-	/* tcp_discardcb() clears the sack_holes up. */
-	uma_zdestroy(V_sack_hole_zone);
 
 	/*
 	 * Cannot free the zone until all tcpcbs are released as we attach
 	 * the allocations to them.
 	 */
-	tcp_fastopen_destroy();
+	tcp_fastopen_vnet_destroy();
 
 	COUNTER_ARRAY_FREE(V_tcps_states, TCP_NSTATES);
 	VNET_PCPUSTAT_FREE(tcpstat);
@@ -1622,7 +1622,8 @@ tcp_destroy(void *unused __unused)
 	}
 #endif
 }
-VNET_SYSUNINIT(tcp, SI_SUB_PROTO_DOMAIN, SI_ORDER_FOURTH, tcp_destroy, NULL);
+VNET_SYSUNINIT(tcp, SI_SUB_PROTO_DOMAIN, SI_ORDER_FOURTH, tcp_vnet_destroy,
+    NULL);
 #endif
 
 /*
@@ -3376,25 +3377,21 @@ static void
 tcp6_ctlinput_viaudp(udp_tun_icmp_param_t param)
 {
 	struct ip6ctlparam *ip6cp = param.ip6cp;
-	struct mbuf *m;
-	struct udphdr *udp;
+	struct udphdr udp;
 	uint16_t port;
 
-	m = m_pulldown(ip6cp->ip6c_m, ip6cp->ip6c_off, sizeof(struct udphdr), NULL);
-	if (m == NULL) {
+	if (ip6cp->ip6c_m->m_pkthdr.len <
+	    ip6cp->ip6c_off + sizeof(struct udphdr))
 		return;
-	}
-	udp = mtod(m, struct udphdr *);
-	if (ntohs(udp->uh_sport) != V_tcp_udp_tunneling_port) {
+	m_copydata(ip6cp->ip6c_m, ip6cp->ip6c_off, sizeof(udp),
+	    (caddr_t)&udp);
+	if (ntohs(udp.uh_sport) != V_tcp_udp_tunneling_port)
 		return;
-	}
-	port = udp->uh_dport;
-	m_adj(m, sizeof(struct udphdr));
-	if ((m->m_flags & M_PKTHDR) == 0) {
-		ip6cp->ip6c_m->m_pkthdr.len -= sizeof(struct udphdr);
-	}
+	port = udp.uh_dport;
+	ip6cp->ip6c_off += sizeof(struct udphdr);
 	/* Now call in to the normal handling code */
 	tcp6_ctlinput_with_port(ip6cp, port);
+	ip6cp->ip6c_off -= sizeof(struct udphdr);
 }
 
 #endif /* INET6 */
