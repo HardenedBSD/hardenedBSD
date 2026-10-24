@@ -401,7 +401,11 @@ static struct if_shared_ctx bnxt_sctx_template = {
 	.isc_magic = IFLIB_MAGIC,
 	.isc_driver = &bnxt_iflib_driver,
 	.isc_nfl = 2,
+#ifdef IFLIB_I2C_PAGE_BANK
+	.isc_flags = IFLIB_HAS_RXCQ | IFLIB_HAS_TXCQ | IFLIB_NEED_ETHER_PAD | IFLIB_I2C_PAGE_BANK,
+#else
 	.isc_flags = IFLIB_HAS_RXCQ | IFLIB_HAS_TXCQ | IFLIB_NEED_ETHER_PAD,
+#endif
 	.isc_q_align = PAGE_SIZE,
 	.isc_tx_maxsize = BNXT_TSO_SIZE + sizeof(struct ether_vlan_header),
 	.isc_tx_maxsegsize = BNXT_TSO_SIZE + sizeof(struct ether_vlan_header),
@@ -430,7 +434,11 @@ static struct if_shared_ctx bnxt_sctx_template_p7 = {
 	.isc_magic = IFLIB_MAGIC,
 	.isc_driver = &bnxt_iflib_driver,
 	.isc_nfl = 2,
+#ifdef IFLIB_I2C_PAGE_BANK
+	.isc_flags = IFLIB_HAS_RXCQ | IFLIB_HAS_TXCQ | IFLIB_NEED_ETHER_PAD | IFLIB_I2C_PAGE_BANK,
+#else
 	.isc_flags = IFLIB_HAS_RXCQ | IFLIB_HAS_TXCQ | IFLIB_NEED_ETHER_PAD,
+#endif
 	.isc_q_align = PAGE_SIZE,
 	.isc_tx_maxsize = BNXT_TSO_SIZE + sizeof(struct ether_vlan_header),
 	.isc_tx_maxsegsize = BNXT_TSO_SIZE + sizeof(struct ether_vlan_header),
@@ -719,6 +727,7 @@ bnxt_queues_free(if_ctx_t ctx)
 	// Free RX queues
 	for (i=0; i<softc->nrxqsets; i++)
 		iflib_dma_free(&softc->rx_stats[i]);
+	iflib_dma_free(&softc->hw_generic_stats);
 	iflib_dma_free(&softc->hw_tx_port_stats);
 	iflib_dma_free(&softc->hw_rx_port_stats);
 	iflib_dma_free(&softc->hw_tx_port_stats_ext);
@@ -788,6 +797,17 @@ bnxt_rx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs,
  * This can be deleted when there will be no further additions of counters.
  */
 #define BNXT_PORT_STAT_PADDING  512
+
+	rc = iflib_dma_alloc(ctx, sizeof(struct generic_sw_hw_stats), &softc->hw_generic_stats, 0);
+	/* Generic stats are optional */
+	if (rc) {
+		softc->fw_cap &= ~BNXT_FW_CAP_GENERIC_STATS;
+		iflib_dma_free(&softc->hw_generic_stats);
+	} else {
+		bus_dmamap_sync(softc->hw_generic_stats.idi_tag,
+		    softc->hw_generic_stats.idi_map, BUS_DMASYNC_PREREAD);
+		softc->generic_stats = (void *) softc->hw_generic_stats.idi_vaddr;
+	}
 
 	rc = iflib_dma_alloc(ctx, sizeof(struct rx_port_stats) + BNXT_PORT_STAT_PADDING,
 	    &softc->hw_rx_port_stats, 0);
@@ -897,6 +917,7 @@ bnxt_rx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs,
 		bnxt_create_rx_sysctls(softc, i);
 	}
 
+	bnxt_create_generic_stats_sysctls(softc);
 	/*
 	 * When SR-IOV is enabled, avoid each VF sending PORT_QSTATS
          * HWRM every sec with which firmware timeouts can happen
@@ -1700,8 +1721,7 @@ bnxt_thor2_db_rx_cq(void *db_ptr, bool enable_irq)
 	uint32_t cons = cpr->raw_cons;
 	uint32_t toggle = 0;
 
-	if (cons == UINT32_MAX)
-		cons = 0;
+	cons++;
 
 	if (enable_irq == true)
 		toggle = cpr->toggle;
@@ -3962,6 +3982,8 @@ bnxt_update_admin_status(if_ctx_t ctx)
 			bit_clear(softc->state_bv, BNXT_STATE_LINK_CHANGE);
 			bnxt_media_status(softc->ctx, &ifmr);
 		}
+
+		bnxt_hwrm_generic_qstats(softc, 0);
 	}
 
 	return;
@@ -4629,16 +4651,26 @@ bnxt_i2c_req(if_ctx_t ctx, struct ifi2creq *i2c)
 	 */
 	if (softc->link_info.module_status >
 		HWRM_PORT_PHY_QCFG_OUTPUT_MODULE_STATUS_WARNINGMSG)
-		return -EOPNOTSUPP;
+		return EOPNOTSUPP;
 
 	/* This feature is not supported in older firmware versions */
 	if (!BNXT_CHIP_P5_PLUS(softc) ||
 	    (softc->hwrm_spec_code < 0x10202))
-		return -EOPNOTSUPP;
+		return EOPNOTSUPP;
 
 
-	rc = bnxt_read_sfp_module_eeprom_info(softc, i2c->dev_addr, 0, 0, 0,
-		i2c->offset, i2c->len, data);
+#ifdef IFLIB_I2C_PAGE_BANK
+	/* linux/page.h #defines page to vm_page; i2c->page has no such member. */
+#undef page
+	rc = bnxt_read_sfp_module_eeprom_info(softc, i2c->dev_addr,
+	    i2c->page, i2c->bank, i2c->bank != 0,
+	    i2c->offset, i2c->len, data);
+#define page	vm_page
+#else
+	rc = bnxt_read_sfp_module_eeprom_info(softc, i2c->dev_addr,
+	    0, 0, 0,
+	    i2c->offset, i2c->len, data);
+#endif
 
 	return rc;
 }

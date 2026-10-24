@@ -50,8 +50,13 @@
 #
 
 TYPE="FreeBSD"
+<<<<<<< HEAD
 REVISION="15.1"
 BRANCH="STABLE-HBSD"
+=======
+REVISION="15.2"
+BRANCH="PRERELEASE"
+>>>>>>> rad/freebsd/15-stable/main
 if [ -n "${BRANCH_OVERRIDE}" ]; then
 	BRANCH=${BRANCH_OVERRIDE}
 fi
