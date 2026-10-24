@@ -243,7 +243,7 @@ CFLAGS+=		${KERN_SSP_CFLAG}
 .endif
 
 .if defined(MK_RETPOLINE) && ${MK_RETPOLINE} != "no"
-CFLAGS+=	-mretpoline
+CFLAGS+=	-mretpoline-external-thunk
 .endif
 
 .if !defined(TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE)

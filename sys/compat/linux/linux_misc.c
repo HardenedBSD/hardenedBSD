@@ -31,7 +31,6 @@
 
 #include "opt_pax.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/fcntl.h>
 #include <sys/jail.h>
@@ -66,6 +65,7 @@
 #include <security/mac/mac_framework.h>
 
 #include <vm/pmap.h>
+#include <vm/vm_extern.h>
 #include <vm/vm_map.h>
 #include <vm/swap_pager.h>
 
@@ -364,7 +364,10 @@ linux_mremap(struct thread *td, struct linux_mremap_args *args)
 
 	if (args->new_len > args->old_len) {
 		td->td_retval[0] = 0;
-		return (ENOMEM);
+		if (useracc((void *)(uintptr_t)args->addr, args->old_len,
+		    VM_PROT_READ))
+			return (ENOMEM);
+		return (EFAULT);
 	}
 
 	if (args->new_len < args->old_len) {
