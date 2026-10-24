@@ -29,12 +29,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-<<<<<<< HEAD
 #include "opt_pax.h"
 
-#include <sys/cdefs.h>
-=======
->>>>>>> rad/freebsd/current/main
 #include <sys/param.h>
 #include <sys/fcntl.h>
 #include <sys/jail.h>
