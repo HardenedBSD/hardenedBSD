@@ -242,8 +242,17 @@ KERN_SSP_CFLAG?=	-fstack-protector-strong
 CFLAGS+=		${KERN_SSP_CFLAG}
 .endif
 
+<<<<<<< HEAD
 .if defined(MK_RETPOLINE) && ${MK_RETPOLINE} != "no"
 CFLAGS+=	-mretpoline
+=======
+#
+# Retpoline speculative execution vulnerability mitigation (CVE-2017-5715)
+#
+.if defined(COMPILER_FEATURES) && ${COMPILER_FEATURES:Mretpoline} != "" && \
+    ${MK_KERNEL_RETPOLINE} != "no"
+CFLAGS+=	-mretpoline-external-thunk
+>>>>>>> rad/freebsd/current/main
 .endif
 
 .if !defined(TRIVIAL_VAR_AUTO_INIT_ZERO_SAFE)
