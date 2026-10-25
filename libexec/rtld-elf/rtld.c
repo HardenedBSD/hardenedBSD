@@ -1130,20 +1130,20 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
 
 /*
  * Fill in a DoneList with an allocation large enough to hold all of
- * the currently-loaded   Keep this as a macro since it calls
- * alloca and we want that to occur within the scope of the caller.
+ * the currently-loaded objects.  Keep this as a macro since it calls
+ * alloca() and we want that to occur within the scope of the caller.
  */
 #define	DLP_ALLOCA_LIMIT	100	/* 800 bytes on LP64 */
-#define donelist_init(_DLP, _REQ)	do {				\
+#define	donelist_init(_DLP, _REQ)	do {				\
 	DoneList *_dlp = _DLP;						\
 	SymLook *_r = _REQ;						\
-	_dlp->num_alloc = obj_count,					\
+	_dlp->num_alloc = obj_count;					\
 	_dlp->req = NULL;						\
 	if (_dlp->num_alloc > DLP_ALLOCA_LIMIT) {			\
 		_dlp->objs = xcalloc(_dlp->num_alloc, sizeof(_dlp->objs[0])); \
 		if (_r != NULL && _r->donelist_mem == NULL) {		\
 			_r->donelist_mem = _dlp->objs;			\
-			_dlp->req = _r;				\
+			_dlp->req = _r;					\
 		}							\
 	} else {							\
 		_dlp->objs = alloca(_dlp->num_alloc * sizeof(_dlp->objs[0])); \
@@ -4658,8 +4658,12 @@ rtld_fill_dl_phdr_info(const Obj_Entry *obj, struct dl_phdr_info *phdr_info)
 	phdr_info->dlpi_phdr = obj->phdr;
 	phdr_info->dlpi_phnum = obj->phnum;
 	phdr_info->dlpi_tls_modid = obj->tlsindex;
-	phdr_info->dlpi_tls_data = (char *)tls_get_addr_slow(_tcb_get(),
-	    obj->tlsindex, 0, true);
+	if (obj->tlsindex != 0) {
+		phdr_info->dlpi_tls_data = tls_get_addr_slow(_tcb_get(),
+		    obj->tlsindex, 0, true);
+	} else {
+		phdr_info->dlpi_tls_data = NULL;
+	}
 	phdr_info->dlpi_adds = obj_loads;
 	phdr_info->dlpi_subs = obj_loads - obj_count;
 }
@@ -4997,8 +5001,9 @@ get_program_var_addr(const char *name, RtldLockState *lockstate)
 	symlook_init(&req, name);
 	req.lockstate = lockstate;
 	donelist_init(&donelist, NULL);
+	res = NULL;
 	if (symlook_global(&req, &donelist) != 0)
-		return (NULL);
+		goto out;
 	if (ELF_ST_TYPE(req.sym_out->st_info) == STT_FUNC)
 		res = (const void **)make_function_pointer(req.sym_out,
 		    req.defobj_out);
@@ -5008,6 +5013,7 @@ get_program_var_addr(const char *name, RtldLockState *lockstate)
 	else
 		res = (const void **)(req.defobj_out->relocbase +
 		    req.sym_out->st_value);
+out:
 	donelist_free(&donelist);
 	return (res);
 }
