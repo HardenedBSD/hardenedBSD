@@ -1583,7 +1583,7 @@ retry_waitok2:
 		ha.mflags = M_WAITOK;
 		goto retry_waitok2;
 	}
-	V_pf_srchashmask = ha.size;
+	V_pf_srchashsize = ha.size;
 	V_pf_srchashmask = V_pf_srchashsize - 1;
 
 	/* UDP endpoint mappings. */
@@ -1872,12 +1872,11 @@ keyattach:
 						    PF_SK_WIRE);
 					PF_HASHROW_UNLOCK(ih);
 					KEYS_UNLOCK();
-					if (idx == PF_SK_WIRE)
-						/*
-						 * We've not inserted either key.
-						 * Free both.
-						 */
-						uma_zfree(V_pf_state_key_z, skw);
+					/*
+					 * sk, this pass's key, is not in the
+					 * hash; sks is NULL on the stack pass.
+					 */
+					uma_zfree(V_pf_state_key_z, sk);
 					if (skw != sks)
 						uma_zfree(
 						    V_pf_state_key_z,
@@ -11279,7 +11278,7 @@ pf_walk_header6(struct pf_pdesc *pd, struct ip6_hdr *h, u_short *reason)
 static void
 pf_init_pdesc(struct pf_pdesc *pd, struct mbuf *m)
 {
-	memset(pd, 0, sizeof(*pd));
+	memset(pd, 0, offsetof(struct pf_pdesc, pd_endzero));
 	pd->pf_mtag = pf_find_mtag(m);
 	pd->m = m;
 }
@@ -11301,6 +11300,8 @@ pf_setup_pdesc(sa_family_t af, int dir, struct pf_pdesc *pd, struct mbuf **m0,
 	TAILQ_INIT(&pd->sctp_multihome_jobs);
 	if (default_actions != NULL)
 		memcpy(&pd->act, default_actions, sizeof(pd->act));
+	else
+		memset(&pd->act, 0, sizeof(pd->act));
 
 	if (pd->pf_mtag && pd->pf_mtag->dnpipe) {
 		pd->act.dnpipe = pd->pf_mtag->dnpipe;
