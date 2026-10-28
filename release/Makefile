@@ -157,18 +157,6 @@ kernel.txz:
 
 src.txz:
 	mkdir -p ${DISTDIR}/usr
-<<<<<<< HEAD
-	ln -fs ${WORLDDIR} ${DISTDIR}/usr/src
-	( cd ${DISTDIR} && ${TAR_CMD} cLvf - --exclude .svn --exclude .zfs \
-	    --exclude .git --exclude @ --exclude usr/src/release/dist usr/src | \
-	    ${XZ_CMD} > ${.OBJDIR}/src.txz )
-
-ports.txz:
-	mkdir -p ${DISTDIR}/usr
-	ln -fs ${PORTSDIR} ${DISTDIR}/usr/ports
-	( cd ${DISTDIR} && ${TAR_CMD} cLvf - \
-	    --exclude .git --exclude .svn \
-=======
 	rm -f ${DISTDIR}/usr/src
 	ln -s ${WORLDDIR} ${DISTDIR}/usr/src
 	( cd ${DISTDIR} && ${TAR_XZ_CMD} -cLvf ${.OBJDIR}/src.txz \
@@ -182,7 +170,6 @@ ports.txz:
 	ln -s ${PORTSDIR} ${DISTDIR}/usr/ports
 	( cd ${DISTDIR} && ${TAR_XZ_CMD} -cLvf ${.OBJDIR}/ports.txz \
 	    --exclude .git --exclude .got --exclude .svn \
->>>>>>> rad/freebsd/15-stable/main
 	    --exclude usr/ports/distfiles --exclude usr/ports/packages \
 	    --exclude 'usr/ports/INDEX*' --exclude work usr/ports | \
 	    ${XZ_CMD} > ${.OBJDIR}/ports.txz )

@@ -33,8 +33,6 @@ GITREV!=	${GIT_CMD} -C ${.CURDIR} rev-parse --verify --short HEAD 2>/dev/null ||
 GITCOUNT!=	${GIT_CMD} -C ${.CURDIR} rev-list --first-parent --count HEAD 2>/dev/null || true
 . export GITCOUNT
 . endif
-<<<<<<< HEAD
-=======
 . if !defined(GITEPOCH) || empty(GITEPOCH)
 GITEPOCH!=	${GIT_CMD} -C ${.CURDIR} show -s --format=%ct HEAD 2>/dev/null || true
 . export GITEPOCH
@@ -56,7 +54,6 @@ GITCOUNT!=	( cd ${.CURDIR} && ${GOT_CMD} log -s | wc -l | tr -d ' ' )
 GITEPOCH!=	( cd ${.CURDIR} && ${GOT_CMD} cat HEAD | awk '$$1 == "committer" { print $$(NF-1); exit }' )
 . export GITEPOCH
 . endif
->>>>>>> rad/freebsd/15-stable/main
 .else
 GITBRANCH=	nullbranch
 GITREV=		nullhash
