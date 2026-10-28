@@ -178,13 +178,15 @@ usage(const char *why)
 	print_schemes(1);
 	fputc('\n', stderr);
 	fprintf(stderr, "    partition specification:\n");
-	fprintf(stderr, "\t<type>[/<label>]::<size>[:[+]<offset>]\t-  "
-	    "empty partition of given size and\n\t\t\t\t\t"
-	    "   optional relative or absolute offset\n");
-	fprintf(stderr, "\t<type>[/<label>]:=<file>[:[+]offset]\t-  partition "
-	    "content and size are\n\t\t\t\t\t"
-	    "   determined by the named file and\n"
-	    "\t\t\t\t\t   optional relative or absolute offset\n");
+	fprintf(stderr, "\t<type>[/<label>]::<size>[:[+]<offset>][%%<align>]\n"
+	    "\t\t\t\t\t-  empty partition of given size and\n"
+	    "\t\t\t\t\t   optional relative or absolute offset\n"
+	    "\t\t\t\t\t   and alignment\n");
+	fprintf(stderr, "\t<type>[/<label>]:=<file>[:[+]<offset>][%%<align>]\n"
+	    "\t\t\t\t\t-  partition content and size are\n"
+	    "\t\t\t\t\t   determined by the named file and\n"
+	    "\t\t\t\t\t   optional relative or absolute offset\n"
+	    "\t\t\t\t\t   and alignment\n");
 	fprintf(stderr, "\t<type>[/<label>]:-<cmd>\t\t-  partition content and size "
 	    "are taken\n\t\t\t\t\t   from the output of the command to run\n");
 	fprintf(stderr, "\t-\t\t\t\t-  unused partition entry\n");
@@ -446,9 +448,11 @@ mkimg(void)
 {
 	FILE *fp;
 	struct part *part;
-	lba_t block, blkoffset;
-	uint64_t bytesize, byteoffset;
-	char *size, *offset;
+	struct stat sb;
+	char *p;
+	lba_t block, blkoffset, blkalign;
+	uint64_t bytesize, byteoffset, bytealign;
+	char *size, *offset, *align;
 	bool abs_offset;
 	int error, fd;
 
@@ -460,39 +464,96 @@ mkimg(void)
 	}
 
 	block = scheme_metadata(SCHEME_META_IMG_START, 0);
-	abs_offset = false;
 	TAILQ_FOREACH(part, &partlist, link) {
 		byteoffset = blkoffset = 0;
 		abs_offset = false;
+		align = NULL;
 
 		/* Look for an offset. Set size too if we can. */
 		switch (part->kind) {
 		case PART_KIND_SIZE:
-		case PART_KIND_FILE:
+			p = strrchr(part->contents, '%');
+			if (p != NULL) {
+				*p = '\0';
+				align = p + 1;
+			}
 			offset = part->contents;
 			size = strsep(&offset, ":");
-			if (part->kind == PART_KIND_SIZE &&
-			    expand_number(size, &bytesize) == -1)
+			if (expand_number(size, &bytesize) == -1)
 				error = errno;
-			if (offset != NULL) {
-				if (*offset != '+')
-					abs_offset = true;
-				else
-					offset++;
-				if (expand_number(offset, &byteoffset) == -1)
-					error = errno;
+			break;
+		case PART_KIND_FILE:
+			size = part->contents;
+			if (stat(part->contents, &sb) == -1) {
+				p = strrchr(part->contents, '%');
+				if (p != NULL) {
+					*p = '\0';
+					align = p + 1;
+				}
+			}
+			if (stat(part->contents, &sb) == 0) {
+				if (S_ISDIR(sb.st_mode)) {
+					errc(EX_IOERR, EISDIR, "partition %d",
+					    part->index + 1);
+				}
+				offset = NULL;
+			} else {
+				p = strrchr(part->contents, ':');
+				if (p != NULL) {
+					*p = '\0';
+					offset = p + 1;
+				} else {
+					offset = NULL;
+				}
 			}
 			break;
+		default:
+			offset = NULL;
+			break;
+		}
+
+		if (align != NULL) {
+			if (expand_number(align, &bytealign) == -1)
+				err(EX_DATAERR, "partition %d",
+				    part->index + 1);
+			if (bytealign == 0)
+				errx(EX_DATAERR, "partition %d: "
+				    "invalid alignment", part->index + 1);
+			if (secsz % bytealign == 0) {
+				warnx("partition %d: ignoring "
+				    "redundant alignment", part->index + 1);
+				bytealign = secsz;
+			}
+			if (bytealign % secsz != 0)
+				errx(EX_DATAERR, "partition %d: "
+				    "invalid alignment", part->index + 1);
+			blkalign = bytealign / secsz;
+		} else {
+			blkalign = 1;
+		}
+
+		if (offset != NULL) {
+			if (*offset != '+')
+				abs_offset = true;
+			else
+				offset++;
+			if (expand_number(offset, &byteoffset) == -1)
+				err(EX_IOERR, "partition %d", part->index + 1);
 		}
 
 		/* Work out exactly where the partition starts. */
 		blkoffset = (byteoffset + secsz - 1) / secsz;
-		if (abs_offset)
+		if (abs_offset) {
 			block = scheme_metadata(SCHEME_META_PART_ABSOLUTE,
 			    blkoffset);
-		else
+			if (block % blkalign)
+				errx(EX_DATAERR, "partition %d: absolute "
+				    "offset incompatible with alignment",
+				    part->index + 1);
+		} else
 			block = scheme_metadata(SCHEME_META_PART_BEFORE,
 			    block + blkoffset);
+		block = ((block + blkalign - 1) / blkalign) * blkalign;
 		part->block = block;
 
 		if (verbose)
@@ -536,6 +597,12 @@ mkimg(void)
 				    "    offset %llu bytes (%llu blocks)\n",
 				    (long long)byteoffset,
 				    (long long)blkoffset);
+			}
+			if (blkalign > 1) {
+				fprintf(stderr,
+				    "    alignment %llu bytes (%llu blocks)\n",
+				    (long long)bytealign,
+				    (long long)blkalign);
 			}
 		}
 		block = scheme_metadata(SCHEME_META_PART_AFTER,
