@@ -43,7 +43,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/atomic.h>
 //#include <security/mac/mac_policy.h> // TODO this requires some additional includes for module_t etc
 #include <sys/jail.h>
-#include <sys/osd.h>
 
 FEATURE(hbsd_hardening, "Pledge sandbox mechanism");
 
@@ -96,10 +95,6 @@ static int sysctl_pledge_exec_flags(SYSCTL_HANDLER_ARGS);
 static int sysctl_pledge_learning_data(SYSCTL_HANDLER_ARGS);
 static bool pledge_is_modifier(uint64_t);
 static int pledge_flags_to_string(uint64_t, char*, int);
-
-static unsigned int pledge_jail_osd_slot;
-static int pledge_jail_osd_create(void *_obj, void *_data);
-static int pledge_jail_osd_remove(void *_obj, void *_data);
 
 static void pledge_learning_init(const void *_unused);
 static void pledge_learning_record(const struct thread *,
@@ -214,6 +209,16 @@ SYSCTL_PROC(_security_pledge, OID_AUTO, exec_flags,
 SYSCTL_NODE(_security_pledge, OID_AUTO, override, 0, 0,
     "Override required flags for a given syscall.");
 
+SYSCTL_JAIL_PARAM_NODE(security, "security.* jail parameters");
+SYSCTL_JAIL_PARAM_SUBNODE(security, pledge, "pledge jail parameters");
+SYSCTL_JAIL_PARAM(
+	_security_pledge,
+	enforcing,
+	CTLTYPE_INT | CTLFLAG_RW,
+	"I",
+  "enforce pledge violations (0: off, 1: enforcing)"
+);
+
 /*
  * sysctl proc node for applying a new pledge mask to the calling thread.
  * The supplied mask is AND'ed with the thread's current mask, permitting
@@ -249,80 +254,61 @@ sysctl_pledge_exec_flags(SYSCTL_HANDLER_ARGS)
 		return error;
 }
 
-static int
-pledge_jail_osd_create(void *obj, void *data __unused)
+int
+pax_pledge_init_prison(struct prison *pr, struct vfsoptlist *opts)
 {
-	struct prison *pr = obj;
-	//struct vfsoptlist *vfsopts = (struct vfsoptlist *)data;
-	struct pledge_jail_data *pjd = NULL;
+	struct prison *pr_p;
+	int error;
+	CTR2(KTR_PAX, "%s: Setting prison %s PaX variables\n", __func__, pr->pr_name);
+	if (pr == &prison0) {
+		pr->pr_hbsd.pledge.enforcing  = pledge_enforcing;
+		pr->pr_hbsd.pledge.violations = counter_u64_alloc(M_WAITOK);
+		pr->pr_hbsd.pledge.kills      = counter_u64_alloc(M_WAITOK);
+		pr->pr_hbsd.pledge.softfails  = counter_u64_alloc(M_WAITOK);
+	} else {
+		KASSERT(pr->pr_parent != NULL, ("%s: pr->pr_parent == NULL", __func__));
+		pr_p = pr->pr_parent;
+		pr->pr_hbsd.pledge.enforcing  = pr_p->pr_hbsd.pledge.enforcing;
+		pr->pr_hbsd.pledge.violations = counter_u64_alloc(M_WAITOK);
+		pr->pr_hbsd.pledge.kills      = counter_u64_alloc(M_WAITOK);
+		pr->pr_hbsd.pledge.softfails  = counter_u64_alloc(M_WAITOK);
 
-	/* vfsopts contains jail options in case we want to do
-	 * something with those. TODO. */
+		error = pax_handle_prison_int(
+			opts,
+			"security.pledge.enforcing",
+			&(pr->pr_hbsd.pledge.enforcing)
+		);
+		if (error)
+			return error;
 
-	/*
-	 * TODO we could walk
-	 * while ((parent = pr->pr_parent)) {
-	 *   inherit from parent
-	 * }
-	 */
+		error = pax_handle_prison_counter(
+			opts,
+			"security.pledge.violations",
+			&(pr->pr_hbsd.pledge.violations)
+		);
+		if (error)
+			return error;
 
-	pjd = malloc(sizeof(struct pledge_jail_data), M_PRISON, M_ZERO|M_WAITOK);
-	pjd->is_enforcing = pledge_enforcing; /* inherit from global */
-	pjd->violations = counter_u64_alloc(M_WAITOK);
+		error = pax_handle_prison_counter(
+			opts,
+			"security.pledge.kills",
+			&(pr->pr_hbsd.pledge.kills)
+		);
+		if (error)
+			return error;
 
-	sysctl_ctx_init(&pjd->sysctl_ctx);
-
-	char jail_id_str[16] = {0};
-	snprintf(jail_id_str, sizeof(jail_id_str), "%u", pr->pr_id);
-	/* add under security.pledge: */
-	struct sysctl_oid *oidp = SYSCTL_ADD_NODE(&pjd->sysctl_ctx,
-	    SYSCTL_STATIC_CHILDREN(_security_pledge_jail),
-	    OID_AUTO,
-	    jail_id_str, CTLFLAG_RW, NULL, "controls for this jid");
-	/* add under oidp */
-	SYSCTL_ADD_BOOL(&pjd->sysctl_ctx, SYSCTL_CHILDREN(oidp), OID_AUTO,
-	    "enforcing", CTLFLAG_RW, &pjd->is_enforcing, 0,
-	    "enforcing for this jail");
-	SYSCTL_ADD_COUNTER_U64(&pjd->sysctl_ctx, SYSCTL_CHILDREN(oidp),
-	    OID_AUTO,
-	    "violations", CTLFLAG_RW, &pjd->violations,
-	    "violation count for this jail");
-
-	void **rsv = osd_reserve(pledge_jail_osd_slot);
-	for (int retry = 1; retry;)
-	{
-		prison_lock(pr);
-		retry = osd_jail_set_reserved(pr,
-		    pledge_jail_osd_slot, rsv, pjd);
-		prison_unlock(pr);
+		error = pax_handle_prison_counter(
+			opts,
+			"security.pledge.softfails",
+			&(pr->pr_hbsd.pledge.softfails)
+		);
+		if (error)
+			return error;
 	}
 
-	return 0;
+	return (0);
 }
 
-static int
-pledge_jail_osd_remove(void *obj, void *data __unused)
-{
-	struct prison *pr = obj;
-	//struct vfsoptlist *vfsopts = data;
-
-	prison_lock(pr);
-	struct pledge_jail_data *pjd = osd_jail_get(pr, pledge_jail_osd_slot);
-	prison_unlock(pr);
-
-	if (NULL == pjd) {
-		printf("pledge_jail_remove: pjd == NULL (pr == prison0: %d)\n",
-		    (pr == &prison0));
-		return 0; /* TODO shouldn't happen? */
-	}
-
-	/* Cleanup sysctls: */
-	sysctl_ctx_free(&pjd->sysctl_ctx);
-	counter_u64_free(pjd->violations);
-	free(pjd, M_PRISON);
-
-	return 0;
-}
 
 /*
  * Learning mode
@@ -365,31 +351,6 @@ pledge_learning_init(const void *_unused)
 	    TODOTODO  CTLFLAG_RWTUN | CTLFLAG_SECURE | CTLFLAG_RD
 		);
 	*/
-
-	/*
-	 * Install per-jail osd.h hooks.
-	 * The PR_* constants are from jail.h
-	 */
-	osd_method_t osdmethods[PR_MAXMETHOD] = {NULL};
-	osdmethods[PR_METHOD_CREATE] = pledge_jail_osd_create;
-	osdmethods[PR_METHOD_REMOVE] = pledge_jail_osd_remove;
-
-	/*
-	 * Go through existing jails, taking the allprison_lock before
-	 * registering our slot to ensure we don't trigger two calls
-	 * to pledge_jail_osd_create for any given jail (one from osd,
-	 * and one here).
-	 * That might be overly careful, not sure how realistic jails
-	 * being spawned at this point is.
-	 */
-	sx_slock(&allprison_lock);
-	pledge_jail_osd_slot = osd_jail_register(NULL, osdmethods);
-	struct prison *pr = &prison0;
-	(void)pledge_jail_osd_create(pr, NULL);
-	TAILQ_FOREACH(pr, &allprison, pr_list) {
-		(void)pledge_jail_osd_create(pr, NULL);
-	}
-	sx_sunlock(&allprison_lock);
 }
 
 /*
@@ -721,18 +682,11 @@ pledge_check_bitmap(struct thread * const thread, const uint64_t flags)
 		/* TODO: is (thread) always (curthread) here? */
 		struct prison *pr = thread->td_ucred->cr_prison;
 		prison_lock(pr);
-		struct pledge_jail_data *pjd = osd_jail_get(pr,
-		    pledge_jail_osd_slot);
-		if (pjd) {
-			if (violated) {
-				counter_u64_add(pjd->violations, 1);
-			}
-			if ( !(pledge_enforcing || pjd->is_enforcing) ) {
-				violated = 0;
-			}
-		} else {
-			// TODO just assert that pjd != NULL
-			counter_u64_add(softfail_count, 10);
+		if (violated) {
+			counter_u64_add(pr->pr_hbsd.pledge.violations, 1);
+		}
+		if (!(pledge_enforcing || pr->pr_hbsd.pledge.enforcing)) {
+			violated = 0;
 		}
 		prison_unlock(pr);
 	}

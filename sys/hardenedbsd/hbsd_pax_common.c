@@ -33,6 +33,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_pax.h"
+#include "opt_pledge.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,6 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/libkern.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/pledge.h>
 #include <sys/pax.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
@@ -425,6 +427,11 @@ pax_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		goto out;
 	}
 
+	if (pax_pledge_init_prison(pr, opts) != 0) {
+		ret = false;
+		goto out;
+	}
+
 	/* Every initialization finished w/o error. */
 	ret = true;
 
@@ -506,6 +513,51 @@ pax_handle_prison_param(struct vfsoptlist *opts, const char *mib, pax_state_t *s
 	case 0:
 		if (pax_feature_validate_state(&new_state))
 			*status = new_state;
+		break;
+	default:
+		return (error);
+	}
+#endif /* PAX_JAIL_SUPPORT */
+
+	return (0);
+}
+
+int
+pax_handle_prison_counter(struct vfsoptlist *opts, const char *mib, counter_u64_t *counter)
+{
+#ifdef PAX_JAIL_SUPPORT
+	counter_u64_t new_counter;
+	int error;
+
+	error = vfs_copyopt(opts, mib, &new_counter, sizeof(new_counter));
+	switch (error) {
+	case ENOENT:
+		/* use system default */
+		break;
+	case 0:
+		*counter = new_counter;
+		break;
+	default:
+		return (error);
+	}
+#endif /* PAX_JAIL_SUPPORT */
+
+	return (0);
+}
+
+int
+pax_handle_prison_int(struct vfsoptlist *opts, const char *mib, int *integer)
+{
+#ifdef PAX_JAIL_SUPPORT
+	int error, new_integer;
+
+	error = vfs_copyopt(opts, mib, &new_integer, sizeof(new_integer));
+	switch (error) {
+	case ENOENT:
+		/* use system default */
+		break;
+	case 0:
+		*integer = new_integer;
 		break;
 	default:
 		return (error);

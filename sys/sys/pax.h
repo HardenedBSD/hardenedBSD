@@ -29,9 +29,10 @@
  * $FreeBSD$
  */
 
+#include <sys/counter.h>
+
 #ifndef	_SYS_PAX_H
 #define	_SYS_PAX_H
-
 #define	__HardenedBSD_version	1500001UL
 
 #if defined(_KERNEL) || defined(_WANT_PRISON)
@@ -68,6 +69,12 @@ struct hbsd_features {
 		pax_state_t	 harden_shm;
 		pax_state_t	 elf_pie_only;
 	} hardening;
+	struct hbsd_pledge {
+		int 	 enforcing;
+		counter_u64_t violations;
+		counter_u64_t kills;
+		counter_u64_t softfails;
+	} pledge;
 	struct hbsd_log {
 		pax_state_t	log;		/* (p) Per-jail logging status */
 		pax_state_t	ulog;		/* (p) Per-jail user visible logging status */
@@ -128,6 +135,8 @@ void pax_get_flags_td(struct thread *td, pax_flag_t *flags);
 struct prison *pax_get_prison_td(struct thread *td);
 bool pax_init_prison(struct prison *pr, struct vfsoptlist *opts);
 int pax_handle_prison_param(struct vfsoptlist *opts, const char *mib, pax_state_t *status);
+int pax_handle_prison_counter(struct vfsoptlist*, const char*, counter_u64_t*);
+int pax_handle_prison_int(struct vfsoptlist*, const char*, int*);
 void pax_print_hbsd_context(void);
 bool pax_feature_validate_state(pax_state_t *state);
 bool pax_feature_simple_validate_state(pax_state_t *state);
@@ -138,6 +147,13 @@ bool pax_feature_simple_validate_state(pax_state_t *state);
 int pax_control_acl_set_flags(struct thread *td, struct image_params *imgp, const pax_flag_t req_flags);
 int pax_control_extattr_parse_flags(struct thread *td, struct image_params *imgp);
 pax_flag_t pax_control_extattr_kmod(struct thread *td, struct vnode *vp);
+
+/*
+ * HardenedBSD pledge related functions
+ */
+#ifdef HBSD_PLEDGE
+int pax_pledge_init_prison(struct prison *pr, struct vfsoptlist *opts);
+#endif
 
 /*
  * ASLR related functions

@@ -50,13 +50,19 @@ int
 pledge(const uint64_t mask, const  uint64_t execmask)
 {
 	int err;
-	err = (sysctl(security_pledge_flags, 3, NULL, NULL,
-		&mask, sizeof(mask)));
+	err = sysctl(
+		security_pledge_flags, 3,
+		NULL, NULL,
+		&mask, sizeof(mask)
+	);
 	if (err) {
 		return (err);
 	}
-	err = (sysctl(security_pledge_exec_flags, 3, NULL, NULL,
-	&execmask, sizeof(execmask)));
+	err = sysctl(
+		security_pledge_exec_flags, 3,
+		NULL, NULL,
+		&execmask, sizeof(execmask)
+	);
 	if (err) {
 		return (err);
 	}

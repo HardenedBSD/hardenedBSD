@@ -442,12 +442,12 @@ try_again:
 	 * Place the vdso between the stacktop and
 	 * vm_max_user-PAGE_SIZE.
 	 *
-	 * In future this will change, to place them between the 
+	 * In future this will change, to place them between the
 	 * stack and heap.
 	 */
 
-	/* 
-	 * This check required to handle the case 
+	/*
+	 * This check required to handle the case
 	 * when PAGE_ALIGN(vm->vm_aslr_delta_stack) == 0.
 	 */
 	if ((vm->vm_aslr_delta_stack & (-1UL << PAX_ASLR_DELTA_VDSO_LSB)) != 0) {
@@ -951,4 +951,3 @@ pax_disallow_map32bit_setup_flags(struct image_params *imgp, struct thread *td, 
 	return (flags);
 }
 #endif	/* MAP_32BIT */
-
