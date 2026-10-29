@@ -13,7 +13,7 @@ class PledgeTest < Picotest::Test
       ##
       # child
       puts "in child"
-      pledge("inet", nil)
+      pledge("rpath cpath wpath inet", nil)
       assert_raise(Errno::ENOTCAPABLE) do
         File.open("/stdio.txt") { f.write("fail") }
         exit(42)
