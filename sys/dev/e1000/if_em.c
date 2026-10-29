@@ -421,7 +421,6 @@ static int	em_if_mtu_set(if_ctx_t, uint32_t);
 static void	em_if_timer(if_ctx_t, uint16_t);
 static void	em_if_vlan_register(if_ctx_t, u16);
 static void	em_if_vlan_unregister(if_ctx_t, u16);
-static void	em_if_watchdog_reset(if_ctx_t);
 static bool	em_if_needs_restart(if_ctx_t, enum iflib_restart_event);
 
 static void	em_identify_hardware(if_ctx_t);
@@ -616,7 +615,6 @@ static device_method_t em_if_methods[] = {
 	DEVMETHOD(ifdi_mtu_set, em_if_mtu_set),
 	DEVMETHOD(ifdi_promisc_set, em_if_set_promisc),
 	DEVMETHOD(ifdi_timer, em_if_timer),
-	DEVMETHOD(ifdi_watchdog_reset, em_if_watchdog_reset),
 	DEVMETHOD(ifdi_vlan_register, em_if_vlan_register),
 	DEVMETHOD(ifdi_vlan_unregister, em_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, em_if_get_counter),
@@ -654,7 +652,6 @@ static device_method_t igb_if_methods[] = {
 	DEVMETHOD(ifdi_mtu_set, em_if_mtu_set),
 	DEVMETHOD(ifdi_promisc_set, em_if_set_promisc),
 	DEVMETHOD(ifdi_timer, em_if_timer),
-	DEVMETHOD(ifdi_watchdog_reset, em_if_watchdog_reset),
 	DEVMETHOD(ifdi_vlan_register, em_if_vlan_register),
 	DEVMETHOD(ifdi_vlan_unregister, em_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, em_if_get_counter),
@@ -3654,18 +3651,6 @@ em_if_update_admin_status(if_ctx_t ctx)
 		lem_smartspeed(sc);
 }
 
-static void
-em_if_watchdog_reset(if_ctx_t ctx)
-{
-	struct e1000_softc *sc = iflib_get_softc(ctx);
-
-	/*
-	 * Just count the event; iflib(4) will already trigger a
-	 * sufficient reset of the controller.
-	 */
-	sc->watchdog_events++;
-}
-
 /*********************************************************************
  *
  *  This routine disables all traffic on the adapter by issuing a
@@ -4703,11 +4688,13 @@ em_initialize_rss_mapping(struct e1000_softc *sc)
 	/*
 	 * Configure RSS key
 	 */
-	arc4rand(rss_key, sizeof(rss_key), 0);
+	_Static_assert(sizeof(rss_key) == RSS_KEYSIZE,
+	    "RSS key size mismatch");
+	rss_getkey(rss_key);
 	for (i = 0; i < RSSKEYLEN; ++i) {
 		uint32_t rssrk = 0;
 
-		rssrk = EM_RSSRK_VAL(rss_key, i);
+		rssrk = le32dec(rss_key + i * sizeof(rssrk));
 		E1000_WRITE_REG(hw,E1000_RSSRK(i), rssrk);
 	}
 
@@ -4804,12 +4791,8 @@ igb_initialize_rss_mapping(struct e1000_softc *sc)
 	 */
 	mrqc = E1000_MRQC_ENABLE_RSS_MQ;
 
-#ifdef RSS
 	/* XXX ew typecasting */
 	rss_getkey((uint8_t *) &rss_key);
-#else
-	arc4rand(&rss_key, sizeof(rss_key), 0);
-#endif
 	for (i = 0; i < 10; i++)
 		E1000_WRITE_REG_ARRAY(hw, E1000_RSSRK(0), i, rss_key[i]);
 
@@ -5136,7 +5119,7 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 		bus_addr = txr->tx_paddr;
 
 		/* Clear checksum offload context. */
-		offp = (caddr_t)&txr->csum_flags;
+		offp = (caddr_t)txr + offsetof(struct tx_ring, csum_flags);
 		endp = (caddr_t)(txr + 1);
 		memset(offp, 0, endp - offp);
 
@@ -5947,7 +5930,6 @@ em_automask_tso(if_ctx_t ctx)
 	if_softc_ctx_t scctx = iflib_get_softc_ctx(ctx);
 	if_t ifp = iflib_get_ifp(ctx);
 	bool reset_needed;
-	int drvflags;
 
 	if (!em_unsupported_tso && sc->link_speed &&
 	    sc->link_speed != SPEED_1000 &&
@@ -5967,16 +5949,13 @@ em_automask_tso(if_ctx_t ctx)
 	}
 
 	/*
-	 * Reset a running interface, or one being initialized while
-	 * administratively up.  OACTIVE remains set after iflib_stop(), so
-	 * it alone cannot distinguish initialization from an interface that
-	 * is down.  In other states, the next initialization will apply the
-	 * updated capabilities.
+	 * Apply the new capabilities to a running or administratively-up
+	 * interface, including one whose initialization has not completed.
+	 * A stopped, administratively-down interface will apply them at the
+	 * next initialization; driver flags do not describe that intent.
 	 */
-	drvflags = if_getdrvflags(ifp);
-	reset_needed = (drvflags & IFF_DRV_RUNNING) != 0 ||
-	    ((drvflags & IFF_DRV_OACTIVE) != 0 &&
-	    (if_getflags(ifp) & IFF_UP) != 0);
+	reset_needed = iflib_is_running(ctx) ||
+	    (if_getflags(ifp) & IFF_UP) != 0;
 	if (!reset_needed)
 		return (false);
 
@@ -6836,8 +6815,6 @@ em_if_get_vf_counter(if_ctx_t ctx, ift_counter cnt)
 	switch (cnt) {
 	case IFCOUNTER_IERRORS:
 		return sc->dropped_pkts;
-	case IFCOUNTER_OERRORS:
-		return sc->watchdog_events;
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}
@@ -6864,8 +6841,8 @@ em_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 		    stats->ruc + stats->roc +
 		    stats->mpc + stats->cexterr);
 	case IFCOUNTER_OERRORS:
-		return (stats->ecol + stats->latecol +
-		    sc->watchdog_events);
+		return (if_get_counter_default(ifp, cnt) +
+		    stats->ecol + stats->latecol);
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}
@@ -6986,9 +6963,6 @@ em_add_hw_stats(struct e1000_softc *sc)
 	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "rx_overruns",
 	    CTLFLAG_RD, &sc->rx_overruns,
 	    "RX overruns");
-	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "watchdog_timeouts",
-	    CTLFLAG_RD, &sc->watchdog_events,
-	    "Watchdog timeouts");
 	SYSCTL_ADD_PROC(ctx, child, OID_AUTO, "device_control",
 	    CTLTYPE_UINT | CTLFLAG_RD,
 	    sc, E1000_CTRL, em_sysctl_reg_handler, "IU",
@@ -7896,21 +7870,13 @@ static void
 em_print_debug_info(struct e1000_softc *sc)
 {
 	device_t dev = iflib_get_dev(sc->ctx);
-	if_t ifp = iflib_get_ifp(sc->ctx);
 
 	if (sc->tx_queues == NULL || sc->rx_queues == NULL) {
 		device_printf(dev, "queue state is unavailable\n");
 		return;
 	}
-	if (if_getdrvflags(ifp) & IFF_DRV_RUNNING)
-		printf("Interface is RUNNING ");
-	else
-		printf("Interface is NOT RUNNING\n");
-
-	if (if_getdrvflags(ifp) & IFF_DRV_OACTIVE)
-		printf("and INACTIVE\n");
-	else
-		printf("and ACTIVE\n");
+	device_printf(dev, "iflib software admission: %s\n",
+	    iflib_is_running(sc->ctx) ? "open" : "closed");
 
 	for (int i = 0; i < sc->tx_num_queues; i++) {
 		device_printf(dev, "TX Queue %d ------\n", i);

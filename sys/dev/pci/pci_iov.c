@@ -748,16 +748,27 @@ pci_iov_config(struct cdev *cdev, struct pci_iov_arg *arg)
 	last_rid = first_rid + (num_vfs - 1) * rid_stride;
 
 	if (pci_get_bus(dev) != PCI_RID2BUS(last_rid)) {
-		int rid = 0;
-		uint16_t last_rid_bus = PCI_RID2BUS(last_rid);
+		struct pci_softc *sc = device_get_softc(bus);
+		uint16_t vf_bus = PCI_RID2BUS(last_rid);
 
-		iov->iov_bus_res = bus_alloc_resource(bus, PCI_RES_BUS, &rid,
-		    last_rid_bus, last_rid_bus, 1, RF_ACTIVE);
-		if (iov->iov_bus_res == NULL) {
-			device_printf(dev,
-			    "failed to allocate PCIe bus number for VFs\n");
-			error = ENOSPC;
-			goto out;
+		/*
+		 * The PCI bus owns its entire sc_bus range in the parent
+		 * resource manager.  Boot-time SR-IOV sizing may already have
+		 * extended that resource through vf_bus, so do not claim the
+		 * same bus number a second time.
+		 */
+		if (vf_bus < rman_get_start(sc->sc_bus) ||
+		    vf_bus > rman_get_end(sc->sc_bus)) {
+			int rid = 0;
+
+			iov->iov_bus_res = bus_alloc_resource(bus, PCI_RES_BUS, &rid,
+			    vf_bus, vf_bus, 1, RF_ACTIVE);
+			if (iov->iov_bus_res == NULL) {
+				device_printf(dev,
+				    "failed to allocate PCIe bus number for VFs\n");
+				error = ENOSPC;
+				goto out;
+			}
 		}
 	}
 

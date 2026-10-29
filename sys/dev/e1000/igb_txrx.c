@@ -28,10 +28,8 @@
 
 #include "if_em.h"
 
-#ifdef RSS
 #include <net/rss_config.h>
 #include <netinet/in_rss.h>
-#endif
 
 #ifdef VERBOSE_DEBUG
 #define DPRINTF device_printf
@@ -601,6 +599,6 @@ igb_determine_rsstype(uint16_t pkt_info)
 	case E1000_RXDADV_RSSTYPE_IPV6_UDP_EX:
 		return M_HASHTYPE_RSS_UDP_IPV6_EX;
 	default:
-		return M_HASHTYPE_OPAQUE;
+		return M_HASHTYPE_NONE;
 	}
 }

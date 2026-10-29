@@ -131,6 +131,7 @@ static void ice_free_pci_mapping(struct ice_softc *sc);
 static void ice_update_link_status(struct ice_softc *sc, bool update_media);
 static void ice_init_device_features(struct ice_softc *sc);
 static void ice_init_tx_tracking(struct ice_vsi *vsi);
+static void ice_handle_rdma_pe_intr(struct ice_softc *sc);
 static void ice_handle_reset_event(struct ice_softc *sc);
 static void ice_handle_pf_reset_request(struct ice_softc *sc);
 static void ice_prepare_for_reset(struct ice_softc *sc);
@@ -1382,7 +1383,8 @@ ice_msix_admin(void *arg)
 		if (oicr & PFINT_OICR_HMC_ERR_M)
 			/* Log the HMC errors */
 			ice_log_hmc_error(hw, dev);
-		ice_rdma_notify_pe_intr(sc, oicr);
+		atomic_set_32(&sc->rdma_oicr, oicr);
+		ice_set_state(&sc->state, ICE_STATE_RDMA_PE_INTR_PENDING);
 	}
 
 	if (oicr & PFINT_OICR_PCI_EXCEPTION_M) {
@@ -2119,7 +2121,7 @@ ice_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to configure the main VSI for Tx: %s\n",
 			      ice_err_str(err));
-		goto err_init_failed;
+		goto err_cleanup_tx;
 	}
 
 	err = ice_cfg_vsi_for_rx(&sc->pf_vsi);
@@ -2133,9 +2135,9 @@ ice_if_init(if_ctx_t ctx)
 	err = ice_control_all_rx_queues(&sc->pf_vsi, true);
 	if (err) {
 		device_printf(dev,
-			      "Unable to enable Rx rings for transmit: %s\n",
+			      "Unable to enable Rx rings for receive: %s\n",
 			      ice_err_str(err));
-		goto err_cleanup_tx;
+		goto err_stop_rx;
 	}
 
 	err = ice_cfg_pf_default_mac_filters(sc);
@@ -2406,6 +2408,28 @@ ice_transition_safe_mode(struct ice_softc *sc)
 }
 
 /**
+ * ice_handle_rdma_pe_intr - Notify RDMA of deferred PE/HMC errors
+ * @sc: device private softc
+ *
+ * Deliver PE and HMC error notifications from the admin task because the
+ * RDMA notification path takes a sleepable lock. Multiple OICR causes which
+ * arrive before the task runs are accumulated by the interrupt filter.
+ */
+static void
+ice_handle_rdma_pe_intr(struct ice_softc *sc)
+{
+	u32 oicr;
+
+	if (!ice_testandclear_state(&sc->state,
+	    ICE_STATE_RDMA_PE_INTR_PENDING))
+		return;
+
+	oicr = atomic_readandclear_32(&sc->rdma_oicr);
+	if (oicr != 0)
+		ice_rdma_notify_pe_intr(sc, oicr);
+}
+
+/**
  * ice_if_update_admin_status - update admin status
  * @ctx: iflib ctx structure
  *
@@ -2420,8 +2444,10 @@ ice_if_update_admin_status(if_ctx_t ctx)
 {
 	struct ice_softc *sc = (struct ice_softc *)iflib_get_softc(ctx);
 	enum ice_fw_modes fw_mode;
-	bool reschedule = false;
+	bool defer_mailbox = false, reschedule = false;
+	u32 reg;
 	u16 pending = 0;
+	int error;
 
 	ASSERT_CTX_LOCKED(sc);
 
@@ -2444,6 +2470,9 @@ ice_if_update_admin_status(if_ctx_t ctx)
 		}
 	}
 
+	/* Notify RDMA before handling a reset it may request. */
+	ice_handle_rdma_pe_intr(sc);
+
 	/* Handle global reset events */
 	ice_handle_reset_event(sc);
 
@@ -2462,19 +2491,59 @@ ice_if_update_admin_status(if_ctx_t ctx)
 		 */
 		;
 	} else if (ice_testandclear_state(&sc->state, ICE_STATE_CONTROLQ_EVENT_PENDING)) {
+		pending = 0;
 		ice_process_ctrlq(sc, ICE_CTL_Q_ADMIN, &pending);
 		if (pending > 0)
 			reschedule = true;
 
 		if (ice_is_generic_mac(&sc->hw)) {
+			pending = 0;
 			ice_process_ctrlq(sc, ICE_CTL_Q_SB, &pending);
 			if (pending > 0)
 				reschedule = true;
 		}
 
-		ice_process_ctrlq(sc, ICE_CTL_Q_MAILBOX, &pending);
-		if (pending > 0)
+		pending = 0;
+		error = ice_process_ctrlq(sc, ICE_CTL_Q_MAILBOX, &pending);
+		if (error == 0 && pending == 0) {
+			reg = rd32(&sc->hw, PFINT_MBX_CTL);
+			if ((reg & PFINT_MBX_CTL_CAUSE_ENA_M) == 0) {
+				wr32(&sc->hw, PFINT_MBX_CTL,
+				    reg | PFINT_MBX_CTL_CAUSE_ENA_M);
+				ice_flush(&sc->hw);
+				/* Events received while masked may not interrupt. */
+				pending = (rd32(&sc->hw, sc->hw.mailboxq.rq.head) &
+				    sc->hw.mailboxq.rq.head_mask) !=
+				    sc->hw.mailboxq.rq.next_to_clean;
+			}
+		}
+		if (error != 0) {
+			/* Retry a failed read on the timer, not in a task loop. */
+			defer_mailbox = true;
+		} else if (pending > 0) {
+#ifdef PCI_IOV
+			/*
+			 * Two passes drain one initially full 512-entry mailbox.
+			 * If it remains nonempty, a VF is replenishing it faster
+			 * than this task can drain it. Mask only the mailbox cause
+			 * and let the periodic admin timer schedule bounded work.
+			 */
+			if (sc->mbx_admin_passes <
+			    howmany(ICE_MBXQ_LEN, ICE_CTRLQ_WORK_LIMIT))
+				sc->mbx_admin_passes++;
+			if (sc->mbx_admin_passes <
+			    howmany(ICE_MBXQ_LEN, ICE_CTRLQ_WORK_LIMIT))
+				reschedule = true;
+			else
+				defer_mailbox = true;
+#else
 			reschedule = true;
+#endif
+		} else {
+#ifdef PCI_IOV
+			sc->mbx_admin_passes = 0;
+#endif
+		}
 	}
 
 	/* Poll for link up */
@@ -2492,17 +2561,18 @@ ice_if_update_admin_status(if_ctx_t ctx)
 		iflib_iov_intr_deferred(ctx);
 #endif
 
-	/*
-	 * If there are still messages to process, we need to reschedule
-	 * ourselves. Otherwise, we can just re-enable the interrupt. We'll be
-	 * woken up at the next interrupt or timer event.
-	 */
-	if (reschedule) {
-		ice_set_state(&sc->state, ICE_STATE_CONTROLQ_EVENT_PENDING);
-		iflib_admin_intr_deferred(ctx);
-	} else {
-		ice_enable_intr(&sc->hw, sc->irqvs[0].me);
+	if (defer_mailbox) {
+		reg = rd32(&sc->hw, PFINT_MBX_CTL);
+		wr32(&sc->hw, PFINT_MBX_CTL,
+		    reg & ~PFINT_MBX_CTL_CAUSE_ENA_M);
 	}
+	if (reschedule || defer_mailbox)
+		ice_set_state(&sc->state, ICE_STATE_CONTROLQ_EVENT_PENDING);
+	if (reschedule)
+		iflib_admin_intr_deferred(ctx);
+	/* Keep OICR and the other control queues live during mailbox deferral. */
+	if (!reschedule || defer_mailbox)
+		ice_enable_intr(&sc->hw, sc->irqvs[0].me);
 }
 
 /**
@@ -2518,6 +2588,9 @@ static void
 ice_prepare_for_reset(struct ice_softc *sc)
 {
 	struct ice_hw *hw = &sc->hw;
+#ifdef PCI_IOV
+	int error;
+#endif
 
 	/* If we're already prepared, there's nothing to do */
 	if (ice_testandset_state(&sc->state, ICE_STATE_PREPARED_FOR_RESET))
@@ -2528,6 +2601,20 @@ ice_prepare_for_reset(struct ice_softc *sc)
 	/* In recovery mode, hardware is not initialized */
 	if (ice_test_state(&sc->state, ICE_STATE_RECOVERY_MODE))
 		return;
+
+#ifdef PCI_IOV
+	/*
+	 * A reset already reported by OICR gates DMA in hardware and rejects
+	 * new function resets. Otherwise notify and hold VFs while AdminQ is
+	 * still usable, before releasing any firmware topology.
+	 */
+	if (!hw->reset_ongoing) {
+		error = ice_iov_quiesce_vfs_for_reset(sc);
+		if (error != 0)
+			device_printf(sc->dev,
+			    "Failed to quiesce one or more VFs: %d\n", error);
+	}
+#endif
 
 	/* Restore identification while the control queues are still usable. */
 	ice_led_restore(sc);
@@ -2610,7 +2697,7 @@ err_release_tx_queues:
 }
 
 /* determine if the iflib context is active */
-#define CTX_ACTIVE(ctx) ((if_getdrvflags(iflib_get_ifp(ctx)) & IFF_DRV_RUNNING))
+#define CTX_ACTIVE(ctx) iflib_is_running(ctx)
 
 /**
  * ice_rebuild_recovery_mode - Rebuild driver state while in recovery mode
@@ -2664,11 +2751,17 @@ ice_rebuild(struct ice_softc *sc)
 	enum ice_ddp_state pkg_state;
 	int status;
 	int err;
+	int i;
 
 	sc->rebuild_ticks = ticks;
 
 	/* If we're rebuilding, then a reset has succeeded. */
 	ice_clear_state(&sc->state, ICE_STATE_RESET_FAILED);
+	/* The reset discarded every firmware VSI before reconstruction. */
+	for (i = 0; i < sc->num_available_vsi; i++) {
+		if (sc->all_vsi[i] != NULL)
+			sc->all_vsi[i]->hw_vsi_created = false;
+	}
 
 	/*
 	 * If the firmware is in recovery mode, only restore the limited
@@ -2688,6 +2781,10 @@ ice_rebuild(struct ice_softc *sc)
 			      ice_status_str(status));
 		goto err_shutdown_ctrlq;
 	}
+
+#ifdef PCI_IOV
+	ice_iov_reconfigure_mbx(sc);
+#endif
 
 	/* Query the allocated resources for Tx scheduler */
 	status = ice_sched_query_res_alloc(hw);
@@ -4490,7 +4587,7 @@ ice_subif_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to configure subif VSI for Tx: %s\n",
 			      ice_err_str(err));
-		goto err_init_failed;
+		goto err_cleanup_tx;
 	}
 
 	err = ice_cfg_vsi_for_rx(vsi);
@@ -4506,7 +4603,7 @@ ice_subif_if_init(if_ctx_t ctx)
 		device_printf(dev,
 			      "Unable to enable subif Rx rings for receive: %s\n",
 			      ice_err_str(err));
-		goto err_cleanup_tx;
+		goto err_stop_rx;
 	}
 
 	ice_configure_all_rxq_interrupts(vsi);
@@ -4515,6 +4612,8 @@ ice_subif_if_init(if_ctx_t ctx)
 	ice_set_state(&mif->state, ICE_STATE_DRIVER_INITIALIZED);
 	return;
 
+err_stop_rx:
+	ice_control_all_rx_queues(vsi, false);
 err_cleanup_tx:
 	ice_vsi_disable_tx(vsi);
 err_init_failed:

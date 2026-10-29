@@ -44,6 +44,7 @@
 #include <net/if_types.h>
 #include <net/if_media.h>
 #include <net/iflib.h>
+#include <net/rss_config.h>
 
 #include <dev/enetc/enetc_hw.h>
 #include <dev/enetc/enetc.h>
@@ -603,6 +604,7 @@ enetc_setup_rss(struct enetc_softc *sc)
 {
 	struct iflib_dma_info dma;
 	int error, i, buckets_num = 0;
+	uint8_t rss_key[RSS_KEYSIZE];
 	uint8_t *rss_table;
 	uint32_t reg;
 
@@ -614,8 +616,11 @@ enetc_setup_rss(struct enetc_softc *sc)
 	if (buckets_num == 0)
 		return (ENOTSUP);
 
+	_Static_assert(ENETC_RSSHASH_KEY_SIZE == RSS_KEYSIZE,
+	    "RSS key size mismatch");
+	rss_getkey(rss_key);
 	for (i = 0; i < ENETC_RSSHASH_KEY_SIZE / sizeof(uint32_t); i++) {
-		arc4rand((uint8_t *)&reg, sizeof(reg), 0);
+		reg = le32dec(rss_key + i * sizeof(reg));
 		ENETC_PORT_WR4(sc, ENETC_PRSSK(i), reg);
 	}
 
@@ -972,7 +977,7 @@ enetc_disable_txq(struct enetc_softc *sc, int qid)
 		cidx = ENETC_TXQ_RD4(sc, qid, ENETC_TBCIR);
 	}
 
-	if (timeout == 0)
+	if (pidx != cidx)
 		device_printf(sc->dev,
 		    "Timeout while waiting for txq%d to stop transmitting packets\n",
 		    qid);
@@ -1347,7 +1352,8 @@ enetc_get_counter(if_ctx_t ctx, ift_counter cnt)
 	case IFCOUNTER_IERRORS:
 		return (ENETC_PORT_RD8(sc, ENETC_PM0_RERR));
 	case IFCOUNTER_OERRORS:
-		return (ENETC_PORT_RD8(sc, ENETC_PM0_TERR));
+		return (if_get_counter_default(ifp, cnt) +
+		    ENETC_PORT_RD8(sc, ENETC_PM0_TERR));
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}

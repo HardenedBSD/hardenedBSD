@@ -2966,24 +2966,7 @@ err_modify:
 static void
 mlx5e_get_rss_key(void *key_ptr)
 {
-#ifdef RSS
 	rss_getkey(key_ptr);
-#else
-	static const u32 rsskey[] = {
-	    cpu_to_be32(0xD181C62C),
-	    cpu_to_be32(0xF7F4DB5B),
-	    cpu_to_be32(0x1983A2FC),
-	    cpu_to_be32(0x943E1ADB),
-	    cpu_to_be32(0xD9389E6B),
-	    cpu_to_be32(0xD1039C2C),
-	    cpu_to_be32(0xA74499AD),
-	    cpu_to_be32(0x593D56D9),
-	    cpu_to_be32(0xF3253C06),
-	    cpu_to_be32(0x2ADC1FFC),
-	};
-	CTASSERT(sizeof(rsskey) == MLX5E_RSS_KEY_SIZE);
-	memcpy(key_ptr, rsskey, MLX5E_RSS_KEY_SIZE);
-#endif
 }
 
 static void
@@ -3095,15 +3078,12 @@ mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 * tirc, int tt, bool inner_vxla
 
 	CTASSERT(MLX5_FLD_SZ_BYTES(tirc, rx_hash_toeplitz_key) >=
 		 MLX5E_RSS_KEY_SIZE);
-#ifdef RSS
+
 	/*
 	 * The FreeBSD RSS implementation does currently not
 	 * support symmetric Toeplitz hashes:
 	 */
 	MLX5_SET(tirc, tirc, rx_hash_symmetric, 0);
-#else
-	MLX5_SET(tirc, tirc, rx_hash_symmetric, 1);
-#endif
 	mlx5e_get_rss_key(hkey);
 
 	switch (tt) {
@@ -3112,12 +3092,10 @@ mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 * tirc, int tt, bool inner_vxla
 		    MLX5_L3_PROT_TYPE_IPV4);
 		MLX5_SET(rx_hash_field_select, hfs, l4_prot_type,
 		    MLX5_L4_PROT_TYPE_TCP);
-#ifdef RSS
 		if (!(rss_gethashconfig() & RSS_HASHTYPE_RSS_TCP_IPV4)) {
 			MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 			    MLX5_HASH_IP);
 		} else
-#endif
 		MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 		    MLX5_HASH_ALL);
 		break;
@@ -3127,12 +3105,10 @@ mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 * tirc, int tt, bool inner_vxla
 		    MLX5_L3_PROT_TYPE_IPV6);
 		MLX5_SET(rx_hash_field_select, hfs, l4_prot_type,
 		    MLX5_L4_PROT_TYPE_TCP);
-#ifdef RSS
 		if (!(rss_gethashconfig() & RSS_HASHTYPE_RSS_TCP_IPV6)) {
 			MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 			    MLX5_HASH_IP);
 		} else
-#endif
 		MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 		    MLX5_HASH_ALL);
 		break;
@@ -3142,12 +3118,10 @@ mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 * tirc, int tt, bool inner_vxla
 		    MLX5_L3_PROT_TYPE_IPV4);
 		MLX5_SET(rx_hash_field_select, hfs, l4_prot_type,
 		    MLX5_L4_PROT_TYPE_UDP);
-#ifdef RSS
 		if (!(rss_gethashconfig() & RSS_HASHTYPE_RSS_UDP_IPV4)) {
 			MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 			    MLX5_HASH_IP);
 		} else
-#endif
 		MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 		    MLX5_HASH_ALL);
 		break;
@@ -3157,12 +3131,10 @@ mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 * tirc, int tt, bool inner_vxla
 		    MLX5_L3_PROT_TYPE_IPV6);
 		MLX5_SET(rx_hash_field_select, hfs, l4_prot_type,
 		    MLX5_L4_PROT_TYPE_UDP);
-#ifdef RSS
 		if (!(rss_gethashconfig() & RSS_HASHTYPE_RSS_UDP_IPV6)) {
 			MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 			    MLX5_HASH_IP);
 		} else
-#endif
 		MLX5_SET(rx_hash_field_select, hfs, selected_fields,
 		    MLX5_HASH_ALL);
 		break;
@@ -3802,6 +3774,8 @@ out:
 		break;
 
 	case SIOCGI2C:
+		/* fallthru */
+	case SIOCGI2CPB:
 		ifr = (struct ifreq *)data;
 
 		/*
@@ -3811,6 +3785,9 @@ out:
 		error = copyin(ifr_data_get_ptr(ifr), &i2c, sizeof(i2c));
 		if (error)
 			break;
+		/* ensure page and bank are 0 for legacy SIOCGI2C ioctls */
+		if (command == SIOCGI2C)
+			i2c.page = i2c.bank = 0;
 
 		if (i2c.len > sizeof(i2c.data)) {
 			error = EINVAL;
@@ -3852,8 +3829,17 @@ out:
 			error = EINVAL;
 			goto err_i2c;
 		}
+
+		if (i2c.bank != 0) {
+			mlx5_en_err(ifp,
+			    "Query eeprom failed, Invalid Bank: %X\n",
+			    i2c.bank);
+			error = EINVAL;
+			goto err_i2c;
+		}
+
 		error = mlx5_query_eeprom(priv->mdev,
-		    read_addr, MLX5_EEPROM_LOW_PAGE,
+		    read_addr, i2c.page,
 		    (uint32_t)i2c.offset, (uint32_t)i2c.len, module_num,
 		    (uint32_t *)i2c.data, &size_read);
 		if (error) {
@@ -3865,7 +3851,7 @@ out:
 
 		if (i2c.len > MLX5_EEPROM_MAX_BYTES) {
 			error = mlx5_query_eeprom(priv->mdev,
-			    read_addr, MLX5_EEPROM_LOW_PAGE,
+			    read_addr, i2c.page,
 			    (uint32_t)(i2c.offset + size_read),
 			    (uint32_t)(i2c.len - size_read), module_num,
 			    (uint32_t *)(i2c.data + size_read), &size_read);
