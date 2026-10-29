@@ -29,6 +29,8 @@
 
 
 #include "opt_inet6.h"
+#include "opt_inet.h"
+#include "opt_rss.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -72,6 +74,10 @@
  *   placement and pcbgroup expectations.
  */
 
+#if !defined(INET) && !defined(INET6)
+#define _net_inet _net
+#define _net_inet_rss _net_rss
+#endif
 SYSCTL_DECL(_net_inet);
 SYSCTL_NODE(_net_inet, OID_AUTO, rss, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "Receive-side steering");
@@ -84,6 +90,8 @@ static u_int	rss_hashalgo = RSS_HASH_TOEPLITZ;
 SYSCTL_INT(_net_inet_rss, OID_AUTO, hashalgo, CTLFLAG_RDTUN, &rss_hashalgo, 0,
     "RSS hash algorithm");
 
+#ifdef RSS
+FEATURE(rss, "Receiver-side scaling");
 /*
  * Size of the indirection table; at most 128 entries per the RSS spec.  We
  * size it to at least 2 times the number of CPUs by default to allow useful
@@ -132,6 +140,7 @@ static const u_int	rss_basecpu;
 SYSCTL_INT(_net_inet_rss, OID_AUTO, basecpu, CTLFLAG_RD,
     __DECONST(int *, &rss_basecpu), 0, "RSS base CPU");
 
+#endif
 /*
  * Print verbose debugging messages.
  * 0 - disable
@@ -140,6 +149,11 @@ SYSCTL_INT(_net_inet_rss, OID_AUTO, basecpu, CTLFLAG_RD,
 int	rss_debug = 0;
 SYSCTL_INT(_net_inet_rss, OID_AUTO, debug, CTLFLAG_RWTUN, &rss_debug, 0,
     "RSS debug level");
+
+static u_int	rss_udp_4tuple = 0;
+SYSCTL_INT(_net_inet_rss, OID_AUTO, udp_4tuple, CTLFLAG_RDTUN,
+    &rss_udp_4tuple, 0,
+    "Enable UDP 4-tuple RSS hashing (src/dst IP + src/dst port)");
 
 /*
  * RSS secret key, intended to prevent attacks on load-balancing.  Its
@@ -159,6 +173,7 @@ static uint8_t rss_key[RSS_KEYSIZE] = {
 	0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa,
 };
 
+#ifdef RSS
 /*
  * RSS hash->CPU table, which maps hashed packet headers to particular CPUs.
  * Drivers may supplement this table with a separate CPU<->queue table when
@@ -168,13 +183,15 @@ struct rss_table_entry {
 	uint8_t		rte_cpu;	/* CPU affinity of bucket. */
 };
 static struct rss_table_entry	rss_table[RSS_TABLE_MAXLEN];
+#endif
 
 static void
 rss_init(__unused void *arg)
 {
+#ifdef RSS
 	u_int i;
 	u_int cpuid;
-
+#endif
 	/*
 	 * Validate tunables, coerce to sensible values.
 	 */
@@ -189,6 +206,7 @@ rss_init(__unused void *arg)
 		rss_hashalgo = RSS_HASH_TOEPLITZ;
 	}
 
+#ifdef RSS
 	/*
 	 * Count available CPUs.
 	 *
@@ -248,7 +266,7 @@ rss_init(__unused void *arg)
 		rss_table[i].rte_cpu = cpuid;
 		cpuid = CPU_NEXT(cpuid);
 	}
-
+#endif /* RSS */
 	/*
 	 * Randomize rrs_key.
 	 *
@@ -292,6 +310,30 @@ rss_hash(u_int datalen, const uint8_t *data)
 	}
 }
 
+/*
+ * Query the current RSS key; likely to be used by device drivers when
+ * configuring hardware RSS.  Caller must pass an array of size RSS_KEYSIZE.
+ *
+ * XXXRW: Perhaps we should do the accept-a-length-and-truncate thing?
+ */
+void
+rss_getkey(uint8_t *key)
+{
+
+	bcopy(rss_key, key, sizeof(rss_key));
+}
+
+/*
+ * Query the RSS hash algorithm.
+ */
+u_int
+rss_gethashalgo(void)
+{
+
+	return (rss_hashalgo);
+}
+
+#ifdef RSS
 /*
  * Query the number of RSS bits in use.
  */
@@ -407,29 +449,6 @@ rss_m2bucket(struct mbuf *m, uint32_t *bucket_id)
 }
 
 /*
- * Query the RSS hash algorithm.
- */
-u_int
-rss_gethashalgo(void)
-{
-
-	return (rss_hashalgo);
-}
-
-/*
- * Query the current RSS key; likely to be used by device drivers when
- * configuring hardware RSS.  Caller must pass an array of size RSS_KEYSIZE.
- *
- * XXXRW: Perhaps we should do the accept-a-length-and-truncate thing?
- */
-void
-rss_getkey(uint8_t *key)
-{
-
-	bcopy(rss_key, key, sizeof(rss_key));
-}
-
-/*
  * Query the number of buckets; this may be used by both network device
  * drivers, which will need to populate hardware shadows of the software
  * indirection table, and the network stack itself (such as when deciding how
@@ -454,6 +473,7 @@ rss_getnumcpus(void)
 	return (rss_ncpus);
 }
 
+#endif
 /*
  * Return the supported RSS hash configuration.
  *
@@ -473,19 +493,24 @@ rss_gethashconfig(void)
 	 * So for now disable UDP 4-tuple hashing until all of the other
 	 * pieces are in place.
 	 */
-	return (
+	u_int config;
+
+	config =
 	    RSS_HASHTYPE_RSS_IPV4
-	|    RSS_HASHTYPE_RSS_TCP_IPV4
-	|    RSS_HASHTYPE_RSS_IPV6
-	|    RSS_HASHTYPE_RSS_TCP_IPV6
-	|    RSS_HASHTYPE_RSS_IPV6_EX
-	|    RSS_HASHTYPE_RSS_TCP_IPV6_EX
-#if 0
-	|    RSS_HASHTYPE_RSS_UDP_IPV4
-	|    RSS_HASHTYPE_RSS_UDP_IPV6
-	|    RSS_HASHTYPE_RSS_UDP_IPV6_EX
-#endif
-	);
+	|   RSS_HASHTYPE_RSS_TCP_IPV4
+	|   RSS_HASHTYPE_RSS_IPV6
+	|   RSS_HASHTYPE_RSS_TCP_IPV6
+	|   RSS_HASHTYPE_RSS_IPV6_EX
+	|   RSS_HASHTYPE_RSS_TCP_IPV6_EX;
+
+	if (rss_udp_4tuple) {
+		config |=
+		    RSS_HASHTYPE_RSS_UDP_IPV4
+		|   RSS_HASHTYPE_RSS_UDP_IPV6
+		|   RSS_HASHTYPE_RSS_UDP_IPV6_EX;
+	}
+
+	return (config);
 }
 
 /*
@@ -517,6 +542,7 @@ SYSCTL_PROC(_net_inet_rss, OID_AUTO, key,
     CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0, sysctl_rss_key,
     "", "RSS keying material");
 
+#ifdef RSS
 static int
 sysctl_rss_bucket_mapping(SYSCTL_HANDLER_ARGS)
 {
@@ -544,3 +570,4 @@ sysctl_rss_bucket_mapping(SYSCTL_HANDLER_ARGS)
 SYSCTL_PROC(_net_inet_rss, OID_AUTO, bucket_mapping,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, NULL, 0,
     sysctl_rss_bucket_mapping, "", "RSS bucket -> CPU mapping");
+#endif

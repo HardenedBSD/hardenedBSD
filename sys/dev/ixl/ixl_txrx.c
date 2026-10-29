@@ -86,23 +86,6 @@ struct if_txrx ixl_txrx_dwb = {
 	NULL
 };
 
-/*
- * @key key is saved into this parameter
- */
-void
-ixl_get_default_rss_key(u32 *key)
-{
-	MPASS(key != NULL);
-
-	u32 rss_seed[IXL_RSS_KEY_SIZE_REG] = {0x41b01687,
-	    0x183cfd8c, 0xce880440, 0x580cbc3c,
-	    0x35897377, 0x328b25e1, 0x4fa98922,
-	    0xb7d90c14, 0xd5bad70d, 0xcd15a2c1,
-	    0x0, 0x0, 0x0};
-
-	bcopy(rss_seed, key, IXL_RSS_KEY_SIZE);
-}
-
 /**
  * i40e_vc_stat_str - convert virtchnl status err code to a string
  * @hw: pointer to the HW structure
@@ -665,7 +648,7 @@ ixl_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	struct ixl_rx_queue	*que = &vsi->rx_queues[ri->iri_qsidx];
 	struct rx_ring		*rxr = &que->rxr;
 	union i40e_rx_desc	*cur;
-	u32		status, error;
+	u32		status, error, fltstat;
 	u16		plen;
 	u64		qword;
 	u8		ptype;
@@ -721,8 +704,12 @@ ixl_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 	if ((scctx->isc_capenable & IFCAP_RXCSUM) != 0)
 		rxr->csum_errs += ixl_rx_checksum(ri, status, error, ptype);
-	ri->iri_flowid = le32toh(cur->wb.qword0.hi_dword.rss);
-	ri->iri_rsstype = ixl_ptype_to_hash(ptype);
+	fltstat = (status >> I40E_RX_DESC_STATUS_FLTSTAT_SHIFT);
+	if ((fltstat & I40E_RX_DESC_FLTSTAT_RSS_HASH) ==
+		I40E_RX_DESC_FLTSTAT_RSS_HASH) {
+		ri->iri_flowid = le32toh(cur->wb.qword0.hi_dword.rss);
+		ri->iri_rsstype = ixl_ptype_to_hash(ptype);
+	}
 	if (status & (1 << I40E_RX_DESC_STATUS_L2TAG1P_SHIFT)) {
 		ri->iri_vtag = le16toh(cur->wb.qword0.lo_dword.l2tag1);
 		ri->iri_flags |= M_VLANTAG;

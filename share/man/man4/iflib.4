@@ -1,4 +1,4 @@
-.Dd August 20, 2025
+.Dd September 16, 2026
 .Dt IFLIB 4
 .Os
 .Sh NAME
@@ -65,7 +65,11 @@ core.
 When set to a non-zero value, TX queues are assigned to cores following the
 last RX queue.
 .It Va simple_tx
-When set to one, iflib uses a simple transmit routine with no queuing at all.
+When set to one, iflib uses a simple transmit routine that sends packets
+directly while the transmit queue mutex is available.
+During contention, packets are deferred through a multi-producer
+.Xr buf_ring 9
+and drained by the mutex holder.
 By default, iflib uses a highly optimized, lockless, transmit queue called
 mp_ring.
 This performs well when there are more CPU cores than NIC
@@ -75,7 +79,9 @@ resource contention is not a problem (well behaved applications on
 systems where there are as many NIC queues as CPU cores).
 Note that when this is enabled, the tx_abdicate sysctl is no longer
 applicable and is ignored.
-Defaults to zero.
+By default, this is the inverse of
+.Va net.iflib.prefer_mpring .
+An explicitly configured value takes precedence over that global default.
 .El
 .Pp
 These
@@ -94,6 +100,12 @@ If set to a non-zero value, task returns immediately and the transmit
 ring is serviced by a different task.
 This returns control to the caller faster and under high receive load,
 may result in fewer dropped RX frames.
+.It Va tx_defer_mfree
+Controls the threshold in packets before iflib will free the memory
+(mbufs) for the packets that it has transmitted.
+When this is nonzero, mbufs will be freed outside the transmit lock.
+Setting this can reduce lock contention and CPU use when using simple_tx.
+Note that this applies only when simple_tx is enabled.
 .It Va tx_reclaim_thresh
 Controls the threshold in packets before iflib will ask the driver
 how many transmitted packets can be reclaimed.
@@ -110,8 +122,20 @@ Zero (the default) indicates the default (currently 16) should be used.
 .El
 .Pp
 There are also some global sysctls which can change behaviour for all drivers,
-and may be changed at any time.
+and, unless noted otherwise, may be changed at any time.
 .Bl -tag -width indent
+.It Va net.iflib.max_producers
+Limits the number of callers that may concurrently enqueue packets to a
+simple transmit deferral ring without taking the transmit queue mutex.
+The limit is applied separately to each transmit queue.
+If lockless producers from one last-level cache are active, a producer from
+another last-level cache waits for the transmit queue mutex regardless of the
+limit.
+Setting this to zero forces all contending producers to wait for the mutex.
+The default is 8.
+This setting applies only when
+.Va simple_tx
+is enabled.
 .It Va net.iflib.min_tx_latency
 If this is set to a non-zero value, iflib will avoid any attempt to combine
 multiple transmits, and notify the hardware as quickly as possible of
@@ -122,6 +146,59 @@ Some NICs allow processing completed transmit descriptors in batches.
 Doing so usually increases the transmit throughput by reducing the number of
 transmit interrupts.
 Setting this to a non-zero value will disable the use of this feature.
+.It Va net.iflib.prefer_mpring
+When set, use the
+.Va mp_ring
+transmit path by default instead of the simple transmit path.
+This is a read-only tunable that must be set before
+.Nm
+is loaded.
+An explicitly configured per-device
+.Va simple_tx
+value takes precedence.
+The default is one.
+.It Va net.iflib.simple_drain_quota
+Sets the maximum number of packets that the transmit task may remove from a
+simple transmit deferral ring in one drain operation.
+The default is 8.
+This setting applies only when
+.Va simple_tx
+is enabled.
+.It Va net.iflib.simple_drain_quota_thread
+Sets the maximum number of packets that a transmitting thread holding the
+transmit queue mutex may remove from a simple transmit deferral ring in one
+drain operation.
+A smaller value bounds the time for which a transmitting thread can hold the
+mutex while other producers replenish the ring.
+The default is 65536.
+This setting applies only when
+.Va simple_tx
+is enabled.
+.It Va net.iflib.simple_txbr_size
+Sets the number of entries in each
+.Xr buf_ring 9
+used by the simple transmit path to defer packets.
+The value must be a power of two and at least 64.
+Invalid values are replaced with the default of 1024.
+This is a read-only tunable that must be set before
+.Nm
+is loaded.
+This setting applies only when
+.Va simple_tx
+is enabled.
+.It Va net.iflib.tx_watchdog_periods
+Number of consecutive
+.Va net.iflib.timer_default
+intervals for which a transmit queue must remain frozen under demand before
+.Nm
+asks the hardware whether it has completions pending.
+A queue is frozen when it holds descriptors the hardware has not reported as
+completed while none are reclaimed.
+Demand persists while the outstanding descriptor count grows, the software
+queue is stalled, or the hardware descriptor ring is at its backpressure
+threshold.
+If it reports none, the interface is reset.
+Setting this to zero disables the check.
 .El
 .Pp
 These
@@ -130,6 +207,11 @@ variables are read-only:
 .Bl -tag -width indent
 .It Va driver_version
 A string indicating the internal version of the driver.
+.It Va tx_watchdog_events
+Number of transmit watchdog resets initiated by
+.Nm .
+This counts recovery events, not failed packets, and is not included in the
+interface output error counter.
 .El
 .Pp
 There are a number of queue state

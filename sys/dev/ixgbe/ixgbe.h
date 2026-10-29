@@ -435,6 +435,9 @@ struct ixgbe_softc {
 	bool			vf_mcast_overflow_warned;
 	u8			vf_link_mbx_failures;
 	u8			vf_link_poll_tick;
+	/* VF-owned RSS programming, protected by the iflib context lock. */
+	u32			vf_rss_key[10];
+	u32			vf_rss_mrqc;
 
 	/* Info about the interface */
 	int			advertise;	/* link speeds */
@@ -513,7 +516,6 @@ struct ixgbe_softc {
 	unsigned long		dropped_pkts;
 	unsigned long		mbuf_header_failed;
 	unsigned long		mbuf_packet_failed;
-	unsigned long		watchdog_events;
 	unsigned long		link_irq;
 	union {
 		struct ixgbe_hw_stats pf;

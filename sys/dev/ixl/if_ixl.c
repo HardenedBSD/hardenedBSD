@@ -1899,7 +1899,7 @@ ixl_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 	case IFCOUNTER_OPACKETS:
 		return (vsi->opackets);
 	case IFCOUNTER_OERRORS:
-		return (vsi->oerrors);
+		return (if_get_counter_default(ifp, cnt) + vsi->oerrors);
 	case IFCOUNTER_COLLISIONS:
 		/* Collisions are by standard impossible in 40G/10G Ethernet */
 		return (0);
@@ -1914,7 +1914,7 @@ ixl_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 	case IFCOUNTER_IQDROPS:
 		return (vsi->iqdrops);
 	case IFCOUNTER_OQDROPS:
-		return (vsi->oqdrops);
+		return (if_get_counter_default(ifp, cnt) + vsi->oqdrops);
 	case IFCOUNTER_NOPROTO:
 		return (vsi->noproto);
 	default:
@@ -1965,7 +1965,8 @@ ixl_if_priv_ioctl(if_ctx_t ctx, u_long command, caddr_t data)
 	case SIOCGDRVSPEC:
 	case SIOCSDRVSPEC:
 		/* NVM update command */
-		if (ifd->ifd_cmd == I40E_NVM_ACCESS) {
+		if (ifd->ifd_cmd == I40E_NVM_ACCESS ||
+		    ifd->ifd_cmd == I40E_NVM_ACCESS2) {
 			error = priv_check(curthread, PRIV_DRIVER);
 			if (error)
 				break;

@@ -273,7 +273,7 @@ struct if_shared_ctx {
 	int isc_ntxqs;			/* # of tx queues per tx qset - usually 1 */
 	int isc_nrxqs;			/* # of rx queues per rx qset - intel 1, chelsio 2, broadcom 3 */
 	int __spare0__;
-	int isc_tx_reclaim_thresh;
+	int __spare1__;
 	int isc_flags;
 };
 
@@ -348,7 +348,10 @@ typedef enum {
  * Driver needs frames padded to some minimum length
  */
 #define IFLIB_NEED_ETHER_PAD	0x100
-#define	IFLIB_SPARE7		0x200
+/*
+ * Driver understands page/bank i2c reads
+ */
+#define	IFLIB_I2C_PAGE_BANK	0x200
 #define	IFLIB_SPARE6		0x400
 #define	IFLIB_SPARE5		0x800
 #define	IFLIB_SPARE4		0x1000
@@ -424,6 +427,13 @@ void *iflib_get_softc(if_ctx_t ctx);
 device_t iflib_get_dev(if_ctx_t ctx);
 
 if_t iflib_get_ifp(if_ctx_t ctx);
+
+/*
+ * Lockless software admission snapshot.  This neither pins the context nor
+ * establishes that queue DMA has stopped; callers retain their usual lifetime
+ * and queue synchronization requirements.
+ */
+bool iflib_is_running(if_ctx_t ctx);
 
 struct ifmedia *iflib_get_media(if_ctx_t ctx);
 
