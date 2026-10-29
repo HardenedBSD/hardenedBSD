@@ -1645,6 +1645,15 @@ uint64_t pledge_permission_map[SYS_MAXSYSCALL] = {
 #ifdef SYS_renameat2
 	[SYS_renameat2] = PLEDGE_CPATH, /* 602 */
 #endif
+#ifdef SYS_pdopenpid
+	[SYS_pdopenpid] = PLEDGE_NONE, /* 603 */
+#endif
+#ifdef SYS_pddupfd
+	[SYS_pddupfd] = PLEDGE_NONE, /* 604 */
+#endif
+#ifdef SYS_pdptrace
+	[SYS_pdptrace] = PLEDGE_NONE, /* 605 */
+#endif
 };
 _Static_assert(603 == SYS_MAXSYSCALL, "new syscalls added to sys/sys/syscall.h, hbsd_pledge.c needs to be updated. TODO would it make sense to remove this static assertion and instead display a helpful message on boot + allow the operator to declare/override the defaults via tunables to prevent situations where people can't boot after upgrading?");
 
