@@ -95,7 +95,7 @@ static int sysctl_pledge_exec_flags(SYSCTL_HANDLER_ARGS);
 static int sysctl_pledge_learning_data(SYSCTL_HANDLER_ARGS);
 static bool pledge_is_modifier(uint64_t);
 static int pledge_flags_to_string(uint64_t, char*, int);
-
+static int sysctl_security_pledge_enforcing(SYSCTL_HANDLER_ARGS);
 static void pledge_learning_init(const void *_unused);
 static void pledge_learning_record(const struct thread *,
     const uint64_t, const uint64_t);
@@ -172,39 +172,57 @@ SYSCTL_COUNTER_U64(_security_pledge, OID_AUTO, learning_count,
 
 static counter_u64_t violation_count = NULL;
 SYSCTL_COUNTER_U64(_security_pledge, OID_AUTO, violations,
-    CTLFLAG_ROOTONLY | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
+    CTLFLAG_PRISON | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
     &violation_count, "# of policy violations (enforced+learning)");
 
 static counter_u64_t kill_count = NULL;
 SYSCTL_COUNTER_U64(_security_pledge, OID_AUTO, kills,
-    CTLFLAG_ROOTONLY | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
+    CTLFLAG_PRISON | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
     &kill_count, "# of policy violations resulting in process kill");
 
 static counter_u64_t softfail_count = NULL;
 SYSCTL_COUNTER_U64(_security_pledge, OID_AUTO, softfails,
-    CTLFLAG_ROOTONLY | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
+    CTLFLAG_PRISON | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_STATS,
     &softfail_count, "# of policy violations resulting in soft-fail");
+
 
 /* TODO are proc nodes with CTLFLAG_SECURE generally accessible to
  * all users in the system? */
-SYSCTL_BOOL(_security_pledge, OID_AUTO, enforcing,
-  CTLFLAG_ROOTONLY | CTLFLAG_RW | CTLFLAG_SECURE | CTLFLAG_RWTUN,
-    &pledge_enforcing, 0,
-    "enforce pledge violations (0: off, 1: enforcing)");
 
-SYSCTL_PROC(_security_pledge, OID_AUTO, flags,
-		CTLFLAG_PLEDGE | CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_ANYBODY
-    | CTLFLAG_PRISON | CTLFLAG_CAPWR | CTLFLAG_CAPRD | CTLFLAG_MPSAFE,
-    NULL, 0, /* arg1, arg2 */
-    sysctl_pledge_flags, "S,uint64_t", /* function, format*/
-    "Reduce pledge flags for the calling thread and return previous flags.");
+SYSCTL_PROC(
+	_security_pledge,
+	OID_AUTO,
+	enforcing,
+  CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_PRISON | CTLFLAG_MPSAFE,
+  NULL, 0,
+	sysctl_security_pledge_enforcing,
+	"I",
+  "Enforce pledge violations (0: disabled, 1: enabled)"
+);
 
-SYSCTL_PROC(_security_pledge, OID_AUTO, exec_flags,
-		CTLFLAG_PLEDGE | CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_ANYBODY
-		| CTLFLAG_PRISON | CTLFLAG_CAPWR | CTLFLAG_CAPRD | CTLFLAG_MPSAFE,
-		NULL, 0,
-		sysctl_pledge_exec_flags, "S,uint64_t",
-		"Set exec-time pledge flags for the calling thread.");
+SYSCTL_PROC(
+	_security_pledge,
+	OID_AUTO,
+	flags,
+	CTLFLAG_PLEDGE | CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_ANYBODY |
+	CTLFLAG_PRISON | CTLFLAG_CAPWR | CTLFLAG_CAPRD | CTLFLAG_MPSAFE,
+  NULL, 0,
+  sysctl_pledge_flags,
+	"S,uint64_t", /* function, format*/
+  "Reduce pledge flags for the calling thread and return previous flags."
+);
+
+SYSCTL_PROC(
+	_security_pledge,
+	OID_AUTO,
+	exec_flags,
+	CTLFLAG_PLEDGE | CTLTYPE_U64 | CTLFLAG_RW | CTLFLAG_ANYBODY |
+	CTLFLAG_PRISON | CTLFLAG_CAPWR | CTLFLAG_CAPRD | CTLFLAG_MPSAFE,
+	NULL, 0,
+	sysctl_pledge_exec_flags,
+	"S,uint64_t",
+	"Set exec-time pledge flags for the calling thread."
+);
 
 SYSCTL_NODE(_security_pledge, OID_AUTO, override, 0, 0,
     "Override required flags for a given syscall.");
@@ -218,6 +236,22 @@ SYSCTL_JAIL_PARAM(
 	"I",
   "enforce pledge violations (0: off, 1: enforcing)"
 );
+
+static int
+sysctl_security_pledge_enforcing(SYSCTL_HANDLER_ARGS)
+{
+	struct prison *pr;
+	int val, error;
+	pr    = pax_get_prison_td(req->td);
+	val   = pr->pr_hbsd.pledge.enforcing;
+	error = sysctl_handle_int(oidp, &val, sizeof(val), req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	if (val != 0 && val != 1)
+		return (EINVAL);
+	pr->pr_hbsd.pledge.enforcing = val;
+	return (0);
+}
 
 /*
  * sysctl proc node for applying a new pledge mask to the calling thread.
