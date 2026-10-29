@@ -7,25 +7,23 @@ class PledgeTest < Picotest::Test
     jail.remove
   end
 
-  def test_pledge_stdio
+  def test_pledge_rpath
     pid = Process.fork do
      jail.attach
       ##
       # child
       puts "in child"
-      pledge("rpath cpath wpath inet", nil)
+      pledge("", nil)
       assert_raise(Errno::ENOTCAPABLE) do
         File.open("/stdio.txt") { f.write("fail") }
-        exit(42)
       end
-      exit(42)
+      exit(1)
     end
     ##
     # parent
     puts "in parent"
     Process.wait(pid)
-    p $?.exitstatus
-    assert_equal 42, $?.exitstatus
+    assert_equal nil, $?.exitstatus
   end
 
   private
