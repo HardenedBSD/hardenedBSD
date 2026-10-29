@@ -1371,11 +1371,15 @@ pf_hash_rule_addr(MD5_CTX *ctx, struct pf_rule_addr *pfr)
 static void
 pf_hash_pool(MD5_CTX *ctx, struct pf_kpool *pool)
 {
+	struct pf_addr_wrap addr;
 	uint16_t x;
 	int y;
 
 	if (pool->cur) {
-		PF_MD5_UPD(pool, cur->addr);
+		/* Leave out the pointer to the kernel's dynaddr or table. */
+		bcopy(&pool->cur->addr, &addr, sizeof(addr));
+		bzero(&addr.p, sizeof(addr.p));
+		MD5Update(ctx, (u_int8_t *)&addr, sizeof(addr));
 		PF_MD5_UPD_STR(pool, cur->ifname);
 		PF_MD5_UPD(pool, cur->af);
 	}
@@ -1990,6 +1994,7 @@ pf_krule_free(struct pf_krule *rule)
 	counter_u64_free(rule->states_tot);
 	for (pf_sn_types_t sn_type=0; sn_type<PF_SN_MAX; sn_type++)
 		counter_u64_free(rule->src_nodes[sn_type]);
+	counter_rate_free(rule->pktrate.cr);
 	uma_zfree_pcpu(pf_timestamp_pcpu_zone, rule->timestamp);
 
 	mtx_destroy(&rule->nat.mtx);
@@ -5842,12 +5847,16 @@ DIOCCHANGEADDR_error:
 
 	case DIOCSETREASS: {
 		u_int32_t	*reass = (u_int32_t *)addr;
+		u_int32_t	 flags;
 
-		V_pf_status.reass = *reass & (PF_REASS_ENABLED|PF_REASS_NODF);
+		flags = *reass & (PF_REASS_ENABLED|PF_REASS_NODF);
 		/* Removal of DF flag without reassembly enabled is not a
 		 * valid combination. Disable reassembly in such case. */
-		if (!(V_pf_status.reass & PF_REASS_ENABLED))
-			V_pf_status.reass = 0;
+		if (!(flags & PF_REASS_ENABLED))
+			flags = 0;
+		PF_RULES_WLOCK();
+		V_pf_status.reass = flags;
+		PF_RULES_WUNLOCK();
 		break;
 	}
 
@@ -7187,8 +7196,6 @@ pf_unload(void *dummy __unused)
 	}
 	sx_xunlock(&pf_end_lock);
 
-	pf_nl_unregister();
-
 	if (pf_dev != NULL)
 		destroy_dev(pf_dev);
 
@@ -7216,6 +7223,26 @@ SYSUNINIT(pf_unload, SI_SUB_PROTO_FIREWALL, SI_ORDER_SECOND, pf_unload, NULL);
 VNET_SYSUNINIT(vnet_pf_uninit, SI_SUB_PROTO_FIREWALL, SI_ORDER_THIRD,
     vnet_pf_uninit, NULL);
 
+/*
+ * The netlink handlers use the per-vnet state: register them after
+ * vnet_pf_init() and unregister them before vnet_pf_uninit().
+ */
+static void
+pf_nl_init(void *unused __unused)
+{
+
+	pf_nl_register();
+}
+SYSINIT(pf_nl, SI_SUB_PROTO_FIREWALL, SI_ORDER_FOURTH, pf_nl_init, NULL);
+
+static void
+pf_nl_uninit(void *unused __unused)
+{
+
+	pf_nl_unregister();
+}
+SYSUNINIT(pf_nl, SI_SUB_PROTO_FIREWALL, SI_ORDER_FOURTH, pf_nl_uninit, NULL);
+
 static int
 pf_modevent(module_t mod, int type, void *data)
 {
@@ -7224,7 +7251,6 @@ pf_modevent(module_t mod, int type, void *data)
 	switch(type) {
 	case MOD_LOAD:
 		error = pf_load();
-		pf_nl_register();
 		break;
 	case MOD_UNLOAD:
 		/* Handled in SYSUNINIT(pf_unload) to ensure it's done after
