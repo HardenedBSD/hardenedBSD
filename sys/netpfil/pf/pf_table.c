@@ -647,16 +647,23 @@ pfr_clr_astats(struct pfr_table *tbl, struct pfr_addr *addr, int size,
 	kt = pfr_lookup_table(tbl);
 	if (kt == NULL || !(kt->pfrkt_flags & PFR_TFLAG_ACTIVE))
 		return (ESRCH);
-	SLIST_INIT(&workq);
 	for (i = 0, ad = addr; i < size; i++, ad++) {
 		if (pfr_validate_addr(ad))
 			senderr(EINVAL);
+		p = pfr_lookup_addr(kt, ad, 1);
+		if (p != NULL)
+			p->pfrke_mark = 0;
+	}
+	SLIST_INIT(&workq);
+	for (i = 0, ad = addr; i < size; i++, ad++) {
 		p = pfr_lookup_addr(kt, ad, 1);
 		if (flags & PFR_FLAG_FEEDBACK) {
 			ad->pfra_fback = (p != NULL) ?
 			    PFR_FB_CLEARED : PFR_FB_NONE;
 		}
-		if (p != NULL) {
+		/* An address given more than once is cleared once. */
+		if (p != NULL && !p->pfrke_mark) {
+			p->pfrke_mark = 1;
 			SLIST_INSERT_HEAD(&workq, p, pfrke_workq);
 			xzero++;
 		}
@@ -839,15 +846,16 @@ static void
 pfr_insert_kentries(struct pfr_ktable *kt,
     struct pfr_kentryworkq *workq, time_t tzero)
 {
-	struct pfr_kentry	*p;
+	struct pfr_kentry	*p, *q;
 	int			 rv, n = 0;
 
-	SLIST_FOREACH(p, workq, pfrke_workq) {
+	SLIST_FOREACH_SAFE(p, workq, pfrke_workq, q) {
 		rv = pfr_route_kentry(kt, p);
 		if (rv) {
 			printf("pfr_insert_kentries: cannot route entry "
 			    "(code=%d).\n", rv);
-			break;
+			pfr_destroy_kentry(p);
+			continue;
 		}
 		p->pfrke_counters.pfrkc_tzero = tzero;
 		n++;
@@ -869,8 +877,10 @@ pfr_insert_kentry(struct pfr_ktable *kt, struct pfr_addr *ad, time_t tzero)
 		return (ENOMEM);
 
 	rv = pfr_route_kentry(kt, p);
-	if (rv)
+	if (rv) {
+		pfr_destroy_kentry(p);
 		return (rv);
+	}
 
 	p->pfrke_counters.pfrkc_tzero = tzero;
 	kt->pfrkt_cnt++;

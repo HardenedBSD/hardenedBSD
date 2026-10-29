@@ -2689,7 +2689,13 @@ pf_purge_thread(void *unused __unused)
 				 */
 				pf_purge_expired_fragments();
 				pf_purge_expired_src_nodes();
+				/*
+				 * Takes the config lock, and may have to
+				 * sleep for it.
+				 */
+				NET_EPOCH_EXIT(et);
 				pf_purge_unlinked_rules();
+				NET_EPOCH_ENTER(et);
 				pfi_kkif_purge();
 			}
 			CURVNET_RESTORE();
@@ -2706,6 +2712,9 @@ pf_purge_thread(void *unused __unused)
 void
 pf_unload_vnet_purge(void)
 {
+
+	/* Overload entries reference rules: apply them before rules are freed. */
+	taskqueue_drain(taskqueue_swi, &V_pf_overloadtask);
 
 	/*
 	 * To cleanse up all kifs and rules we need
@@ -2908,6 +2917,14 @@ pf_free_state(struct pf_kstate *cur)
 	pf_counter_u64_add(&V_pf_status.fcounters[FCNT_STATE_REMOVALS], 1);
 }
 
+static inline void
+pf_kkif_mark(struct pfi_kkif *kif)
+{
+
+	if ((atomic_load_int(&kif->pfik_flags) & PFI_IFLAG_REFS) == 0)
+		atomic_set_int(&kif->pfik_flags, PFI_IFLAG_REFS);
+}
+
 /*
  * Called only from pf_purge_thread(), thus serialized.
  */
@@ -2943,11 +2960,11 @@ relock:
 					s->nat_rule->rule_ref |= PFRULE_REFS;
 				if (s->anchor != NULL)
 					s->anchor->rule_ref |= PFRULE_REFS;
-				s->kif->pfik_flags |= PFI_IFLAG_REFS;
+				pf_kkif_mark(s->kif);
 				SLIST_FOREACH(mrm, &s->match_rules, entry)
 					mrm->r->rule_ref |= PFRULE_REFS;
 				if (s->act.rt_kif)
-					s->act.rt_kif->pfik_flags |= PFI_IFLAG_REFS;
+					pf_kkif_mark(s->act.rt_kif);
 				count++;
 			}
 			PF_HASHROW_UNLOCK(ih);
@@ -8058,9 +8075,21 @@ pf_test_state_icmp(struct pf_kstate **state, struct pf_pdesc *pd,
 					    &pd->hdr.icmp6.icmp6_cksum,
 					    &nk->addr[didx], 0);
 
-				if (nk->port[iidx] != pd->hdr.icmp6.icmp6_id)
+				/*
+				 * Only echo has an identifier.  Other
+				 * types use a virtual id of 0 and keep
+				 * other fields here (e.g. the NA flags).
+				 */
+				if (virtual_type == htons(ICMP6_ECHO_REQUEST) &&
+				    nk->port[iidx] != pd->hdr.icmp6.icmp6_id) {
+					pd->hdr.icmp6.icmp6_cksum =
+					    pf_cksum_fixup(
+					    pd->hdr.icmp6.icmp6_cksum,
+					    pd->hdr.icmp6.icmp6_id,
+					    nk->port[iidx], 0);
 					pd->hdr.icmp6.icmp6_id =
 					    nk->port[iidx];
+				}
 
 				m_copyback(pd->m, pd->off, sizeof(struct icmp6_hdr),
 				    (caddr_t )&pd->hdr.icmp6);
