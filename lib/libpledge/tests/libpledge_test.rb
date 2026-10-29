@@ -11,13 +11,19 @@ class PledgeTest < Picoruby::Test
   def test_pledge_stdio
     pid = Process.fork do
       jail.attach
-      if pid.nil? # child
+      if pid.nil?
+        ##
+        # child
         pledge("inet", nil)
         assert_raise(Errno::ENOTCAPABLE) do
           File.open("/stdio.txt") { f.write("fail") }
+          exit(42)
         end
       else
+        ##
+        # parent
         Process.wait(pid)
+        assert_equal 42, $?.exitstatus
       end
     end
   end
