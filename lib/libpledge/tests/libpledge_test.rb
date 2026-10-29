@@ -1,31 +1,31 @@
-class PledgeTest < Picoruby::Test
+class PledgeTest < Picotest::Test
   def setup
-    Dir.mkdir(settings[:path])
+    jail
   end
 
   def teardown
-    Dir.rmdir(settings[:path])
     jail.remove
   end
 
   def test_pledge_stdio
     pid = Process.fork do
-      jail.attach
-      if pid.nil?
-        ##
-        # child
-        pledge("inet", nil)
-        assert_raise(Errno::ENOTCAPABLE) do
-          File.open("/stdio.txt") { f.write("fail") }
-          exit(42)
-        end
-      else
-        ##
-        # parent
-        Process.wait(pid)
-        assert_equal 42, $?.exitstatus
+     jail.attach
+      ##
+      # child
+      puts "in child"
+      pledge("inet", nil)
+      assert_raise(Errno::ENOTCAPABLE) do
+        File.open("/stdio.txt") { f.write("fail") }
+        exit(42)
       end
+      exit(42)
     end
+    ##
+    # parent
+    puts "in parent"
+    Process.wait(pid)
+    p $?.exitstatus
+    assert_equal 42, $?.exitstatus
   end
 
   private
@@ -35,13 +35,16 @@ class PledgeTest < Picoruby::Test
   # @return [Jail]
   def jail
     @jail ||= Jail.create(
-      settings.merge(persist: true)
+      **settings.merge(persist: 1)
     )
   end
 
   ##
   # @return [Hash]
   def settings
-    {name: "tmpjail", path: File.join("tmp", "jail")}
+    {name: "tmpjail",
+     hostname: "test.hardenedbsd.org",
+     path: File.join("/tmp", "jail"),
+    "security.pledge.enforcing" => 1}
   end
 end
