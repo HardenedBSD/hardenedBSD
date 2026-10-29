@@ -72,10 +72,8 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/iflib.h>
-#ifdef	RSS
 #include <net/rss_config.h>
 #include <netinet/in_rss.h>
-#endif
 
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
@@ -669,7 +667,6 @@ struct e1000_softc {
 	unsigned long		dropped_pkts;
 	unsigned long		link_irq;
 	unsigned long		rx_overruns;
-	unsigned long		watchdog_events;
 
 	union {
 		struct e1000_hw_stats	stats;		/* !sc->vf_ifp */
@@ -696,9 +693,4 @@ typedef struct _em_vendor_info_t {
 
 void em_dump_rs(struct e1000_softc *);
 
-#define EM_RSSRK_SIZE	4
-#define EM_RSSRK_VAL(key, i)	(key[(i) * EM_RSSRK_SIZE] | \
-				    key[(i) * EM_RSSRK_SIZE + 1] << 8 | \
-				    key[(i) * EM_RSSRK_SIZE + 2] << 16 | \
-				    key[(i) * EM_RSSRK_SIZE + 3] << 24)
 #endif /* _EM_H_DEFINED_ */

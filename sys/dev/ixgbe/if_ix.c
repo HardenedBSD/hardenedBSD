@@ -676,13 +676,7 @@ ixgbe_initialize_rss_mapping(struct ixgbe_softc *sc)
 	u32 pfmrqc;
 #endif
 
-	if (sc->feat_en & IXGBE_FEATURE_RSS) {
-		/* Fetch the configured RSS key */
-		rss_getkey((uint8_t *)&rss_key);
-	} else {
-		/* set up random bits */
-		arc4rand(&rss_key, sizeof(rss_key), 0);
-	}
+	rss_getkey((uint8_t *)rss_key);
 
 	/* Set multiplier for RETA setup and table size based on MAC */
 	index_mult = 0x1;
@@ -1549,8 +1543,6 @@ ixgbe_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 		return (0);
 	case IFCOUNTER_IQDROPS:
 		return (sc->iqdrops);
-	case IFCOUNTER_OQDROPS:
-		return (0);
 	case IFCOUNTER_IERRORS:
 		return (sc->ierrors);
 	default:
@@ -2240,8 +2232,6 @@ ixgbe_add_hw_stats(struct ixgbe_softc *sc)
 	/* Driver Statistics */
 	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "dropped",
 	    CTLFLAG_RD, &sc->dropped_pkts, "Driver dropped packets");
-	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "watchdog_events",
-	    CTLFLAG_RD, &sc->watchdog_events, "Watchdog timeouts");
 	SYSCTL_ADD_ULONG(ctx, child, OID_AUTO, "link_irq",
 	    CTLFLAG_RD, &sc->link_irq, "Link MSI-X IRQ Handled");
 
@@ -2963,10 +2953,9 @@ ixgbe_msix_que(void *arg)
 {
 	struct ix_rx_queue *que = arg;
 	struct ixgbe_softc *sc = que->sc;
-	if_t ifp = iflib_get_ifp(que->sc->ctx);
 
 	/* Protect against spurious interrupts */
-	if ((if_getdrvflags(ifp) & IFF_DRV_RUNNING) == 0)
+	if (!iflib_is_running(sc->ctx))
 		return (FILTER_HANDLED);
 
 	ixgbe_disable_queue(sc, que->msix);
@@ -4245,6 +4234,7 @@ ixgbe_if_init(if_ctx_t ctx)
 	u32 ctrl_ext;
 
 	int i, j, err;
+	s32 status;
 
 	INIT_DEBUGOUT("ixgbe_if_init: begin");
 	if (atomic_load_acq_int(&sc->recovery_mode)) {
@@ -4273,7 +4263,13 @@ ixgbe_if_init(if_ctx_t ctx)
 	ixgbe_set_rar(hw, 0, hw->mac.addr, sc->pool, 1);
 	hw->addr_ctrl.rar_used_count = 1;
 
-	ixgbe_init_hw(hw);
+	status = ixgbe_init_hw(hw);
+	if (status != IXGBE_SUCCESS) {
+		device_printf(dev, "Hardware initialization failed: %d\n",
+		    status);
+		iflib_init_failed(ctx);
+		return;
+	}
 	sc->iov_mta_valid = false;
 	sc->iov_vfta_valid = false;
 
@@ -5216,7 +5212,7 @@ ixgbe_if_update_admin_status(if_ctx_t ctx)
 	 * MOD and firmware events can produce dependent requests.  Fold those
 	 * into the claimed batch so link state is sampled after any link setup.
 	 */
-	if ((if_getdrvflags(iflib_get_ifp(ctx)) & IFF_DRV_RUNNING) != 0 &&
+	if (iflib_is_running(ctx) &&
 	    (sc->iov_mbx_cleanup_pending || ixgbe_mbx_pending(sc)))
 		atomic_set_32(&sc->task_requests, IXGBE_REQUEST_TASK_MBX);
 	for (pass = 0; pass < IXGBE_ADMIN_TASK_BUDGET; pass++) {
@@ -5235,7 +5231,7 @@ ixgbe_if_update_admin_status(if_ctx_t ctx)
 			ixgbe_handle_msf(ctx);
 		/* A reset request can re-enable VF traffic; skip it while stopped. */
 		if ((requests & IXGBE_REQUEST_TASK_MBX) != 0 &&
-		    (if_getdrvflags(iflib_get_ifp(ctx)) & IFF_DRV_RUNNING) != 0)
+		    iflib_is_running(ctx))
 			ixgbe_handle_mbx(ctx);
 		if (requests & IXGBE_REQUEST_TASK_FDIR)
 			ixgbe_reinit_fdir(ctx);
@@ -5670,10 +5666,16 @@ ixgbe_set_flowcntl(struct ixgbe_softc *sc, int fc)
 		return (EINVAL);
 	}
 
+	sc->hw.fc.requested_mode = fc;
+	/* Don't autoneg if forcing a value. */
+	sc->hw.fc.disable_fc_autoneg = true;
+	/* Init replays the policy; closed admission does not prove DMA stopped. */
+	if (!iflib_is_running(sc->ctx))
+		return (0);
+
 	/* Updating SRRCTL on a live queue is itself an MDD violation. */
 	mdd_active = sc->num_rx_queues > 1 &&
-	    (sc->feat_en & IXGBE_FEATURE_SRIOV) != 0 &&
-	    (if_getdrvflags(iflib_get_ifp(sc->ctx)) & IFF_DRV_RUNNING) != 0;
+	    (sc->feat_en & IXGBE_FEATURE_SRIOV) != 0;
 	if (mdd_active)
 		ixgbe_disable_mdd(&sc->hw);
 	if (sc->num_rx_queues > 1) {
@@ -5692,10 +5694,6 @@ ixgbe_set_flowcntl(struct ixgbe_softc *sc, int fc)
 		}
 	}
 
-	sc->hw.fc.requested_mode = fc;
-
-	/* Don't autoneg if forcing a value */
-	sc->hw.fc.disable_fc_autoneg = true;
 	ixgbe_fc_enable(&sc->hw);
 
 	return (0);
@@ -5959,11 +5957,13 @@ static int
 ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 {
 	struct ixgbe_softc *sc = (struct ixgbe_softc *)arg1;
-	if_t ifp = iflib_get_ifp(sc->ctx);
+	struct sx *ctx_lock = iflib_ctx_lock_get(sc->ctx);
 	int error;
 	u16 newval;
 
+	sx_xlock(ctx_lock);
 	newval = sc->dmac;
+	sx_xunlock(ctx_lock);
 	error = sysctl_handle_16(oidp, &newval, 0, req);
 	if ((error) || (req->newptr == NULL))
 		return (error);
@@ -5971,11 +5971,10 @@ ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 	switch (newval) {
 	case 0:
 		/* Disabled */
-		sc->dmac = 0;
 		break;
 	case 1:
 		/* Enable and use default */
-		sc->dmac = 1000;
+		newval = 1000;
 		break;
 	case 50:
 	case 100:
@@ -5986,18 +5985,24 @@ ixgbe_sysctl_dmac(SYSCTL_HANDLER_ARGS)
 	case 5000:
 	case 10000:
 		/* Legal values - allow */
-		sc->dmac = newval;
 		break;
 	default:
 		/* Do nothing, illegal value */
 		return (EINVAL);
 	}
 
-	/* Re-initialize hardware if it's already running */
-	if (if_getdrvflags(ifp) & IFF_DRV_RUNNING)
-		if_init(ifp, ifp);
+	sx_xlock(ctx_lock);
+	if (iflib_in_detach(sc->ctx)) {
+		error = ENXIO;
+	} else if (sc->dmac != newval) {
+		sc->dmac = newval;
+		/* Apply through init only if still administratively up. */
+		iflib_request_reset_if_up(sc->ctx);
+		iflib_admin_intr_deferred(sc->ctx);
+	}
+	sx_xunlock(ctx_lock);
 
-	return (0);
+	return (error);
 } /* ixgbe_sysctl_dmac */
 
 #ifdef IXGBE_DEBUG
