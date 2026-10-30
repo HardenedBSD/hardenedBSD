@@ -73,7 +73,7 @@ static int	_pfctl_clear_states(int , const struct pfctl_kill *,
 static void	_pfctl_verify_parsers(void);
 
 struct pfctl_handle *
-pfctl_open(const char *pf_device)
+pfctl_open_from_nl_fd(const char *pf_device, int nl_fd)
 {
 	struct pfctl_handle *h;
 
@@ -85,8 +85,18 @@ pfctl_open(const char *pf_device)
 	if (h->fd < 0)
 		goto error;
 
-	if (!snl_init(&h->ss, NETLINK_GENERIC))
-		goto error;
+	if (nl_fd >= 0) {
+		if (!snl_init_fd(&h->ss, nl_fd))
+			goto error;
+		/*
+		 * Replies are matched by sequence number; a random start makes
+		 * a collision with an earlier owner's counter improbable.
+		 */
+		h->ss.seq = arc4random();
+	} else {
+		if (!snl_init(&h->ss, NETLINK_GENERIC))
+			goto error;
+	}
 
 	h->family_id = snl_get_genl_family(&h->ss, PFNL_FAMILY_NAME);
 	if (h->family_id == 0)
@@ -102,6 +112,12 @@ error:
 	return (NULL);
 }
 
+struct pfctl_handle *
+pfctl_open(const char *pf_device)
+{
+	return (pfctl_open_from_nl_fd(pf_device, -1));
+}
+
 void
 pfctl_close(struct pfctl_handle *h)
 {
@@ -114,6 +130,12 @@ int
 pfctl_fd(struct pfctl_handle *h)
 {
 	return (h->fd);
+}
+
+int
+pfctl_nl_fd(struct pfctl_handle *h)
+{
+	return (h->ss.fd);
 }
 
 static int
@@ -4592,6 +4614,206 @@ pfctl_add_fingerprint(struct pfctl_handle *h, struct pf_osfp_ioctl *fp)
 out:
 	snl_clear_lb(&h->ss);
 	return (e.error);
+}
+
+struct pfctl_trans_e {
+	int rs_num;
+	char anchor[MAXPATHLEN];
+	uint32_t ticket;
+	TAILQ_ENTRY(pfctl_trans_e) entry;
+};
+
+struct pfctl_trans {
+	struct pfctl_trans_e tmp;
+	TAILQ_HEAD(, pfctl_trans_e) elms;
+};
+
+struct pfctl_trans *
+pfctl_trans_alloc(void)
+{
+	struct pfctl_trans *t = malloc(sizeof(struct pfctl_trans));
+
+	bzero(t, sizeof(*t));
+
+	TAILQ_INIT(&t->elms);
+
+	return (t);
+}
+
+void
+pfctl_trans_free(struct pfctl_trans *t)
+{
+	struct pfctl_trans_e *e, *et;
+
+	TAILQ_FOREACH_SAFE(e, &t->elms, entry, et)
+		free(e);
+
+	free(t);
+}
+
+size_t
+pfctl_trans_size(struct pfctl_trans *t)
+{
+	struct pfctl_trans_e *e;
+	size_t s = 0;
+
+	TAILQ_FOREACH(e, &t->elms, entry)
+		s++;
+
+	return (s);
+}
+
+int
+pfctl_trans_add(struct pfctl_trans *t, int rs_num, const char *anchor)
+{
+	struct pfctl_trans_e *e;
+
+	e = malloc(sizeof(*e));
+	if (e == NULL)
+		return (ENOMEM);
+
+	e->rs_num = rs_num;
+	e->ticket = 0;
+	strlcpy(e->anchor, anchor, sizeof(e->anchor));
+
+	TAILQ_INSERT_TAIL(&t->elms, e, entry);
+
+	return (0);
+}
+
+uint32_t
+pfctl_get_ticket(struct pfctl_trans *t, int rs_num, const char *anchor)
+{
+	struct pfctl_trans_e *e;
+
+	TAILQ_FOREACH(e, &t->elms, entry) {
+		if (e->rs_num != rs_num)
+			continue;
+		if (strcmp(e->anchor, anchor) != 0)
+			continue;
+
+		return (e->ticket);
+	}
+
+	return (-1);
+}
+
+static void
+snl_add_msg_attr_trans_e(struct snl_writer *nw, uint32_t type,
+    const struct pfctl_trans_e *e)
+{
+	int off = snl_add_msg_attr_nested(nw, type);
+
+	snl_add_msg_attr_u32(nw, PF_TE_RULESET_NUM, e->rs_num);
+	snl_add_msg_attr_string(nw, PF_TE_ANCHOR, e->anchor);
+	snl_add_msg_attr_u32(nw, PF_TE_TICKET, e->ticket);
+
+	snl_end_attr_nested(nw, off);
+}
+
+#define _OUT(_field)	offsetof(struct pfctl_trans_e, _field)
+static const struct snl_attr_parser ap_trans_e[] = {
+	{ .type = PF_TE_RULESET_NUM, .off = _OUT(rs_num), .cb = snl_attr_get_uint32 },
+	{ .type = PF_TE_ANCHOR, .off = _OUT(anchor), .arg_u32 = MAXPATHLEN, .cb = snl_attr_copy_string },
+	{ .type = PF_TE_TICKET, .off = _OUT(ticket), .cb = snl_attr_get_uint32 },
+};
+#undef _OUT
+
+static bool
+_pfctl_trans_e_post(struct snl_state *ss, void *target)
+{
+	struct pfctl_trans *t = (struct pfctl_trans *)target;
+	struct pfctl_trans_e *e;
+
+	(void)ss;
+
+	TAILQ_FOREACH(e, &t->elms, entry) {
+		if (e->rs_num != t->tmp.rs_num)
+			continue;
+		if (strcmp(e->anchor, t->tmp.anchor) != 0)
+			continue;
+		e->ticket = t->tmp.ticket;
+		return (true);
+	}
+
+	e = malloc(sizeof(*e));
+	if (! e)
+		return (false);
+
+	memcpy(e, &t->tmp, sizeof(*e));
+
+	TAILQ_INSERT_TAIL(&t->elms, e, entry);
+
+	return (true);
+}
+
+SNL_DECLARE_ATTR_PARSER_EXT(trans_e_parser, 0, ap_trans_e, _pfctl_trans_e_post);
+
+static struct snl_attr_parser ap_trans[] = {
+	{ .type = PF_TR_TRANS, .arg = &trans_e_parser, .cb = snl_attr_get_nested },
+};
+SNL_DECLARE_PARSER(trans_parser, struct genlmsghdr, snl_f_p_empty, ap_trans);
+
+static int
+_pfctl_trans(struct pfctl_handle *h, struct pfctl_trans *t, size_t off, int cmd)
+{
+	struct snl_writer nw;
+	struct snl_errmsg_data e = {};
+	struct nlmsghdr *hdr;
+	struct pfctl_trans_e *te;
+	uint32_t seq_id;
+
+	snl_init_writer(&h->ss, &nw);
+	hdr = snl_create_genl_msg_request(&nw, h->family_id,
+	    cmd);
+
+	snl_add_msg_attr_u32(&nw, PF_TR_UNSPEC, 0);
+	TAILQ_FOREACH(te, &t->elms, entry) {
+		if (off) {
+			off--;
+			continue;
+		}
+
+		snl_add_msg_attr_trans_e(&nw, PF_TR_TRANS, te);
+	}
+
+	if ((hdr = snl_finalize_msg(&nw)) == NULL) {
+		e.error = ENXIO;
+		goto out;
+	}
+	seq_id = hdr->nlmsg_seq;
+
+	if (! snl_send_message(&h->ss, hdr)) {
+		e.error = ENXIO;
+		goto out;
+	}
+
+	while ((hdr = snl_read_reply_multi(&h->ss, seq_id, &e)) != NULL) {
+		if (! snl_parse_nlmsg(&h->ss, hdr, &trans_parser, t))
+			continue;
+	}
+
+out:
+	snl_clear_lb(&h->ss);
+	return (e.error);
+}
+
+int
+pfctl_trans_begin(struct pfctl_handle *h, struct pfctl_trans *t, size_t off)
+{
+	return (_pfctl_trans(h, t, off, PFNL_CMD_BEGIN));
+}
+
+int
+pfctl_trans_commit(struct pfctl_handle *h, struct pfctl_trans *t, size_t off)
+{
+	return (_pfctl_trans(h, t, off, PFNL_CMD_COMMIT));
+}
+
+int
+pfctl_trans_rollback(struct pfctl_handle *h, struct pfctl_trans *t, size_t off)
+{
+	return (_pfctl_trans(h, t, off, PFNL_CMD_ROLLBACK));
 }
 
 static const struct snl_hdr_parser *all_parsers[] = {
