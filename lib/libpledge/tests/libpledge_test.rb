@@ -1,4 +1,4 @@
-class PledgeTest < Picotest::Test
+class RPathTest < Picotest::Test
   def setup
     jail
   end
@@ -7,16 +7,14 @@ class PledgeTest < Picotest::Test
     jail.remove
   end
 
-  def test_pledge_rpath
+  def test_pledge_rpath_denied
     pid = Process.fork do
-     jail.attach
+      jail.attach
       ##
       # child
       puts "in child"
-      pledge("", nil)
-      assert_raise(Errno::ENOTCAPABLE) do
-        File.open("/stdio.txt") { f.write("fail") }
-      end
+      pledge("proc stdio", nil)
+      File.open("/stdio.txt", "r") { }
       exit(1)
     end
     ##
@@ -26,15 +24,30 @@ class PledgeTest < Picotest::Test
     assert_equal nil, $?.exitstatus
   end
 
+  def test_pledge_rpath_allowed
+    pid = Process.fork do
+     jail.attach
+      ##
+      # child
+      puts "in child"
+      pledge("proc stdio rpath", nil)
+      File.open("/stdio.txt", "r") { }
+      exit(1)
+    end
+    ##
+    # parent
+    puts "in parent"
+    Process.wait(pid)
+    assert_equal 1, $?.exitstatus
+  end
+
   private
 
   ##
   # Isolate our tests in a separate jail.
   # @return [Jail]
   def jail
-    @jail ||= Jail.create(
-      **settings.merge(persist: 1)
-    )
+    @jail ||= Jail.create(**settings)
   end
 
   ##
@@ -43,6 +56,7 @@ class PledgeTest < Picotest::Test
     {name: "tmpjail",
      hostname: "test.hardenedbsd.org",
      path: File.join("/tmp", "jail"),
+     persist: 1,
     "security.pledge.enforcing" => 1}
   end
 end
