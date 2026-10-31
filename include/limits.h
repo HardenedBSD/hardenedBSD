@@ -30,9 +30,13 @@
  */
 
 #ifndef _LIMITS_H_
-#define	_LIMITS_H_
+#define _LIMITS_H_
 
 #include <sys/cdefs.h>
+
+#if __ISO_C_VISIBLE >= 2023 || __BSD_VISIBLE
+#define __STDC_VERSION_LIMITS_H__	202311L
+#endif
 
 #if __POSIX_VISIBLE
 #define	_POSIX_ARG_MAX		4096

@@ -34,9 +34,6 @@
  * SUCH DAMAGE.
  */
 
-/*
- */
-
 #ifndef _TIME_H_
 #define	_TIME_H_
 
@@ -44,6 +41,10 @@
 #include <sys/_null.h>
 #include <sys/_types.h>
 #include <sys/_clock_id.h>
+
+#if __ISO_C_VISIBLE >= 2023 || __BSD_VISIBLE
+#define __STDC_VERSION_TIME_H__	202311L
+#endif
 
 #if __POSIX_VISIBLE > 0 && __POSIX_VISIBLE < 200112 || __BSD_VISIBLE
 /*
