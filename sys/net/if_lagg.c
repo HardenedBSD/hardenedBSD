@@ -1312,6 +1312,8 @@ lagg_init_locked(struct lagg_softc *sc)
 
 	lagg_if_updown(sc, true);
 
+	/* Recheck port caps; bringing them up may have changed if_hwassist. */
+	lagg_capabilities(sc);
 	lagg_proto_init(sc);
 
 	if (ifp->if_type == IFT_INFINIBAND) {
