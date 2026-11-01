@@ -508,6 +508,7 @@ MAN=	aac.4 \
 	random.4 \
 	rctl.4 \
 	re.4 \
+	rge.4 \
 	rgephy.4 \
 	rights.4 \
 	rl.4 \
@@ -718,6 +719,8 @@ MLINKS+=edsc.4 if_edsc.4
 MLINKS+=em.4 if_em.4 \
 	em.4 igb.4 \
 	em.4 if_igb.4 \
+	em.4 igbv.4 \
+	em.4 if_igbv.4 \
 	em.4 lem.4 \
 	em.4 if_lem.4
 MLINKS+=ena.4 if_ena.4

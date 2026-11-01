@@ -1633,6 +1633,10 @@ dev/efidev/efirt.c		optional efirt
 dev/efidev/efirtc.c		optional efirt efirtc
 dev/e1000/if_em.c		optional em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
+dev/e1000/if_igbv.c		optional em \
+	compile-with "${NORMAL_C} -I$S/dev/e1000"
+dev/e1000/if_igb_iov.c		optional em \
+	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/em_txrx.c		optional em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/igb_txrx.c		optional em \
@@ -2891,6 +2895,10 @@ dev/regulator/regnode_if.m	optional regulator
 dev/regulator/regulator.c	optional regulator
 dev/regulator/regulator_bus.c	optional regulator fdt
 dev/regulator/regulator_fixed.c	optional regulator
+dev/rge/if_rge.c		optional rge
+dev/rge/if_rge_hw.c		optional rge
+dev/rge/if_rge_stats.c		optional rge
+dev/rge/if_rge_sysctl.c		optional rge
 dev/rl/if_rl.c			optional rl pci
 dev/rndtest/rndtest.c		optional rndtest
 #
