@@ -28,6 +28,12 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#if defined(__FreeBSD__)
+/* TODO: upstream this. */
+#undef	NDEBUG
+#endif
+
 #include <sys/cdefs.h>
 __RCSID("$NetBSD: t_assert.c,v 1.3 2017/01/10 15:17:57 christos Exp $");
 
