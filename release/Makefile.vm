@@ -117,12 +117,6 @@ CLEANFILES+=	${_CW:tl}.${_FS}.${_FMT}.img \
 		${_CW:tl}.${_FS}.${_FMT}.raw
 ${_CW:tu}${_FS:tu}${_FMT:tu}IMAGE=	${_CW:tl}.${_FS}.${_FMT}
 
-<<<<<<< HEAD
-cw-${_CW:tl}-${_FS}-${_FMT}: ${QEMUTGT}
-	mkdir -p ${.OBJDIR}/${.TARGET}
-	env TARGET=${TARGET} TARGET_ARCH=${TARGET_ARCH} SWAPSIZE=${SWAPSIZE} \
-		QEMUSTATIC=${QEMUSTATIC} \
-=======
 # Special handling: EC2 "AMI Builder" images need a copy of the "base" disk
 # built first.
 .if ${_CW} == EC2-BUILDER
@@ -139,12 +133,11 @@ cw-${_CW:tl}-${_FS}-${_FMT}: ${QEMUTGT} ${PKGBASE_REPO_DIR}
 		PKG_CMD=${PKG_CMD:Upkg} \
 		PKG_ABI=${PKG_ABI} \
 		PKG_REPOS_DIR=${PKG_REPOS_DIR:U${.OBJDIR}/${.TARGET}/etc/pkg} \
-		PKG_REPO_NAME=${PKG_REPO_NAME:UFreeBSD-ports} \
+		PKG_REPO_NAME=${PKG_REPO_NAME:UHardenedBSD} \
 		PKG_INSTALL_EPOCH=${PKG_INSTALL_EPOCH:U${GITEPOCH}} \
 		NOPKGBASE=${NOPKGBASE} \
 		PKGBASE_REPO_DIR=${.OBJDIR}/pkgbase-repo-dir \
 		PORTSDIR=${PORTSDIR} \
->>>>>>> rad/freebsd/current/main
 		${.CURDIR}/scripts/mk-vmimage.sh \
 		-C ${.CURDIR}/tools/vmimage.subr -d ${.OBJDIR}/${.TARGET} -F ${_FS} \
 		-i ${.OBJDIR}/${_CW:tl}.${_FS}.${_FMT}.img -s ${VMSIZE} -f ${_FMT} \

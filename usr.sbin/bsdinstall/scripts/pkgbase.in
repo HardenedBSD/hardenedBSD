@@ -366,13 +366,10 @@ local function pkgbase()
 	if not os.execute(pkg .. "install -U -y -r HardenedBSD-base " .. packages) then
 		os.exit(1)
 	end
-<<<<<<< HEAD
 
 	-- Enable the FreeBSD-base repository for this system.
 	assert(os.execute("mkdir -p " .. chroot .. "/usr/local/etc/pkg/repos"))
 	assert(os.execute("echo 'HardenedBSD-base: { enabled: yes }' > " .. chroot .. "/usr/local/etc/pkg/repos/HardenedBSD-Base.conf"))
-=======
->>>>>>> rad/freebsd/current/main
 end
 
 pkgbase()

@@ -79,12 +79,6 @@ vm_extra_filter_base_packages() {
 vm_install_base() {
 	# Installs the FreeBSD userland/kernel to the virtual machine disk.
 
-<<<<<<< HEAD
-	cd ${WORLDDIR} && \
-		make DESTDIR=${DESTDIR} ${INSTALLOPTS} \
-		installworld installkernel distribution || \
-		err "\n\nCannot install the base system to ${DESTDIR}."
-=======
 	if [ -z "${NOPKGBASE}" ]; then
 		local pkg_cmd
 		pkg_cmd="${PKG_CMD} --rootdir ${DESTDIR} --repo-conf-dir ${PKGBASE_REPO_DIR}
@@ -101,7 +95,6 @@ vm_install_base() {
 			installworld installkernel distribution || \
 			err "\n\nCannot install the base system to ${DESTDIR}."
 	fi
->>>>>>> rad/freebsd/current/main
 
 	# Bootstrap etcupdate(8) database.
 	mkdir -p ${DESTDIR}/var/db/etcupdate
