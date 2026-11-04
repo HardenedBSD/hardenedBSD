@@ -2659,6 +2659,17 @@ kern_jail_get(struct thread *td, struct uio *optuio, int flags)
 			vfs_opterror(opts, "unexpected desc");
 			goto done;
 		}
+		if (flags & (JAIL_GET_DESC | JAIL_OWN_DESC)) {
+			/*
+			 * Allocate a jail descriptor to return later.
+			 * This must happen before the JAIL_USE_DESC
+			 * lookup below, which jumps to found_prison.
+			 */
+			error = jaildesc_alloc(td, &jfp_out, &jfd_out,
+			    flags & JAIL_OWN_DESC);
+			if (error)
+				goto done;
+		}
 		if (flags & JAIL_USE_DESC) {
 			/* Get the jail from its descriptor. */
 			error = jaildesc_find(td, jfd_in, &pr, NULL);
@@ -2686,13 +2697,6 @@ kern_jail_get(struct thread *td, struct uio *optuio, int flags)
 			}
 			prison_free(mypr);
 			mypr = jdpr;
-		}
-		if (flags & (JAIL_GET_DESC | JAIL_OWN_DESC)) {
-			/* Allocate a jail descriptor to return later. */
-			error = jaildesc_alloc(td, &jfp_out, &jfd_out,
-				flags & JAIL_OWN_DESC);
-			if (error)
-				goto done;
 		}
 	} else
 		goto done;

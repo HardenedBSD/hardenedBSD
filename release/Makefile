@@ -21,6 +21,14 @@
 # Variables affecting the build process:
 #  WORLDDIR: location of src tree -- must have built world and default kernel
 #            (by default, the directory above this one)
+<<<<<<< HEAD
+=======
+#  NOPKGBASE:  if set, include dist tarballs rather than pkgbase packages in
+#            disc1 and dvd1 installation media and build VM/cloud images using
+#            make installkernel installworld.
+#  DISTSETS: if set, include dist sets and MANIFEST.  Enabled automatically if
+#            NOPKGBASE is set.
+>>>>>>> rad/freebsd/current/main
 #  PORTSDIR: location of ports tree to distribute (default: /usr/ports)
 #  XTRADIR:  xtra-bits-dir argument for <arch>/mkisoimages.sh
 #  NOPKG:    if set, do not distribute third-party packages
@@ -72,6 +80,18 @@ VOLUME_LABEL=	${REVISION:C/[.-]/_/g}_${BRANCH:C/[.-]/_/g}_${TARGET_ARCH}
 .endfor
 .endif
 
+<<<<<<< HEAD
+=======
+.if !defined(NOPKGBASE) || empty(NOPKGBASE)
+PKGBASE_REPO_DIR= pkgbase-repo-dir
+WSTAGEDIR!=	${IMAKE} -f Makefile.inc1 -C ${WORLDDIR} -V WSTAGEDIR
+PKG_ABI_FILE=	${WSTAGEDIR}/usr/bin/uname
+PKG_ABI=	$$(${PKG_CMD} -o ABI_FILE=${PKG_ABI_FILE} config ABI)
+.else
+DISTSETS=	YES
+.endif
+
+>>>>>>> rad/freebsd/current/main
 .if ${.MAKE.OS} == "FreeBSD"
 # For installing packages into the release media.
 .if defined(NO_ROOT)
@@ -100,7 +120,14 @@ DISTRIBUTIONS+= ports.txz
 DISTRIBUTIONS+= src.txz
 .endif
 
+<<<<<<< HEAD
 RELEASE_TARGETS= ftp
+=======
+RELEASE_TARGETS=
+.if defined(DISTSETS) && !empty(DISTSETS)
+RELEASE_TARGETS+= ftp
+.endif
+>>>>>>> rad/freebsd/current/main
 IMAGES=
 .if exists(${.CURDIR}/${TARGET}/mkisoimages.sh)
 RELEASE_TARGETS+= cdrom
@@ -174,6 +201,14 @@ ports.txz:
 	    --exclude 'usr/ports/INDEX*' --exclude work usr/ports | \
 	    ${XZ_CMD} > ${.OBJDIR}/ports.txz )
 
+<<<<<<< HEAD
+=======
+packagesystem: ${DISTRIBUTIONS}
+	sh ${.CURDIR}/scripts/make-manifest.sh $$(ls *.txz | grep -v container) > MANIFEST
+	touch ${.TARGET}
+
+.if defined(DISTSETS) && !empty(DISTSETS)
+>>>>>>> rad/freebsd/current/main
 disc1: packagesystem
 # Install system
 	mkdir -p ${.TARGET}
@@ -183,8 +218,32 @@ disc1: packagesystem
 	    ${_ALL_LIBCOMPATS:@v@MK_LIB$v=no@} \
 	    MK_TOOLCHAIN=no \
 	    MK_RESCUE=no MK_DICT=no \
+<<<<<<< HEAD
 	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no \
 	    -DDB_FROM_SRC )
+=======
+	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no)
+.if !defined(NOPKGBASE) || empty(NOPKGBASE)
+# Create offline pkgbase repo on release media
+	mkdir -p ${.TARGET}/usr/freebsd-packages/repos/
+	${.CURDIR}/scripts/pkgbase-stage.lua disc \
+	    ${.OBJDIR}/pkgbase-repo-dir \
+	    ${.TARGET}/usr/freebsd-packages/offline \
+	    "${_ALL_libcompats}" ${PKG_ABI} ${.OBJDIR}/pkgdb-disc1
+	cp ${.CURDIR}/scripts/FreeBSD-base-offline.conf \
+		${.TARGET}/usr/freebsd-packages/repos/
+	mtree -c -p ${.TARGET}/usr/freebsd-packages | \
+	    mtree -C -k type,mode,link,size | \
+	    sed 's|^\.|./usr/freebsd-packages|g' >> ${.TARGET}/METALOG
+.endif
+.if defined(DISTSETS) && !empty(DISTSETS)
+	# Copy MANIFEST to provide legacy dist checksums in both modes
+	mkdir -p ${.TARGET}/usr/freebsd-dist
+	echo "./usr/freebsd-dist type=dir uname=root gname=wheel mode=0755" >> ${.TARGET}/METALOG
+	cp MANIFEST ${.TARGET}/usr/freebsd-dist
+	echo "./usr/freebsd-dist/MANIFEST type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG
+.if defined(NOPKGBASE) && !empty(NOPKGBASE)
+>>>>>>> rad/freebsd/current/main
 # Copy distfiles
 	mkdir -p ${.TARGET}/usr/freebsd-dist
 	for dist in MANIFEST $$(ls *.txz | grep -v container | grep -vE -- '(${base ${_ALL_libcompats}:L:ts|})-dbg'); \
@@ -233,8 +292,13 @@ bootonly: packagesystem
 	    ${_ALL_LIBCOMPATS:@v@MK_LIB$v=no@} \
 	    MK_TOOLCHAIN=no \
 	    MK_RESCUE=no MK_DICT=no \
+<<<<<<< HEAD
 	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no \
 	    -DDB_FROM_SRC )
+=======
+	    MK_KERNEL_SYMBOLS=no MK_TESTS=no MK_DEBUG_FILES=no)
+.if defined(DISTSETS) && !empty(DISTSETS)
+>>>>>>> rad/freebsd/current/main
 # Copy manifest only (no distfiles) to get checksums
 	mkdir -p ${.TARGET}/usr/freebsd-dist
 	cp MANIFEST ${.TARGET}/usr/freebsd-dist
@@ -268,8 +332,31 @@ dvd: packagesystem
 	mkdir -p ${.TARGET}
 	( cd ${WORLDDIR} && ${IMAKE} installworld installkernel distribution \
 		DESTDIR=${.OBJDIR}/${.TARGET} MK_RESCUE=no MK_KERNEL_SYMBOLS=no \
+<<<<<<< HEAD
 		MK_TESTS=no MK_DEBUG_FILES=no \
 		-DDB_FROM_SRC )
+=======
+		MK_TESTS=no MK_DEBUG_FILES=no)
+.if !defined(NOPKGBASE) || empty(NOPKGBASE)
+# Create offline pkgbase repo on release media
+	mkdir -p ${.TARGET}/usr/freebsd-packages/repos/
+	${.CURDIR}/scripts/pkgbase-stage.lua dvd \
+	    ${.OBJDIR}/pkgbase-repo-dir \
+	    ${.TARGET}/usr/freebsd-packages/offline \
+	    "${_ALL_libcompats}" ${PKG_ABI} ${.OBJDIR}/pkgdb-dvd
+	cp ${.CURDIR}/scripts/FreeBSD-base-offline.conf \
+		${.TARGET}/usr/freebsd-packages/repos/
+	mtree -c -p ${.TARGET}/usr/freebsd-packages | \
+	    mtree -C -k type,mode,link,size | \
+	    sed 's|^\.|./usr/freebsd-packages|g' >> ${.TARGET}/METALOG
+.endif
+.if defined(DISTSETS) && !empty(DISTSETS)
+	# Copy MANIFEST to provide legacy dist checksums in both modes
+	mkdir -p ${.TARGET}/usr/freebsd-dist
+	echo "./usr/freebsd-dist type=dir uname=root gname=wheel mode=0755" >> ${.TARGET}/METALOG
+	cp MANIFEST ${.TARGET}/usr/freebsd-dist
+	echo "./usr/freebsd-dist/MANIFEST type=file uname=root gname=wheel mode=0644" >> ${.TARGET}/METALOG
+>>>>>>> rad/freebsd/current/main
 # Copy distfiles
 	mkdir -p ${.TARGET}/usr/freebsd-dist
 	for dist in MANIFEST $$(ls *.txz | grep -v container); \
@@ -374,6 +461,10 @@ release-install:
 .if defined(DESTDIR) && !empty(DESTDIR)
 	mkdir -p ${DESTDIR}
 .endif
+<<<<<<< HEAD
+=======
+.if defined(DISTSETS) && !empty(DISTSETS)
+>>>>>>> rad/freebsd/current/main
 	cp -a ftp ${DESTDIR}/
 .if !empty(IMAGES)
 .for I in ${IMAGES}
