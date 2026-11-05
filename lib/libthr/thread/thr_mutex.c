@@ -865,7 +865,7 @@ mutex_self_trylock(struct pthread_mutex *m)
 
 	case PTHREAD_MUTEX_RECURSIVE:
 		/* Increment the lock count: */
-		if (m->m_count + 1 > 0) {
+		if (m->m_count < INT_MAX) {
 			m->m_count++;
 			ret = 0;
 		} else
@@ -934,7 +934,7 @@ mutex_self_lock(struct pthread_mutex *m, const struct timespec *abstime)
 
 	case PTHREAD_MUTEX_RECURSIVE:
 		/* Increment the lock count: */
-		if (m->m_count + 1 > 0) {
+		if (m->m_count < INT_MAX) {
 			m->m_count++;
 			ret = 0;
 		} else
@@ -1109,6 +1109,8 @@ __pthread_mutex_setspinloops_np(pthread_mutex_t *mutex, int count)
 	struct pthread_mutex *m;
 	int ret;
 
+	if (count < 0)
+		return (EINVAL);
 	ret = check_and_init_mutex(mutex, &m);
 	if (ret == 0)
 		m->m_spinloops = count;
@@ -1133,10 +1135,12 @@ __pthread_mutex_setyieldloops_np(pthread_mutex_t *mutex, int count)
 	struct pthread_mutex *m;
 	int ret;
 
+	if (count < 0)
+		return (EINVAL);
 	ret = check_and_init_mutex(mutex, &m);
 	if (ret == 0)
 		m->m_yieldloops = count;
-	return (0);
+	return (ret);
 }
 
 int

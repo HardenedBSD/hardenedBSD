@@ -440,6 +440,58 @@ init_main_thread(struct pthread *thread)
 	/* Others cleared to zero by thr_alloc() */
 }
 
+bool
+__thr_get_main_stack_base(char **base)
+{
+	size_t len;
+	int mib[2];
+
+	if (_elf_aux_info(AT_USRSTACKBASE, base, sizeof(*base)) == 0)
+		return (true);
+
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_USRSTACK;
+	len = sizeof(*base);
+	if (sysctl(mib, nitems(mib), base, &len, NULL, 0) == 0)
+		return (true);
+
+	return (false);
+}
+
+bool
+__thr_get_main_stack_lim(size_t *lim)
+{
+	struct rlimit rlim;
+
+	if (_elf_aux_info(AT_USRSTACKLIM, lim, sizeof(*lim)) == 0)
+		return (true);
+
+	if (getrlimit(RLIMIT_STACK, &rlim) == 0) {
+		*lim = rlim.rlim_cur;
+		return (true);
+	}
+
+	return (false);
+}
+
+static bool
+getenv_int(const char *name, int mn, int mx, int *result)
+{
+	const char *env;
+	char *endptr;
+	long val;
+
+	env = getenv(name);
+	if (env == NULL || *env == '\0')
+		return (false);
+	val = strtol(env, &endptr, 10);
+	if (*endptr != '\0' || errno != 0 || val < mn || val > mx) {
+		return (false);
+	}
+	*result = val;
+	return (true);
+}
+
 static void
 init_private(void)
 {
@@ -490,15 +542,12 @@ init_private(void)
 		_thr_guard_default = _thr_page_size;
 		_pthread_attr_default.guardsize_attr = _thr_guard_default;
 		_pthread_attr_default.stacksize_attr = _thr_stack_default;
-		env = getenv("LIBPTHREAD_SPINLOOPS");
-		if (env)
-			_thr_spinloops = atoi(env);
-		env = getenv("LIBPTHREAD_YIELDLOOPS");
-		if (env)
-			_thr_yieldloops = atoi(env);
-		env = getenv("LIBPTHREAD_QUEUE_FIFO");
-		if (env)
-			_thr_queuefifo = atoi(env);
+		(void)getenv_int("LIBPTHREAD_SPINLOOPS", 0, INT_MAX,
+		    &_thr_spinloops);
+		(void)getenv_int("LIBPTHREAD_YIELDLOOPS", 0, INT_MAX,
+		    &_thr_yieldloops);
+		(void)getenv_int("LIBPTHREAD_QUEUE_FIFO", 0, 31,
+		    &_thr_queuefifo);
 		env = getenv("LIBPTHREAD_UMTX_MIN_TIMEOUT");
 		if (env) {
 			char *endptr;
