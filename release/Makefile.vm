@@ -117,10 +117,27 @@ CLEANFILES+=	${_CW:tl}.${_FS}.${_FMT}.img \
 		${_CW:tl}.${_FS}.${_FMT}.raw
 ${_CW:tu}${_FS:tu}${_FMT:tu}IMAGE=	${_CW:tl}.${_FS}.${_FMT}
 
-cw-${_CW:tl}-${_FS}-${_FMT}: ${QEMUTGT}
+# Special handling: EC2 "AMI Builder" images need a copy of the "base" disk
+# built first.
+.if ${_CW} == EC2-BUILDER
+cw-${_CW:tl}-${_FS}-${_FMT}: cw-ec2-base-${_FS}-${_FMT}
+.endif
+
+cw-${_CW:tl}-${_FS}-${_FMT}: ${QEMUTGT} ${PKGBASE_REPO_DIR}
 	mkdir -p ${.OBJDIR}/${.TARGET}
 	env TARGET=${TARGET} TARGET_ARCH=${TARGET_ARCH} SWAPSIZE=${SWAPSIZE} \
 		QEMUSTATIC=${QEMUSTATIC} \
+		EC2BASEIMG=${.OBJDIR}/${EC2-BASE${_FS:tu}${_FMT:tu}IMAGE} \
+		${WITHOUT_QEMU:DWITHOUT_QEMU=true} \
+		${NO_ROOT:DNO_ROOT=true} \
+		PKG_CMD=${PKG_CMD:Upkg} \
+		PKG_ABI=${PKG_ABI} \
+		PKG_REPOS_DIR=${PKG_REPOS_DIR:U${.OBJDIR}/${.TARGET}/etc/pkg} \
+		PKG_REPO_NAME=${PKG_REPO_NAME:UHardenedBSD} \
+		PKG_INSTALL_EPOCH=${PKG_INSTALL_EPOCH:U${GITEPOCH}} \
+		NOPKGBASE=${NOPKGBASE} \
+		PKGBASE_REPO_DIR=${.OBJDIR}/pkgbase-repo-dir \
+		PORTSDIR=${PORTSDIR} \
 		${.CURDIR}/scripts/mk-vmimage.sh \
 		-C ${.CURDIR}/tools/vmimage.subr -d ${.OBJDIR}/${.TARGET} -F ${_FS} \
 		-i ${.OBJDIR}/${_CW:tl}.${_FS}.${_FMT}.img -s ${VMSIZE} -f ${_FMT} \
