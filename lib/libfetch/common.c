@@ -57,6 +57,8 @@
 #include "fetch.h"
 #include "common.h"
 
+/* Maximum length of a line, newline included, for fetch_getln() */
+#define FETCH_LINE_MAX		65536
 
 /*** Local data **************************************************************/
 
@@ -1217,7 +1219,9 @@ int
 fetch_ssl(conn_t *conn, const struct url *URL, int verbose)
 {
 #ifdef WITH_SSL
-	int ret, ssl_err;
+	struct timeval now, timeout, delta;
+	struct pollfd pfd;
+	int deltams, ret, ssl_err;
 	X509_NAME *name;
 	char *str;
 
@@ -1249,11 +1253,45 @@ fetch_ssl(conn_t *conn, const struct url *URL, int verbose)
 		return (-1);
 	}
 #endif
+	if (fetchTimeout > 0) {
+		gettimeofday(&timeout, NULL);
+		timeout.tv_sec += fetchTimeout;
+	}
+	deltams = INFTIM;
+	pfd.fd = conn->sd;
 	while ((ret = SSL_connect(conn->ssl)) == -1) {
 		ssl_err = SSL_get_error(conn->ssl, ret);
-		if (ssl_err != SSL_ERROR_WANT_READ &&
-		    ssl_err != SSL_ERROR_WANT_WRITE) {
+		switch (ssl_err) {
+		case SSL_ERROR_WANT_READ:
+			pfd.events = POLLIN;
+			break;
+		case SSL_ERROR_WANT_WRITE:
+			pfd.events = POLLOUT;
+			break;
+		default:
 			ERR_print_errors_fp(stderr);
+			return (-1);
+		}
+		/* check what's left of our timeout */
+		if (fetchTimeout > 0) {
+			gettimeofday(&now, NULL);
+			if (!timercmp(&timeout, &now, >)) {
+				errno = ETIMEDOUT;
+				fetch_syserr();
+				return (-1);
+			}
+			timersub(&timeout, &now, &delta);
+			deltams = delta.tv_sec * 1000 +
+			    delta.tv_usec / 1000;
+		}
+		ret = poll(&pfd, 1, deltams);
+		if (ret == 0) {
+			fetch_info("SSL handshake timed out");
+			return (-1);
+		}
+		if (ret < 0) {
+			if (errno == EINTR && fetchRestartCalls)
+				continue;
 			return (-1);
 		}
 	}
@@ -1466,9 +1504,15 @@ fetch_getln(conn_t *conn)
 	/* look at the data we already have */
 	if (conn->pos < conn->buflen) {
 		conn->line = conn->buf + conn->pos;
-		while (conn->pos < conn->buflen)
+		while (conn->pos < conn->buflen) {
 			if (conn->buf[conn->pos++] == '\n')
 				goto found;
+			if (conn->buf + conn->pos - conn->line >=
+			    FETCH_LINE_MAX) {
+				errno = EPROTO;
+				goto fail;
+			}
+		}
 		/* reset for the upcoming memmove() */
 		conn->pos = conn->line - conn->buf;
 	}
@@ -1498,9 +1542,14 @@ fetch_getln(conn_t *conn)
 		if (rlen == 0)
 			break;
 		/* look for a newline */
-		while (conn->pos < conn->buflen)
+		while (conn->pos < conn->buflen) {
 			if (conn->buf[conn->pos++] == '\n')
 				goto found;
+			if (conn->pos >= FETCH_LINE_MAX) {
+				errno = EPROTO;
+				goto fail;
+			}
+		}
 		/* do we need a bigger buffer? */
 		if (conn->buflen > conn->bufsize / 2) {
 			tmp = conn->buf;

@@ -77,6 +77,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <xlocale.h>
 
 #ifdef WITH_SSL
 #include <openssl/md5.h>
@@ -121,6 +122,15 @@
 
 #define HTTP_ERROR(xyz) ((xyz) >= 400 && (xyz) <= 599)
 
+static locale_t
+fetch_time_locale(void)
+{
+	static locale_t loc;
+
+	if (loc == NULL)
+		loc = newlocale(LC_TIME_MASK, "C", NULL);
+	return (loc);
+}
 
 /*****************************************************************************
  * I/O functions for decoding chunked streams
@@ -854,20 +864,20 @@ out:
 static int
 http_parse_mtime(const char *p, time_t *mtime)
 {
-	char locale[64], *r;
 	struct tm tm;
+	char *r;
 
-	strlcpy(locale, setlocale(LC_TIME, NULL), sizeof(locale));
-	setlocale(LC_TIME, "C");
-	r = strptime(p, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+	r = strptime_l(p, "%a, %d %b %Y %H:%M:%S GMT", &tm,
+	    fetch_time_locale());
 	/*
 	 * Some proxies use UTC in response, but it should still be
 	 * parsed. RFC2616 states GMT and UTC are exactly equal for HTTP.
 	 */
-	if (r == NULL)
-		r = strptime(p, "%a, %d %b %Y %H:%M:%S UTC", &tm);
+	if (r == NULL) {
+		r = strptime_l(p, "%a, %d %b %Y %H:%M:%S UTC", &tm,
+		    fetch_time_locale());
+	}
 	/* XXX should add support for date-2 and date-3 */
-	setlocale(LC_TIME, locale);
 	if (r == NULL)
 		return (-1);
 	DEBUGF("last modified: [%04d-%02d-%02d %02d:%02d:%02d]\n",
@@ -1565,7 +1575,7 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 	char timebuf[80];
 	char hbuf[MAXHOSTNAMELEN + 7], *host;
 	conn_t *conn;
-	struct url *url, *new;
+	struct url *url, *loc;
 	int chunked, direct, ims, noredirect, verbose;
 	int e, i, n, val;
 	off_t offset, clength, length, size;
@@ -1602,7 +1612,7 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 
 	e = HTTP_PROTOCOL_ERROR;
 	do {
-		new = NULL;
+		loc = NULL;
 		chunked = 0;
 		offset = 0;
 		clength = -1;
@@ -1647,8 +1657,8 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 
 		if (ims && url->ims_time) {
 			timestruct = gmtime((time_t *)&url->ims_time);
-			(void)strftime(timebuf, 80, "%a, %d %b %Y %T GMT",
-			    timestruct);
+			(void)strftime_l(timebuf, 80, "%a, %d %b %Y %T GMT",
+			    timestruct, fetch_time_locale());
 			if (verbose)
 				fetch_info("If-Modified-Since: %s", timebuf);
 			http_cmd(conn, "If-Modified-Since: %s", timebuf);
@@ -1871,32 +1881,32 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 					n = 1;
 					break;
 				}
-				if (new)
-					free(new);
+				if (loc != NULL)
+					fetchFreeURL(loc);
 				if (verbose)
 					fetch_info("%d redirect to %s",
 					    conn->err, p);
 				if (*p == '/')
 					/* absolute path */
-					new = fetchMakeURL(url->scheme, url->host,
+					loc = fetchMakeURL(url->scheme, url->host,
 					    url->port, p, url->user, url->pwd);
 				else
-					new = fetchParseURL(p);
-				if (new == NULL) {
+					loc = fetchParseURL(p);
+				if (loc == NULL) {
 					/* XXX should set an error code */
 					DEBUGF("failed to parse new URL\n");
 					goto ouch;
 				}
 
 				/* Only copy credentials if the host matches */
-				if (strcmp(new->host, url->host) == 0 &&
-				    !*new->user && !*new->pwd) {
-					strcpy(new->user, url->user);
-					strcpy(new->pwd, url->pwd);
+				if (strcmp(loc->host, url->host) == 0 &&
+				    !*loc->user && !*loc->pwd) {
+					strcpy(loc->user, url->user);
+					strcpy(loc->pwd, url->pwd);
 				}
-				new->offset = url->offset;
-				new->length = url->length;
-				new->ims_time = url->ims_time;
+				loc->offset = url->offset;
+				loc->length = url->length;
+				loc->ims_time = url->ims_time;
 				break;
 			case hdr_transfer_encoding:
 				/* XXX weak test*/
@@ -1965,13 +1975,13 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 		clean_http_auth_challenges(&server_challenges);
 		fetch_close(conn);
 		conn = NULL;
-		if (!new) {
+		if (loc == NULL) {
 			DEBUGF("redirect with no new location\n");
 			break;
 		}
 		if (url != URL)
 			fetchFreeURL(url);
-		url = new;
+		url = loc;
 	} while (++i < n);
 
 	/* we failed, or ran out of retries */
@@ -1986,7 +1996,7 @@ http_request_body(struct url *URL, const char *op, struct url_stat *us,
 
 	if (conn->err == HTTP_NOT_MODIFIED) {
 		http_seterr(HTTP_NOT_MODIFIED);
-		return (NULL);
+		goto ouch;
 	}
 
 	/* check for inconsistencies */
