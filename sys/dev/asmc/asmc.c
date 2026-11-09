@@ -90,6 +90,16 @@ static int 	asmc_init(device_t dev);
 static int 	asmc_command(device_t dev, uint8_t command);
 static int 	asmc_wait(device_t dev, uint8_t val);
 static int 	asmc_wait_ack(device_t dev, uint8_t val, int amount);
+static int	asmc_pio_send(device_t dev, const uint8_t *buf, int len,
+		    uint8_t status);
+static int	asmc_pio_recv(device_t dev, uint8_t *buf, int len,
+		    uint8_t status);
+static int	asmc_pio_getbyindex_locked(device_t dev, int index,
+		    uint8_t *key);
+static int	asmc_pio_getinfo_locked(device_t dev, const uint8_t *key,
+		    uint8_t *info);
+static void	asmc_keyinfo_decode(const uint8_t *info, uint8_t *len,
+		    char *type);
 static int 	asmc_key_write(device_t dev, const char *key, uint8_t *buf,
     uint8_t len);
 static int 	asmc_key_read(device_t dev, const char *key, uint8_t *buf,
@@ -115,17 +125,10 @@ static int	asmc_key_dump(device_t, int);
  */
 static int 	asmc_mb_sysctl_fanid(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mb_sysctl_fanspeed(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_fansafespeed(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_fanminspeed(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_fanmaxspeed(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_fantargetspeed(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mb_sysctl_fanmanual(SYSCTL_HANDLER_ARGS);
 static int 	asmc_temp_sysctl(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_sms_x(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_sms_y(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mb_sysctl_sms_z(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mbp_sysctl_light_left(SYSCTL_HANDLER_ARGS);
-static int 	asmc_mbp_sysctl_light_right(SYSCTL_HANDLER_ARGS);
+static int 	asmc_mb_sysctl_sms(SYSCTL_HANDLER_ARGS);
+static int 	asmc_mbp_sysctl_light(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mbp_sysctl_light_control(SYSCTL_HANDLER_ARGS);
 static int 	asmc_mbp_sysctl_light_left_10byte(SYSCTL_HANDLER_ARGS);
 static int	asmc_aupo_sysctl(SYSCTL_HANDLER_ARGS);
@@ -406,8 +409,6 @@ ACPI_MODULE_NAME("ASMC")
 /* NB: can't be const */
 static char *asmc_ids[] = { "APP0001", NULL };
 
-static unsigned int light_control = 0;
-
 ACPI_PNP_INFO(asmc_ids);
 DRIVER_MODULE(asmc, acpi, asmc_driver, NULL, NULL);
 MODULE_DEPEND(asmc, acpi, 1, 1, 1);
@@ -463,12 +464,251 @@ asmc_try_probe(device_t dev)
 	return (ENOMEM);
 }
 
+/*
+ * The per-fan speed keys, selected by the high byte of a fan sysctl's arg2.
+ * Writable keys accept a new speed; the rest are reported only.
+ */
+#define	ASMC_FAN_ARG2(which, fan)	(((which) << 8) | (fan))
+#define	ASMC_FAN_ARG2_WHICH(arg2)	(((arg2) >> 8) & 0xff)
+#define	ASMC_FAN_ARG2_FAN(arg2)		((arg2) & 0xff)
+
+#define	ASMC_FANSPEED_CUR	0
+#define	ASMC_FANSPEED_SAFE	1
+#define	ASMC_FANSPEED_MIN	2
+#define	ASMC_FANSPEED_MAX	3
+#define	ASMC_FANSPEED_TARGET	4
+
+static const struct {
+	const char	*key;
+	bool		writable;
+} asmc_fan_speed_keys[] = {
+	[ASMC_FANSPEED_CUR]	= { ASMC_KEY_FANSPEED,		false },
+	[ASMC_FANSPEED_SAFE]	= { ASMC_KEY_FANSAFESPEED,	false },
+	[ASMC_FANSPEED_MIN]	= { ASMC_KEY_FANMINSPEED,	true },
+	[ASMC_FANSPEED_MAX]	= { ASMC_KEY_FANMAXSPEED,	true },
+	[ASMC_FANSPEED_TARGET]	= { ASMC_KEY_FANTARGETSPEED,	true },
+};
+
+/* The dev.asmc.n.fan.m leaves, in registration order. */
+static const struct {
+	const char	*name;
+	const char	*desc;
+	int		ctlflags;
+	int		(*handler)(SYSCTL_HANDLER_ARGS);
+	int		which;
+	bool		needs_safespeed;
+} asmc_fan_sysctls[] = {
+	{ "id", "Fan ID", CTLTYPE_STRING | CTLFLAG_RD,
+	    asmc_mb_sysctl_fanid, 0, false },
+	{ "speed", "Fan speed in RPM", CTLTYPE_INT | CTLFLAG_RD,
+	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_CUR, false },
+	{ "safespeed", "Fan safe speed in RPM", CTLTYPE_INT | CTLFLAG_RD,
+	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_SAFE, true },
+	{ "minspeed", "Fan minimum speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_MIN, false },
+	{ "maxspeed", "Fan maximum speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_MAX, false },
+	{ "targetspeed", "Fan target speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_TARGET, false },
+	{ "manual", "Fan manual mode (0=auto, 1=manual)",
+	    CTLTYPE_INT | CTLFLAG_RW, asmc_mb_sysctl_fanmanual, 0, false },
+};
+
+static void
+asmc_sysctl_add_fan(device_t dev, struct sysctl_ctx_list *ctx)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+	char name[2];
+
+	sc->sc_fan_tree[0] = SYSCTL_ADD_NODE(ctx,
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "fan",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Fan Root Tree");
+
+	for (int i = 1; i <= sc->sc_nfan; i++) {
+		int j = i - 1;
+
+		name[0] = '0' + j;
+		name[1] = 0;
+		sc->sc_fan_tree[i] = SYSCTL_ADD_NODE(ctx,
+		    SYSCTL_CHILDREN(sc->sc_fan_tree[0]), OID_AUTO, name,
+		    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Fan Subtree");
+
+		for (unsigned int k = 0; k < nitems(asmc_fan_sysctls); k++) {
+			if (asmc_fan_sysctls[k].needs_safespeed &&
+			    !sc->sc_has_safespeed)
+				continue;
+
+			/* SYSCTL_ADD_PROC() asserts flags at compile time. */
+			sysctl_add_oid(ctx,
+			    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
+			    OID_AUTO, asmc_fan_sysctls[k].name,
+			    asmc_fan_sysctls[k].ctlflags | CTLFLAG_MPSAFE,
+			    dev, ASMC_FAN_ARG2(asmc_fan_sysctls[k].which, j),
+			    asmc_fan_sysctls[k].handler, "I",
+			    asmc_fan_sysctls[k].desc, NULL);
+		}
+	}
+}
+
+/* The dev.asmc.n.sms axes, selected by arg2. */
+static const struct {
+	const char	*name;
+	const char	*key;
+	const char	*desc;
+} asmc_sms_sysctls[] = {
+	{ "x", ASMC_KEY_SMS_X, "Sudden Motion Sensor X value" },
+	{ "y", ASMC_KEY_SMS_Y, "Sudden Motion Sensor Y value" },
+	{ "z", ASMC_KEY_SMS_Z, "Sudden Motion Sensor Z value" },
+};
+
+static void
+asmc_sysctl_add_sms(device_t dev, struct sysctl_ctx_list *ctx)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+
+	sc->sc_sms_tree = SYSCTL_ADD_NODE(ctx,
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "sms",
+	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Sudden Motion Sensor");
+
+	for (unsigned int k = 0; k < nitems(asmc_sms_sysctls); k++) {
+		SYSCTL_ADD_PROC(ctx,
+		    SYSCTL_CHILDREN(sc->sc_sms_tree),
+		    OID_AUTO, asmc_sms_sysctls[k].name,
+		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
+		    dev, k, asmc_mb_sysctl_sms, "I",
+		    asmc_sms_sysctls[k].desc);
+	}
+}
+
+/* Every key asmc_sms_init() touches; all must be present for SMS. */
+static const char * const asmc_sms_required_keys[] = {
+	ASMC_KEY_SMS,
+	ASMC_KEY_SMS_X,
+	ASMC_KEY_SMS_Y,
+	ASMC_KEY_SMS_Z,
+	ASMC_KEY_SMS_LOW,
+	ASMC_KEY_SMS_HIGH,
+	ASMC_KEY_SMS_LOW_INT,
+	ASMC_KEY_SMS_HIGH_INT,
+	ASMC_KEY_SMS_FLAG,
+	ASMC_KEY_INTOK,
+};
+
+/* The ambient light sensors, selected by arg2. */
+#define	ASMC_LIGHT_LEFT		0
+#define	ASMC_LIGHT_RIGHT	1
+
+static const char * const asmc_light_keys[] = {
+	[ASMC_LIGHT_LEFT]	= ASMC_KEY_LIGHTLEFT,
+	[ASMC_LIGHT_RIGHT]	= ASMC_KEY_LIGHTRIGHT,
+};
+
+/* The dev.asmc.n.system leaves, in registration order; len_min 0 = any. */
+static const struct {
+	const char	*key;
+	const char	*name;
+	const char	*desc;
+	const char	*fmt;
+	int		ctlflags;
+	int		arg2;
+	int		(*handler)(SYSCTL_HANDLER_ARGS);
+	uint8_t		len_min;
+	uint8_t		len_max;
+} asmc_system_sysctls[] = {
+	{ ASMC_KEY_MSSD, "shutdown_cause", "Last shutdown cause (MSSD)",
+	    "A", CTLTYPE_STRING | CTLFLAG_RD, 0, asmc_cause_sysctl, 0, 0 },
+	{ ASMC_KEY_MSSP, "sleep_cause", "Last sleep cause (MSSP)",
+	    "A", CTLTYPE_STRING | CTLFLAG_RD, 1, asmc_cause_sysctl, 0, 0 },
+	{ ASMC_KEY_MSAL, "thermal_status",
+	    "Thermal subsystem status flags (MSAL)",
+	    "A", CTLTYPE_STRING | CTLFLAG_RD, 0, asmc_msal_sysctl, 0, 0 },
+	{ ASMC_KEY_CLKT, "time_of_day",
+	    "Seconds since midnight per SMC clock (CLKT)",
+	    "IU", CTLTYPE_UINT | CTLFLAG_RD, 0, asmc_clkt_sysctl, 0, 0 },
+	{ ASMC_KEY_MSPS, "power_state", "SMC power state index (MSPS)",
+	    "IU", CTLTYPE_UINT | CTLFLAG_RD, 0, asmc_msps_sysctl, 1, 2 },
+	{ ASMC_KEY_RPLT, "board_id", "Apple internal board codename (RPlt)",
+	    "A", CTLTYPE_STRING | CTLFLAG_RD, 0, asmc_rplt_sysctl, 0, 0 },
+	{ ASMC_KEY_RGEN, "chip_gen",
+	    "Apple security chip generation (RGEN; 3=T2)",
+	    "IU", CTLTYPE_UINT | CTLFLAG_RD, 0, asmc_rgen_sysctl, 0, 0 },
+};
+
+static int
+asmc_sysctl_add_system(device_t dev, struct sysctl_ctx_list *ctx)
+{
+	struct sysctl_oid *sys_tree;
+
+	sys_tree = SYSCTL_ADD_NODE(ctx,
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "system", CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+	    "System state and board identity");
+	if (sys_tree == NULL) {
+		device_printf(dev, "failed to create system sysctl node\n");
+		return (ENXIO);
+	}
+
+	for (unsigned int k = 0; k < nitems(asmc_system_sysctls); k++) {
+		uint8_t len = 0;
+
+		if (asmc_key_getinfo(dev, asmc_system_sysctls[k].key,
+		    &len, NULL) != 0)
+			continue;
+		if (asmc_system_sysctls[k].len_min != 0 &&
+		    (len < asmc_system_sysctls[k].len_min ||
+		    len > asmc_system_sysctls[k].len_max))
+			continue;
+
+		/* SYSCTL_ADD_PROC() asserts flags at compile time. */
+		sysctl_add_oid(ctx, SYSCTL_CHILDREN(sys_tree),
+		    OID_AUTO, asmc_system_sysctls[k].name,
+		    asmc_system_sysctls[k].ctlflags | CTLFLAG_MPSAFE,
+		    dev, asmc_system_sysctls[k].arg2,
+		    asmc_system_sysctls[k].handler,
+		    asmc_system_sysctls[k].fmt,
+		    asmc_system_sysctls[k].desc, NULL);
+	}
+
+	return (0);
+}
+
+/* Platform toggles under dev.asmc.n, each present only if its key reads. */
+static const struct {
+	const char	*key;
+	const char	*name;
+	const char	*desc;
+	int		(*handler)(SYSCTL_HANDLER_ARGS);
+} asmc_platform_sysctls[] = {
+	{ ASMC_KEY_AUPO, "auto_poweron",
+	    "Auto power-on after AC power loss (0=off, 1=on)",
+	    asmc_aupo_sysctl },
+	{ ASMC_KEY_MSLD, "sil", "Sleep indicator LED (0=off, 1=on)",
+	    asmc_sil_sysctl },
+};
+
+static void
+asmc_sysctl_add_platform(device_t dev, struct sysctl_ctx_list *ctx)
+{
+	uint8_t buf[1];
+
+	for (unsigned int k = 0; k < nitems(asmc_platform_sysctls); k++) {
+		if (asmc_key_read(dev, asmc_platform_sysctls[k].key,
+		    buf, 1) != 0)
+			continue;
+
+		SYSCTL_ADD_PROC(ctx,
+		    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
+		    OID_AUTO, asmc_platform_sysctls[k].name,
+		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
+		    dev, 0, asmc_platform_sysctls[k].handler, "I",
+		    asmc_platform_sysctls[k].desc);
+	}
+}
+
 static int
 asmc_attach(device_t dev)
 {
-	int i, j;
 	int ret;
-	char name[2];
 	struct asmc_softc *sc = device_get_softc(dev);
 	struct sysctl_ctx_list *sysctlctx;
 	struct sysctl_oid *sysctlnode;
@@ -497,70 +737,7 @@ asmc_attach(device_t dev)
 	/* Auto-detect and register voltage/current/power/ambient/temp sensors */
 	asmc_detect_sensors(dev);
 
-	/*
-	 * dev.asmc.n.fan.* tree.
-	 */
-	sc->sc_fan_tree[0] = SYSCTL_ADD_NODE(sysctlctx,
-	    SYSCTL_CHILDREN(sysctlnode), OID_AUTO, "fan",
-	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Fan Root Tree");
-
-	for (i = 1; i <= sc->sc_nfan; i++) {
-		j = i - 1;
-		name[0] = '0' + j;
-		name[1] = 0;
-		sc->sc_fan_tree[i] = SYSCTL_ADD_NODE(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[0]), OID_AUTO, name,
-		    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Fan Subtree");
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "id",
-		    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fanid, "I", "Fan ID");
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "speed",
-		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fanspeed, "I", "Fan speed in RPM");
-
-		if (sc->sc_has_safespeed) {
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-			    OID_AUTO, "safespeed",
-			    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, dev, j,
-			    asmc_mb_sysctl_fansafespeed, "I",
-			    "Fan safe speed in RPM");
-		}
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "minspeed",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fanminspeed, "I",
-		    "Fan minimum speed in RPM");
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "maxspeed",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fanmaxspeed, "I",
-		    "Fan maximum speed in RPM");
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "targetspeed",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fantargetspeed, "I",
-		    "Fan target speed in RPM");
-
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sc->sc_fan_tree[i]),
-		    OID_AUTO, "manual",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, dev, j,
-		    asmc_mb_sysctl_fanmanual, "I",
-		    "Fan manual mode (0=auto, 1=manual)");
-	}
+	asmc_sysctl_add_fan(dev, sysctlctx);
 
 	/*
 	 * dev.asmc.n.temp tree.
@@ -569,7 +746,7 @@ asmc_attach(device_t dev)
 	    SYSCTL_CHILDREN(sysctlnode), OID_AUTO, "temp",
 	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Temperature sensors");
 
-	for (i = 0; i < sc->sc_temp_count; i++) {
+	for (int i = 0; i < sc->sc_temp_count; i++) {
 		SYSCTL_ADD_PROC(sysctlctx,
 		    SYSCTL_CHILDREN(sc->sc_temp_tree),
 		    OID_AUTO, sc->sc_temp_sensors[i],
@@ -591,10 +768,10 @@ asmc_attach(device_t dev)
 		    SYSCTL_CHILDREN(sc->sc_light_tree),
 		    OID_AUTO, "left",
 		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-		    dev, 0,
+		    dev, ASMC_LIGHT_LEFT,
 		    sc->sc_light_len == ASMC_LIGHT_LONGLEN ?
 		        asmc_mbp_sysctl_light_left_10byte :
-		        asmc_mbp_sysctl_light_left,
+		        asmc_mbp_sysctl_light,
 		    "I", "Keyboard backlight left sensor");
 
 		if (sc->sc_light_len != ASMC_LIGHT_LONGLEN &&
@@ -604,8 +781,8 @@ asmc_attach(device_t dev)
 			    SYSCTL_CHILDREN(sc->sc_light_tree),
 			    OID_AUTO, "right",
 			    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0,
-			    asmc_mbp_sysctl_light_right, "I",
+			    dev, ASMC_LIGHT_RIGHT,
+			    asmc_mbp_sysctl_light, "I",
 			    "Keyboard backlight right sensor");
 		}
 
@@ -674,70 +851,8 @@ asmc_attach(device_t dev)
 	}
 
 	/* System state / board identity subtree. */
-	{
-		struct sysctl_oid *sys_tree;
-		uint8_t msps_len;
-
-		sys_tree = SYSCTL_ADD_NODE(sysctlctx,
-		    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
-		    "system", CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
-		    "System state and board identity");
-		if (sys_tree == NULL) {
-			device_printf(dev,
-			    "failed to create system sysctl node\n");
-			goto nosms;
-		}
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_MSSD, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "shutdown_cause",
-			    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_cause_sysctl, "A",
-			    "Last shutdown cause (MSSD)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_MSSP, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "sleep_cause",
-			    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 1, asmc_cause_sysctl, "A",
-			    "Last sleep cause (MSSP)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_MSAL, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "thermal_status",
-			    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_msal_sysctl, "A",
-			    "Thermal subsystem status flags (MSAL)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_CLKT, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "time_of_day",
-			    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_clkt_sysctl, "IU",
-			    "Seconds since midnight per SMC clock (CLKT)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_MSPS, &msps_len, NULL) == 0 &&
-		    (msps_len == 1 || msps_len == 2))
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "power_state",
-			    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_msps_sysctl, "IU",
-			    "SMC power state index (MSPS)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_RPLT, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "board_id",
-			    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_rplt_sysctl, "A",
-			    "Apple internal board codename (RPlt)");
-
-		if (asmc_key_getinfo(dev, ASMC_KEY_RGEN, NULL, NULL) == 0)
-			SYSCTL_ADD_PROC(sysctlctx,
-			    SYSCTL_CHILDREN(sys_tree), OID_AUTO, "chip_gen",
-			    CTLTYPE_UINT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-			    dev, 0, asmc_rgen_sysctl, "IU",
-			    "Apple security chip generation (RGEN; 3=T2)");
-	}
+	if (asmc_sysctl_add_system(dev, sysctlctx) != 0)
+		goto nosms;
 
 	if (asmc_key_getinfo(dev, ASMC_KEY_MBSS, NULL, NULL) == 0)
 		sc->sc_shutdown_tag = EVENTHANDLER_REGISTER(shutdown_pre_sync,
@@ -751,33 +866,7 @@ asmc_attach(device_t dev)
 	 */
 	asmc_sms_init(dev);
 
-	/*
-	 * dev.asmc.n.sms tree.
-	 */
-	sc->sc_sms_tree = SYSCTL_ADD_NODE(sysctlctx,
-	    SYSCTL_CHILDREN(sysctlnode), OID_AUTO, "sms",
-	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "Sudden Motion Sensor");
-
-	SYSCTL_ADD_PROC(sysctlctx,
-	    SYSCTL_CHILDREN(sc->sc_sms_tree),
-	    OID_AUTO, "x",
-	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-	    dev, 0, asmc_mb_sysctl_sms_x, "I",
-	    "Sudden Motion Sensor X value");
-
-	SYSCTL_ADD_PROC(sysctlctx,
-	    SYSCTL_CHILDREN(sc->sc_sms_tree),
-	    OID_AUTO, "y",
-	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-	    dev, 0, asmc_mb_sysctl_sms_y, "I",
-	    "Sudden Motion Sensor Y value");
-
-	SYSCTL_ADD_PROC(sysctlctx,
-	    SYSCTL_CHILDREN(sc->sc_sms_tree),
-	    OID_AUTO, "z",
-	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE,
-	    dev, 0, asmc_mb_sysctl_sms_z, "I",
-	    "Sudden Motion Sensor Z value");
+	asmc_sysctl_add_sms(dev, sysctlctx);
 
 	/*
 	 * Need a taskqueue to send devctl_notify() events
@@ -880,9 +969,10 @@ asmc_detach(device_t dev)
 static int
 asmc_resume(device_t dev)
 {
+	struct asmc_softc *sc = device_get_softc(dev);
 	uint8_t buf[2];
 
-	buf[0] = light_control;
+	buf[0] = sc->sc_light_control;
 	buf[1] = 0x00;
 	asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
 
@@ -953,25 +1043,7 @@ asmc_init(device_t dev)
 		    ntohs(*(uint16_t *)buf + 4));
 	}
 
-	/* Auto power-on after AC power loss (AUPO). */
-	if (asmc_key_read(dev, ASMC_KEY_AUPO, buf, 1) == 0) {
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
-		    OID_AUTO, "auto_poweron",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
-		    dev, 0, asmc_aupo_sysctl, "I",
-		    "Auto power-on after AC power loss (0=off, 1=on)");
-	}
-
-	/* Sleep Indicator LED (SIL) control via MSLD/MSLS keys. */
-	if (asmc_key_read(dev, ASMC_KEY_MSLD, buf, 1) == 0) {
-		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
-		    OID_AUTO, "sil",
-		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
-		    dev, 0, asmc_sil_sysctl, "I",
-		    "Sleep indicator LED (0=off, 1=on)");
-	}
+	asmc_sysctl_add_platform(dev, sysctlctx);
 
 	sc->sc_nfan = asmc_fan_count(dev);
 	if (sc->sc_nfan > ASMC_MAXFANS) {
@@ -1088,27 +1160,14 @@ asmc_detect_capabilities(device_t dev)
 	char type[ASMC_TYPELEN + 1];
 
 	/* SMS: require all keys used by asmc_sms_init() */
-	sc->sc_has_sms =
-	    (asmc_key_getinfo(dev, ASMC_KEY_SMS,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_X,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_Y,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_Z,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_LOW,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_HIGH,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_LOW_INT,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_HIGH_INT,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_SMS_FLAG,
-	    &len, type) == 0 &&
-	    asmc_key_getinfo(dev, ASMC_KEY_INTOK,
-	    &len, type) == 0);
+	sc->sc_has_sms = 1;
+	for (unsigned int k = 0; k < nitems(asmc_sms_required_keys); k++) {
+		if (asmc_key_getinfo(dev, asmc_sms_required_keys[k],
+		    &len, type) != 0) {
+			sc->sc_has_sms = 0;
+			break;
+		}
+	}
 
 	/* Light sensor: require ALV0 (len 6 or 10) and LKSB */
 	if (asmc_key_getinfo(dev, ASMC_KEY_LIGHTLEFT,
@@ -1208,11 +1267,94 @@ asmc_command(device_t dev, uint8_t command)
 	return (1);
 }
 
+/* Push len bytes out the data port, awaiting status after each. */
+static int
+asmc_pio_send(device_t dev, const uint8_t *buf, int len, uint8_t status)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+
+	for (int i = 0; i < len; i++) {
+		ASMC_DATAPORT_WRITE(sc, buf[i]);
+		if (asmc_wait(dev, status))
+			return (1);
+	}
+
+	return (0);
+}
+
+/* Await status then pull each of len bytes from the data port. */
+static int
+asmc_pio_recv(device_t dev, uint8_t *buf, int len, uint8_t status)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+
+	for (int i = 0; i < len; i++) {
+		if (asmc_wait(dev, status))
+			return (1);
+		buf[i] = ASMC_DATAPORT_READ(sc);
+	}
+
+	return (0);
+}
+
+/* Fetch the name of the index'th key; the caller holds sc_mtx. */
+static int
+asmc_pio_getbyindex_locked(device_t dev, int index, uint8_t *key)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+	uint8_t index_buf[ASMC_KEYLEN];
+
+	index_buf[0] = (index >> 24) & 0xff;
+	index_buf[1] = (index >> 16) & 0xff;
+	index_buf[2] = (index >> 8) & 0xff;
+	index_buf[3] = index & 0xff;
+
+	if (asmc_command(dev, ASMC_CMDGETBYINDEX))
+		return (1);
+
+	if (asmc_pio_send(dev, index_buf, ASMC_KEYLEN, ASMC_STATUS_AWAIT_DATA))
+		return (1);
+
+	ASMC_DATAPORT_WRITE(sc, ASMC_KEYLEN);
+
+	return (asmc_pio_recv(dev, key, ASMC_KEYLEN, ASMC_STATUS_DATA_READY));
+}
+
+/* Fetch the raw key info response; the caller holds sc_mtx. */
+static int
+asmc_pio_getinfo_locked(device_t dev, const uint8_t *key, uint8_t *info)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+
+	if (asmc_command(dev, ASMC_CMDGETINFO))
+		return (1);
+
+	if (asmc_pio_send(dev, key, ASMC_KEYLEN, ASMC_STATUS_AWAIT_DATA))
+		return (1);
+
+	ASMC_DATAPORT_WRITE(sc, ASMC_KEYINFO_RESPLEN);
+
+	return (asmc_pio_recv(dev, info, ASMC_KEYINFO_RESPLEN,
+	    ASMC_STATUS_DATA_READY));
+}
+
+/* Split a key info response; type needs ASMC_TYPELEN + 1 bytes. */
+static void
+asmc_keyinfo_decode(const uint8_t *info, uint8_t *len, char *type)
+{
+	if (len != NULL)
+		*len = info[0];
+	if (type != NULL) {
+		memcpy(type, &info[1], ASMC_TYPELEN);
+		type[ASMC_TYPELEN] = '\0';
+	}
+}
+
 static int
 asmc_key_read(device_t dev, const char *key, uint8_t *buf, uint8_t len)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
-	int i, error = 1, try = 0;
+	int error = 1, try = 0;
 
 	if (sc->sc_is_mmio)
 		return (asmc_mmio_key_read(dev, key, buf, len));
@@ -1223,19 +1365,14 @@ begin:
 	if (asmc_command(dev, ASMC_CMDREAD))
 		goto out;
 
-	for (i = 0; i < 4; i++) {
-		ASMC_DATAPORT_WRITE(sc, key[i]);
-		if (asmc_wait(dev, 0x04))
-			goto out;
-	}
+	if (asmc_pio_send(dev, (const uint8_t *)key, ASMC_KEYLEN,
+	    ASMC_STATUS_AWAIT_DATA))
+		goto out;
 
 	ASMC_DATAPORT_WRITE(sc, len);
 
-	for (i = 0; i < len; i++) {
-		if (asmc_wait(dev, 0x05))
-			goto out;
-		buf[i] = ASMC_DATAPORT_READ(sc);
-	}
+	if (asmc_pio_recv(dev, buf, len, ASMC_STATUS_DATA_READY))
+		goto out;
 
 	error = 0;
 out:
@@ -1255,108 +1392,28 @@ out:
 static int
 asmc_key_dump(device_t dev, int number)
 {
-	struct asmc_softc *sc = device_get_softc(dev);
 	char key[ASMC_KEYLEN + 1] = { 0 };
-	char type[ASMC_KEYINFO_RESPLEN + 1] = { 0 };
-	uint8_t index[4];
+	char type[ASMC_TYPELEN + 1] = { 0 };
 	uint8_t v[ASMC_MAXVAL];
-	uint8_t maxlen;
-	int i, error = 1, try = 0;
-
-	if (sc->sc_is_mmio) {
-		uint8_t len = 0;
-		char mmio_type[ASMC_TYPELEN + 1] = { 0 };
-		if (asmc_key_dump_by_index(dev, number, key, mmio_type, &len))
-			return (1);
-		memset(v, 0, sizeof(v));
-		len = MIN(len, sizeof(v));
-		asmc_key_read(dev, key, v, len);
-		struct sbuf sb;
-		char buf[128];
-		sbuf_new(&sb, buf, sizeof(buf), SBUF_FIXEDLEN);
-		sbuf_printf(&sb, "key %d: %s, type %s (len %d), data",
-		    number, key, mmio_type, len);
-		for (i = 0; i < len; i++)
-			sbuf_printf(&sb, " %02x", v[i]);
-		sbuf_finish(&sb);
-		device_printf(dev, "%s\n", sbuf_data(&sb));
-		sbuf_delete(&sb);
-		return (0);
-	}
-
-	mtx_lock_spin(&sc->sc_mtx);
-
-	index[0] = (number >> 24) & 0xff;
-	index[1] = (number >> 16) & 0xff;
-	index[2] = (number >> 8) & 0xff;
-	index[3] = number & 0xff;
-
-begin:
-	if (asmc_command(dev, ASMC_CMDGETBYINDEX))
-		goto out;
-
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		ASMC_DATAPORT_WRITE(sc, index[i]);
-		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
-			goto out;
-	}
-
-	ASMC_DATAPORT_WRITE(sc, ASMC_KEYLEN);
-
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		if (asmc_wait(dev, ASMC_STATUS_DATA_READY))
-			goto out;
-		key[i] = ASMC_DATAPORT_READ(sc);
-	}
-
-	/* Get key info (length + type). */
-	if (asmc_command(dev, ASMC_CMDGETINFO))
-		goto out;
-
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		ASMC_DATAPORT_WRITE(sc, key[i]);
-		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
-			goto out;
-	}
-
-	ASMC_DATAPORT_WRITE(sc, ASMC_KEYINFO_RESPLEN);
-
-	for (i = 0; i < ASMC_KEYINFO_RESPLEN; i++) {
-		if (asmc_wait(dev, ASMC_STATUS_DATA_READY))
-			goto out;
-		type[i] = ASMC_DATAPORT_READ(sc);
-	}
-
-	error = 0;
-out:
-	if (error) {
-		if (++try < ASMC_MAXRETRIES)
-			goto begin;
-		device_printf(dev,
-		    "%s for key %d failed %d times, giving up\n",
-		    __func__, number, try);
-	}
-	mtx_unlock_spin(&sc->sc_mtx);
-
-	if (error)
-		return (error);
-
-	maxlen = type[0];
-	type[0] = ' ';
-	type[5] = '\0';
-	maxlen = MIN(maxlen, sizeof(v));
-
-	memset(v, 0, sizeof(v));
-	error = asmc_key_read(dev, key, v, maxlen);
-	if (error)
-		return (error);
-
 	struct sbuf sb;
 	char buf[128];
+	uint8_t len = 0;
+	int error;
+
+	error = asmc_key_dump_by_index(dev, number, key, type, &len);
+	if (error)
+		return (error);
+
+	len = MIN(len, sizeof(v));
+	memset(v, 0, sizeof(v));
+	error = asmc_key_read(dev, key, v, len);
+	if (error)
+		return (error);
+
 	sbuf_new(&sb, buf, sizeof(buf), SBUF_FIXEDLEN);
-	sbuf_printf(&sb, "key %d: %s, type%s (len %d), data",
-	    number, key, type, maxlen);
-	for (i = 0; i < maxlen; i++)
+	sbuf_printf(&sb, "key %d: %s, type %s (len %d), data",
+	    number, key, type, len);
+	for (int i = 0; i < len; i++)
 		sbuf_printf(&sb, " %02x", v[i]);
 	sbuf_finish(&sb);
 	device_printf(dev, "%s\n", sbuf_data(&sb));
@@ -1376,46 +1433,26 @@ asmc_key_getinfo(device_t dev, const char *key, uint8_t *len, char *type)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
 	uint8_t info[ASMC_KEYINFO_RESPLEN];
-	int i, error = -1, try = 0;
+	int error = -1, try = 0;
 
 	if (sc->sc_is_mmio)
 		return (asmc_mmio_key_getinfo(dev, key, len, type));
 
 	mtx_lock_spin(&sc->sc_mtx);
 
-begin:
-	if (asmc_command(dev, ASMC_CMDGETINFO))
-		goto out;
+	do {
+		if (asmc_pio_getinfo_locked(dev, (const uint8_t *)key,
+		    info) == 0) {
+			error = 0;
+			break;
+		}
+	} while (++try < ASMC_MAXRETRIES);
 
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		ASMC_DATAPORT_WRITE(sc, key[i]);
-		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
-			goto out;
-	}
-
-	ASMC_DATAPORT_WRITE(sc, ASMC_KEYINFO_RESPLEN);
-
-	for (i = 0; i < ASMC_KEYINFO_RESPLEN; i++) {
-		if (asmc_wait(dev, ASMC_STATUS_DATA_READY))
-			goto out;
-		info[i] = ASMC_DATAPORT_READ(sc);
-	}
-
-	error = 0;
-out:
-	if (error && ++try < ASMC_MAXRETRIES)
-		goto begin;
 	mtx_unlock_spin(&sc->sc_mtx);
 
-	if (error == 0) {
-		if (len != NULL)
-			*len = info[0];
-		if (type != NULL) {
-			for (i = 0; i < ASMC_TYPELEN; i++)
-				type[i] = info[i + 1];
-			type[ASMC_TYPELEN] = '\0';
-		}
-	}
+	if (error == 0)
+		asmc_keyinfo_decode(info, len, type);
+
 	return (error);
 }
 
@@ -1654,27 +1691,46 @@ asmc_sensor_sysctl(SYSCTL_HANDLER_ARGS)
 	return (sysctl_handle_int(oidp, &val, 0, req));
 }
 
-/*
- * Scan a range of SMC key indices, adding matching sensors.
- * Only considers 2-byte keys with a supported type.
- */
+static bool
+asmc_match_sp78(const char *key __unused, const char *type)
+{
+
+	return (strncmp(type, "sp78", 4) == 0);
+}
+
+static bool
+asmc_match_supported(const char *key __unused, const char *type)
+{
+
+	return (asmc_sensor_type_supported(type));
+}
+
+static bool
+asmc_match_light(const char *key, const char *type)
+{
+
+	return (key[1] == 'L' && (key[2] == 'V' || key[2] == 'S') &&
+	    asmc_sensor_type_supported(type));
+}
+
+/* Scan key indices for 2-byte keys passing prefix (if set) and match. */
 static void
 asmc_scan_sensor_range(device_t dev, unsigned int start,
-    unsigned int end, char prefix, int *countp, char **sensors,
-    int maxcount)
+    unsigned int end, char prefix,
+    bool (*match)(const char *key, const char *type), int *countp,
+    char **sensors, int maxcount)
 {
 	char key[ASMC_KEYLEN + 1];
 	char type[ASMC_TYPELEN + 1];
 	uint8_t len;
-	unsigned int i;
 	char *sensor_key;
 
-	for (i = start; i < end; i++) {
+	for (unsigned int i = start; i < end; i++) {
 		if (asmc_key_dump_by_index(dev, i, key, type, &len))
 			continue;
-		if (key[0] != prefix || len != 2)
+		if (len != 2 || (prefix != '\0' && key[0] != prefix))
 			continue;
-		if (!asmc_sensor_type_supported(type))
+		if (!match(key, type))
 			continue;
 		if (*countp >= maxcount)
 			break;
@@ -1691,12 +1747,8 @@ asmc_detect_sensors(device_t dev)
 	struct asmc_softc *sc = device_get_softc(dev);
 	struct sysctl_ctx_list *sysctlctx;
 	struct sysctl_oid *tree_node;
-	char key[ASMC_KEYLEN + 1];
-	char type[ASMC_TYPELEN + 1];
-	uint8_t len;
 	unsigned int start, end, i;
 	int error;
-	char *sensor_key;
 
 	sc->sc_voltage_count = 0;
 	sc->sc_current_count = 0;
@@ -1714,23 +1766,9 @@ asmc_detect_sensors(device_t dev)
 	error = asmc_key_search(dev, "T\0\0\0", &start);
 	if (error == 0)
 		error = asmc_key_search(dev, "U\0\0\0", &end);
-	if (error == 0) {
-		for (i = start; i < end; i++) {
-			if (asmc_key_dump_by_index(dev, i,
-			    key, type, &len))
-				continue;
-			if (len != 2 ||
-			    strncmp(type, "sp78", 4) != 0)
-				continue;
-			if (sc->sc_temp_count >= ASMC_TEMP_MAX)
-				break;
-			sensor_key = malloc(ASMC_KEYLEN + 1,
-			    M_DEVBUF, M_WAITOK);
-			memcpy(sensor_key, key, ASMC_KEYLEN + 1);
-			sc->sc_temp_sensors[sc->sc_temp_count++] =
-			    sensor_key;
-		}
-	}
+	if (error == 0)
+		asmc_scan_sensor_range(dev, start, end, '\0', asmc_match_sp78,
+		    &sc->sc_temp_count, sc->sc_temp_sensors, ASMC_TEMP_MAX);
 
 	/* Voltage/Current/Power sensors */
 	static const struct {
@@ -1759,34 +1797,19 @@ asmc_detect_sensors(device_t dev)
 			    sensor_ranges[r].range_end, &end);
 		if (error == 0)
 			asmc_scan_sensor_range(dev, start, end,
-			    sensor_ranges[r].prefix, sensor_counts[r],
-			    sensor_arrays[r], ASMC_MAX_SENSORS);
+			    sensor_ranges[r].prefix, asmc_match_supported,
+			    sensor_counts[r], sensor_arrays[r],
+			    ASMC_MAX_SENSORS);
 	}
 
 	/* Ambient light sensors: AL* in A..B range */
 	error = asmc_key_search(dev, "A\0\0\0", &start);
 	if (error == 0)
 		error = asmc_key_search(dev, "B\0\0\0", &end);
-	if (error == 0) {
-		for (i = start; i < end; i++) {
-			if (asmc_key_dump_by_index(dev, i,
-			    key, type, &len))
-				continue;
-			if (key[0] != 'A' || key[1] != 'L' ||
-			    (key[2] != 'V' && key[2] != 'S') ||
-			    len != 2)
-				continue;
-			if (!asmc_sensor_type_supported(type))
-				continue;
-			if (sc->sc_light_count >= ASMC_MAX_SENSORS)
-				break;
-			sensor_key = malloc(ASMC_KEYLEN + 1,
-			    M_DEVBUF, M_WAITOK);
-			memcpy(sensor_key, key, ASMC_KEYLEN + 1);
-			sc->sc_light_sensors[sc->sc_light_count++] =
-			    sensor_key;
-		}
-	}
+	if (error == 0)
+		asmc_scan_sensor_range(dev, start, end, 'A', asmc_match_light,
+		    &sc->sc_light_count, sc->sc_light_sensors,
+		    ASMC_MAX_SENSORS);
 
 	if (bootverbose)
 		device_printf(dev,
@@ -1853,11 +1876,9 @@ asmc_key_dump_by_index(device_t dev, int index, char *key_out,
     char *type_out, uint8_t *len_out)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
-	uint8_t index_buf[ASMC_KEYLEN];
 	uint8_t key_buf[ASMC_KEYLEN];
 	uint8_t info_buf[ASMC_KEYINFO_RESPLEN];
 	int error = ENXIO, try = 0;
-	int i;
 
 	if (sc->sc_is_mmio) {
 		error = asmc_mmio_key_getbyindex(dev, index, key_out);
@@ -1869,61 +1890,24 @@ asmc_key_dump_by_index(device_t dev, int index, char *key_out,
 
 	mtx_lock_spin(&sc->sc_mtx);
 
-	index_buf[0] = (index >> 24) & 0xff;
-	index_buf[1] = (index >> 16) & 0xff;
-	index_buf[2] = (index >> 8) & 0xff;
-	index_buf[3] = index & 0xff;
+	do {
+		if (asmc_pio_getbyindex_locked(dev, index, key_buf) == 0 &&
+		    asmc_pio_getinfo_locked(dev, key_buf, info_buf) == 0) {
+			error = 0;
+			break;
+		}
+	} while (++try < ASMC_MAXRETRIES);
 
-begin:
-	if (asmc_command(dev, ASMC_CMDGETBYINDEX))
-		goto out;
+	mtx_unlock_spin(&sc->sc_mtx);
 
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		ASMC_DATAPORT_WRITE(sc, index_buf[i]);
-		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
-			goto out;
-	}
-
-	ASMC_DATAPORT_WRITE(sc, ASMC_KEYLEN);
-
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		if (asmc_wait(dev, ASMC_STATUS_DATA_READY))
-			goto out;
-		key_buf[i] = ASMC_DATAPORT_READ(sc);
-	}
-
-	if (asmc_command(dev, ASMC_CMDGETINFO))
-		goto out;
-
-	for (i = 0; i < ASMC_KEYLEN; i++) {
-		ASMC_DATAPORT_WRITE(sc, key_buf[i]);
-		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
-			goto out;
-	}
-
-	ASMC_DATAPORT_WRITE(sc, ASMC_KEYINFO_RESPLEN);
-
-	for (i = 0; i < ASMC_KEYINFO_RESPLEN; i++) {
-		if (asmc_wait(dev, ASMC_STATUS_DATA_READY))
-			goto out;
-		info_buf[i] = ASMC_DATAPORT_READ(sc);
-	}
+	if (error != 0)
+		return (error);
 
 	memcpy(key_out, key_buf, ASMC_KEYLEN);
 	key_out[ASMC_KEYLEN] = '\0';
-	*len_out = info_buf[0];
-	memcpy(type_out, &info_buf[1], ASMC_TYPELEN);
-	type_out[ASMC_TYPELEN] = '\0';
-	error = 0;
+	asmc_keyinfo_decode(info_buf, len_out, type_out);
 
-out:
-	if (error) {
-		if (++try < ASMC_MAXRETRIES)
-			goto begin;
-	}
-
-	mtx_unlock_spin(&sc->sc_mtx);
-	return (error);
+	return (0);
 }
 
 /*
@@ -1974,17 +1958,16 @@ begin:
 		goto out;
 
 	ASMC_DPRINTF(("data port: key\n"));
-	for (i = 0; i < 4; i++) {
-		ASMC_DATAPORT_WRITE(sc, key[i]);
-		if (asmc_wait(dev, 0x04))
-			goto out;
-	}
+	if (asmc_pio_send(dev, (const uint8_t *)key, ASMC_KEYLEN,
+	    ASMC_STATUS_AWAIT_DATA))
+		goto out;
+
 	ASMC_DPRINTF(("data port: length\n"));
 	ASMC_DATAPORT_WRITE(sc, len);
 
 	ASMC_DPRINTF(("data port: buffer\n"));
 	for (i = 0; i < len; i++) {
-		if (asmc_wait(dev, 0x04))
+		if (asmc_wait(dev, ASMC_STATUS_AWAIT_DATA))
 			goto out;
 		ASMC_DATAPORT_WRITE(sc, buf[i]);
 	}
@@ -2098,12 +2081,20 @@ static int
 asmc_mb_sysctl_fanspeed(SYSCTL_HANDLER_ARGS)
 {
 	device_t dev = (device_t)arg1;
-	int fan = arg2;
+	int which = ASMC_FAN_ARG2_WHICH(arg2);
+	int fan = ASMC_FAN_ARG2_FAN(arg2);
 	int error;
 	int32_t v;
 
-	v = asmc_fan_getvalue(dev, ASMC_KEY_FANSPEED, fan);
+	v = asmc_fan_getvalue(dev, asmc_fan_speed_keys[which].key, fan);
 	error = sysctl_handle_int(oidp, &v, 0, req);
+
+	if (error == 0 && req->newptr != NULL &&
+	    asmc_fan_speed_keys[which].writable) {
+		unsigned int newspeed = v;
+		asmc_fan_setvalue(dev, asmc_fan_speed_keys[which].key, fan,
+		    newspeed);
+	}
 
 	return (error);
 }
@@ -2113,7 +2104,7 @@ asmc_mb_sysctl_fanid(SYSCTL_HANDLER_ARGS)
 {
 	uint8_t buf[16];
 	device_t dev = (device_t)arg1;
-	int fan = arg2;
+	int fan = ASMC_FAN_ARG2_FAN(arg2);
 	int error = true;
 	char *desc;
 
@@ -2126,82 +2117,11 @@ asmc_mb_sysctl_fanid(SYSCTL_HANDLER_ARGS)
 }
 
 static int
-asmc_mb_sysctl_fansafespeed(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int fan = arg2;
-	int error;
-	int32_t v;
-
-	v = asmc_fan_getvalue(dev, ASMC_KEY_FANSAFESPEED, fan);
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	return (error);
-}
-
-static int
-asmc_mb_sysctl_fanminspeed(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int fan = arg2;
-	int error;
-	int32_t v;
-
-	v = asmc_fan_getvalue(dev, ASMC_KEY_FANMINSPEED, fan);
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	if (error == 0 && req->newptr != NULL) {
-		unsigned int newspeed = v;
-		asmc_fan_setvalue(dev, ASMC_KEY_FANMINSPEED, fan, newspeed);
-	}
-
-	return (error);
-}
-
-static int
-asmc_mb_sysctl_fanmaxspeed(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int fan = arg2;
-	int error;
-	int32_t v;
-
-	v = asmc_fan_getvalue(dev, ASMC_KEY_FANMAXSPEED, fan);
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	if (error == 0 && req->newptr != NULL) {
-		unsigned int newspeed = v;
-		asmc_fan_setvalue(dev, ASMC_KEY_FANMAXSPEED, fan, newspeed);
-	}
-
-	return (error);
-}
-
-static int
-asmc_mb_sysctl_fantargetspeed(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int fan = arg2;
-	int error;
-	int32_t v;
-
-	v = asmc_fan_getvalue(dev, ASMC_KEY_FANTARGETSPEED, fan);
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	if (error == 0 && req->newptr != NULL) {
-		unsigned int newspeed = v;
-		asmc_fan_setvalue(dev, ASMC_KEY_FANTARGETSPEED, fan, newspeed);
-	}
-
-	return (error);
-}
-
-static int
 asmc_mb_sysctl_fanmanual(SYSCTL_HANDLER_ARGS)
 {
 	device_t dev = (device_t)arg1;
 	struct asmc_softc *sc = device_get_softc(dev);
-	int fan = arg2;
+	int fan = ASMC_FAN_ARG2_FAN(arg2);
 	int error;
 	int32_t v;
 	uint8_t buf[2];
@@ -2417,14 +2337,14 @@ asmc_sms_task(void *arg, int pending)
 }
 
 static int
-asmc_mb_sysctl_sms_x(SYSCTL_HANDLER_ARGS)
+asmc_mb_sysctl_sms(SYSCTL_HANDLER_ARGS)
 {
 	device_t dev = (device_t)arg1;
 	int error;
 	int16_t val;
 	int32_t v;
 
-	asmc_sms_read(dev, ASMC_KEY_SMS_X, &val);
+	asmc_sms_read(dev, asmc_sms_sysctls[arg2].key, &val);
 	v = (int32_t)val;
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
@@ -2432,59 +2352,14 @@ asmc_mb_sysctl_sms_x(SYSCTL_HANDLER_ARGS)
 }
 
 static int
-asmc_mb_sysctl_sms_y(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int error;
-	int16_t val;
-	int32_t v;
-
-	asmc_sms_read(dev, ASMC_KEY_SMS_Y, &val);
-	v = (int32_t)val;
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	return (error);
-}
-
-static int
-asmc_mb_sysctl_sms_z(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	int error;
-	int16_t val;
-	int32_t v;
-
-	asmc_sms_read(dev, ASMC_KEY_SMS_Z, &val);
-	v = (int32_t)val;
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	return (error);
-}
-
-static int
-asmc_mbp_sysctl_light_left(SYSCTL_HANDLER_ARGS)
+asmc_mbp_sysctl_light(SYSCTL_HANDLER_ARGS)
 {
 	device_t dev = (device_t)arg1;
 	uint8_t buf[6];
 	int error;
 	int32_t v;
 
-	asmc_key_read(dev, ASMC_KEY_LIGHTLEFT, buf, sizeof(buf));
-	v = buf[2];
-	error = sysctl_handle_int(oidp, &v, 0, req);
-
-	return (error);
-}
-
-static int
-asmc_mbp_sysctl_light_right(SYSCTL_HANDLER_ARGS)
-{
-	device_t dev = (device_t)arg1;
-	uint8_t buf[6];
-	int error;
-	int32_t v;
-
-	asmc_key_read(dev, ASMC_KEY_LIGHTRIGHT, buf, sizeof(buf));
+	asmc_key_read(dev, asmc_light_keys[arg2], buf, sizeof(buf));
 	v = buf[2];
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
@@ -2500,15 +2375,15 @@ asmc_mbp_sysctl_light_control(SYSCTL_HANDLER_ARGS)
 	int error;
 	int v;
 
-	v = light_control;
+	v = sc->sc_light_control;
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
 	if (error == 0 && req->newptr != NULL) {
 		if (v < 0 || v > 255)
 			return (EINVAL);
-		light_control = v;
+		sc->sc_light_control = v;
 		sc->sc_kbd_bkl_level = v * 100 / 255;
-		buf[0] = light_control;
+		buf[0] = sc->sc_light_control;
 		buf[1] = 0x00;
 		asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
 	}
@@ -2613,8 +2488,8 @@ asmc_backlight_update_status(device_t dev, struct backlight_props *props)
 	uint8_t buf[2];
 
 	sc->sc_kbd_bkl_level = props->brightness;
-	light_control = props->brightness * 255 / 100;
-	buf[0] = light_control;
+	sc->sc_light_control = props->brightness * 255 / 100;
+	buf[0] = sc->sc_light_control;
 	buf[1] = 0x00;
 	asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
 

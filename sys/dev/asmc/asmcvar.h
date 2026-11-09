@@ -64,14 +64,13 @@ struct asmc_softc {
 	uint8_t			sc_sms_intr_works;
 	struct cdev		*sc_kbd_bkl;
 	uint32_t		sc_kbd_bkl_level;
-#ifdef ASMC_DEBUG
-	/* Raw key access */
+	unsigned int		sc_light_control;
+	/* Raw key access; only used when built with ASMC_DEBUG */
 	struct sysctl_oid	*sc_raw_tree;
 	char			sc_rawkey[ASMC_KEYLEN + 1];
 	uint8_t			sc_rawval[ASMC_MAXVAL];
 	uint8_t			sc_rawlen;
 	char			sc_rawtype[ASMC_TYPELEN + 1];
-#endif
 	/* Voltage/Current/Power/Light sensors */
 	char			*sc_voltage_sensors[ASMC_MAX_SENSORS];
 	int			sc_voltage_count;

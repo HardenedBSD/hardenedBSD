@@ -452,6 +452,14 @@ link_elf_link_preload(linker_class_t cls, const char *filename,
 	symtabindex = -1;
 	symstrindex = -1;
 	for (i = 0; i < hdr->e_shnum; i++) {
+		if ((shdr[i].sh_type == SHT_REL ||
+		    shdr[i].sh_type == SHT_RELA) &&
+		    shdr[i].sh_info >= hdr->e_shnum) {
+			link_elf_error(filename,
+			    "file has an invalid relocation section");
+			error = ENOEXEC;
+			goto out;
+		}
 		switch (shdr[i].sh_type) {
 		case SHT_PROGBITS:
 		case SHT_NOBITS:
@@ -896,6 +904,14 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 	for (i = 0; i < hdr->e_shnum; i++) {
 		if (shdr[i].sh_size == 0)
 			continue;
+		if ((shdr[i].sh_type == SHT_REL ||
+		    shdr[i].sh_type == SHT_RELA) &&
+		    shdr[i].sh_info >= hdr->e_shnum) {
+			link_elf_error(filename,
+			    "file has an invalid relocation section");
+			error = ENOEXEC;
+			goto out;
+		}
 		switch (shdr[i].sh_type) {
 		case SHT_PROGBITS:
 		case SHT_NOBITS:
@@ -943,7 +959,7 @@ link_elf_load_file(linker_class_t cls, const char *filename,
 		error = ENOEXEC;
 		goto out;
 	}
-	if (symstrindex < 0 || symstrindex > hdr->e_shnum ||
+	if (symstrindex < 0 || symstrindex >= hdr->e_shnum ||
 	    shdr[symstrindex].sh_type != SHT_STRTAB) {
 		link_elf_error(filename, "file has invalid symbol strings");
 		error = ENOEXEC;
@@ -1398,12 +1414,16 @@ link_elf_unload_file(linker_file_t file)
 		return;
 	}
 
-	for (i = 0; i < ef->nreltab; i++)
-		free(ef->reltab[i].rel, M_LINKER);
-	for (i = 0; i < ef->nrelatab; i++)
-		free(ef->relatab[i].rela, M_LINKER);
-	free(ef->reltab, M_LINKER);
-	free(ef->relatab, M_LINKER);
+	if (ef->reltab != NULL) {
+		for (i = 0; i < ef->nreltab; i++)
+			free(ef->reltab[i].rel, M_LINKER);
+		free(ef->reltab, M_LINKER);
+	}
+	if (ef->relatab != NULL) {
+		for (i = 0; i < ef->nrelatab; i++)
+			free(ef->relatab[i].rela, M_LINKER);
+		free(ef->relatab, M_LINKER);
+	}
 	free(ef->progtab, M_LINKER);
 
 	if (ef->object != NULL)
