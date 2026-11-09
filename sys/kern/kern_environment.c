@@ -210,7 +210,6 @@ kern_kenv(struct thread *td, int what, const char *namep, char *u_val,
 
 	error = 0;
 
-<<<<<<< HEAD
 #ifdef PAX_HARDENING
 	/*
 	 * 2021-07-19 shawn.webb:
@@ -222,7 +221,7 @@ kern_kenv(struct thread *td, int what, const char *namep, char *u_val,
 	 * Even though we do the same exact switch as below, we want
 	 * to do this one just as a permissions check.
 	 */
-	switch (uap->what) {
+	switch (what) {
 	case KENV_DUMP:
 		error = priv_check(td, PRIV_KENV_DUMP);
 		if (error)
@@ -246,10 +245,7 @@ kern_kenv(struct thread *td, int what, const char *namep, char *u_val,
 	}
 #endif
 
-	switch (uap->what) {
-=======
 	switch (what) {
->>>>>>> rad/freebsd/current/main
 	case KENV_DUMP:
 		error = kenv_read_allowed(td, what);
 		if (error)

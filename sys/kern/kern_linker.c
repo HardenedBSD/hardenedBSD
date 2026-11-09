@@ -1624,18 +1624,10 @@ kern_kldsym(struct thread *td, int fileid, int cmd, const char *symname,
 		return (error);
 #endif
 
-<<<<<<< HEAD
 	error = priv_check(td, PRIV_KLD_STAT);
 	if (error != 0)
 		return (error);
 
-	if ((error = copyin(uap->data, &lookup, sizeof(lookup))) != 0)
-		return (error);
-	if (lookup.version != sizeof(lookup) ||
-	    uap->cmd != KLDSYM_LOOKUP)
-		return (EINVAL);
-=======
->>>>>>> rad/freebsd/current/main
 	symstr = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
 	if ((error = copyinstr(symname, symstr, MAXPATHLEN, NULL)) != 0)
 		goto out;
@@ -1646,41 +1638,28 @@ kern_kldsym(struct thread *td, int fileid, int cmd, const char *symname,
 			error = ENOENT;
 		else if (LINKER_LOOKUP_SYMBOL(lf, symstr, &sym) == 0 &&
 		    LINKER_SYMBOL_VALUES(lf, sym, &symval) == 0) {
-<<<<<<< HEAD
 #ifdef HARDEN_KLD
-			lookup.symvalue = (uintptr_t) NULL;
-			lookup.symsize = 0;
+			*symvalue = (uintptr_t)NULL;
+			*symsize = 0;
 #else
-			lookup.symvalue = (uintptr_t) symval.value;
-			lookup.symsize = symval.size;
-#endif
-			error = copyout(&lookup, uap->data, sizeof(lookup));
-=======
 			*symvalue = (uintptr_t)symval.value;
 			*symsize = symval.size;
+#endif
 			error = 0;
->>>>>>> rad/freebsd/current/main
 		} else
 			error = ENOENT;
 	} else {
 		TAILQ_FOREACH(lf, &linker_files, link) {
 			if (LINKER_LOOKUP_SYMBOL(lf, symstr, &sym) == 0 &&
 			    LINKER_SYMBOL_VALUES(lf, sym, &symval) == 0) {
-<<<<<<< HEAD
 #ifdef HARDEN_KLD
-				lookup.symvalue = (uintptr_t)NULL;
-				lookup.symsize = 0;
+				*symvalue = (uintptr_t)NULL;
+				*symsize = 0;
 #else
-				lookup.symvalue = (uintptr_t)symval.value;
-				lookup.symsize = symval.size;
-#endif
-				error = copyout(&lookup, uap->data,
-				    sizeof(lookup));
-=======
 				*symvalue = (uintptr_t)symval.value;
 				*symsize = symval.size;
+#endif
 				error = 0;
->>>>>>> rad/freebsd/current/main
 				break;
 			}
 		}
