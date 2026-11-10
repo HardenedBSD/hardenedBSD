@@ -2274,7 +2274,8 @@ void	nvme_ns_resv_report_cmd(struct nvme_command *cmd, uint32_t nsid,
 {
 	cmd->opc = NVME_OPC_RESERVATION_REPORT;
 	cmd->nsid = htole32(nsid);
-	cmd->cdw10 = htole32(length);
+	/* NUMD is a 0's based count of dwords; length is in bytes. */
+	cmd->cdw10 = htole32(length / 4 - 1);
 	cmd->cdw11 = htole32(report_type);
 }
 
@@ -2315,15 +2316,16 @@ void	nvme_admin_format_cmd(struct nvme_command *cmd, uint32_t nsid,
 {
 	cmd->opc = NVME_OPC_FORMAT_NVM;
 	cmd->nsid = htole32(nsid);
-	cmd->cdw10 = htole32((ses << 9) | (pil << 8) | (pi << 5) | (mset << 4) |
-			      lbaf);
+	cmd->cdw10 = htole32(((lbaf & 0x30) << 8) | ((ses & 0x7) << 9) |
+	    ((pil & 0x1) << 8) | ((pi & 0x7) << 5) | ((mset & 0x1) << 4) |
+	    (lbaf & 0x0f));
 }
 
 static inline
 void	nvme_admin_get_feature_cmd(struct nvme_command *cmd, uint32_t nsid,
     int sel, uint8_t feature, uint32_t cdw11, int uuid_idx) {
 	cmd->opc = NVME_OPC_GET_FEATURES;
-	cmd->nsid = nsid;
+	cmd->nsid = htole32(nsid);
 	cmd->cdw10 = htole32(((sel & 0x7) << 8) | feature);
 	cmd->cdw11 = htole32(cdw11);
 	cmd->cdw14 = htole32(uuid_idx & 0x7f);
@@ -2336,7 +2338,7 @@ void	nvme_admin_set_feature_cmd(struct nvme_command *cmd, uint32_t nsid,
     uint32_t cdw13, uint32_t cdw14, uint32_t cdw15)
 {
 	cmd->opc = NVME_OPC_SET_FEATURES;
-	cmd->nsid = nsid;
+	cmd->nsid = htole32(nsid);
 	cmd->cdw10 = htole32(((sv & 0x1) << 31) | feature);
 	cmd->cdw11 = htole32(cdw11);
 	cmd->cdw12 = htole32(cdw12);
