@@ -35,11 +35,8 @@
 #include <sys/malloc.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
-<<<<<<< HEAD
 #include <sys/priv.h>
-=======
 #include <sys/sysproto.h>
->>>>>>> rad/freebsd/current/main
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -474,16 +471,12 @@ kern_modstat(struct thread *td, int modid, struct module_stat *stat)
 int
 sys_modfind(struct thread *td, struct modfind_args *uap)
 {
-<<<<<<< HEAD
-=======
 	return (kern_modfind(td, uap->name));
 }
 
 int
 kern_modfind(struct thread *td, const char *uname)
 {
-	int error = 0;
->>>>>>> rad/freebsd/current/main
 	char name[MAXMODNAMEV3];
 	module_t mod;
 	int error;
