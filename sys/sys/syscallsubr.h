@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 
 struct __wrusage;
+struct acl;
 struct cpuset_copy_cb;
 struct ffclock_estimate;
 struct file;
@@ -120,6 +121,20 @@ typedef int (copyinuio_t)(const void *iovp, unsigned int iovcnt,
 typedef int (updateiov_t)(const struct uio *uiop, void *iovp);
 
 uint64_t at2cnpflags(u_int at_flags, u_int mask);
+int	kern___acl_aclcheck_fd(struct thread *td, int filedes,
+	    __acl_type_t type, const struct acl *aclp);
+int	kern___acl_aclcheck_path(struct thread *td, const char *path,
+	    __acl_type_t type, struct acl *aclp, int follow);
+int	kern___acl_delete_path(struct thread *td, const char *path,
+	    __acl_type_t type, int follow);
+int	kern___acl_get_fd(struct thread *td, int filedes, __acl_type_t type,
+	    struct acl *aclp);
+int	kern___acl_get_path(struct thread *td, const char *path,
+	    __acl_type_t type, struct acl *aclp, int follow);
+int	kern___acl_set_fd(struct thread *td, int filedes, __acl_type_t type,
+	    const struct acl *aclp);
+int	kern___acl_set_path(struct thread *td, const char *path,
+	    __acl_type_t type, const struct acl *aclp, int follow);
 int	kern___cap_rights_get(struct thread *td, int version, int fd,
 	    cap_rights_t *rightsp);
 int	kern___getcwd(struct thread *td, char *buf, enum uio_seg bufseg,
@@ -378,6 +393,7 @@ int	kern_pathconf(struct thread *td, const char *path,
 int	kern_pdfork(struct thread *td, int *fdp, int flags);
 int	kern_pipe(struct thread *td, int fildes[2], int flags,
 	    struct filecaps *fcaps1, struct filecaps *fcaps2);
+int	kern_pipe2(struct thread *td, int *ufildes, int flags);
 int	kern_poll(struct thread *td, struct pollfd *fds, u_int nfds,
 	    struct timespec *tsp, sigset_t *uset);
 int	kern_poll_kfds(struct thread *td, struct pollfd *fds, u_int nfds,
@@ -419,6 +435,8 @@ int	kern_rctl_remove_rule(struct thread *td, const void *inbufp,
 int	kern_readlinkat(struct thread *td, int fd, const char *path,
 	    enum uio_seg pathseg, char *buf, enum uio_seg bufseg, size_t count);
 int	kern_readv(struct thread *td, int fd, struct uio *auio);
+int	kern_recvfrom(struct thread *td, int s, void *buf, size_t len,
+	    int flags, struct sockaddr *from, socklen_t *fromlenaddr);
 int	kern_recvit(struct thread *td, int s, struct msghdr *mp,
 	    enum uio_seg fromseg, struct mbuf **controlp);
 int	kern_renameat(struct thread *td, int fromfd, const char *from,
@@ -474,6 +492,9 @@ int	kern_shm_open2(struct thread *td, const char *path, int flags,
 	    const char *name, struct shmfd *shmfd);
 int	kern_shmat(struct thread *td, int shmid, const void *shmaddr,
 	    int shmflg);
+int	kern_shm_rename(struct thread *td, const char *path_from_p,
+	    const char *path_to_p, int flags);
+int	kern_shm_unlink(struct thread *td, const char *userpath);
 int	kern_shmctl(struct thread *td, int shmid, int cmd, void *buf,
 	    size_t *bufsz);
 int	kern_shutdown(struct thread *td, int s, int how);
@@ -544,12 +565,20 @@ int	kern_unmount(struct thread *td, const char *path, uint64_t flags);
 
 int	user___specialfd(struct thread *td, int type, const void *req,
 	    size_t len);
+int	user_accept(struct thread *td, int s, struct sockaddr *uname,
+	    socklen_t *anamelen, int flags);
+int	user_bind(struct thread *td, int s, const struct sockaddr *name,
+	    socklen_t namelen);
+int	user_bindat(struct thread *td, int fd, int s,
+	    const struct sockaddr *name, socklen_t namelen);
 int	user_cap_ioctls_limit(struct thread *td, int fd, const u_long *ucmds,
 	    size_t ncmds);
 int	user_cap_rights_limit(struct thread *td, int fd, cap_rights_t *rightsp);
 int	user_clock_nanosleep(struct thread *td, clockid_t clock_id,
 	    int flags, const struct timespec *ua_rqtp,
 	    struct timespec *ua_rmtp);
+int	user_connectat(struct thread *td, int fd, int s,
+	    const struct sockaddr *name, socklen_t namelen);
 int	user_cpuset_getaffinity(struct thread *td, cpulevel_t level,
 	    cpuwhich_t which, id_t id, size_t cpusetsize, cpuset_t *maskp,
 	    const struct cpuset_copy_cb *cb);
@@ -560,8 +589,14 @@ int	user_fspacectl(struct thread *td, int fd, int cmd,
 	    const struct spacectl_range *rqsrp, int flags,
 	    struct spacectl_range *rmsrp);
 int	user_fstat(struct thread *td, int fd, struct stat *sb);
+int	user_getpeername(struct thread *td, int fdes, struct sockaddr *asa,
+	    socklen_t *alen, bool compat);
 int	user_getrlimitusage(struct thread *td, u_int which, int flags,
 	    rlim_t *ures);
+int	user_getsockname(struct thread *td, int fdes, struct sockaddr *asa,
+	    socklen_t *alen, bool compat);
+int	user_getsockopt(struct thread *td, int s, int level, int name,
+	    void *val, socklen_t *avalsize);
 int	user_ioctl(struct thread *td, int fd, u_long ucom, void *udata,
 	    void *datap);
 int	user_jail_get(struct thread *td, struct iovec *iovp,
@@ -570,6 +605,7 @@ int	user_jail_get(struct thread *td, struct iovec *iovp,
 int	user_jail_set(struct thread *td, struct iovec *iovp,
 	    unsigned int iovcnt, int flags, copyinuio_t *copyinuio_f);
 int	user_kldload(struct thread *td, const char *file);
+int	user_pdgetpid(struct thread *td, int fd, pid_t *pidp);
 int	user_poll(struct thread *td, struct pollfd *fds, u_int nfds,
 	    int timeout);
 int	user_ppoll(struct thread *td, struct pollfd *fds, u_int nfds,
@@ -593,6 +629,9 @@ int	user_sched_setscheduler(struct thread *td, pid_t pid, int policy,
 	    const struct sched_param *param);
 int	user_select(struct thread *td, int nd, fd_set *in, fd_set *ou,
 	    fd_set *ex, struct timeval *utv);
+int	user_sendit(struct thread *td, int s, struct msghdr *mp, int flags);
+int	user_sendto(struct thread *td, int s, const char *buf, size_t len,
+	    int flags, const struct sockaddr *to, socklen_t tolen);
 int	user_setgroups(struct thread *td, int gidsetsize, const gid_t *gidset);
 int	user_settimeofday(struct thread *td, const struct timeval *tv,
 	    const struct timezone *tz);
@@ -605,6 +644,8 @@ int	user_sigtimedwait(struct thread *td, const sigset_t *uset, void *info,
 int	user_sigwait(struct thread *td, const sigset_t *uset, int *usig);
 int	user_sigwaitinfo(struct thread *td, const sigset_t *uset, void *info,
 	    copyout_siginfo_t *copyout_siginfop);
+int	user_socketpair(struct thread *td, int domain, int type, int protocol,
+	    int *rsv);
 int	user_uuidgen(struct thread *td, struct uuid *ustore, int count);
 int	user_wait6(struct thread *td, enum idtype idtype, id_t id,
 	    int *statusp, int options, struct __wrusage *wrusage,
