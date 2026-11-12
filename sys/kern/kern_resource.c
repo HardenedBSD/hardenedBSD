@@ -339,6 +339,11 @@ kern_rtprio_thread(struct thread *td, int function, lwpid_t lwpid,
 		p = td->td_proc;
 		td1 = td;
 		PROC_LOCK(p);
+	} else if (IN_CAPABILITY_MODE(td)) {
+		td1 = tdfind(lwpid, td->td_proc->p_pid);
+		if (td1 == NULL)
+			return (ECAPMODE);
+		p = td1->td_proc;
 	} else {
 		td1 = tdfind(lwpid, -1);
 		if (td1 == NULL)
@@ -426,6 +431,8 @@ kern_rtprio(struct thread *td, int function, pid_t pid, struct rtprio *urtp)
 		p = td->td_proc;
 		PROC_LOCK(p);
 	} else {
+		if (IN_CAPABILITY_MODE(td) && pid != td->td_proc->p_pid)
+			return (ECAPMODE);
 		p = pfind(pid);
 		if (p == NULL)
 			return (ESRCH);
