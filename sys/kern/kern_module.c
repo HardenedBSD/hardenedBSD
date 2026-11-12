@@ -430,25 +430,15 @@ int
 kern_modstat(struct thread *td, int modid, struct module_stat *stat)
 {
 	module_t mod;
-<<<<<<< HEAD
-	modspecific_t data;
-	int error;
-	int id, namelen, refs, version;
-	struct module_stat_v2 *stat_v2;
-	char *name, *user_namep;
-	bool is_v1v2;
+	int error = 0;
+	int version;
+	void *statbuf;
 
 	error = priv_check(td, PRIV_KLD_STAT);
 	if (error)
 		return (error);
 
-=======
-	int error = 0;
-	int version;
-	void *statbuf;
-
 	/* Look up first to preserve historic error priority */
->>>>>>> rad/freebsd/current/main
 	MOD_SLOCK;
 	mod = module_lookupbyid(modid);
 	MOD_SUNLOCK;

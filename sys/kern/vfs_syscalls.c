@@ -322,13 +322,8 @@ user_statfs(struct thread *td, const char *path, struct statfs *buf)
 	struct statfs *sfp;
 	int error;
 
-<<<<<<< HEAD
 	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
-	error = kern_statfs(td, uap->path, UIO_USERSPACE, sfp);
-=======
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
 	error = kern_statfs(td, path, UIO_USERSPACE, sfp);
->>>>>>> rad/freebsd/current/main
 	if (error == 0)
 		error = copyout(sfp, buf, sizeof(struct statfs));
 	free(sfp, M_STATFS);
@@ -374,13 +369,8 @@ user_fstatfs(struct thread *td, int fd, struct statfs *buf)
 	struct statfs *sfp;
 	int error;
 
-<<<<<<< HEAD
 	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK | M_ZERO);
-	error = kern_fstatfs(td, uap->fd, sfp);
-=======
-	sfp = malloc(sizeof(struct statfs), M_STATFS, M_WAITOK);
 	error = kern_fstatfs(td, fd, sfp);
->>>>>>> rad/freebsd/current/main
 	if (error == 0)
 		error = copyout(sfp, buf, sizeof(struct statfs));
 	free(sfp, M_STATFS);
