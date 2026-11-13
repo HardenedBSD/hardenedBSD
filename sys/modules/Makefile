@@ -673,7 +673,7 @@ _genet=		genet
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "aarch64" || \
-	${MACHINE_ARCH:Mpowerpc64*}
+	${MACHINE_ARCH:Mpowerpc64*} != ""
 _ice=		ice
 .if ${MK_SOURCELESS_UCODE} != "no"
 _ice_ddp=	ice_ddp
@@ -683,6 +683,7 @@ _ice_ddp=	ice_ddp
 _irdma=		irdma
 .endif
 .endif
+_ixl=		ixl
 .endif
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm" || \
@@ -921,7 +922,6 @@ _ffec=		ffec
 .endif
 
 .if ${MACHINE_ARCH:Mpowerpc64*} != ""
-_ixl=		ixl
 _nvram=		opal_nvram
 .endif
 
