@@ -466,7 +466,7 @@ static struct axp8xx_regdef axp8xx_common_regdefs[] = {
 		.voltage_min = 800,
 		.voltage_max = 1840,
 		.voltage_step1 = 10,
-		.voltage_nstep1 = 42,
+		.voltage_nstep1 = 32,
 		.voltage_step2 = 20,
 		.voltage_nstep2 = 36,
 	},
@@ -899,10 +899,11 @@ axp8xx_regnode_enable(struct regnode *regnode, bool enable, int *udelay)
 	uint8_t val;
 	int error;
 
-	*udelay = 0;
-
 	sc = regnode_get_softc(regnode);
 	asc = device_get_softc(sc->base_dev);
+
+	/* The consumers wait for the regulator to be ready after enabling it */
+	*udelay = enable ? sc->param->enable_delay : 0;
 
 	if (bootverbose)
 		device_printf(sc->base_dev, "%sable %s (%s)\n",
