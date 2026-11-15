@@ -1010,14 +1010,34 @@ sched_balance(void)
 
 /*
  * Lock two thread queues using their address to maintain lock order.
+ *
+ * 'one_locked' specifies if 'one' is already locked.  In this case, 'one' may
+ * first need to be unlocked, leaving both locks unlocked before they can be
+ * re-acquired.
  */
 static void
-tdq_lock_pair(struct tdq *one, struct tdq *two)
+tdq_lock_pair(struct tdq *one, bool one_locked, struct tdq *two)
 {
 	if (one < two) {
-		TDQ_LOCK(one);
+		if (!one_locked)
+			TDQ_LOCK(one);
 		TDQ_LOCK_FLAGS(two, MTX_DUPOK);
 	} else {
+		if (one_locked) {
+			/*
+			 * If we can acquire the second lock right away (without
+			 * blocking)...
+			 */
+			if (TDQ_TRYLOCK_FLAGS(two, MTX_DUPOK))
+				/* ...then we are done! */
+				return;
+			/*
+			 * That did not work. Release 'one' to acquire both
+			 * locks in the proper order as we may need to sleep
+			 * (most probably, as 'two' has just been seen locked).
+			 */
+			TDQ_UNLOCK(one);
+		}
 		TDQ_LOCK(two);
 		TDQ_LOCK_FLAGS(one, MTX_DUPOK);
 	}
@@ -1044,7 +1064,7 @@ sched_balance_pair(struct tdq *high, struct tdq *low)
 	bool ret;
 
 	ret = false;
-	tdq_lock_pair(high, low);
+	tdq_lock_pair(high, false, low);
 
 	/*
 	 * Transfer a thread from high to low.
@@ -1096,7 +1116,6 @@ tdq_move(struct tdq *from, struct tdq *to)
 	 */
 	thread_lock_block_wait(td);
 	sched_rem(td);
-	THREAD_LOCKPTR_ASSERT(td, TDQ_LOCKPTR(from));
 	td->td_lock = TDQ_LOCKPTR(to);
 	td_get_sched(td)->ts_cpu = cpu;
 	return (tdq_add(to, td, SRQ_YIELDING));
@@ -1266,8 +1285,8 @@ tdq_notify(struct tdq *tdq, int lowpri)
 }
 
 struct runq_steal_pred_data {
-	struct thread	*td;
-	int		cpu;
+	int		cpu;	/* Destination CPU. */
+	struct thread	*td;	/* Found thread. */
 };
 
 static bool
@@ -1294,8 +1313,8 @@ runq_steal_range(struct runq *const rq, const int lvl_min, const int lvl_max,
     int cpu)
 {
 	struct runq_steal_pred_data data = {
-		.td = NULL,
 		.cpu = cpu,
+		.td = NULL,
 	};
 	int idx;
 
@@ -2298,16 +2317,31 @@ sched_switch_migrate(struct tdq *tdq, struct thread *td, int flags)
 #ifdef SMP
 	tdq_load_rem(tdq, td);
 	/*
-	 * Do the lock dance required to avoid LOR.  We have an 
-	 * extra spinlock nesting from sched_switch() which will
-	 * prevent preemption while we're holding neither run-queue lock.
+	 * We have an extra spinlock nesting from sched_switch() which will
+	 * prevent preemption while we're holding neither run-queue lock, which
+	 * can happen in tdq_lock_pair() if tdq's lock has to be dropped and
+	 * re-acquired.
+	 *
+	 * In order to avoid deadlocks, we lock both the current and remote
+	 * runqueues before the thread, which is still lock-blocked, can appear
+	 * on the remote runqueue.  Indeed, a steal (tdq_move()) locks both the
+	 * source and destination runqueues, but needs to wait for the stolen
+	 * thread to be lock-unblocked (see there why).  If we dropped the
+	 * current runqueue lock, we would have to re-acquire it after putting
+	 * the thread into our remote CPU's runqueue (i.e., the source CPU for
+	 * the steal) before finally reaching cpu_wait() which lock-unblocks the
+	 * thread.  This would create a "hidden" and arbitrary additional
+	 * lock-ordering dependency between the source and destination locks of
+	 * tdq_move() on one hand, and our current runqueue's lock on the other
+	 * hand, sometimes violating the lock ordering established by
+	 * tdq_lock_pair().  Parallel steal attempts involving one of the
+	 * runqueue locks held by tdq_move() and our current runqueue's could
+	 * then cause a deadlock.
 	 */
-	TDQ_UNLOCK(tdq);
-	TDQ_LOCK(tdn);
+	tdq_lock_pair(tdq, true, tdn);
 	lowpri = tdq_add(tdn, td, flags);
 	tdq_notify(tdn, lowpri);
 	TDQ_UNLOCK(tdn);
-	TDQ_LOCK(tdq);
 #endif
 	return (TDQ_LOCKPTR(tdn));
 }
@@ -2885,13 +2919,13 @@ tdq_add(struct tdq *tdq, struct thread *td, int flags)
 	int lowpri;
 
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
-	THREAD_LOCK_BLOCKED_ASSERT(td, MA_OWNED);
+	THREAD_LOCKPTR_BLOCKED_ASSERT(td, TDQ_LOCKPTR(tdq));
 	KASSERT((td->td_inhibitors == 0),
-	    ("sched_add: trying to run inhibited thread"));
+	    ("%s: trying to run inhibited thread", __func__));
 	KASSERT((TD_CAN_RUN(td) || TD_IS_RUNNING(td)),
-	    ("sched_add: bad thread state"));
+	    ("%s: bad thread state", __func__));
 	KASSERT(td->td_flags & TDF_INMEM,
-	    ("sched_add: thread swapped out"));
+	    ("%s: thread swapped out", __func__));
 
 	lowpri = tdq->tdq_lowpri;
 	if (td->td_priority < lowpri)
@@ -2975,11 +3009,14 @@ sched_rem(struct thread *td)
 	KTR_STATE1(KTR_SCHED, "thread", sched_tdname(td), "runq rem",
 	    "prio:%d", td->td_priority);
 	SDT_PROBE3(sched, , , dequeue, td, td->td_proc, NULL);
+
 	tdq = TDQ_CPU(td_get_sched(td)->ts_cpu);
+
 	TDQ_LOCK_ASSERT(tdq, MA_OWNED);
-	MPASS(td->td_lock == TDQ_LOCKPTR(tdq));
+	THREAD_LOCKPTR_ASSERT(td, TDQ_LOCKPTR(tdq));
 	KASSERT(TD_ON_RUNQ(td),
 	    ("sched_rem: thread not on run queue"));
+
 	tdq_runq_rem(tdq, td);
 	tdq_load_rem(tdq, td);
 	TD_SET_CAN_RUN(td);
@@ -3465,6 +3502,7 @@ sysctl_kern_slice(SYSCTL_HANDLER_ARGS)
 	return (0);
 }
 
+/* NOTE: Please keep sched_ule.4 in sync with sysctl knobs defined here. */
 SYSCTL_NODE(_kern_sched, OID_AUTO, ule, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     "ULE Scheduler");
 

@@ -638,7 +638,6 @@ struct ixgbe_debug_dump_cmd {
     "\nSum of the following RX errors counters:\n" \
     " * CRC errors,\n" \
     " * illegal byte error count,\n" \
-    " * missed packet count,\n" \
     " * length error count,\n" \
     " * undersized packets count,\n" \
     " * fragmented packets count,\n" \

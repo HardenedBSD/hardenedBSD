@@ -574,7 +574,9 @@ xhci_init(struct xhci_softc *sc, device_t self, uint8_t dma32)
 	DPRINTF("RUNTIMEOFFSET=0x%x\n", sc->sc_runt_off);
 	DPRINTF("DOOROFFSET=0x%x\n", sc->sc_door_off);
 
-	DPRINTF("xHCI version = 0x%04x\n", XREAD2(sc, capa, XHCI_HCIVERSION));
+	sc->sc_hcversion = XREAD2(sc, capa, XHCI_HCIVERSION);
+
+	DPRINTF("xHCI version = 0x%04x\n", sc->sc_hcversion);
 
 	if (!(XREAD4(sc, oper, XHCI_PAGESIZE) & XHCI_PAGESIZE_4K)) {
 		device_printf(sc->sc_bus.parent, "Controller does "
@@ -713,7 +715,8 @@ xhci_get_xecp(struct xhci_softc *sc)
 	 * documented in Table 7.2 of eXtensible Host Controller Interface for
 	 * Universal Serial Bus (xHCI) Rev 1.2b 2023.
 	 */
-	device_printf(sc->sc_bus.parent, "xECP capabilities <");
+	device_printf(sc->sc_bus.parent, "xHCI %u.%u, xECP capabilities <",
+	    sc->sc_hcversion >> 8, (sc->sc_hcversion >> 4) & 0xF);
 
 	eec = -1;
 	for (eecp = XHCI_HCS0_XECP(hccp1) << 2;
@@ -975,17 +978,72 @@ xhci_skip_transfer(struct usb_xfer *xfer)
 }
 
 /*------------------------------------------------------------------------*
+ *	xhci_find_transfer
+ *
+ * Find the queued USB transfer whose current TD contains the TRB
+ * address reported by a transfer event.
+ *------------------------------------------------------------------------*/
+static struct usb_xfer *
+xhci_find_transfer(struct xhci_endpoint_ext *pepext, uint64_t td_event,
+    int64_t *poffset)
+{
+	struct usb_xfer *xfer;
+	struct xhci_td *td;
+	int64_t offset;
+	uint32_t mask;
+	uint16_t stream_id;
+	int i;
+
+	for (stream_id = 0; stream_id != XHCI_MAX_STREAMS; stream_id++) {
+		for (mask = pepext->xfer_mask[stream_id]; mask != 0;
+		    mask &= ~(1U << i)) {
+			i = ffs(mask) - 1;
+
+			xfer = pepext->xfer[i +
+			    (XHCI_MAX_TRANSFERS * stream_id)];
+			td = xfer->td_transfer_cache;
+			if (td == NULL)
+				continue;
+
+			DPRINTFN(5, "Checking if 0x%016llx == "
+			    "(0x%016llx .. 0x%016llx)\n",
+			    (long long)td_event,
+			    (long long)td->td_self,
+			    (long long)td->td_self + sizeof(td->td_trb));
+
+			/*
+			 * NOTE: Some XHCI implementations might not trigger
+			 * an event on the last LINK TRB so we need to
+			 * consider both the last and second last event
+			 * address as conditions for a successful transfer.
+			 *
+			 * NOTE: We assume that the XHCI will only trigger one
+			 * event per chain of TRBs.
+			 */
+			offset = td_event - td->td_self;
+			if (offset >= 0 &&
+			    offset < (int64_t)sizeof(td->td_trb)) {
+				*poffset = offset;
+				return (xfer);
+			}
+		}
+	}
+	return (NULL);
+}
+
+/*------------------------------------------------------------------------*
  *	xhci_check_transfer
  *------------------------------------------------------------------------*/
 static void
 xhci_check_transfer(struct xhci_softc *sc, struct xhci_trb *trb)
 {
 	struct xhci_endpoint_ext *pepext;
+	struct usb_xfer *xfer;
+	struct xhci_td *td;
 	int64_t offset;
 	uint64_t td_event;
 	uint32_t temp;
 	uint32_t remainder;
-	uint16_t stream_id = 0;
 	uint16_t i;
 	uint8_t status;
 	uint8_t halted;
@@ -1023,125 +1081,87 @@ xhci_check_transfer(struct xhci_softc *sc, struct xhci_trb *trb)
 	pepext = &sc->sc_hw.devs[index].endp[epno];
 
 	/* try to find the USB transfer that generated the event */
-	for (i = 0;; i++) {
-		struct usb_xfer *xfer;
-		struct xhci_td *td;
+	xfer = xhci_find_transfer(pepext, td_event, &offset);
+	if (xfer == NULL)
+		return;
 
-		if (i == (XHCI_MAX_TRANSFERS - 1)) {
-			if (pepext->trb_ep_mode != USB_EP_MODE_STREAMS ||
-			    stream_id == (XHCI_MAX_STREAMS - 1))
-				break;
-			stream_id++;
-			i = 0;
-			DPRINTFN(5, "stream_id=%u\n", stream_id);
-		}
+	td = xfer->td_transfer_cache;
 
-		xfer = pepext->xfer[i + (XHCI_MAX_TRANSFERS * stream_id)];
-		if (xfer == NULL)
-			continue;
+	usb_pc_cpu_invalidate(td->page_cache);
 
-		td = xfer->td_transfer_cache;
-		if (td == NULL)
-			continue;
+	/* compute rest of remainder, if any */
+	for (i = (offset / 16) + 1; i < td->ntrb; i++) {
+		temp = le32toh(td->td_trb[i].dwTrb2);
+		remainder += XHCI_TRB_2_BYTES_GET(temp);
+	}
 
-		DPRINTFN(5, "Checking if 0x%016llx == (0x%016llx .. 0x%016llx)\n",
-			(long long)td_event,
-			(long long)td->td_self,
-			(long long)td->td_self + sizeof(td->td_trb));
+	DPRINTFN(5, "New remainder: %u\n", remainder);
 
-		/*
-		 * NOTE: Some XHCI implementations might not trigger
-		 * an event on the last LINK TRB so we need to
-		 * consider both the last and second last event
-		 * address as conditions for a successful transfer.
-		 *
-		 * NOTE: We assume that the XHCI will only trigger one
-		 * event per chain of TRBs.
-		 */
-
-		offset = td_event - td->td_self;
-
-		if (offset >= 0 &&
-		    offset < (int64_t)sizeof(td->td_trb)) {
-			usb_pc_cpu_invalidate(td->page_cache);
-
-			/* compute rest of remainder, if any */
-			for (i = (offset / 16) + 1; i < td->ntrb; i++) {
-				temp = le32toh(td->td_trb[i].dwTrb2);
-				remainder += XHCI_TRB_2_BYTES_GET(temp);
-			}
-
-			DPRINTFN(5, "New remainder: %u\n", remainder);
-
-			/* clear isochronous transfer errors */
-			if (xfer->flags_int.isochronous_xfr) {
-				if (halted) {
-					halted = 0;
-					status = XHCI_TRB_ERROR_SUCCESS;
-					remainder = td->len;
-				}
-			}
-
-			/* "td->remainder" is verified later */
-			td->remainder = remainder;
-			td->status = status;
-
-			usb_pc_cpu_flush(td->page_cache);
-
-			/*
-			 * 1) Last transfer descriptor makes the
-			 * transfer done
-			 */
-			if (((void *)td) == xfer->td_transfer_last) {
-				DPRINTF("TD is last\n");
-				xhci_generic_done(xfer);
-				break;
-			}
-
-			/*
-			 * 2) Any kind of error makes the transfer
-			 * done
-			 */
-			if (halted) {
-				DPRINTF("TD has I/O error\n");
-				xhci_generic_done(xfer);
-				break;
-			}
-
-			/*
-			 * 3) If there is no alternate next transfer,
-			 * a short packet also makes the transfer done
-			 */
-			if (td->remainder > 0) {
-				if (td->alt_next == NULL) {
-					DPRINTF(
-					    "short TD has no alternate next\n");
-					xhci_generic_done(xfer);
-					break;
-				}
-				DPRINTF("TD has short pkt\n");
-				if (xfer->flags_int.short_frames_ok ||
-				    xfer->flags_int.isochronous_xfr ||
-				    xfer->flags_int.control_xfr) {
-					/* follow the alt next */
-					xfer->td_transfer_cache = td->alt_next;
-					xhci_activate_transfer(xfer);
-					break;
-				}
-				xhci_skip_transfer(xfer);
-				xhci_generic_done(xfer);
-				break;
-			}
-
-			/*
-			 * 4) Transfer complete - go to next TD
-			 */
-			DPRINTF("Following next TD\n");
-			xfer->td_transfer_cache = td->obj_next;
-			xhci_activate_transfer(xfer);
-			break;		/* there should only be one match */
+	/* clear isochronous transfer errors */
+	if (xfer->flags_int.isochronous_xfr) {
+		if (halted) {
+			halted = 0;
+			status = XHCI_TRB_ERROR_SUCCESS;
+			remainder = td->len;
 		}
 	}
+
+	/* "td->remainder" is verified later */
+	td->remainder = remainder;
+	td->status = status;
+
+	usb_pc_cpu_flush(td->page_cache);
+
+	/*
+	 * 1) Last transfer descriptor makes the
+	 * transfer done
+	 */
+	if (((void *)td) == xfer->td_transfer_last) {
+		DPRINTF("TD is last\n");
+		xhci_generic_done(xfer);
+		return;
+	}
+
+	/*
+	 * 2) Any kind of error makes the transfer
+	 * done
+	 */
+	if (halted) {
+		DPRINTF("TD has I/O error\n");
+		xhci_generic_done(xfer);
+		return;
+	}
+
+	/*
+	 * 3) If there is no alternate next transfer,
+	 * a short packet also makes the transfer done
+	 */
+	if (td->remainder > 0) {
+		if (td->alt_next == NULL) {
+			DPRINTF("short TD has no alternate next\n");
+			xhci_generic_done(xfer);
+			return;
+		}
+		DPRINTF("TD has short pkt\n");
+		if (xfer->flags_int.short_frames_ok ||
+		    xfer->flags_int.isochronous_xfr ||
+		    xfer->flags_int.control_xfr) {
+			/* follow the alt next */
+			xfer->td_transfer_cache = td->alt_next;
+			xhci_activate_transfer(xfer);
+			return;
+		}
+		xhci_skip_transfer(xfer);
+		xhci_generic_done(xfer);
+		return;
+	}
+
+	/*
+	 * 4) Transfer complete - go to next TD
+	 */
+	DPRINTF("Following next TD\n");
+	xfer->td_transfer_cache = td->obj_next;
+	xhci_activate_transfer(xfer);
 }
 
 static int
@@ -2764,6 +2784,10 @@ xhci_ss_parent_hub(struct xhci_softc *sc, struct usb_device *udev,
 	struct usb_device *adev = udev;
 	struct usb_device *hubdev = udev->parent_hub;
 
+	/* These fields have no Enhanced SuperSpeed meaning before xHCI 1.2. */
+	if (sc->sc_hcversion < XHCI_HCIVERSION_1_2)
+		return (NULL);
+
 	if (udev->speed >= xhci_ss_highest(sc))
 		return (NULL);
 
@@ -3112,6 +3136,8 @@ xhci_transfer_remove(struct usb_xfer *xfer, usb_error_t error)
 		pepext->trb_used[xfer->stream_id]--;
 
 		pepext->xfer[xfer->qh_pos] = NULL;
+		pepext->xfer_mask[xfer->stream_id] &=
+		    ~(1U << (xfer->qh_pos % XHCI_MAX_TRANSFERS));
 
 		if (error && pepext->trb_running != 0) {
 			pepext->trb_halted = 1;
@@ -3157,7 +3183,10 @@ xhci_transfer_insert(struct usb_xfer *xfer)
 		trb_limit = 1;
 		break;
 	default:
-		/* multi buffered */
+		/*
+		 * multi buffered, less the hardcoded LINK TRB and the
+		 * chain end marker
+		 */
 		trb_limit = (XHCI_MAX_TRANSFERS - 2);
 		break;
 	}
@@ -3252,6 +3281,7 @@ xhci_transfer_insert(struct usb_xfer *xfer)
 	DPRINTF("qh_pos = %u\n", i);
 
 	pepext->xfer[i] = xfer;
+	pepext->xfer_mask[id] |= 1U << (i % XHCI_MAX_TRANSFERS);
 
 	xfer->qh_pos = i;
 
@@ -3336,27 +3366,25 @@ xhci_device_generic_multi_enter(struct usb_endpoint *ep,
 
 	/*
 	 * Check if the current transfer is started and then pickup
-	 * the next one, if any. Else wait for next start event due to
+	 * the next ones, if any. Else wait for next start event due to
 	 * block on failure feature.
 	 */
 	if (!xfer->flags_int.bandwidth_reclaimed)
 		return;
 
-	xfer = TAILQ_FIRST(&ep->endpoint_q[stream_id].head);
-	if (xfer == NULL) {
-		/*
-		 * In case of enter we have to consider that the
-		 * transfer is queued by the USB core after the enter
-		 * method is called.
-		 */
-		xfer = enter_xfer;
-
-		if (xfer == NULL)
+	/*
+	 * Try to multi buffer all waiting transfers, in order.
+	 */
+	TAILQ_FOREACH(xfer, &ep->endpoint_q[stream_id].head, wait_entry) {
+		if (xfer->flags_int.bandwidth_reclaimed)
+			continue;
+		if (xhci_transfer_insert(xfer) != 0 ||
+		    !xfer->flags_int.bandwidth_reclaimed)
 			return;
 	}
 
-	/* try to multi buffer */
-	xhci_transfer_insert(xfer);
+	if (enter_xfer != NULL)
+		xhci_transfer_insert(enter_xfer);
 }
 
 static void

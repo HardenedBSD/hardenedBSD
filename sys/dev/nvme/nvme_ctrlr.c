@@ -852,7 +852,7 @@ nvme_ctrlr_configure_aer(struct nvme_controller *ctrlr)
 			NVME_ASYNC_EVENT_FW_ACTIVATE);
 
 	status.done = 0;
-	nvme_ctrlr_cmd_get_feature(ctrlr, NVME_FEAT_TEMPERATURE_THRESHOLD,
+	nvme_ctrlr_cmd_get_feature(ctrlr, 0, NVME_FEAT_TEMPERATURE_THRESHOLD,
 	    0, NULL, 0, nvme_completion_poll_cb, &status);
 	nvme_completion_poll(&status);
 	if (nvme_completion_is_error(&status.cpl) ||
@@ -895,7 +895,7 @@ nvme_ctrlr_configure_apst(struct nvme_controller *ctrlr)
 			data[i] = htole64(data[i]);
 	} else {
 		status.done = 0;
-		nvme_ctrlr_cmd_get_feature(ctrlr,
+		nvme_ctrlr_cmd_get_feature(ctrlr, 0,
 		    NVME_FEAT_AUTONOMOUS_POWER_STATE_TRANSITION, 0,
 		    data, data_size, nvme_completion_poll_cb, &status);
 		nvme_completion_poll(&status);
@@ -904,7 +904,7 @@ nvme_ctrlr_configure_apst(struct nvme_controller *ctrlr)
 	}
 
 	status.done = 0;
-	nvme_ctrlr_cmd_set_feature(ctrlr,
+	nvme_ctrlr_cmd_set_feature(ctrlr, 0, 0,
 	    NVME_FEAT_AUTONOMOUS_POWER_STATE_TRANSITION, enable, 0, 0,
 	    0, 0, data, data_size, nvme_completion_poll_cb, &status);
 	nvme_completion_poll(&status);
@@ -932,8 +932,8 @@ nvme_ctrlr_set_timestamp(struct nvme_controller *ctrlr)
 		ts->tstmp[i] = (ms >> (i * 8)) & 0xff;
 
 	status.done = 0;
-	nvme_ctrlr_cmd_set_feature(ctrlr, NVME_FEAT_TIMESTAMP, 0, 0, 0, 0, 0,
-	    ts, sizeof(*ts), nvme_completion_poll_cb, &status);
+	nvme_ctrlr_cmd_set_feature(ctrlr, 0, 0, NVME_FEAT_TIMESTAMP, 0, 0, 0,
+	    0, 0, ts, sizeof(*ts), nvme_completion_poll_cb, &status);
 	nvme_completion_poll(&status);
 	if (nvme_completion_is_error(&status.cpl) && bootverbose)
 		nvme_printf(ctrlr, "failed to set the timestamp\n");
@@ -1179,11 +1179,10 @@ nvme_ctrlr_hmb_enable(struct nvme_controller *ctrlr, bool enable, bool memret)
 	if (memret)
 		cdw11 |= 2;
 	status.done = 0;
-	nvme_ctrlr_cmd_set_feature(ctrlr, NVME_FEAT_HOST_MEMORY_BUFFER, cdw11,
-	    ctrlr->hmb_nchunks * ctrlr->hmb_chunk / ctrlr->page_size,
+	nvme_ctrlr_cmd_set_feature(ctrlr, 0, 0, NVME_FEAT_HOST_MEMORY_BUFFER,
+	    cdw11, ctrlr->hmb_nchunks * ctrlr->hmb_chunk / ctrlr->page_size,
 	    ctrlr->hmb_desc_paddr, ctrlr->hmb_desc_paddr >> 32,
-	    ctrlr->hmb_nchunks, NULL, 0,
-	    nvme_completion_poll_cb, &status);
+	    ctrlr->hmb_nchunks, NULL, 0, nvme_completion_poll_cb, &status);
 	nvme_completion_poll(&status);
 	if (nvme_completion_is_error(&status.cpl))
 		nvme_printf(ctrlr, "nvme_ctrlr_hmb_enable failed!\n");
@@ -1829,7 +1828,7 @@ nvme_ctrlr_construct(struct nvme_controller *ctrlr, device_t dev)
 	struct make_dev_args	md_args;
 	uint32_t	cap_lo;
 	uint32_t	cap_hi;
-	uint32_t	to, vs, pmrcap;
+	uint32_t	crto, to, vs, pmrcap;
 	int		status, timeout_period;
 
 	ctrlr->dev = dev;
@@ -1892,7 +1891,11 @@ nvme_ctrlr_construct(struct nvme_controller *ctrlr, device_t dev)
 	ctrlr->page_size = 1 << (NVME_MPS_SHIFT + ctrlr->mps);
 
 	/* Get ready timeout value from controller, in units of 500ms. */
-	to = NVME_CAP_LO_TO(cap_lo) + 1;
+	if (NVME_CAP_HI_CRWMS(cap_hi)) {
+		crto = nvme_mmio_read_4(ctrlr, crto);
+		to = max(NVME_CRTO_CRWMT(crto), NVME_CAP_LO_TO(cap_lo)) + 1;
+	} else
+		to = NVME_CAP_LO_TO(cap_lo) + 1;
 	ctrlr->ready_timeout_in_ms = to * 500;
 
 	timeout_period = NVME_ADMIN_TIMEOUT_PERIOD;

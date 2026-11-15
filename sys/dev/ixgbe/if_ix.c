@@ -178,6 +178,7 @@ static const pci_vendor_info_t ixgbe_vendor_info_array[] =
 };
 
 static void *ixgbe_register(device_t);
+static int  ixgbe_attach(device_t);
 static int  ixgbe_if_attach_pre(if_ctx_t);
 static int  ixgbe_if_attach_post(if_ctx_t);
 static int  ixgbe_if_detach(if_ctx_t);
@@ -317,7 +318,7 @@ static device_method_t ix_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_register, ixgbe_register),
 	DEVMETHOD(device_probe, iflib_device_probe),
-	DEVMETHOD(device_attach, iflib_device_attach),
+	DEVMETHOD(device_attach, ixgbe_attach),
 	DEVMETHOD(device_detach, iflib_device_detach),
 	DEVMETHOD(device_shutdown, iflib_device_shutdown),
 	DEVMETHOD(device_suspend, iflib_device_suspend),
@@ -1152,6 +1153,24 @@ ixgbe_register(device_t dev)
 } /* ixgbe_register */
 
 /************************************************************************
+ * ixgbe_attach - Device attach entry point
+ *
+ *   The MDIO bus children are attached here rather than in
+ *   ixgbe_if_attach_post(): their register accesses take the iflib
+ *   context lock, which iflib holds across IFDI_ATTACH_POST.
+ ************************************************************************/
+static int
+ixgbe_attach(device_t dev)
+{
+	int error;
+
+	error = iflib_device_attach(dev);
+	if (error == 0)
+		ixgbe_mdio_attach(iflib_get_softc(device_get_softc(dev)));
+	return (error);
+} /* ixgbe_attach */
+
+/************************************************************************
  * ixgbe_if_attach_pre - Device initialization routine, part 1
  *
  *   Called when the driver is being loaded.
@@ -1251,7 +1270,7 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 
 	/* Enable EEE power saving */
 	if (sc->feat_en & IXGBE_FEATURE_EEE)
-		hw->mac.ops.setup_eee(hw, true);
+		ixgbe_setup_eee(hw, true);
 
 	/* Set an initial default flow control value */
 	hw->fc.requested_mode = ixgbe_flow_control;
@@ -1458,9 +1477,6 @@ ixgbe_if_attach_post(if_ctx_t ctx)
 
 	/* Add sysctls */
 	ixgbe_add_device_sysctls(ctx);
-
-	/* Add MDIO bus if required / supported */
-	ixgbe_mdio_attach(sc);
 
 	/* Init recovery mode timer and state variable */
 	if (sc->feat_en & IXGBE_FEATURE_RECOVERY_MODE) {
@@ -2278,7 +2294,6 @@ ixgbe_update_stats_counters(struct ixgbe_softc *sc)
 	 * Aggregate following types of errors as RX errors:
 	 * - CRC error count,
 	 * - illegal byte error count,
-	 * - missed packets count,
 	 * - length error count,
 	 * - undersized packets count,
 	 * - fragmented packets count,
@@ -2286,7 +2301,7 @@ ixgbe_update_stats_counters(struct ixgbe_softc *sc)
 	 * - jabber count.
 	 */
 	IXGBE_SET_IERRORS(sc, stats->crcerrs + stats->illerrc +
-	    stats->mpctotal + stats->rlec + stats->ruc + stats->rfc +
+	    stats->rlec + stats->ruc + stats->rfc +
 	    stats->roc + stats->rjc);
 } /* ixgbe_update_stats_counters */
 
@@ -6417,8 +6432,6 @@ ixgbe_init_device_features(struct ixgbe_softc *sc)
 		sc->feat_cap |= IXGBE_FEATURE_RECOVERY_MODE;
 		sc->feat_cap |= IXGBE_FEATURE_SRIOV;
 		sc->feat_cap |= IXGBE_FEATURE_FDIR;
-		if (sc->hw.device_id == IXGBE_DEV_ID_X550EM_X_KR)
-			sc->feat_cap |= IXGBE_FEATURE_EEE;
 		break;
 	case ixgbe_mac_X550EM_a:
 		sc->feat_cap |= IXGBE_FEATURE_RECOVERY_MODE;

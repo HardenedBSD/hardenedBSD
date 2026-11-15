@@ -375,7 +375,6 @@ struct dup2_args {
 int
 sys_dup2(struct thread *td, struct dup2_args *uap)
 {
-
 	return (kern_dup(td, FDDUP_FIXED, 0, (int)uap->from, (int)uap->to));
 }
 
@@ -391,7 +390,6 @@ struct dup_args {
 int
 sys_dup(struct thread *td, struct dup_args *uap)
 {
-
 	return (kern_dup(td, FDDUP_NORMAL, 0, (int)uap->fd, 0));
 }
 
@@ -409,7 +407,6 @@ struct fcntl_args {
 int
 sys_fcntl(struct thread *td, struct fcntl_args *uap)
 {
-
 	return (kern_fcntl_freebsd(td, uap->fd, uap->cmd, uap->arg));
 }
 
@@ -1494,7 +1491,6 @@ struct close_args {
 int
 sys_close(struct thread *td, struct close_args *uap)
 {
-
 	return (kern_close(td, uap->fd));
 }
 
@@ -1611,7 +1607,6 @@ struct close_range_args {
 int
 sys_close_range(struct thread *td, struct close_range_args *uap)
 {
-
 	AUDIT_ARG_FD(uap->lowfd);
 	AUDIT_ARG_CMD(uap->highfd);
 	AUDIT_ARG_FFLAGS(uap->flags);
@@ -1705,12 +1700,18 @@ struct fstat_args {
 int
 sys_fstat(struct thread *td, struct fstat_args *uap)
 {
+	return (user_fstat(td, uap->fd, uap->sb));
+}
+
+int
+user_fstat(struct thread *td, int fd, struct stat *sb)
+{
 	struct stat ub;
 	int error;
 
-	error = kern_fstat(td, uap->fd, &ub);
+	error = kern_fstat(td, fd, &ub);
 	if (error == 0)
-		error = copyout(&ub, uap->sb, sizeof(ub));
+		error = copyout(&ub, sb, sizeof(ub));
 	return (error);
 }
 

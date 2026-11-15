@@ -35,7 +35,7 @@
 #define	XHCI_MAX_EVENTS		232
 #define	XHCI_MAX_COMMANDS	(16 * 1)
 #define	XHCI_MAX_RSEG		1
-#define	XHCI_MAX_TRANSFERS	4
+#define	XHCI_MAX_TRANSFERS	8
 #if USB_MAX_EP_STREAMS == 8
 #define	XHCI_MAX_STREAMS	8
 #define	XHCI_MAX_STREAMS_LOG	3
@@ -355,6 +355,9 @@ struct xhci_dev_endpoint_trbs {
 	    XHCI_MAX_TRANSFERS) + XHCI_MAX_STREAMS];
 };
 
+/* The endpoint rings are addressed from a single physical page */
+CTASSERT(sizeof(struct xhci_dev_endpoint_trbs) <= 4096);
+
 #if (USB_PAGE_SIZE < 4096)
 #error "The XHCI driver needs a pagesize above or equal to 4K"
 #endif
@@ -409,10 +412,12 @@ struct xhci_hw_root {
 };
 
 CTASSERT(sizeof(struct xhci_hw_root) == XHCI_PAGE_SIZE);
+CTASSERT(XHCI_MAX_TRANSFERS <= 32);
 
 struct xhci_endpoint_ext {
 	struct xhci_trb		*trb;
 	struct usb_xfer		*xfer[XHCI_MAX_TRANSFERS * XHCI_MAX_STREAMS];
+	uint32_t		xfer_mask[XHCI_MAX_STREAMS];
 	struct usb_page_cache	*page_cache;
 	uint64_t		physaddr;
 	uint8_t			trb_used[XHCI_MAX_STREAMS];
@@ -562,6 +567,8 @@ struct xhci_softc {
 	uint8_t			sc_noslot;
 	/* Enhanced SuperSpeed speed IDs of the controller, see XHCI_PSIV_BIT */
 	uint16_t		sc_ss_psiv;
+	/* xHCI interface version, see XHCI_HCIVERSION_* */
+	uint16_t		sc_hcversion;
 	/* number of ports on root HUB */
 	uint8_t			sc_noport;
 	/* root HUB device configuration */

@@ -52,6 +52,7 @@
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
@@ -194,6 +195,13 @@ kenv_read_allowed(struct thread *td, int which)
 int
 sys_kenv(struct thread *td, struct kenv_args *uap)
 {
+	return (kern_kenv(td, uap->what, uap->name, uap->value, uap->len));
+}
+
+int
+kern_kenv(struct thread *td, int what, const char *namep, char *u_val,
+    int u_len)
+{
 	char *name, *value;
 	size_t len;
 	int error;
@@ -213,7 +221,7 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 	 * Even though we do the same exact switch as below, we want
 	 * to do this one just as a permissions check.
 	 */
-	switch (uap->what) {
+	switch (what) {
 	case KENV_DUMP:
 		error = priv_check(td, PRIV_KENV_DUMP);
 		if (error)
@@ -237,21 +245,21 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 	}
 #endif
 
-	switch (uap->what) {
+	switch (what) {
 	case KENV_DUMP:
-		error = kenv_read_allowed(td, uap->what);
+		error = kenv_read_allowed(td, what);
 		if (error)
 			return (error);
-		return (kenv_dump(td, kenvp, uap->what, uap->value, uap->len));
+		return (kenv_dump(td, kenvp, what, u_val, u_len));
 	case KENV_DUMP_LOADER:
 	case KENV_DUMP_STATIC:
-		error = kenv_read_allowed(td, uap->what);
+		error = kenv_read_allowed(td, what);
 		if (error)
 			return (error);
 #ifdef PRESERVE_EARLY_KENV
 		return (kenv_dump(td,
-		    uap->what == KENV_DUMP_LOADER ? (char **)md_envp :
-		    (char **)kern_envp, uap->what, uap->value, uap->len));
+		    what == KENV_DUMP_LOADER ? (char **)md_envp :
+		    (char **)kern_envp, what, u_val, u_len));
 #else
 		return (ENOENT);
 #endif
@@ -267,7 +275,7 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 			return (error);
 		break;
 	case KENV_GET:
-		error = kenv_read_allowed(td, uap->what);
+		error = kenv_read_allowed(td, what);
 		if (error)
 			return (error);
 		break;
@@ -275,11 +283,11 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 
 	name = malloc(KENV_MNAMELEN + 1, M_TEMP, M_WAITOK);
 
-	error = copyinstr(uap->name, name, KENV_MNAMELEN + 1, NULL);
+	error = copyinstr(namep, name, KENV_MNAMELEN + 1, NULL);
 	if (error)
 		goto done;
 
-	switch (uap->what) {
+	switch (what) {
 	case KENV_GET:
 #ifdef MAC
 		error = mac_kenv_check_get(td->td_ucred, name);
@@ -292,16 +300,16 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 			goto done;
 		}
 		len = strlen(value) + 1;
-		if (len > uap->len)
-			len = uap->len;
-		error = copyout(value, uap->value, len);
+		if (len > u_len)
+			len = u_len;
+		error = copyout(value, u_val, len);
 		freeenv(value);
 		if (error)
 			goto done;
 		td->td_retval[0] = len;
 		break;
 	case KENV_SET:
-		len = uap->len;
+		len = u_len;
 		if (len < 1) {
 			error = EINVAL;
 			goto done;
@@ -309,7 +317,7 @@ sys_kenv(struct thread *td, struct kenv_args *uap)
 		if (len > kenv_mvallen + 1)
 			len = kenv_mvallen + 1;
 		value = malloc(len, M_TEMP, M_WAITOK);
-		error = copyinstr(uap->value, value, len, NULL);
+		error = copyinstr(u_val, value, len, NULL);
 		if (error) {
 			free(value, M_TEMP);
 			goto done;
