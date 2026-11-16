@@ -35,11 +35,8 @@
 #include <sys/malloc.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
-<<<<<<< HEAD
 #include <sys/priv.h>
-=======
 #include <sys/sysproto.h>
->>>>>>> rad/freebsd/15-stable/main
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -426,21 +423,6 @@ module2module_stat(module_t mod, struct module_stat *stat)
 int
 sys_modstat(struct thread *td, struct modstat_args *uap)
 {
-<<<<<<< HEAD
-	module_t mod;
-	modspecific_t data;
-	int error;
-	int id, namelen, refs, version;
-	struct module_stat *stat;
-	struct module_stat_v2 *stat_v2;
-	char *name;
-	bool is_v1v2;
-
-	error = priv_check(td, PRIV_KLD_STAT);
-	if (error)
-		return (error);
-
-=======
 	return (kern_modstat(td, uap->modid, uap->stat));
 }
 
@@ -452,8 +434,11 @@ kern_modstat(struct thread *td, int modid, struct module_stat *stat)
 	int version;
 	void *statbuf;
 
+	error = priv_check(td, PRIV_KLD_STAT);
+	if (error)
+		return (error);
+
 	/* Look up first to preserve historic error priority */
->>>>>>> rad/freebsd/15-stable/main
 	MOD_SLOCK;
 	mod = module_lookupbyid(modid);
 	MOD_SUNLOCK;
@@ -517,16 +502,12 @@ out:
 int
 sys_modfind(struct thread *td, struct modfind_args *uap)
 {
-<<<<<<< HEAD
-=======
 	return (kern_modfind(td, uap->name));
 }
 
 int
 kern_modfind(struct thread *td, const char *uname)
 {
-	int error = 0;
->>>>>>> rad/freebsd/15-stable/main
 	char name[MAXMODNAMEV3];
 	module_t mod;
 	int error;
