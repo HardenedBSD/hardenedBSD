@@ -58,7 +58,7 @@
 
 #include <dev/acpica/acpivar.h>
 #include <dev/asmc/asmcvar.h>
-#include <dev/asmc/asmcmmio.h>
+#include <dev/asmc/asmc_mmio.h>
 #include <dev/asmc/asmc_pio.h>
 #include <dev/asmc/asmc_sysctl.h>
 #include <dev/asmc/asmc_debug.h>
@@ -72,6 +72,7 @@
 static int 	asmc_probe(device_t dev);
 static int 	asmc_attach(device_t dev);
 static int 	asmc_detach(device_t dev);
+static int 	asmc_suspend(device_t dev);
 static int 	asmc_resume(device_t dev);
 static void	asmc_shutdown(void *arg, int howto);
 
@@ -90,6 +91,8 @@ static int	asmc_backlight_get_info(device_t dev,
  */
 static int 	asmc_init(device_t dev);
 static int 	asmc_fan_count(device_t dev);
+static int	asmc_fan_manual_get(device_t dev, uint16_t *maskp);
+static int	asmc_fan_manual_set(device_t dev, uint16_t mask);
 static void 	asmc_sms_calibrate(device_t dev);
 static int 	asmc_sms_intrfast(void *arg);
 static void 	asmc_sms_printintr(device_t dev, uint8_t);
@@ -110,6 +113,7 @@ static device_method_t	asmc_methods[] = {
 	DEVMETHOD(device_probe,		asmc_probe),
 	DEVMETHOD(device_attach,	asmc_attach),
 	DEVMETHOD(device_detach,	asmc_detach),
+	DEVMETHOD(device_suspend,	asmc_suspend),
 	DEVMETHOD(device_resume,	asmc_resume),
 
 	/* Backlight interface */
@@ -137,6 +141,7 @@ static char *asmc_ids[] = { "APP0001", NULL };
 
 ACPI_PNP_INFO(asmc_ids);
 DRIVER_MODULE(asmc, acpi, asmc_driver, NULL, NULL);
+MODULE_VERSION(asmc, 1);
 MODULE_DEPEND(asmc, acpi, 1, 1, 1);
 MODULE_DEPEND(asmc, backlight, 1, 1, 1);
 
@@ -264,19 +269,19 @@ asmc_attach(device_t dev)
 	if (sc->sc_is_t2 &&
 	    asmc_key_getinfo(dev, ASMC_KEY_BCLM, NULL, NULL) == 0) {
 		SYSCTL_ADD_PROC(sysctlctx,
-		    SYSCTL_CHILDREN(sysctlnode), OID_AUTO, "battery_charge_limit",
+		    SYSCTL_CHILDREN(sysctlnode), OID_AUTO,
+		    "battery_charge_limit",
 		    CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE,
 		    dev, 0, asmc_bclm_sysctl, "I",
 		    "Battery charge limit (0-100)");
 	}
 
-	/* System state / board identity subtree. */
-	if (asmc_sysctl_add_system(dev, sysctlctx) != 0)
-		goto nosms;
-
 	if (asmc_key_getinfo(dev, ASMC_KEY_MBSS, NULL, NULL) == 0)
 		sc->sc_shutdown_tag = EVENTHANDLER_REGISTER(shutdown_pre_sync,
 		    asmc_shutdown, dev, SHUTDOWN_PRI_FIRST);
+
+	/* System state / board identity subtree. */
+	asmc_sysctl_add_system(dev, sysctlctx);
 
 	if (!sc->sc_has_sms)
 		goto nosms;
@@ -348,16 +353,21 @@ asmc_detach(device_t dev)
 	/* Free temperature sensor key arrays */
 	for (int i = 0; i < sc->sc_temp_count; i++)
 		free(sc->sc_temp_sensors[i], M_DEVBUF);
+	sc->sc_temp_count = 0;
 
 	/* Free sensor key arrays */
 	for (int i = 0; i < sc->sc_voltage_count; i++)
 		free(sc->sc_voltage_sensors[i], M_DEVBUF);
+	sc->sc_voltage_count = 0;
 	for (int i = 0; i < sc->sc_current_count; i++)
 		free(sc->sc_current_sensors[i], M_DEVBUF);
+	sc->sc_current_count = 0;
 	for (int i = 0; i < sc->sc_power_count; i++)
 		free(sc->sc_power_sensors[i], M_DEVBUF);
+	sc->sc_power_count = 0;
 	for (int i = 0; i < sc->sc_light_count; i++)
 		free(sc->sc_light_sensors[i], M_DEVBUF);
+	sc->sc_light_count = 0;
 
 	if (sc->sc_sms_tq) {
 		taskqueue_drain(sc->sc_sms_tq, &sc->sc_sms_task);
@@ -387,14 +397,38 @@ asmc_detach(device_t dev)
 }
 
 static int
+asmc_suspend(device_t dev)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+
+	sc->sc_fanmanual_saved = 0;
+	if (asmc_fan_manual_get(dev, &sc->sc_fanmanual_saved) != 0)
+		return (0);
+	if (sc->sc_fanmanual_saved != 0)
+		asmc_fan_manual_set(dev, 0);
+
+	return (0);
+}
+
+static int
 asmc_resume(device_t dev)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
 	uint8_t buf[2];
 
-	buf[0] = sc->sc_light_control;
-	buf[1] = 0x00;
-	asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
+	if (sc->sc_has_light) {
+		buf[0] = sc->sc_light_control;
+		buf[1] = 0x00;
+		asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
+	}
+
+	if (sc->sc_fanmanual_saved != 0) {
+		asmc_fan_manual_set(dev, sc->sc_fanmanual_saved);
+		sc->sc_fanmanual_saved = 0;
+	}
+
+	if (sc->sc_has_sms)
+		asmc_sms_init(dev);
 
 	return (0);
 }
@@ -441,8 +475,7 @@ asmc_init(device_t dev)
 		}
 	} else {
 		device_printf(dev, "SMC revision: %x.%x%x%x\n",
-		    buf[0], buf[1], buf[2],
-		    ntohs(*(uint16_t *)buf + 4));
+		    buf[0], buf[1], buf[2], be16dec(buf + 4));
 	}
 
 	asmc_sysctl_add_platform(dev, sysctlctx);
@@ -959,6 +992,68 @@ asmc_fan_count(device_t dev)
 		return (-1);
 
 	return (buf[0]);
+}
+
+/* T2 Macs keep one key per fan; everything else packs it into FS!. */
+static int
+asmc_fan_manual_get(device_t dev, uint16_t *maskp)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+	char fmkey[ASMC_KEYLEN + 1];
+	uint8_t buf[2];
+	uint16_t mask = 0;
+	int error;
+
+	if (sc->sc_is_t2) {
+		for (int i = 0; i < sc->sc_nfan; i++) {
+			snprintf(fmkey, sizeof(fmkey),
+			    ASMC_KEY_FANMANUAL_T2, i);
+			if (asmc_key_getinfo(dev, fmkey, NULL, NULL) != 0)
+				continue;
+			error = asmc_key_read(dev, fmkey, buf, 1);
+			if (error != 0)
+				return (error);
+			if (buf[0] != 0)
+				mask |= 1 << i;
+		}
+		*maskp = mask;
+		return (0);
+	}
+
+	error = asmc_key_read(dev, ASMC_KEY_FANMANUAL, buf, sizeof(buf));
+	if (error != 0)
+		return (error);
+	*maskp = (buf[0] << 8) | buf[1];
+
+	return (0);
+}
+
+static int
+asmc_fan_manual_set(device_t dev, uint16_t mask)
+{
+	struct asmc_softc *sc = device_get_softc(dev);
+	char fmkey[ASMC_KEYLEN + 1];
+	uint8_t buf[2];
+	int error;
+
+	if (sc->sc_is_t2) {
+		for (int i = 0; i < sc->sc_nfan; i++) {
+			snprintf(fmkey, sizeof(fmkey),
+			    ASMC_KEY_FANMANUAL_T2, i);
+			if (asmc_key_getinfo(dev, fmkey, NULL, NULL) != 0)
+				continue;
+			buf[0] = (mask & (1 << i)) != 0;
+			error = asmc_key_write(dev, fmkey, buf, 1);
+			if (error != 0)
+				return (error);
+		}
+		return (0);
+	}
+
+	buf[0] = mask >> 8;
+	buf[1] = mask & 0xff;
+
+	return (asmc_key_write(dev, ASMC_KEY_FANMANUAL, buf, sizeof(buf)));
 }
 
 

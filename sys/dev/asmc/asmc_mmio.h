@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#ifndef _DEV_ASMC_ASMCMMIO_H_
-#define _DEV_ASMC_ASMCMMIO_H_
+#ifndef _DEV_ASMC_ASMC_MMIO_H_
+#define _DEV_ASMC_ASMC_MMIO_H_
 
 struct asmc_softc;
 
@@ -26,7 +26,7 @@ struct asmc_softc;
  * T2-specific keys.
  */
 #define ASMC_KEY_LDKN		"LDKN"	/* RO; 1 byte, firmware version */
-#define ASMC_KEY_BCLM		"BCLM"	/* RW; 1 byte, battery charge limit 0-100 */
+#define ASMC_KEY_BCLM		"BCLM"	/* RW; 1 byte, charge limit 0-100 */
 #define ASMC_KEY_FANMANUAL_T2	"F%dMd"	/* RW; 1 byte per fan (T2) */
 
 /*
@@ -53,4 +53,4 @@ uint32_t	asmc_u32_to_float(uint32_t d);
  */
 int	asmc_bclm_sysctl(SYSCTL_HANDLER_ARGS);
 
-#endif /* _DEV_ASMC_ASMCMMIO_H_ */
+#endif /* _DEV_ASMC_ASMC_MMIO_H_ */

@@ -44,7 +44,6 @@
 #define ASMC_TEMP_MAX		80
 
 struct asmc_softc {
-	device_t 		sc_dev;
 	struct mtx 		sc_mtx;
 	int 			sc_nfan;
 	int 			sc_nkeys;
@@ -64,7 +63,7 @@ struct asmc_softc {
 	int			sc_rid_mem;
 	struct resource		*sc_iomem;
 	bool			sc_is_mmio;
-	int			sc_is_t2;	/* T2 fan float + per-fan manual */
+	int			sc_is_t2;	/* T2 float + per-fan manual */
 	int 			sc_sms_intrtype;
 	struct taskqueue 	*sc_sms_tq;
 	struct task 		sc_sms_task;
@@ -72,6 +71,7 @@ struct asmc_softc {
 	struct cdev		*sc_kbd_bkl;
 	uint32_t		sc_kbd_bkl_level;
 	unsigned int		sc_light_control;
+	uint16_t		sc_fanmanual_saved;
 	/* Raw key access; only used when built with ASMC_DEBUG */
 	struct sysctl_oid	*sc_raw_tree;
 	char			sc_rawkey[ASMC_KEYLEN + 1];
