@@ -27,8 +27,13 @@
 #include <sys/taskqueue.h>
 
 #include <dev/asmc/asmcvar.h>
-#include <dev/asmc/asmcmmio.h>
+#include <dev/asmc/asmc_mmio.h>
 #include <dev/asmc/asmc_sysctl.h>
+
+#define	ASMC_ZERO_C_TO_DK	2731	/* deciKelvin at 0 degrees C */
+
+/* sp78 0x8100: SMC sentinel for an unpopulated sensor, milli-degrees C. */
+#define	ASMC_TEMP_ABSENT	(-127000)
 
 /*
  * Shutdown/sleep cause codes (MSSD/MSSP values).
@@ -44,7 +49,8 @@ struct asmc_cause {
 	const char	*sleep_desc;	/* sleep description, or NULL if same */
 };
 
-#define ASMC_CAUSE_BUFLEN	48	/* "-128 (temperature-overlimit-timeout)\0" */
+/* Widest rendering: "-128 (temperature-overlimit-timeout)\0". */
+#define	ASMC_CAUSE_BUFLEN	48
 
 static const struct asmc_cause asmc_cause_table[] = {
 	{    5,	"good-shutdown",		"good-sleep" },
@@ -57,10 +63,10 @@ static const struct asmc_cause asmc_cause_table[] = {
 	{   -3,	"temperature-multisleep",	NULL },
 	{   -4,	"sensor-fan",			NULL },
 	{  -30,	"temperature-overlimit-timeout", NULL },
-	{  -40,	"pswr-smrst",			NULL },	/* power supply watchdog reset */
+	{  -40,	"pswr-smrst",			NULL },	/* watchdog reset */
 	{  -50,	"unmapped",			NULL },
 	{  -60,	"low-battery",			NULL },
-	{  -61,	"ninja-shutdown",		NULL },	/* sudden unexpected power loss */
+	{  -61,	"ninja-shutdown",		NULL },	/* sudden power loss */
 	{  -62,	"ninja-restart",		NULL },
 	{  -70,	"palm-rest-temperature",	NULL },
 	{  -71,	"sodimm-temperature",		NULL },
@@ -331,7 +337,7 @@ asmc_sysctl_add_temp(device_t dev, struct sysctl_ctx_list *ctx)
 		    SYSCTL_CHILDREN(sc->sc_temp_tree),
 		    OID_AUTO, sc->sc_temp_sensors[i],
 		    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MPSAFE, dev, i,
-		    asmc_temp_sysctl, "I",
+		    asmc_temp_sysctl, "IK",
 		    asmc_temp_desc(sc->sc_temp_sensors[i]));
 	}
 }
@@ -366,24 +372,27 @@ static const struct {
 	const char	*name;
 	const char	*desc;
 	int		ctlflags;
+	const char	*fmt;
 	int		(*handler)(SYSCTL_HANDLER_ARGS);
 	int		which;
 	bool		needs_safespeed;
 } asmc_fan_sysctls[] = {
-	{ "id", "Fan ID", CTLTYPE_STRING | CTLFLAG_RD,
+	{ "id", "Fan ID", CTLTYPE_STRING | CTLFLAG_RD, "A",
 	    asmc_mb_sysctl_fanid, 0, false },
-	{ "speed", "Fan speed in RPM", CTLTYPE_INT | CTLFLAG_RD,
+	{ "speed", "Fan speed in RPM", CTLTYPE_INT | CTLFLAG_RD, "I",
 	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_CUR, false },
-	{ "safespeed", "Fan safe speed in RPM", CTLTYPE_INT | CTLFLAG_RD,
+	{ "safespeed", "Fan safe speed in RPM", CTLTYPE_INT | CTLFLAG_RD, "I",
 	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_SAFE, true },
-	{ "minspeed", "Fan minimum speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	{ "minspeed", "Fan minimum speed in RPM", CTLTYPE_INT | CTLFLAG_RW, "I",
 	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_MIN, false },
-	{ "maxspeed", "Fan maximum speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	{ "maxspeed", "Fan maximum speed in RPM", CTLTYPE_INT | CTLFLAG_RW, "I",
 	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_MAX, false },
-	{ "targetspeed", "Fan target speed in RPM", CTLTYPE_INT | CTLFLAG_RW,
+	{ "targetspeed", "Fan target speed in RPM",
+	    CTLTYPE_INT | CTLFLAG_RW, "I",
 	    asmc_mb_sysctl_fanspeed, ASMC_FANSPEED_TARGET, false },
 	{ "manual", "Fan manual mode (0=auto, 1=manual)",
-	    CTLTYPE_INT | CTLFLAG_RW, asmc_mb_sysctl_fanmanual, 0, false },
+	    CTLTYPE_INT | CTLFLAG_RW, "I",
+	    asmc_mb_sysctl_fanmanual, 0, false },
 };
 
 void
@@ -416,7 +425,8 @@ asmc_sysctl_add_fan(device_t dev, struct sysctl_ctx_list *ctx)
 			    OID_AUTO, asmc_fan_sysctls[k].name,
 			    asmc_fan_sysctls[k].ctlflags | CTLFLAG_MPSAFE,
 			    dev, ASMC_FAN_ARG2(asmc_fan_sysctls[k].which, j),
-			    asmc_fan_sysctls[k].handler, "I",
+			    asmc_fan_sysctls[k].handler,
+			    asmc_fan_sysctls[k].fmt,
 			    asmc_fan_sysctls[k].desc, NULL);
 		}
 	}
@@ -532,7 +542,7 @@ static const struct {
 	    "IU", CTLTYPE_UINT | CTLFLAG_RD, 0, asmc_rgen_sysctl, 0, 0 },
 };
 
-int
+void
 asmc_sysctl_add_system(device_t dev, struct sysctl_ctx_list *ctx)
 {
 	struct sysctl_oid *sys_tree;
@@ -543,7 +553,7 @@ asmc_sysctl_add_system(device_t dev, struct sysctl_ctx_list *ctx)
 	    "System state and board identity");
 	if (sys_tree == NULL) {
 		device_printf(dev, "failed to create system sysctl node\n");
-		return (ENXIO);
+		return;
 	}
 
 	for (unsigned int k = 0; k < nitems(asmc_system_sysctls); k++) {
@@ -566,8 +576,6 @@ asmc_sysctl_add_system(device_t dev, struct sysctl_ctx_list *ctx)
 		    asmc_system_sysctls[k].fmt,
 		    asmc_system_sysctls[k].desc, NULL);
 	}
-
-	return (0);
 }
 
 /* Platform toggles under dev.asmc.n, each present only if its key reads. */
@@ -651,10 +659,10 @@ asmc_sensor_sysctl(SYSCTL_HANDLER_ARGS)
 }
 
 static int
-asmc_fan_getvalue(device_t dev, const char *key, int fan)
+asmc_fan_getvalue(device_t dev, const char *key, int fan, int *speed)
 {
 	struct asmc_softc *sc = device_get_softc(dev);
-	int speed;
+	int error;
 	uint8_t buf[4];
 	char fankey[5];
 	char type[ASMC_TYPELEN + 1];
@@ -669,16 +677,18 @@ asmc_fan_getvalue(device_t dev, const char *key, int fan)
 	if (sc->sc_is_t2 &&
 	    asmc_key_getinfo(dev, fankey, NULL, type) == 0 &&
 	    strncmp(type, "flt ", 4) == 0) {
-		if (asmc_key_read(dev, fankey, buf, 4) != 0)
-			return (-1);
-		speed = (int)asmc_float_to_u32(le32dec(buf));
+		error = asmc_key_read(dev, fankey, buf, 4);
+		if (error != 0)
+			return (error);
+		*speed = (int)asmc_float_to_u32(le32dec(buf));
 	} else {
-		if (asmc_key_read(dev, fankey, buf, 2) != 0)
-			return (-1);
-		speed = (buf[0] << 6) | (buf[1] >> 2);
+		error = asmc_key_read(dev, fankey, buf, 2);
+		if (error != 0)
+			return (error);
+		*speed = (buf[0] << 6) | (buf[1] >> 2);
 	}
 
-	return (speed);
+	return (0);
 }
 
 static char *
@@ -691,7 +701,7 @@ asmc_fan_getstring(device_t dev, const char *key, int fan, uint8_t *buf,
 	snprintf(fankey, sizeof(fankey), key, fan);
 	if (asmc_key_read(dev, fankey, buf, buflen) != 0)
 		return (NULL);
-	desc = buf + 4;
+	desc = (char *)(buf + 4);
 
 	return (desc);
 }
@@ -714,17 +724,14 @@ asmc_fan_setvalue(device_t dev, const char *key, int fan, int speed)
 		speed = MIN(speed, 65535);
 		fval = asmc_u32_to_float((uint32_t)speed);
 		le32enc(buf, fval);
-		if (asmc_key_write(dev, fankey, buf, 4) != 0)
-			return (-1);
-	} else {
-		speed *= 4;
-		buf[0] = speed >> 8;
-		buf[1] = speed;
-		if (asmc_key_write(dev, fankey, buf, 2) != 0)
-			return (-1);
+		return (asmc_key_write(dev, fankey, buf, 4));
 	}
 
-	return (0);
+	speed *= 4;
+	buf[0] = speed >> 8;
+	buf[1] = speed;
+
+	return (asmc_key_write(dev, fankey, buf, 2));
 }
 
 static int
@@ -734,17 +741,18 @@ asmc_mb_sysctl_fanspeed(SYSCTL_HANDLER_ARGS)
 	int which = ASMC_FAN_ARG2_WHICH(arg2);
 	int fan = ASMC_FAN_ARG2_FAN(arg2);
 	int error;
-	int32_t v;
+	int v;
 
-	v = asmc_fan_getvalue(dev, asmc_fan_speed_keys[which].key, fan);
+	error = asmc_fan_getvalue(dev, asmc_fan_speed_keys[which].key, fan, &v);
+	if (error != 0)
+		return (error);
+
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
 	if (error == 0 && req->newptr != NULL &&
-	    asmc_fan_speed_keys[which].writable) {
-		unsigned int newspeed = v;
-		asmc_fan_setvalue(dev, asmc_fan_speed_keys[which].key, fan,
-		    newspeed);
-	}
+	    asmc_fan_speed_keys[which].writable)
+		error = asmc_fan_setvalue(dev, asmc_fan_speed_keys[which].key,
+		    fan, v);
 
 	return (error);
 }
@@ -755,15 +763,13 @@ asmc_mb_sysctl_fanid(SYSCTL_HANDLER_ARGS)
 	uint8_t buf[16];
 	device_t dev = (device_t)arg1;
 	int fan = ASMC_FAN_ARG2_FAN(arg2);
-	int error = true;
 	char *desc;
 
 	desc = asmc_fan_getstring(dev, ASMC_KEY_FANID, fan, buf, sizeof(buf));
+	if (desc == NULL)
+		return (ENXIO);
 
-	if (desc != NULL)
-		error = sysctl_handle_string(oidp, desc, 0, req);
-
-	return (error);
+	return (sysctl_handle_string(oidp, desc, 0, req));
 }
 
 static int
@@ -844,33 +850,27 @@ asmc_mb_sysctl_fanmanual(SYSCTL_HANDLER_ARGS)
  * Temperature functions.
  */
 static int
-asmc_temp_getvalue(device_t dev, const char *key)
-{
-	uint8_t buf[2];
-
-	/*
-	 * Check for invalid temperatures.
-	 */
-	if (asmc_key_read(dev, key, buf, sizeof(buf)) != 0)
-		return (-1);
-
-	return (buf[0]);
-}
-
-static int
 asmc_temp_sysctl(SYSCTL_HANDLER_ARGS)
 {
 	device_t dev = (device_t)arg1;
 	struct asmc_softc *sc = device_get_softc(dev);
-	int error, val;
+	int error, millic, deci;
 
 	if (arg2 < 0 || arg2 >= sc->sc_temp_count)
 		return (EINVAL);
 
-	val = asmc_temp_getvalue(dev, sc->sc_temp_sensors[arg2]);
-	error = sysctl_handle_int(oidp, &val, 0, req);
+	error = asmc_sensor_read(dev, sc->sc_temp_sensors[arg2], &millic);
+	if (error != 0)
+		return (error);
 
-	return (error);
+	if (millic == ASMC_TEMP_ABSENT)
+		return (ENXIO);
+
+	/* Round to the tenth of a degree that "IK" prints, then offset. */
+	deci = millic >= 0 ? (millic + 50) / 100 : (millic - 50) / 100;
+	deci += ASMC_ZERO_C_TO_DK;
+
+	return (sysctl_handle_int(oidp, &deci, 0, req));
 }
 
 static int
@@ -881,7 +881,9 @@ asmc_mb_sysctl_sms(SYSCTL_HANDLER_ARGS)
 	int16_t val;
 	int32_t v;
 
-	asmc_sms_read(dev, asmc_sms_sysctls[arg2].key, &val);
+	error = asmc_sms_read(dev, asmc_sms_sysctls[arg2].key, &val);
+	if (error != 0)
+		return (error);
 	v = (int32_t)val;
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
@@ -896,7 +898,9 @@ asmc_mbp_sysctl_light(SYSCTL_HANDLER_ARGS)
 	int error;
 	int32_t v;
 
-	asmc_key_read(dev, asmc_light_keys[arg2], buf, sizeof(buf));
+	error = asmc_key_read(dev, asmc_light_keys[arg2], buf, sizeof(buf));
+	if (error != 0)
+		return (error);
 	v = buf[2];
 	error = sysctl_handle_int(oidp, &v, 0, req);
 
@@ -922,7 +926,8 @@ asmc_mbp_sysctl_light_control(SYSCTL_HANDLER_ARGS)
 		sc->sc_kbd_bkl_level = v * 100 / 255;
 		buf[0] = sc->sc_light_control;
 		buf[1] = 0x00;
-		asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf, sizeof(buf));
+		error = asmc_key_write(dev, ASMC_KEY_LIGHTVALUE, buf,
+		    sizeof(buf));
 	}
 	return (error);
 }
@@ -935,7 +940,9 @@ asmc_mbp_sysctl_light_left_10byte(SYSCTL_HANDLER_ARGS)
 	int error;
 	uint32_t v;
 
-	asmc_key_read(dev, ASMC_KEY_LIGHTLEFT, buf, sizeof(buf));
+	error = asmc_key_read(dev, ASMC_KEY_LIGHTLEFT, buf, sizeof(buf));
+	if (error != 0)
+		return (error);
 
 	/*
 	 * This seems to be a 32 bit big endian value from buf[6] -> buf[9].
