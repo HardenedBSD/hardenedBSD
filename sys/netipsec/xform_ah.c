@@ -314,6 +314,15 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 				return EINVAL;
 			}
 
+			/* An option must not run past the header. */
+			if (ptr[off] != IPOPT_EOL && ptr[off] != IPOPT_NOP &&
+			    off + ptr[off + 1] > skip) {
+				DPRINTF(("%s: malformed IPv4 options header\n",
+					__func__));
+				m_freem(m);
+				return EINVAL;
+			}
+
 			switch (ptr[off]) {
 			case IPOPT_EOL:
 				off = skip;  /* End the loop. */
@@ -383,15 +392,6 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 				bcopy(ipseczeroes, ptr + off, count);
 				off += count;
 				break;
-			}
-
-			/* Sanity check. */
-			if (off > skip)	{
-				DPRINTF(("%s: malformed IPv4 options header\n",
-					__func__));
-
-				m_freem(m);
-				return EINVAL;
 			}
 		}
 
@@ -476,6 +476,9 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 						continue; /* Skip padding. */
 					}
 
+					/* The length byte must be in the header. */
+					if (count + 1 >= noff)
+						goto error6;
 					ad = ptr[count + 1] + 2;
 					if (count + ad > noff)
 						goto error6;
@@ -695,7 +698,6 @@ ah_input_cb(struct cryptop *crp)
 	struct secasvar *sav;
 	struct secasindex *saidx;
 	caddr_t ptr;
-	crypto_session_t cryptoid;
 	int authsize, rplen, ahsize, error, skip, protoff;
 	uint8_t nxt;
 
@@ -708,7 +710,6 @@ ah_input_cb(struct cryptop *crp)
 	skip = xd->skip;
 	nxt = xd->nxt;
 	protoff = xd->protoff;
-	cryptoid = xd->cryptoid;
 	ipsec_sahtree_rlock(&sahtree_tracker);
 	if (sav->state >= SADB_SASTATE_DEAD) {
 		/* saidx is freed */
@@ -725,10 +726,7 @@ ah_input_cb(struct cryptop *crp)
 	/* Check for crypto errors. */
 	if (crp->crp_etype) {
 		if (crp->crp_etype == EAGAIN) {
-			/* Reset the session ID */
-			if (ipsec_updateid(sav, &crp->crp_session, &cryptoid) != 0)
-				crypto_freesession(cryptoid);
-			xd->cryptoid = crp->crp_session;
+			ipsec_crypto_retry(sav, xd, crp);
 			ipsec_sahtree_runlock(&sahtree_tracker);
 			CURVNET_RESTORE();
 			return (crypto_dispatch(crp));
@@ -1100,7 +1098,6 @@ ah_output_cb(struct cryptop *crp)
 	struct secpolicy *sp;
 	struct secasvar *sav;
 	struct mbuf *m;
-	crypto_session_t cryptoid;
 	caddr_t ptr;
 	u_int idx;
 	int skip, error;
@@ -1112,16 +1109,12 @@ ah_output_cb(struct cryptop *crp)
 	sav = xd->sav;
 	skip = xd->skip;
 	idx = xd->idx;
-	cryptoid = xd->cryptoid;
 	ptr = (caddr_t) (xd + 1);
 
 	/* Check for crypto errors. */
 	if (crp->crp_etype) {
 		if (crp->crp_etype == EAGAIN) {
-			/* Reset the session ID */
-			if (ipsec_updateid(sav, &crp->crp_session, &cryptoid) != 0)
-				crypto_freesession(cryptoid);
-			xd->cryptoid = crp->crp_session;
+			ipsec_crypto_retry(sav, xd, crp);
 			CURVNET_RESTORE();
 			return (crypto_dispatch(crp));
 		}
