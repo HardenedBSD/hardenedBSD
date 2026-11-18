@@ -186,6 +186,7 @@ out:
 static int
 remove_dir(int fd, size_t max_recursions)
 {
+	int res;
 	DIR *dirp;
 	struct dirent *dp;
 
@@ -197,6 +198,7 @@ remove_dir(int fd, size_t max_recursions)
 	if (dirp == NULL)
 		return (-1);
 
+	res = 0;
 	while ((dp = readdir(dirp)) != NULL) {
 		if (dp->d_type == DT_DIR) {
 			int dirfd;
@@ -205,16 +207,21 @@ remove_dir(int fd, size_t max_recursions)
 			    strcmp(dp->d_name, "..") == 0)
 				continue;
 			dirfd = openat(fd, dp->d_name, 0);
-			remove_dir(dirfd, max_recursions-1);
+			if (remove_dir(dirfd, max_recursions-1)) {
+				res = -1;
+			}
 			close(dirfd);
 			unlinkat(fd, dp->d_name, AT_REMOVEDIR);
+			if (res) {
+				break;
+			}
 			continue;
 		}
 		unlinkat(fd, dp->d_name, 0);
 	}
 	closedir(dirp);
 
-	return (0);
+	return (res);
 }
 
 static int
@@ -329,21 +336,17 @@ _pam_xdg_close(pam_handle_t *pamh __unused, int flags __unused,
 	 * or linger enabled but user has no processes
 	 */
 	if (i == 0) {
-<<<<<<< HEAD
-		remove_dir(rt_dir, REMOVEDIR_MAX_RECUR);
-		if (unlinkat(rt_dir_prefix, user, AT_REMOVEDIR) != 0) {
-			PAM_VERBOSE_ERROR("Can't cleanup %s/%s\n", runtime_dir_prefix, user);
-			rv = PAM_SESSION_ERR;
-			goto out;
-=======
 		if (openpam_get_option(pamh, "linger") == NULL || !uid_has_procs(passwd->pw_uid)) {
-			remove_dir(rt_dir);
+			if (remove_dir(rt_dir, REMOVEDIR_MAX_RECUR)) {
+				PAM_VERBOSE_ERROR("Can't cleanup %s/%s\n", runtime_dir_prefix, user);
+				rv = PAM_SESSION_ERR;
+				goto out;
+			}
 			if (unlinkat(rt_dir_prefix, user, AT_REMOVEDIR) != 0) {
 				PAM_VERBOSE_ERROR("Can't cleanup %s/%s\n", runtime_dir_prefix, user);
 				rv = PAM_SESSION_ERR;
 				goto out;
 			}
->>>>>>> rad/freebsd/current/main
 		}
 	}
 
