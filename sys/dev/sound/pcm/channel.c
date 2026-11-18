@@ -138,8 +138,6 @@ chn_vpc_proc(int reset, int db)
 		d = devclass_get_softc(pcm_devclass, i);
 		if (!PCM_REGISTERED(d))
 			continue;
-		PCM_LOCK(d);
-		PCM_WAIT(d);
 		PCM_ACQUIRE(d);
 		CHN_FOREACH(c, d, channels.pcm) {
 			CHN_LOCK(c);
@@ -149,7 +147,6 @@ chn_vpc_proc(int reset, int db)
 			CHN_UNLOCK(c);
 		}
 		PCM_RELEASE(d);
-		PCM_UNLOCK(d);
 	}
 	bus_topo_unlock();
 }
@@ -342,9 +339,7 @@ chn_sleep(struct pcm_channel *c, int timeout)
 	if (c->flags & CHN_F_DEAD)
 		return (EINVAL);
 
-	c->sleeping++;
 	ret = cv_timedwait_sig(&c->intr_cv, &c->lock, timeout);
-	c->sleeping--;
 
 	return ((c->flags & CHN_F_DEAD) ? EINVAL : ret);
 }
@@ -1156,7 +1151,6 @@ chn_init(struct snddev_info *d, struct pcm_channel *parent, kobj_class_t cls,
 	int err, i, direction, *vchanrate, *vchanformat;
 
 	PCM_BUSYASSERT(d);
-	PCM_LOCKASSERT(d);
 
 	switch (dir) {
 	case PCMDIR_PLAY:
@@ -1186,7 +1180,6 @@ chn_init(struct snddev_info *d, struct pcm_channel *parent, kobj_class_t cls,
 		return (NULL);
 	}
 
-	PCM_UNLOCK(d);
 	b = NULL;
 	bs = NULL;
 
@@ -1266,7 +1259,6 @@ chn_init(struct snddev_info *d, struct pcm_channel *parent, kobj_class_t cls,
 			goto fail;
 	}
 
-	PCM_LOCK(d);
 	CHN_INSERT_SORT_ASCEND(d, c, channels.pcm);
 	if ((c->flags & CHN_F_VIRTUAL) == 0) {
 		CHN_INSERT_SORT_ASCEND(d, c, channels.pcm.primary);
@@ -1279,7 +1271,6 @@ chn_init(struct snddev_info *d, struct pcm_channel *parent, kobj_class_t cls,
 
 fail:
 	chn_kill(c);
-	PCM_LOCK(d);
 
 	return (NULL);
 }
@@ -1293,7 +1284,6 @@ chn_kill(struct pcm_channel *c)
 
 	PCM_BUSYASSERT(c->parentsnddev);
 
-	PCM_LOCK(d);
 	CHN_REMOVE(d, c, channels.pcm);
 	if ((c->flags & CHN_F_VIRTUAL) == 0)
 		CHN_REMOVE(d, c, channels.pcm.primary);
@@ -1314,7 +1304,6 @@ chn_kill(struct pcm_channel *c)
 	default:
 		__assert_unreachable();
 	}
-	PCM_UNLOCK(d);
 
 	if (CHN_STARTED(c)) {
 		CHN_LOCK(c);
@@ -1339,13 +1328,50 @@ chn_kill(struct pcm_channel *c)
 	free(c, M_DEVBUF);
 }
 
-void
+static void
 chn_shutdown(struct pcm_channel *c)
 {
 	CHN_LOCKASSERT(c);
 
 	chn_wakeup(c);
 	c->flags |= CHN_F_DEAD;
+}
+
+void
+chn_shutdownall(struct snddev_info *d)
+{
+	struct pcm_channel *c;
+
+	PCM_BUSYASSERT(d);
+	KASSERT(!PCM_REGISTERED(d), ("%s(): still registered", __func__));
+
+	CHN_FOREACH(c, d, channels.pcm) {
+		CHN_LOCK(c);
+		chn_shutdown(c);
+		if (c->inprog == 0 && CHN_STOPPED(c)) {
+			CHN_UNLOCK(c);
+			continue;
+		}
+		if (c->direction == PCMDIR_PLAY)
+			chn_flush(c);
+		else
+			chn_abort(c);
+		CHN_UNLOCK(c);
+	}
+}
+
+void
+chn_killall(struct snddev_info *d)
+{
+	struct pcm_channel *c;
+
+	PCM_BUSYASSERT(d);
+	KASSERT(!PCM_REGISTERED(d), ("%s(): still registered", __func__));
+
+	while (!CHN_EMPTY(d, channels.pcm)) {
+		c = CHN_FIRST(d, channels.pcm);
+		chn_kill(c);
+	}
 }
 
 /* release a locked channel and unlock it */
