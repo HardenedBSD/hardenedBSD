@@ -5,6 +5,7 @@ name: Checklist
 
 on:
   pull_request_target:
+    branches: [ main ]
     types: [ opened, reopened, edited, synchronize ]
 
 permissions:
@@ -13,6 +14,7 @@ permissions:
 jobs:
   checklist:
     name: commit
+    if: github.repository == 'freebsd/freebsd-src'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
