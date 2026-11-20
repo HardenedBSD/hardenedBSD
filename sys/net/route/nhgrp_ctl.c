@@ -73,7 +73,6 @@ CHK_STRUCT_FIELD_GENERIC(struct nhop_object, nh_flags, struct nhgrp_object, nhg_
 /* Cap multipath to 64, as the larger values would break rib_cmd_info bmasks */
 CTASSERT(RIB_MAX_MPATH_WIDTH <= 64);
 
-static int wn_cmp_idx(const void *a, const void *b);
 static void sort_weightened_nhops(struct weightened_nhop *wn, int num_nhops);
 
 static struct nhgrp_priv *get_nhgrp(struct nh_control *ctl,
@@ -82,14 +81,21 @@ static void destroy_nhgrp(struct nhgrp_priv *nhg_priv);
 static void destroy_nhgrp_epoch(epoch_context_t ctx);
 static void free_nhgrp_nhops(struct nhgrp_priv *nhg_priv);
 
-static int
-wn_cmp_idx(const void *a, const void *b)
+/*
+ * Compares the position of two nexthops in a group: nexthops are ordered
+ * by metric first and by nexthop index second.
+ */
+int
+nhgrp_cmp_wn(const struct weightened_nhop *w_a,
+    const struct weightened_nhop *w_b)
 {
-	const struct weightened_nhop *w_a = a;
-	const struct weightened_nhop *w_b = b;
+	uint32_t a_metric = w_a->nh->nh_priv->nh_metric;
+	uint32_t b_metric = w_b->nh->nh_priv->nh_metric;
 	uint32_t a_idx = w_a->nh->nh_priv->nh_idx;
 	uint32_t b_idx = w_b->nh->nh_priv->nh_idx;
 
+	if (a_metric != b_metric)
+		return (a_metric < b_metric ? -1 : 1);
 	if (a_idx < b_idx)
 		return (-1);
 	else if (a_idx > b_idx)
@@ -98,116 +104,77 @@ wn_cmp_idx(const void *a, const void *b)
 		return (0);
 }
 
+static int
+wn_cmp(const void *a, const void *b)
+{
+
+	return (nhgrp_cmp_wn(a, b));
+}
+
 /*
  * Perform in-place sorting for array of nexthops in @wn.
- * Sort by nexthop index ascending.
+ * Sort by metric ascending, then by nexthop index ascending:
+ * the nexthops with the lowest metric come first.
  */
 static void
 sort_weightened_nhops(struct weightened_nhop *wn, int num_nhops)
 {
 
-	qsort(wn, num_nhops, sizeof(struct weightened_nhop), wn_cmp_idx);
+	qsort(wn, num_nhops, sizeof(struct weightened_nhop), wn_cmp);
 }
 
 /*
- * In order to determine the minimum weight difference in the array
- * of weights, create a sorted array of weights, using spare "storage"
- * field in the `struct weightened_nhop`.
- * Assume weights to be (mostly) the same and use insertion sort to
- * make it sorted.
- */
-static void
-sort_weightened_nhops_weights(struct weightened_nhop *wn, int num_items)
-{
-	wn[0].storage = wn[0].weight;
-	for (int i = 1, j = 0; i < num_items; i++) {
-		uint32_t weight = wn[i].weight; // read from 'weight' as it's not reordered
-		/* Move all weights > weight 1 position right */
-		for (j = i - 1; j >= 0 && wn[j].storage > weight; j--)
-			wn[j + 1].storage = wn[j].storage;
-		wn[j + 1].storage = weight;
-	}
-}
-
-/*
- * Calculate minimum number of slots required to fit the existing
- * set of weights in the common use case where weights are "easily"
- * comparable.
- * Assumes @wn is sorted by weight ascending and each weight is > 0.
- * Returns number of slots or 0 if precise calculation failed.
- * Only calculate for nexthops with specified metric and ignore the rest.
- *
- * Some examples:
- * note: (i, X) pair means (nhop=i, weight=X):
- * (1, 1) (2, 2) -> 3 slots [1, 2, 2]
- * (1, 100), (2, 200) -> 3 slots [1, 2, 2]
- * (1, 100), (2, 200), (3, 400) -> 7 slots [1, 2, 2, 3, 3, 3]
+ * Returns the greatest common divisor of @a and @b.
+ * The divisor of zero and x is x.
  */
 static uint32_t
-calc_min_mpath_slots_fast(struct weightened_nhop *wn, size_t num_items,
-    uint32_t metric, uint64_t *ptotal)
+calc_gcd(uint32_t a, uint32_t b)
 {
-	uint32_t i, x, last, xmin = 0;
-	uint64_t total = 0;
+	uint32_t r;
 
-	// Get sorted array of weights in .storage field
-	sort_weightened_nhops_weights(wn, num_items);
-
-	/* start with lowest metric */
-	for (x = 0; x < num_items; x++) {
-		if (nhop_get_metric(wn[x].nh) == metric) {
-			xmin = wn[x].storage;
-			break;
-		}
-	}
-	last = 0;
-	for (i = x; i < num_items; i++) {
-		if (nhop_get_metric(wn[i].nh) != metric)
-			continue;
-
-		total += wn[i].storage;
-		if ((wn[i].storage != last) &&
-		    ((wn[i].storage - last < xmin) || xmin == 0)) {
-			xmin = wn[i].storage - last;
-		}
-		last = wn[i].storage;
-	}
-	*ptotal = total;
-	/* xmin is the minimum unit of desired capacity */
-	if (xmin == 0 || (total % xmin) != 0)
-		return (0);
-	for (i = 0; i < num_items; i++) {
-		if ((wn[i].weight % xmin) != 0)
-			return (0);
+	while (b != 0) {
+		r = a % b;
+		a = b;
+		b = r;
 	}
 
-	return ((uint32_t)(total / xmin));
+	return (a);
 }
 
 /*
  * Calculate minimum number of slots required to fit the existing
  * set of weights while maintaining weight coefficients
- * after filtering by metric.
+ * after filtering by metric: the sum of the weights divided by
+ * their greatest common divisor.
  *
- * Assume @wn is sorted by weight ascending and each weight is > 0.
+ * Assume @wn is sorted by metric ascending and only calculate for
+ * nexthops with the lowest metric.
+ * Returns number of slots, at most RIB_MAX_MPATH_WIDTH, or 0 if all
+ * weights are zero.
  *
- * Tries to find simple precise solution first and falls back to
- *  RIB_MAX_MPATH_WIDTH in case of any failure.
+ * Some examples:
+ * note: (i, X) pair means (nhop=i, weight=X):
+ * (1, 1) (2, 2) -> 3 slots [1, 2, 2]
+ * (1, 100), (2, 200) -> 3 slots [1, 2, 2]
+ * (1, 100), (2, 200), (3, 400) -> 7 slots [1, 2, 2, 3, 3, 3, 3]
  */
 static uint32_t
-calc_min_mpath_slots(struct weightened_nhop *wn, size_t num_items,
-    uint32_t metric)
+calc_min_mpath_slots(const struct weightened_nhop *wn, size_t num_items)
 {
-	uint32_t v;
-	uint64_t total;
+	uint64_t total = 0;
+	uint32_t unit = 0;
 
-	v = calc_min_mpath_slots_fast(wn, num_items, metric, &total);
+	for (size_t i = 0; i < num_items; i++) {
+		if (wn[i].metric != wn[0].metric)
+			break;
+
+		total += wn[i].weight;
+		unit = calc_gcd(unit, wn[i].weight);
+	}
 	if (total == 0)
 		return (0);
-	if ((v == 0) || (v > RIB_MAX_MPATH_WIDTH))
-		v = RIB_MAX_MPATH_WIDTH;
 
-	return (v);
+	return (MIN(total / unit, RIB_MAX_MPATH_WIDTH));
 }
 
 /*
@@ -237,8 +204,7 @@ get_nhgrp_alloc_size(uint32_t nhg_size, uint32_t num_nhops)
  * Compile actual list of nexthops to be used by datapath from
  *  the nexthop group @dst.
  * Since we only need nexthops with lowest metric, only process
- * nexthops with specified metric. The metric argument is taken
- * from input and is expected to be the lowest metric in weightened_nhop.
+ * the first nexthops of @x, which is sorted by metric ascending.
  *
  * For example, compiling control plane list of 2 nexthops
  *  [(200, A), (100, B)] would result in the datapath array
@@ -246,7 +212,7 @@ get_nhgrp_alloc_size(uint32_t nhg_size, uint32_t num_nhops)
  */
 static void
 compile_nhgrp(struct nhgrp_priv *dst_priv, const struct weightened_nhop *x,
-    uint32_t num_slots, uint32_t metric)
+    uint32_t num_slots)
 {
 	struct nhgrp_object *dst;
 	int i, slot_idx, remaining_slots;
@@ -258,16 +224,17 @@ compile_nhgrp(struct nhgrp_priv *dst_priv, const struct weightened_nhop *x,
 	/* Calculate sum of all weights with lowest metric */
 	remaining_sum = nh_weight = 0;
 	for (i = 0; i < dst_priv->nhg_nh_count; i++) {
-		if (nhop_get_metric(x[i].nh) == metric) {
-			/*
-			 * Temporary store weight of unreachable nhops in nh_weight
-			 * to ensure we have at least one reachable nexthop.
-			 */
-			if (NH_IS_VALID(x[i].nh))
-				remaining_sum += x[i].weight;
-			else
-				nh_weight += x[i].weight;
-		}
+		if (x[i].metric != x[0].metric)
+			break;
+
+		/*
+		 * Temporary store weight of unreachable nhops in nh_weight
+		 * to ensure we have at least one reachable nexthop.
+		 */
+		if (NH_IS_VALID(x[i].nh))
+			remaining_sum += x[i].weight;
+		else
+			nh_weight += x[i].weight;
 	}
 
 	/* If no reachable nhops exist, include all */
@@ -278,10 +245,10 @@ compile_nhgrp(struct nhgrp_priv *dst_priv, const struct weightened_nhop *x,
 
 	remaining_slots = num_slots;
 	FIB_NH_LOG(LOG_DEBUG3, x[0].nh, "sum: %lu, slots: %d, lowest_metric: %u",
-	    remaining_sum, remaining_slots, metric);
+	    remaining_sum, remaining_slots, x[0].metric);
 	for (i = 0; i < dst_priv->nhg_nh_count; i++) {
-		if (nhop_get_metric(x[i].nh) != metric)
-			continue;
+		if (x[i].metric != x[0].metric)
+			break;
 
 		/*
 		 * Calculate number of slots for the current nexthop.
@@ -315,13 +282,13 @@ compile_nhgrp(struct nhgrp_priv *dst_priv, const struct weightened_nhop *x,
  * Returns group with refcount=1 or NULL.
  */
 static struct nhgrp_priv *
-alloc_nhgrp(struct weightened_nhop *wn, int num_nhops, uint32_t min_metric)
+alloc_nhgrp(struct weightened_nhop *wn, int num_nhops)
 {
 	uint32_t nhgrp_size;
 	struct nhgrp_object *nhg;
 	struct nhgrp_priv *nhg_priv;
 
-	nhgrp_size = calc_min_mpath_slots(wn, num_nhops, min_metric);
+	nhgrp_size = calc_min_mpath_slots(wn, num_nhops);
 	if (nhgrp_size == 0) {
 		/* Zero weights, abort */
 		return (NULL);
@@ -354,7 +321,7 @@ alloc_nhgrp(struct weightened_nhop *wn, int num_nhops, uint32_t min_metric)
 	FIB_NH_LOG(LOG_DEBUG, wn[0].nh, "num_nhops: %d, compiled_nhop: %u",
 	    num_nhops, nhgrp_size);
 
-	compile_nhgrp(nhg_priv, wn, nhg->nhg_size, min_metric);
+	compile_nhgrp(nhg_priv, wn, nhg->nhg_size);
 
 	return (nhg_priv);
 }
@@ -535,7 +502,6 @@ nhgrp_alloc(uint32_t fibnum, int family, struct weightened_nhop *wn, int num_nho
 	/* Sort nexthops & check there are no duplicates */
 	sort_weightened_nhops(wn, num_nhops);
 	uint32_t last_id = 0;
-	uint32_t min_metric = nhop_get_metric(wn[0].nh);
 	for (int i = 0; i < num_nhops; i++) {
 		if (wn[i].nh->nh_priv->nh_control != ctl) {
 			*perror = EINVAL;
@@ -546,12 +512,10 @@ nhgrp_alloc(uint32_t fibnum, int family, struct weightened_nhop *wn, int num_nho
 			return (NULL);
 		}
 		last_id = wn[i].nh->nh_priv->nh_idx;
-
-		if (nhop_get_metric(wn[i].nh) < min_metric)
-			min_metric = nhop_get_metric(wn[i].nh);
+		wn[i].metric = nhop_get_metric(wn[i].nh);
 	}
 
-	if ((nhg_priv = alloc_nhgrp(wn, num_nhops, min_metric)) == NULL) {
+	if ((nhg_priv = alloc_nhgrp(wn, num_nhops)) == NULL) {
 		*perror = ENOMEM;
 		return (NULL);
 	}
@@ -1114,13 +1078,10 @@ nhgrp_recompile_one(struct nhgrp_priv *nhg_priv)
 {
 	struct nhgrp_object *nhg = nhg_priv->nhg;
 	const struct weightened_nhop *wn;
-	uint32_t num_nhops, min_metric;
+	uint32_t num_nhops;
 
 	wn = nhgrp_get_nhops(nhg, &num_nhops);
-
-	/* dataplane only has the lowest metric nhops, just pick one */
-	min_metric = nhop_get_metric(nhg->nhops[0]);
-	compile_nhgrp(nhg_priv, wn, nhg->nhg_size, min_metric);
+	compile_nhgrp(nhg_priv, wn, nhg->nhg_size);
 }
 
 void
