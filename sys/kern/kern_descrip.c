@@ -4414,37 +4414,41 @@ pwd_chdir(struct thread *td, struct vnode *vp)
 }
 
 /*
- * Process is transitioning to/from a non-native ABI.
+ * Set the alternative root directory for the process.
+ *
+ * A non-NULL altroot_vp enables the alternative root and uses
+ * altroot_vp for it.  NULL disables it by setting the alternative
+ * root to the process root directory.
  */
-void
+int
 pwd_altroot(struct thread *td, struct vnode *altroot_vp)
 {
 	struct pwddesc *pdp;
 	struct pwd *newpwd, *oldpwd;
+	struct vnode *vp;
 
+	if (altroot_vp != NULL && altroot_vp->v_type != VDIR)
+		return (ENOTDIR);
 	newpwd = pwd_alloc();
 	pdp = td->td_proc->p_pd;
 	PWDDESC_XLOCK(pdp);
 	oldpwd = PWDDESC_XLOCKED_LOAD_PWD(pdp);
-	if (altroot_vp != NULL) {
-		/*
-		 * Native process to a non-native ABI.
-		 */
-
-		vrefact(altroot_vp);
-		newpwd->pwd_adir = altroot_vp;
+	vp = altroot_vp != NULL ? altroot_vp : oldpwd->pwd_rdir;
+	if (vp != oldpwd->pwd_adir) {
+		vrefact(vp);
+		newpwd->pwd_adir = vp;
+		pwd_fill(oldpwd, newpwd);
+		pwd_set(pdp, newpwd);
+		newpwd = NULL;
 	} else {
-		/*
-		 * Non-native process to the native ABI.
-		 */
-
-		vrefact(oldpwd->pwd_rdir);
-		newpwd->pwd_adir = oldpwd->pwd_rdir;
+		oldpwd = NULL;
 	}
-	pwd_fill(oldpwd, newpwd);
-	pwd_set(pdp, newpwd);
 	PWDDESC_XUNLOCK(pdp);
-	pwd_drop(oldpwd);
+	if (oldpwd != NULL)
+		pwd_drop(oldpwd);
+	if (newpwd != NULL)
+		pwd_drop(newpwd);
+	return (0);
 }
 
 /*
@@ -5077,6 +5081,13 @@ kern_proc_filedesc_out(struct proc *p,  struct sbuf *sb, ssize_t maxlen,
 			vrefact(pwd->pwd_jdir);
 			error = export_vnode_to_sb(pwd->pwd_jdir,
 			    KF_FD_TYPE_JAIL, FREAD, efbuf);
+		}
+		/* alt root directory */
+		if (error == 0 && pwd->pwd_adir != NULL &&
+		    pwd->pwd_adir != pwd->pwd_rdir) {
+			vrefact(pwd->pwd_adir);
+			error = export_vnode_to_sb(pwd->pwd_adir,
+			    KF_FD_TYPE_ALTROOT, FREAD, efbuf);
 		}
 	}
 	PWDDESC_XUNLOCK(pdp);

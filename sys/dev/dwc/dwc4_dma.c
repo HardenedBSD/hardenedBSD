@@ -621,9 +621,27 @@ int
 dma4_init(struct dwc_softc *sc)
 {
 	struct mbuf *m;
+	bus_addr_t lowaddr;
 	uint32_t reg;
+	u_int addr_bits;
 	int error;
 	int idx;
+
+	/* The address width of the DMA is a synthesis option of the core. */
+	reg = READ4(sc, ETH_MACHWF1R);
+	switch ((reg & MACHWF1R_ADDR64_M) >> MACHWF1R_ADDR64_S) {
+	case 1:
+		addr_bits = 40;
+		break;
+	case 2:
+		addr_bits = 48;
+		break;
+	default:
+		addr_bits = 32;
+		break;
+	}
+	lowaddr = (bus_addr_t)MIN(((uint64_t)1 << addr_bits) - 1,
+	    (uint64_t)BUS_SPACE_MAXADDR);
 
 	WRITE4(sc, ETH_MACQ0TXFCR, 0xffff << 16 | 1);
 	WRITE4(sc, ETH_MACRXFCR, 1);
@@ -635,15 +653,23 @@ dma4_init(struct dwc_softc *sc)
 		reg |= DMACCR_PBLX8;
 	WRITE4(sc, ETH_DMACCR(0), reg);
 
-	WRITE4(sc, ETH_DMACTXCR(0), 0);
+	/* Programmable burst lengths, multiplied by 8 unless snps,no-pbl-x8. */
+	reg = (sc->txpbl << DMACTXCR_TXPBL_S) & DMACTXCR_TXPBL_M;
+	WRITE4(sc, ETH_DMACTXCR(0), reg);
 
 	reg = (MCLBYTES << DMACRXCR_RBSZ_S);
+	reg |= (sc->rxpbl << DMACRXCR_RXPBL_S) & DMACRXCR_RXPBL_M;
 	WRITE4(sc, ETH_DMACRXCR(0), reg);
 
 	reg = DMASBMR_BLEN4;
 	reg |= DMASBMR_BLEN8;
 	reg |= DMASBMR_BLEN16;
 	reg |= DMASBMR_EAME;
+	/* The hardware fields hold the limits minus one. */
+	reg |= ((sc->axi_rd_osr_lmt - 1) << DMASBMR_RD_OSR_LMT_S) &
+	    DMASBMR_RD_OSR_LMT_M;
+	reg |= ((sc->axi_wr_osr_lmt - 1) << DMASBMR_WR_OSR_LMT_S) &
+	    DMASBMR_WR_OSR_LMT_M;
 	WRITE4(sc, ETH_DMASBMR, reg);
 
 	reg = READ4(sc, ETH_DMASBMR);
@@ -651,6 +677,10 @@ dma4_init(struct dwc_softc *sc)
 		reg |= DMASBMR_FB;
 	else
 		reg &= ~DMASBMR_FB;
+	if (sc->mixed_burst)
+		reg |= DMASBMR_MB;
+	else
+		reg &= ~DMASBMR_MB;
 	if (sc->aal)
 		reg |= DMASBMR_AAL;
 	else
@@ -680,7 +710,7 @@ dma4_init(struct dwc_softc *sc)
 	error = bus_dma_tag_create(
 	    bus_get_dma_tag(sc->dev),	/* Parent tag. */
 	    DWC_DESC_RING_ALIGN, 0,	/* alignment, boundary */
-	    BUS_SPACE_MAXADDR,		/* lowaddr */
+	    lowaddr,			/* lowaddr */
 	    BUS_SPACE_MAXADDR,		/* highaddr */
 	    NULL, NULL,			/* filter, filterarg */
 	    TX_DESC_SIZE, 1, 		/* maxsize, nsegments */
@@ -715,7 +745,7 @@ dma4_init(struct dwc_softc *sc)
 	error = bus_dma_tag_create(
 	    bus_get_dma_tag(sc->dev),	/* Parent tag. */
 	    1, 0,			/* alignment, boundary */
-	    BUS_SPACE_MAXADDR,		/* lowaddr */
+	    lowaddr,			/* lowaddr */
 	    BUS_SPACE_MAXADDR,		/* highaddr */
 	    NULL, NULL,			/* filter, filterarg */
 	    MCLBYTES * TX_MAP_MAX_SEGS,	/* maxsize */
@@ -754,7 +784,7 @@ dma4_init(struct dwc_softc *sc)
 	error = bus_dma_tag_create(
 	    bus_get_dma_tag(sc->dev),	/* Parent tag. */
 	    DWC_DESC_RING_ALIGN, 0,	/* alignment, boundary */
-	    BUS_SPACE_MAXADDR,		/* lowaddr */
+	    lowaddr,			/* lowaddr */
 	    BUS_SPACE_MAXADDR,		/* highaddr */
 	    NULL, NULL,			/* filter, filterarg */
 	    RX_DESC_SIZE, 1, 		/* maxsize, nsegments */
@@ -789,7 +819,7 @@ dma4_init(struct dwc_softc *sc)
 	error = bus_dma_tag_create(
 	    bus_get_dma_tag(sc->dev),	/* Parent tag. */
 	    1, 0,			/* alignment, boundary */
-	    BUS_SPACE_MAXADDR,		/* lowaddr */
+	    lowaddr,			/* lowaddr */
 	    BUS_SPACE_MAXADDR,		/* highaddr */
 	    NULL, NULL,			/* filter, filterarg */
 	    MCLBYTES, 1, 		/* maxsize, nsegments */
