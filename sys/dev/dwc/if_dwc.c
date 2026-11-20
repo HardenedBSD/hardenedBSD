@@ -67,6 +67,7 @@
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 #include <dev/mii/mii_fdt.h>
+#include <dev/fdt/fdt_common.h>
 
 #include <dev/dwc/if_dwcvar.h>
 #include <dev/dwc/dwc1000_core.h>
@@ -548,6 +549,8 @@ dwc_attach(device_t dev)
 	if_t ifp;
 	int error;
 	uint32_t pbl;
+	phandle_t axi;
+	pcell_t xref;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -584,6 +587,20 @@ dwc_attach(device_t dev)
 		sc->mixed_burst = true;
 	if (OF_hasprop(sc->node, "snps,aal"))
 		sc->aal = true;
+
+	/* Maximum number of outstanding AXI requests. */
+	sc->axi_rd_osr_lmt = 1;
+	sc->axi_wr_osr_lmt = 1;
+	if (OF_getencprop(sc->node, "snps,axi-config", &xref,
+	    sizeof(xref)) > 0) {
+		axi = OF_node_from_xref(xref);
+		OF_getencprop(axi, "snps,rd_osr_lmt", &sc->axi_rd_osr_lmt,
+		    sizeof(uint32_t));
+		OF_getencprop(axi, "snps,wr_osr_lmt", &sc->axi_wr_osr_lmt,
+		    sizeof(uint32_t));
+	}
+	sc->axi_rd_osr_lmt = MIN(MAX(sc->axi_rd_osr_lmt, 1), 16);
+	sc->axi_wr_osr_lmt = MIN(MAX(sc->axi_wr_osr_lmt, 1), 16);
 
 	error = clk_set_assigned(dev, ofw_bus_get_node(dev));
 	if (error != 0 && error != ENOENT) {
@@ -682,6 +699,12 @@ dwc_attach(device_t dev)
 		return (ENXIO);
 	}
 	sc->mii_softc = device_get_softc(sc->miibus);
+
+	/*
+	 * Prefer the address from the device tree (set by the bootloader)
+	 * over the one read from the hardware or generated.
+	 */
+	fdt_ether_get_addr(sc->node, ifp, macaddr);
 
 	/* All ready to run, attach the ethernet interface. */
 	ether_ifattach(ifp, macaddr);
