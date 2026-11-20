@@ -2815,6 +2815,7 @@ kern_swapoff(struct thread *td, const char *name, enum uio_seg name_seg,
 			break;
 	}
 	mtx_unlock(&sw_dev_mtx);
+	vrele(vp);
 	if (sp == NULL) {
 		error = EINVAL;
 		goto done;
@@ -3268,13 +3269,14 @@ swapgeom_close(struct thread *td, struct swdevt *sw)
 	sw->sw_id = NULL;
 	mtx_unlock(&sw_dev_mtx);
 
-	/*
-	 * swapgeom_close() may be called from the biodone context,
-	 * where we cannot perform topology changes.  Delegate the
-	 * work to the events thread.
-	 */
 	if (cp != NULL)
 		g_waitfor_event(swapgeom_close_ev, cp, M_WAITOK, NULL);
+
+	/*
+	 * Release the reference added by kern_swapon when resolving the
+	 * vnode.
+	 */
+	vrele(sw->sw_vp);
 }
 
 static int
