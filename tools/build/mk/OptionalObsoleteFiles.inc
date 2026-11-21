@@ -1729,9 +1729,11 @@ OLD_FILES+=usr/share/nls/uk_UA.KOI8-U/ee.cat
 .if ${MK_EFI} == no
 OLD_FILES+=usr/sbin/efibootmgr
 OLD_FILES+=usr/sbin/efidp
+OLD_FILES+=usr/sbin/efisign
 OLD_FILES+=usr/sbin/efivar
 OLD_FILES+=usr/sbin/uefisign
-OLD_FILES+=usr/share/examples/uefisign/uefikeys
+OLD_FILES+=usr/share/examples/efisign/uefikeys
+OLD_DIRS+=usr/share/examples/efisign
 .endif
 
 .if ${MK_EXAMPLES} == no
@@ -2003,9 +2005,9 @@ OLD_FILES+=usr/tests/share/examples/tests/tap/cp_test
 OLD_FILES+=usr/tests/share/examples/tests/tap/file1
 OLD_FILES+=usr/tests/share/examples/tests/tap/printf_test
 OLD_FILES+=usr/tests/share/examples/tests/Kyuafile
+OLD_FILES+=usr/share/examples/efisign/uefikeys
 OLD_FILES+=usr/share/examples/tcsh/complete.tcsh
 OLD_FILES+=usr/share/examples/tcsh/csh-mode.el
-OLD_FILES+=usr/share/examples/uefisign/uefikeys
 OLD_FILES+=usr/share/examples/ypldap/ypldap.conf
 OLD_DIRS+=usr/share/examples
 OLD_DIRS+=usr/share/examples/BSD_daemon
@@ -2018,6 +2020,7 @@ OLD_DIRS+=usr/share/examples/csh
 OLD_DIRS+=usr/share/examples/diskless
 OLD_DIRS+=usr/share/examples/dma
 OLD_DIRS+=usr/share/examples/dwatch
+OLD_DIRS+=usr/share/examples/efisign
 OLD_DIRS+=usr/share/examples/etc
 OLD_DIRS+=usr/share/examples/etc/defaults
 OLD_DIRS+=usr/share/examples/find_interface
@@ -2068,7 +2071,6 @@ OLD_DIRS+=usr/share/examples/sunrpc/dir
 OLD_DIRS+=usr/share/examples/sunrpc/msg
 OLD_DIRS+=usr/share/examples/sunrpc/sort
 OLD_DIRS+=usr/share/examples/tcsh
-OLD_DIRS+=usr/share/examples/uefisign
 OLD_DIRS+=usr/share/examples/ypldap
 OLD_DIRS+=usr/tests/share/examples/tests/atf
 OLD_DIRS+=usr/tests/share/examples/tests/plain
