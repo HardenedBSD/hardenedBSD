@@ -296,6 +296,8 @@
             ..
             dwatch
             ..
+            efisign
+            ..
             etc
                 defaults
                 ..
@@ -391,8 +393,6 @@
                 ..
             ..
             tcsh
-            ..
-            uefisign
             ..
             ypldap
             ..
