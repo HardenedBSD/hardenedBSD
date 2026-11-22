@@ -324,8 +324,8 @@ treat_like_collating_symbol:
 						    sclen == (size_t)-2) {
 							sc = (unsigned char)*string;
 							sclen = 1;
-							memset(&strmbs, 0,
-							    sizeof(strmbs));
+							memset(strmbs, 0,
+							    sizeof(*strmbs));
 						}
 						if (sc != *wp++) {
 							memcpy(strmbs, &save,
@@ -410,8 +410,8 @@ treat_like_collating_symbol:
 			if (c2 == EOS)
 				return (RANGE_ERROR);
 
-			if ((c2 == '[' && (special = *pattern) == '.') ||
-			    special == '=' || special == ':') {
+			if (c2 == '[' && ((special = *pattern) == '.' ||
+			    special == '=' || special == ':')) {
 
 				/*
 				 * No equivalence classes or character
