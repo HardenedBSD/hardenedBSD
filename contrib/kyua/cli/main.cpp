@@ -49,6 +49,7 @@ extern "C" {
 #include "cli/cmd_debug.hpp"
 #include "cli/cmd_help.hpp"
 #include "cli/cmd_list.hpp"
+#include "cli/cmd_prepare.hpp"
 #include "cli/cmd_report.hpp"
 #include "cli/cmd_report_html.hpp"
 #include "cli/cmd_report_junit.hpp"
@@ -56,6 +57,7 @@ extern "C" {
 #include "cli/common.ipp"
 #include "cli/config.hpp"
 #include "engine/atf.hpp"
+#include "engine/googletest.hpp"
 #include "engine/plain.hpp"
 #include "engine/scheduler.hpp"
 #include "engine/tap.hpp"
@@ -102,6 +104,9 @@ register_scheduler_interfaces(void)
     scheduler::register_interface(
         "atf", std::shared_ptr< scheduler::interface >(
             new engine::atf_interface()));
+    scheduler::register_interface(
+        "googletest", std::shared_ptr< scheduler::interface >(
+            new engine::googletest_interface()));
     scheduler::register_interface(
         "plain", std::shared_ptr< scheduler::interface >(
             new engine::plain_interface()));
@@ -191,6 +196,7 @@ safe_main(cmdline::ui* ui, int argc, const char* const argv[],
 
     commands.insert(new cli::cmd_debug(), "Workspace");
     commands.insert(new cli::cmd_list(), "Workspace");
+    commands.insert(new cli::cmd_prepare(), "Workspace");
     commands.insert(new cli::cmd_test(), "Workspace");
 
     commands.insert(new cli::cmd_report(), "Reporting");
