@@ -1283,7 +1283,9 @@ scheduler::exec_handle
 scheduler::scheduler_handle::spawn_test(
     const model::test_program_ptr test_program,
     const std::string& test_case_name,
-    const config::tree& user_config)
+    const config::tree& user_config,
+    const utils::optional<utils::fs::path>& stdout_target,
+    const utils::optional<utils::fs::path>& stderr_target)
 {
     _pimpl->generic.check_interrupt();
 
@@ -1305,7 +1307,7 @@ scheduler::scheduler_handle::spawn_test(
         run_test_program(interface, test_program, test_case_name,
                          user_config),
         test_case.get_metadata().timeout(),
-        unprivileged_user);
+        unprivileged_user, stdout_target, stderr_target);
 
     const exec_data_ptr data(new test_exec_data(
         test_program, test_case_name, interface, user_config, handle.pid()));
@@ -1401,6 +1403,9 @@ scheduler::scheduler_handle::wait_any(void)
         if (debugger) {
             debugger->before_cleanup(test_data->test_program, test_case,
                 result, handle);
+            if (!result.get().good())
+                debugger->upon_test_failure(test_data->test_program, test_case,
+                    result, handle);
         }
 
         if (test_data->needs_cleanup) {
@@ -1563,8 +1568,16 @@ scheduler::scheduler_handle::debug_test(
     const fs::path& stdout_target,
     const fs::path& stderr_target)
 {
+    optional<fs::path> out = none;
+    optional<fs::path> err = none;
+    const model::test_case& test_case = test_program->find(test_case_name);
+    if (test_case.get_debugger() != nullptr) {
+        out = stdout_target;
+        err = stderr_target;
+    }
+
     const exec_handle exec_handle = spawn_test(
-        test_program, test_case_name, user_config);
+        test_program, test_case_name, user_config, out, err);
     result_handle_ptr result_handle = wait_any();
 
     // TODO(jmmv): We need to do this while the subprocess is alive.  This is
@@ -1574,12 +1587,12 @@ scheduler::scheduler_handle::debug_test(
     // Unfortunately, we cannot do so.  We cannot just read and block from a
     // file, waiting for further output to appear... as this only works on pipes
     // or sockets.  We need a better interface for this whole thing.
-    {
+    if (test_case.get_debugger() == nullptr) {
         std::unique_ptr< std::ostream > output = utils::open_ostream(
             stdout_target);
         *output << utils::read_file(result_handle->stdout_file());
     }
-    {
+    if (test_case.get_debugger() == nullptr) {
         std::unique_ptr< std::ostream > output = utils::open_ostream(
             stderr_target);
         *output << utils::read_file(result_handle->stderr_file());
