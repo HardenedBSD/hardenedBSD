@@ -84,16 +84,18 @@ linux_pwd_onexec(struct thread *td)
 	struct nameidata nd;
 	int error;
 
+	/*
+	 * We never want the native altroot, in particular, for the
+	 * linux_emul_path lookup.
+	 */
+	pwd_altroot_clear(td);
+
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, linux_emul_path);
 	error = namei(&nd);
-	if (error != 0) {
-		pwd_altroot(td, NULL);
-		return (0);
-	}
-	NDFREE_PNBUF(&nd);
-	error = pwd_altroot(td, nd.ni_vp);
 	if (error != 0)
-		pwd_altroot(td, NULL);
+		return (0);
+	NDFREE_PNBUF(&nd);
+	(void)pwd_altroot(td, nd.ni_vp);
 	vrele(nd.ni_vp);
 	return (0);
 }
@@ -102,7 +104,7 @@ void
 linux_pwd_onexec_native(struct thread *td)
 {
 
-	pwd_altroot(td, NULL);
+	pwd_altroot_clear(td);
 }
 
 void
