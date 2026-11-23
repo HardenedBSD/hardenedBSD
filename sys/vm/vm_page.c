@@ -2637,6 +2637,26 @@ vm_page_alloc_noobj(int req)
 }
 
 vm_page_t
+vm_page_alloc_noobj_domainset(struct domainset *ds, int req)
+{
+	struct vm_domainset_iter di;
+	vm_page_t m;
+	int domain, m_flags;
+
+	MPASS((req & (VM_ALLOC_WAITOK | VM_ALLOC_WAITFAIL)) == 0);
+	m_flags = M_NOWAIT;
+	if (vm_domainset_iter_policy_init(&di, ds, &domain, &m_flags) != 0)
+		return (NULL);
+	do {
+		m = vm_page_alloc_noobj_domain(domain, req);
+		if (m != NULL)
+			break;
+	} while (vm_domainset_iter_policy(&di, &domain) == 0);
+
+	return (m);
+}
+
+vm_page_t
 vm_page_alloc_noobj_contig(int req, u_long npages, vm_paddr_t low,
     vm_paddr_t high, u_long alignment, vm_paddr_t boundary,
     vm_memattr_t memattr)
@@ -4359,6 +4379,38 @@ vm_page_unwire_managed(vm_page_t m, uint8_t nqueue, bool noreuse)
 }
 
 /*
+ * Release one wiring of an unmanaged page.  Return true if that was the
+ * last reference to the page and the page was freed.
+ */
+bool
+vm_page_unwire_unmanaged(vm_page_t m)
+{
+	u_int old;
+
+	MPASS((m->oflags & VPO_UNMANAGED) != 0);
+
+	/*
+	 * Decide from the value returned by our own decrement.  If the page
+	 * belongs to an object, the object may drop its VPRC_OBJREF
+	 * reference concurrently, see vm_object_terminate_single_page(),
+	 * and a later load of ref_count could make both threads free the
+	 * page.
+	 */
+	old = vm_page_drop(m, 1);
+	KASSERT(VPRC_WIRE_COUNT(old) != 0,
+	    ("%s: counter underflow for page %p", __func__, m));
+	KASSERT((m->flags & PG_FICTITIOUS) == 0 || VPRC_WIRE_COUNT(old) > 1,
+	    ("%s: missing ref on fictitious page %p", __func__, m));
+	if (VPRC_WIRE_COUNT(old) > 1)
+		return (false);
+	vm_wire_sub(1);
+	if (old != 1)
+		return (false);
+	vm_page_free(m);
+	return (true);
+}
+
+/*
  * Release one wiring of the specified page, potentially allowing it to be
  * paged out.
  *
@@ -4374,8 +4426,7 @@ vm_page_unwire(vm_page_t m, uint8_t nqueue)
             ("%s: invalid queue %u request for page %p", __func__, nqueue, m));
 
 	if ((m->oflags & VPO_UNMANAGED) != 0) {
-		if (vm_page_unwire_noq(m) && m->ref_count == 0)
-			vm_page_free(m);
+		vm_page_unwire_unmanaged(m);
 	} else {
 		vm_page_unwire_managed(m, nqueue, false);
 	}

@@ -43,10 +43,12 @@
 #include <sys/tslog.h>
 #include <sys/_mutex.h>
 #include <sys/_sx.h>
+#include <sys/_task.h>
 #elif defined(_WANT_MOUNT)
 #include <sys/_lock.h>
 #include <sys/_lockmgr.h>
 #include <sys/_mutex.h>
+#include <sys/_task.h>
 #endif
 
 /*
@@ -238,7 +240,8 @@ struct mount {
 	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on */
 	struct vfsops	*mnt_op;		/* operations on fs */
 	struct vfsconf	*mnt_vfc;		/* configuration info */
-	struct mtx __aligned(CACHE_LINE_SIZE)	mnt_mtx; /* mount structure interlock */
+	struct mtx __aligned(CACHE_LINE_SIZE)	mnt_mtx; /* mount structure
+						   interlock */
 	int		mnt_gen;		/* struct mount generation */
 #define	mnt_startzero	mnt_list
 	TAILQ_ENTRY(mount) mnt_list;		/* (m) mount list */
@@ -267,14 +270,20 @@ struct mount {
 	struct mtx	mnt_listmtx;
 	struct vnodelst	mnt_lazyvnodelist;	/* (l) list of lazy vnodes */
 	int		mnt_lazyvnodelistsize;	/* (l) # of lazy vnodes */
-	int		mnt_upper_pending;	/* (i) # of pending ops on mnt_uppers */
+	int		mnt_upper_pending;	/* (i) # of pending ops on
+						   mnt_uppers */
 	struct lock	mnt_explock;		/* vfs_export walkers lock */
 	struct lock	mnt_renamelock;		/* renames and O_RESOLVE_BENEATH */
 	TAILQ_HEAD(, mount_upper_node) mnt_uppers; /* (i) upper mounts over us */
-	TAILQ_HEAD(, mount_upper_node) mnt_notify; /* (i) upper mounts for notification */
-	STAILQ_ENTRY(mount) mnt_taskqueue_link;	/* (d) our place in deferred unmount list */
-	uint64_t	mnt_taskqueue_flags;	/* (d) unmount flags passed from taskqueue */
-	unsigned int	mnt_unmount_retries;	/* (d) # of failed deferred unmount attempts */
+	TAILQ_HEAD(, mount_upper_node) mnt_notify; /* (i) upper mounts for
+						      notification */
+	STAILQ_ENTRY(mount) mnt_taskqueue_link;	/* (d) our place in deferred
+						   unmount list */
+	uint64_t	mnt_taskqueue_flags;	/* (d) unmount flags passed from
+						   taskqueue */
+	unsigned int	mnt_unmount_retries;	/* (d) # of failed deferred
+						   unmount attempts */
+	struct task	mnt_bdflush_task;
 };
 #endif	/* _WANT_MOUNT || _KERNEL */
 
@@ -1103,6 +1112,8 @@ extern	struct sx vfsconf_sx;
 #define	vfsconf_sunlock()	sx_sunlock(&vfsconf_sx)
 struct vnode *mntfs_allocvp(struct mount *, struct vnode *);
 void   mntfs_freevp(struct vnode *);
+void   mntfs_fsync_delayed(struct vnode *);
+void   mntfs_fsync_task(void *, int);
 
 /*
  * Declarations for these vfs default operations are located in
