@@ -50,12 +50,19 @@ struct gicv5_softc {
 	u_int			gic_nchildren;
 	/* Number of LPIs, including IPIs */
 	u_int			gic_nlpis;
+	u_int			gic_lpi_id_bits;
+
+	bool has_virt;
 };
 
 struct gicv5_devinfo {
 	struct resource_list	di_rl;
 	struct gicv5_irs	*di_irs;
+	bool			di_is_vgic;
 };
+
+#define GICV5_PPIS_PER_REG	64
+#define GICV5_PPI_COUNT		128
 
 #define	GICV5_IVAR_LPI_START	5000
 
@@ -63,11 +70,17 @@ __BUS_ACCESSOR(gicv5, lpi_start, GICV5, LPI_START, u_int);
 
 void gicv5_attach(device_t);
 bool gicv5_add_child(device_t, struct gicv5_devinfo *);
+bool gicv5_has_virt_support(device_t);
 int gicv5_intr(void *);
 
 void gicv5_irs_init(device_t, u_int, cpuset_t *);
 void gicv5_irs_extend_ist(device_t, device_t, u_int);
 
 void gicv5_attach_iwb(device_t, device_t);
+
+int gicv5_alloc_vm(device_t, int);
+int gicv5_free_vm(device_t, int);
+
+int gicv5_get_max_vpe_count(device_t);
 
 #endif /* _ARM64_GICV5VAR_H_ */
