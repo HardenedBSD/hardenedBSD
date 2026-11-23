@@ -131,7 +131,7 @@ class mock_interface : public scheduler::interface {
     ///
     /// \param exit_code Exit code.
     void
-    do_exit(const int exit_code) const UTILS_NORETURN
+    do_exit [[noreturn]] (const int exit_code) const
     {
         std::cout.flush();
         std::cerr.flush();
@@ -140,7 +140,7 @@ class mock_interface : public scheduler::interface {
 
     /// Executes a test case that creates various files and then fails.
     void
-    exec_create_files_and_fail(void) const UTILS_NORETURN
+    exec_create_files_and_fail [[noreturn]] (void) const
     {
         std::cerr << "This should not be clobbered\n";
         atf::utils::create_file("first file", "");
@@ -155,7 +155,7 @@ class mock_interface : public scheduler::interface {
     /// This is intended to validate that the test runs in an empty directory,
     /// separate from any control files that the scheduler may have created.
     void
-    exec_delete_all(void) const UTILS_NORETURN
+    exec_delete_all [[noreturn]] (void) const
     {
         const int exit_code = ::system("rm *") == -1
             ? EXIT_FAILURE : EXIT_SUCCESS;
@@ -170,14 +170,14 @@ class mock_interface : public scheduler::interface {
     ///
     /// \param exit_code Exit status to terminate the program with.
     void
-    exec_exit(const int exit_code) const UTILS_NORETURN
+    exec_exit [[noreturn]] (const int exit_code) const
     {
         do_exit(exit_code);
     }
 
     /// Executes a test case that just fails.
     void
-    exec_fail(void) const UTILS_NORETURN
+    exec_fail [[noreturn]] (void) const
     {
         std::cerr << "This should not be clobbered\n";
         ::kill(::getpid(), SIGTERM);
@@ -191,10 +191,10 @@ class mock_interface : public scheduler::interface {
     ///     number.
     /// \param vars User-provided variables to pass to the test program.
     void
-    exec_print_params(const model::test_program& test_program,
-                      const std::string& test_case_name,
-                      const config::properties_map& vars) const
-        UTILS_NORETURN
+    exec_print_params [[noreturn]] (
+        const model::test_program& test_program,
+        const std::string& test_case_name,
+        const config::properties_map& vars) const
     {
         std::cout << F("Test program: %s\n") % test_program.relative_path();
         std::cout << F("Test case: %s\n") % test_case_name;
@@ -218,9 +218,9 @@ public:
     /// \param test_program The test program to execute.
     /// \param vars User-provided variables to pass to the test program.
     void
-    exec_list(const model::test_program& test_program,
-              const config::properties_map& vars)
-        const UTILS_NORETURN
+    exec_list [[noreturn]] (
+        const model::test_program& test_program,
+        const config::properties_map& vars) const
     {
         const std::string name = test_program.absolute_path().leaf_name();
 
@@ -577,6 +577,7 @@ ATF_TEST_CASE_BODY(integration__run_one)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(exec_handle, result_handle->original_pid());
     ATF_REQUIRE_EQ(model::test_result(model::test_result_passed, "Exit 41"),
                    test_result_handle->test_result());
@@ -659,6 +660,7 @@ ATF_TEST_CASE_BODY(integration__run_many)
         const scheduler::test_result_handle* test_result_handle =
             dynamic_cast< const scheduler::test_result_handle* >(
                 result_handle.get());
+        ATF_REQUIRE(test_result_handle != nullptr);
 
         const scheduler::exec_handle exec_handle =
             result_handle->original_pid();
@@ -714,6 +716,7 @@ ATF_TEST_CASE_BODY(integration__run_check_paths)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
 
     ATF_REQUIRE_EQ(model::test_result(model::test_result_passed, "Exit 0"),
                    test_result_handle->test_result());
@@ -745,6 +748,7 @@ ATF_TEST_CASE_BODY(integration__parameters_and_output)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
 
     ATF_REQUIRE_EQ(exec_handle, result_handle->original_pid());
     ATF_REQUIRE_EQ(program, test_result_handle->test_program());
@@ -796,6 +800,7 @@ ATF_TEST_CASE_BODY(integration__fake_result)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(fake_result, test_result_handle->test_result());
     result_handle->cleanup();
     result_handle.reset();
@@ -826,6 +831,7 @@ ATF_TEST_CASE_BODY(integration__cleanup__head_skips)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(model::test_result(
                        model::test_result_skipped,
                        "Required configuration property "
@@ -864,6 +870,7 @@ do_cleanup_test(const char* test_case,
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(exp_result, test_result_handle->test_result());
     ATF_REQUIRE(atf::utils::compare_file(
         result_handle->stdout_file().str(),
@@ -943,6 +950,7 @@ ATF_TEST_CASE_BODY(integration__check_requirements)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(model::test_result(
                        model::test_result_skipped,
                        "Required configuration property 'abcde' not defined"),
@@ -973,6 +981,7 @@ ATF_TEST_CASE_BODY(integration__stacktrace)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(model::test_result(model::test_result_failed,
                                       F("Signal %s") % SIGABRT),
                    test_result_handle->test_result());
@@ -1053,6 +1062,7 @@ ATF_TEST_CASE_BODY(integration__prevent_clobbering_control_files)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
     ATF_REQUIRE_EQ(model::test_result(model::test_result_passed, "Exit 0"),
                    test_result_handle->test_result());
     result_handle->cleanup();
@@ -1083,6 +1093,7 @@ ATF_TEST_CASE_BODY(debug_test)
     const scheduler::test_result_handle* test_result_handle =
         dynamic_cast< const scheduler::test_result_handle* >(
             result_handle.get());
+    ATF_REQUIRE(test_result_handle != nullptr);
 
     ATF_REQUIRE_EQ(program, test_result_handle->test_program());
     ATF_REQUIRE_EQ("print_params", test_result_handle->test_case_name());

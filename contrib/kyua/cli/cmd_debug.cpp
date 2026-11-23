@@ -33,6 +33,7 @@ extern "C" {
 }
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #include "cli/common.ipp"
@@ -105,7 +106,7 @@ public:
     {
         if (::chdir(_eh.work_directory().c_str()) == -1) {
             std::cerr << "execute: chdir() errors: "
-                << strerror(errno) << ".\n";
+                << std::strerror(errno) << ".\n";
             std::exit(EXIT_FAILURE);
         }
 
