@@ -120,7 +120,7 @@ static void	filecaps_copy_finish(const struct filecaps *src,
 		    struct filecaps *dst, u_long *ioctls);
 static u_long 	*filecaps_free_prep(struct filecaps *fcaps);
 static void	filecaps_free_finish(u_long *ioctls);
-
+static void	pdescfree_tail(struct proc *p, struct pwddesc *pdp);
 static struct pwd *pwd_alloc(void);
 
 /*
@@ -2583,22 +2583,39 @@ fdunshare(struct thread *td)
 }
 
 /*
+ * Used by the caller to replace its own p_pd while no other writer
+ * exists.  old_pdp must be the current value, and its share and
+ * reference are consumed.
+ */
+void
+pdswap(struct proc *p, struct pwddesc *new_pdp, struct pwddesc *old_pdp)
+{
+	MPASS(p->p_pd == old_pdp);
+
+	/* Make the initialized copy visible before the pointer to it. */
+	atomic_store_rel_ptr((volatile uintptr_t *)&p->p_pd,
+	    (uintptr_t)new_pdp);
+	pdescfree_tail(p, old_pdp);
+}
+
+/*
  * Unshare a pwddesc structure.
  */
 void
 pdunshare(struct thread *td)
 {
-	struct pwddesc *pdp;
+	struct pwddesc *old_pdp, *new_pdp;
 	struct proc *p;
 
 	p = td->td_proc;
+	old_pdp = p->p_pd;
+
 	/* Not shared. */
-	if (refcount_load(&p->p_pd->pd_sharecount) == 1)
+	if (refcount_load(&old_pdp->pd_sharecount) == 1)
 		return;
 
-	pdp = pdcopy(p->p_pd);
-	pdescfree(td);
-	p->p_pd = pdp;
+	new_pdp = pdcopy(old_pdp);
+	pdswap(p, new_pdp, old_pdp);
 }
 
 /*
@@ -2862,6 +2879,20 @@ fdescfree(struct thread *td)
 	fdescfree_fds(td, fdp);
 }
 
+static void
+pdescfree_tail(struct proc *p, struct pwddesc *pdp)
+{
+	/*
+	 * The p_pd store must be visible before the process lock is
+	 * observed unlocked, see the comment above fdhold().
+	 */
+	atomic_thread_fence_seq_cst();
+	PROC_WAIT_UNLOCKED(p);
+
+	(void)refcount_release(&pdp->pd_sharecount);
+	pddrop(pdp);
+}
+
 void
 pdescfree(struct thread *td)
 {
@@ -2873,14 +2904,10 @@ pdescfree(struct thread *td)
 	MPASS(pdp != NULL);
 
 	/*
-	 * Check pdhold for an explanation.
+	 * Check pdhold() for an explanation.
 	 */
 	atomic_store_ptr(&p->p_pd, NULL);
-	atomic_thread_fence_seq_cst();
-	PROC_WAIT_UNLOCKED(p);
-
-	(void)refcount_release(&pdp->pd_sharecount);
-	pddrop(pdp);
+	pdescfree_tail(p, pdp);
 }
 
 /*

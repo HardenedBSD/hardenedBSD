@@ -48,6 +48,7 @@ struct amdiommu_domain {
 	vm_object_t pgtbl_obj;		/* (c) Page table pages */
 	vm_page_t pgtblr;		/* (c) Page table root page */
 	u_int pglvl;			/* (c) Page table levels */
+	u_int pde_flushes;		/* Maps flushing a new PDE, pglock */
 };
 
 struct amdiommu_ctx {
@@ -65,6 +66,7 @@ struct amdiommu_unit {
 	u_int		unit_id;	/* Hypertransport Unit ID, deprecated */
 	TAILQ_ENTRY(amdiommu_unit) unit_next;
 	int		seccap_reg;
+	uint32_t	cap_hdr;	/* Capability header */
 	uint64_t	efr;
 	vm_paddr_t	mmio_base;
 	vm_size_t	mmio_sz;
@@ -199,7 +201,7 @@ void amdiommu_fini_event(struct amdiommu_unit *unit);
 int amdiommu_alloc_msi_intr(device_t src, u_int *cookies, u_int count);
 int amdiommu_map_msi_intr(device_t src, u_int cpu, u_int vector,
     u_int cookie, uint64_t *addr, uint32_t *data);
-int amdiommu_unmap_msi_intr(device_t src, u_int cookie);
+int amdiommu_unmap_msi_intr(device_t src, u_int cookie, u_int count);
 int amdiommu_map_ioapic_intr(u_int ioapic_id, u_int cpu, u_int vector,
     bool edge, bool activehi, int irq, u_int *cookie, uint32_t *hi,
     uint32_t *lo);
