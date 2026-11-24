@@ -76,8 +76,12 @@ g_ctl_init(void)
 	    UID_ROOT, GID_WHEEL, 0600, PATH_GEOM_CTL);
 #else
 	make_dev_credf(MAKEDEV_ETERNAL, &g_ctl_cdevsw, 0, NULL,
+<<<<<<< HEAD
 	    UID_ROOT, GID_WHEEL, 0640, PATH_GEOM_CTL);
 #endif
+=======
+	    UID_ROOT, GID_OPERATOR, 0640, PATH_GEOM_CTL);
+>>>>>>> rad/freebsd/current/main
 }
 
 /*
