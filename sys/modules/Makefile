@@ -597,6 +597,7 @@ _mlx5ib=	mlx5ib
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64" || \
     ${MACHINE_CPUARCH} == "i386"
 _acpi=		acpi
+_aq=		aq
 _ena=		ena
 _gve=		gve
 _igc=		igc
@@ -755,7 +756,6 @@ _imx=		imx
 .endif
 
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
-_aq=		aq
 _agp=		agp
 _bios=		bios
 .if ${MK_SOURCELESS_UCODE} != "no"
