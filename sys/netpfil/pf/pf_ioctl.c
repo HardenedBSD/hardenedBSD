@@ -3014,6 +3014,9 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 #define	ERROUT(x)		ERROUT_FUNCTION(errout, x)
 #define	ERROUT_UNLOCKED(x)	ERROUT_FUNCTION(errout_unlocked, x)
 
+	if (anchor == NULL || anchor_call == NULL)
+		ERROUT_UNLOCKED(EINVAL);
+
 	if ((rule->return_icmp >> 8) > ICMP_MAXTYPE)
 		ERROUT_UNLOCKED(EINVAL);
 
@@ -3210,6 +3213,8 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 #undef ERROUT
 #undef ERROUT_UNLOCKED
 errout:
+	pf_free_rule(rule);
+	rule = NULL;
 	PF_RULES_WUNLOCK();
 	PF_CONFIG_UNLOCK();
 errout_unlocked:
@@ -4259,7 +4264,6 @@ DIOCGETETHRULES_error:
 	}
 
 	case DIOCGETETHRULE: {
-		struct epoch_tracker	 et;
 		struct pfioc_nv		*nv = (struct pfioc_nv *)addr;
 		nvlist_t		*nvl = NULL;
 		void			*nvlpacked = NULL;
@@ -4322,15 +4326,12 @@ DIOCGETETHRULES_error:
 			PF_RULES_RUNLOCK();
 			ERROUT(ENOENT);
 		}
-		/* Make sure rule can't go away. */
-		NET_EPOCH_ENTER(et);
-		PF_RULES_RUNLOCK();
 		nvl = pf_keth_rule_to_nveth_rule(rule);
 		if (pf_keth_anchor_nvcopyout(rs, rule, nvl)) {
-			NET_EPOCH_EXIT(et);
+			PF_RULES_RUNLOCK();
 			ERROUT(EBUSY);
 		}
-		NET_EPOCH_EXIT(et);
+		PF_RULES_RUNLOCK();
 		if (nvl == NULL)
 			ERROUT(ENOMEM);
 
@@ -5664,141 +5665,6 @@ DIOCGETSTATESV2_full:
 		error = pf_ioctl_get_addr(&npp);
 		memcpy(pp, &npp, sizeof(*pp));
 
-		break;
-	}
-
-	case DIOCCHANGEADDR: {
-		struct pfioc_pooladdr	*pca = (struct pfioc_pooladdr *)addr;
-		struct pf_kpool		*pool;
-		struct pf_kpooladdr	*oldpa = NULL, *newpa = NULL;
-		struct pf_kruleset	*ruleset;
-		struct pfi_kkif		*kif = NULL;
-
-		pca->anchor[sizeof(pca->anchor) - 1] = '\0';
-
-		if (pca->action < PF_CHANGE_ADD_HEAD ||
-		    pca->action > PF_CHANGE_REMOVE) {
-			error = EINVAL;
-			goto fail;
-		}
-		if (pca->addr.addr.type != PF_ADDR_ADDRMASK &&
-		    pca->addr.addr.type != PF_ADDR_DYNIFTL &&
-		    pca->addr.addr.type != PF_ADDR_TABLE) {
-			error = EINVAL;
-			goto fail;
-		}
-		if (pca->addr.addr.p.dyn != NULL) {
-			error = EINVAL;
-			goto fail;
-		}
-
-		if (pca->action != PF_CHANGE_REMOVE) {
-#ifndef INET
-			if (pca->af == AF_INET) {
-				error = EAFNOSUPPORT;
-				goto fail;
-			}
-#endif /* INET */
-#ifndef INET6
-			if (pca->af == AF_INET6) {
-				error = EAFNOSUPPORT;
-				goto fail;
-			}
-#endif /* INET6 */
-			newpa = malloc(sizeof(*newpa), M_PFRULE, M_WAITOK);
-			bcopy(&pca->addr, newpa, sizeof(struct pf_pooladdr));
-			if (newpa->ifname[0])
-				kif = pf_kkif_create(M_WAITOK);
-			newpa->kif = NULL;
-		}
-#define	ERROUT(x)	ERROUT_IOCTL(DIOCCHANGEADDR_error, x)
-		PF_RULES_WLOCK();
-		ruleset = pf_find_kruleset(pca->anchor);
-		if (ruleset == NULL)
-			ERROUT(EBUSY);
-
-		pool = pf_get_kpool(pca->anchor, pca->ticket, pca->r_action,
-		    pca->r_num, pca->r_last, 1, 1, PF_RDR);
-		if (pool == NULL)
-			ERROUT(EBUSY);
-
-		if (pca->action != PF_CHANGE_REMOVE) {
-			if (newpa->ifname[0]) {
-				newpa->kif = pfi_kkif_attach(kif, newpa->ifname);
-				pfi_kkif_ref(newpa->kif);
-				kif = NULL;
-			}
-
-			switch (newpa->addr.type) {
-			case PF_ADDR_DYNIFTL:
-				error = pfi_dynaddr_setup(&newpa->addr,
-				    pca->af);
-				break;
-			case PF_ADDR_TABLE:
-				newpa->addr.p.tbl = pfr_attach_table(ruleset,
-				    newpa->addr.v.tblname);
-				if (newpa->addr.p.tbl == NULL)
-					error = ENOMEM;
-				break;
-			}
-			if (error)
-				goto DIOCCHANGEADDR_error;
-		}
-
-		switch (pca->action) {
-		case PF_CHANGE_ADD_HEAD:
-			oldpa = TAILQ_FIRST(&pool->list);
-			break;
-		case PF_CHANGE_ADD_TAIL:
-			oldpa = TAILQ_LAST(&pool->list, pf_kpalist);
-			break;
-		default:
-			oldpa = TAILQ_FIRST(&pool->list);
-			for (int i = 0; oldpa && i < pca->nr; i++)
-				oldpa = TAILQ_NEXT(oldpa, entries);
-
-			if (oldpa == NULL)
-				ERROUT(EINVAL);
-		}
-
-		if (pca->action == PF_CHANGE_REMOVE) {
-			TAILQ_REMOVE(&pool->list, oldpa, entries);
-			switch (oldpa->addr.type) {
-			case PF_ADDR_DYNIFTL:
-				pfi_dynaddr_remove(oldpa->addr.p.dyn);
-				break;
-			case PF_ADDR_TABLE:
-				pfr_detach_table(oldpa->addr.p.tbl);
-				break;
-			}
-			if (oldpa->kif)
-				pfi_kkif_unref(oldpa->kif);
-			free(oldpa, M_PFRULE);
-		} else {
-			if (oldpa == NULL)
-				TAILQ_INSERT_TAIL(&pool->list, newpa, entries);
-			else if (pca->action == PF_CHANGE_ADD_HEAD ||
-			    pca->action == PF_CHANGE_ADD_BEFORE)
-				TAILQ_INSERT_BEFORE(oldpa, newpa, entries);
-			else
-				TAILQ_INSERT_AFTER(&pool->list, oldpa,
-				    newpa, entries);
-		}
-
-		pool->cur = TAILQ_FIRST(&pool->list);
-		pf_addrcpy(&pool->counter, &pool->cur->addr.v.a.addr, pca->af);
-		PF_RULES_WUNLOCK();
-		break;
-
-#undef ERROUT
-DIOCCHANGEADDR_error:
-		if (newpa != NULL) {
-			if (newpa->kif)
-				pfi_kkif_unref(newpa->kif);
-			free(newpa, M_PFRULE);
-		}
-		PF_RULES_WUNLOCK();
-		pf_kkif_free(kif);
 		break;
 	}
 
