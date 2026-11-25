@@ -57,9 +57,14 @@ SYSCTL_INT(_debug_acpi, OID_AUTO, max_tasks, CTLFLAG_RDTUN, &acpi_max_tasks,
 /*
  * Track and report the system's demand for task slots.
  */
-static int acpi_tasks_hiwater;
+static int acpi_boot_tasks_nb;
+SYSCTL_INT(_debug_acpi, OID_AUTO, boot_tasks_nb, CTLFLAG_RD,
+    &acpi_boot_tasks_nb, 0,
+    "Amount of ACPI event tasks queued at boot before processing starts.");
+static int acpi_tasks_high_water;
 SYSCTL_INT(_debug_acpi, OID_AUTO, tasks_hiwater, CTLFLAG_RD,
-    &acpi_tasks_hiwater, 1, "Peak demand for ACPI event task slots.");
+    &acpi_tasks_high_water, 0,
+    "Peak demand for ACPI event task slots (after boot).");
 
 /*
  * Allow the user to tune the number of task threads we start.  It seems
@@ -78,21 +83,19 @@ struct acpi_task_ctx {
     int				at_flag;
 #define	ACPI_TASK_FREE		0
 #define	ACPI_TASK_USED		1
-#define	ACPI_TASK_ENQUEUED	2
 };
 
 struct taskqueue		*acpi_taskq;
 static struct acpi_task_ctx	*acpi_tasks;
-/* Unsynchronized as only useful in the mono-CPU startup phase. */
-static int			acpi_task_count;
 static int			acpi_taskq_started;
 
 /*
- * Preallocate some memory for tasks early enough.
- * malloc(9) cannot be used with spin lock held.
+ * Preallocate memory for tasks, as tasks can be posted from interrupt contexts
+ * where malloc(9) cannot be called, and initialize the taskqueue so we can
+ * enqueue tasks on behalf of drivers.
  */
 static void
-acpi_task_init(void *arg)
+acpi_taskq_init(void *arg)
 {
     if (acpi_max_tasks < 0) {
 	acpi_max_tasks = ACPI_MAX_TASKS;
@@ -102,39 +105,33 @@ acpi_task_init(void *arg)
 
     acpi_tasks = malloc(sizeof(*acpi_tasks) * acpi_max_tasks, M_ACPITASK,
 	M_WAITOK | M_ZERO);
-}
-
-SYSINIT(acpi_tasks, SI_SUB_DRIVERS, SI_ORDER_FIRST, acpi_task_init, NULL);
-
-/*
- * Initialize ACPI task queue.
- */
-static void
-acpi_taskq_init(void *arg)
-{
-    int i;
-
     acpi_taskq = taskqueue_create_fast("acpi_task", M_WAITOK,
 	&taskqueue_thread_enqueue, &acpi_taskq);
+}
+
+SYSINIT(acpi_tasks, SI_SUB_DRIVERS, SI_ORDER_FIRST, acpi_taskq_init, NULL);
+
+/*
+ * Start processing of the taskqueue.
+ */
+static void
+acpi_taskq_kick(void *arg)
+{
+    int boot_tasks_nb;
+
+    if (bootverbose && (boot_tasks_nb = atomic_load_int(&acpi_boot_tasks_nb),
+			boot_tasks_nb > 0))
+	printf("ACPI: Unleashing pending %d tasks\n", boot_tasks_nb);
 
     if (acpi_max_threads < 1)
 	acpi_max_threads = 1;
 
     taskqueue_start_threads(&acpi_taskq, acpi_max_threads, PWAIT, "acpi_task");
 
-    if (acpi_task_count > 0) {
-	if (bootverbose)
-	    printf("AcpiOsExecute: enqueue %d pending tasks\n",
-		acpi_task_count);
-	for (i = 0; i < acpi_max_tasks; i++)
-	    if (atomic_cmpset_int(&acpi_tasks[i].at_flag, ACPI_TASK_USED,
-		ACPI_TASK_USED | ACPI_TASK_ENQUEUED))
-		taskqueue_enqueue(acpi_taskq, &acpi_tasks[i].at_task);
-    }
-    acpi_taskq_started = 1;
+    atomic_store_int(&acpi_taskq_started, 1);
 }
 
-SYSINIT(acpi_taskq, SI_SUB_KICK_SCHEDULER, SI_ORDER_ANY, acpi_taskq_init, NULL);
+SYSINIT(acpi_taskq, SI_SUB_KICK_SCHEDULER, SI_ORDER_ANY, acpi_taskq_kick, NULL);
 
 /*
  * Bounce through this wrapper function since ACPI-CA doesn't understand
@@ -147,50 +144,46 @@ acpi_task_execute(void *context, int pending)
 
     at = (struct acpi_task_ctx *)context;
     at->at_function(at->at_context);
-    atomic_clear_int(&at->at_flag, ACPI_TASK_USED | ACPI_TASK_ENQUEUED);
-    acpi_task_count--;
+    atomic_store_int(&at->at_flag, ACPI_TASK_FREE);
 }
 
 static ACPI_STATUS
 acpi_task_enqueue(int priority, ACPI_OSD_EXEC_CALLBACK Function, void *Context)
 {
+    const int started = atomic_load_int(&acpi_taskq_started);
     struct acpi_task_ctx *at;
-    int hiwater, i;
+    int *high_water_p;
+    int high_water, i;
 
-    for (at = NULL, i = 0; i < acpi_max_tasks; i++)
+    at = NULL;
+    for (i = 0; i < acpi_max_tasks; i++)
 	if (atomic_cmpset_int(&acpi_tasks[i].at_flag, ACPI_TASK_FREE,
 	    ACPI_TASK_USED)) {
 	    at = &acpi_tasks[i];
-	    acpi_task_count++;
 	    break;
 	}
 
-    while (hiwater = atomic_load_int(&acpi_tasks_hiwater), i + 1 > hiwater) {
-	if (atomic_cmpset_int(&acpi_tasks_hiwater, hiwater, i + 1))
+    /* Update the appropriate high water mark. */
+    high_water_p = started ? &acpi_tasks_high_water : &acpi_boot_tasks_nb;
+    while (high_water = atomic_load_int(high_water_p), i + 1 > high_water) {
+	if (atomic_cmpset_int(high_water_p, high_water, i + 1))
 	    break;
 	cpu_spinwait();
     }
 
     if (at == NULL) {
-	printf("AcpiOsExecute: failed to enqueue task, consider increasing "
-	    "the debug.acpi.max_tasks tunable\n");
+	printf("AcpiOsExecute: Failed to enqueue task! Consider increasing "
+	       "the 'debug.acpi.max_tasks' tunable.\n");
 	return (AE_NO_MEMORY);
     }
 
     TASK_INIT(&at->at_task, priority, acpi_task_execute, at);
     at->at_function = Function;
     at->at_context = Context;
+    taskqueue_enqueue(acpi_taskq, &at->at_task);
 
-    /*
-     * If the task queue is ready, enqueue it now.
-     */
-    if (acpi_taskq_started) {
-	atomic_set_int(&at->at_flag, ACPI_TASK_ENQUEUED);
-	taskqueue_enqueue(acpi_taskq, &at->at_task);
-	return (AE_OK);
-    }
-    if (bootverbose)
-	printf("AcpiOsExecute: task queue not started\n");
+    if (bootverbose && !started)
+	printf("AcpiOsExecute: Task enqueued but processing not started yet\n");
 
     return (AE_OK);
 }
@@ -242,15 +235,18 @@ AcpiOsExecute(ACPI_EXECUTE_TYPE Type, ACPI_OSD_EXEC_CALLBACK Function,
 void
 AcpiOsWaitEventsComplete(void)
 {
-	int i;
+    static bool warning_printed = false;
 
-	ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+    ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
-	for (i = 0; i < acpi_max_tasks; i++)
-		if ((atomic_load_acq_int(&acpi_tasks[i].at_flag) &
-		    ACPI_TASK_ENQUEUED) != 0)
-			taskqueue_drain(acpi_taskq, &acpi_tasks[i].at_task);
-	return_VOID;
+    if (atomic_load_int(&acpi_taskq_started))
+	taskqueue_drain_all(acpi_taskq);
+    else if (!warning_printed && atomic_load_int(&acpi_boot_tasks_nb) > 0) {
+	warning_printed = true;
+	printf("%s: Task processing not started, ignoring request\n", __func__);
+    }
+
+    return_VOID;
 }
 
 void
