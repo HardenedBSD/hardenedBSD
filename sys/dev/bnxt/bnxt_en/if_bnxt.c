@@ -4042,7 +4042,7 @@ bnxt_copy_maddr(void *arg, struct sockaddr_dl *sdl, u_int cnt)
 {
 	uint8_t *mta = arg;
 
-	if (cnt == BNXT_MAX_MC_ADDRS)
+	if (cnt >= BNXT_MAX_MC_ADDRS)
 		return (1);
 
 	bcopy(LLADDR(sdl), &mta[cnt * ETHER_ADDR_LEN], ETHER_ADDR_LEN);
@@ -4749,13 +4749,21 @@ bnxt_vlan_register(if_ctx_t ctx, uint16_t vtag)
 {
 	struct bnxt_softc *softc = iflib_get_softc(ctx);
 	struct bnxt_vlan_tag *new_tag;
+	struct vlan_head tail;
 
 	new_tag = malloc(sizeof(struct bnxt_vlan_tag), M_DEVBUF, M_NOWAIT);
 	if (new_tag == NULL)
 		return;
 	new_tag->tag = vtag;
 	new_tag->filter_id = -1;
-	SLIST_INSERT_HEAD(&softc->vnic_info.vlan_tags, new_tag, next);
+
+	/*
+	 * Append new tags to the list so that the oldest VLANs (re)acquire
+	 * L2 filters if bnxt_hwrm_set_filter() runs out.
+	 */
+	SLIST_INIT(&tail);
+	SLIST_INSERT_HEAD(&tail, new_tag, next);
+	SLIST_CONCAT(&softc->vnic_info.vlan_tags, &tail, bnxt_vlan_tag, next);
 };
 
 static void
@@ -5784,6 +5792,7 @@ bnxt_handle_def_cp(void *arg)
 static void
 bnxt_clear_ids(struct bnxt_softc *softc)
 {
+	struct bnxt_vlan_tag *tag;
 	int i;
 
 	softc->def_cp_ring.stats_ctx_id = HWRM_NA_SIGNATURE;
@@ -5811,6 +5820,8 @@ bnxt_clear_ids(struct bnxt_softc *softc)
 	}
 	bnxt_clear_mpc_rings_ids(softc);
 	softc->vnic_info.filter_id = -1;
+	SLIST_FOREACH(tag, &softc->vnic_info.vlan_tags, next)
+		tag->filter_id = -1;
 	softc->vnic_info.id = (uint16_t)HWRM_NA_SIGNATURE;
 	softc->vnic_info.rss_id = (uint16_t)HWRM_NA_SIGNATURE;
 	memset(softc->vnic_info.rss_grp_tbl.idi_vaddr, 0xff,
