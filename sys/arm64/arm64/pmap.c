@@ -539,8 +539,7 @@ void (*pmap_stage2_invalidate_all)(uint64_t);
 
 #define	TLBI_RANGE_FIELDS(va, va_shift, num, scale, ttl)		\
 	(TLBI_RANGE_TG | ((u_long)(scale) << TLBI_RANGE_SCALE_SHIFT) |	\
-	((u_long)(num) << TLBI_RANGE_NUM_SHIFT) |			\
-	(pmap_ttl_support ? TLBI_RANGE_TTL(ttl) : 0) |			\
+	((u_long)(num) << TLBI_RANGE_NUM_SHIFT) | TLBI_RANGE_TTL(ttl) |	\
 	(((va) >> (va_shift)) & TLBI_RANGE_BADDR_MASK))
 
 static bool __read_frequently pmap_tlbi_range_support = false;
@@ -2231,7 +2230,7 @@ pmap_s1_invalidate_loop(vm_offset_t sva, vm_offset_t eva, vm_offset_t stride,
     int va_shift, vm_offset_t va_mask, uint64_t asid, bool kernel,
     bool final_only, int ttl)
 {
-	uint64_t units;
+	uint64_t r, units;
 	vm_size_t pages;
 	int scale, unit_shift;
 
@@ -2255,12 +2254,13 @@ pmap_s1_invalidate_loop(vm_offset_t sva, vm_offset_t eva, vm_offset_t stride,
 				continue;
 			}
 		}
+		r = asid | TLBI_VA(va);
+		if (pmap_ttl_support)
+			r |= TLBI_VA_TTL(ttl);
 		if (kernel)
-			pmap_s1_invalidate_kernel(asid | TLBI_VA(va),
-			    final_only);
+			pmap_s1_invalidate_kernel(r, final_only);
 		else
-			pmap_s1_invalidate_user(asid | TLBI_VA(va),
-			    final_only);
+			pmap_s1_invalidate_user(r, final_only);
 		va += stride;
 	}
 }
@@ -2304,9 +2304,9 @@ pmap_s1_invalidate_strided(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
  */
 static __inline void
 pmap_s1_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
-    bool final_only)
+    bool final_only, int ttl)
 {
-	pmap_s1_invalidate_strided(pmap, sva, eva, L3_SIZE, final_only, TLBI_TTL_UNKNOWN);
+	pmap_s1_invalidate_strided(pmap, sva, eva, L3_SIZE, final_only, ttl);
 }
 
 static __inline void
@@ -2320,10 +2320,10 @@ pmap_s2_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
 
 static __inline void
 pmap_invalidate_range(pmap_t pmap, vm_offset_t sva, vm_offset_t eva,
-    bool final_only)
+    bool final_only, int ttl)
 {
 	if (pmap->pm_stage == PM_STAGE1)
-		pmap_s1_invalidate_range(pmap, sva, eva, final_only);
+		pmap_s1_invalidate_range(pmap, sva, eva, final_only, ttl);
 	else
 		pmap_s2_invalidate_range(pmap, sva, eva, final_only);
 }
@@ -2730,7 +2730,8 @@ pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode)
 		size -= PAGE_SIZE;
 	}
 	if ((old_l3e & ATTR_DESCR_VALID) != 0)
-		pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
+		pmap_s1_invalidate_range(kernel_pmap, sva, va, true,
+		    TLBI_TTL_L3);
 	else {
 		/*
 		 * Because the old entries were invalid and the new mappings
@@ -2793,10 +2794,11 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 
 			if (va != sva) {
 				pmap_s1_invalidate_range(kernel_pmap, sva, va,
-				    true);
+				    true, TLBI_TTL_L3);
 			}
 			pmap_clear(ptep);
-			pmap_s1_invalidate_page(kernel_pmap, va, true, TLBI_TTL_L2);
+			pmap_s1_invalidate_page(kernel_pmap, va, true,
+			    TLBI_TTL_L2);
 			PMAP_LOCK(kernel_pmap);
 			pmap_remove_kernel_l2(kernel_pmap, ptep, va);
 			PMAP_UNLOCK(kernel_pmap);
@@ -2831,7 +2833,8 @@ pmap_kremove_device(vm_offset_t sva, vm_size_t size)
 		}
 	}
 	if (va != sva)
-		pmap_s1_invalidate_range(kernel_pmap, sva, va, true);
+		pmap_s1_invalidate_range(kernel_pmap, sva, va, true,
+		    TLBI_TTL_L3);
 }
 
 /*
@@ -2890,7 +2893,7 @@ pmap_qenter(void *sva, vm_page_t *ma, int count)
 	}
 	if ((old_l3e & ATTR_DESCR_VALID) != 0)
 		pmap_s1_invalidate_range(kernel_pmap, (vm_offset_t)sva, va,
-		    true);
+		    true, TLBI_TTL_L3);
 	else {
 		/*
 		 * Because the old entries were invalid and the new mappings
@@ -2924,7 +2927,8 @@ pmap_qremove(void *sva, int count)
 
 		va += PAGE_SIZE;
 	}
-	pmap_s1_invalidate_range(kernel_pmap, (vm_offset_t)sva, va, true);
+	pmap_s1_invalidate_range(kernel_pmap, (vm_offset_t)sva, va, true,
+	    TLBI_TTL_L3);
 }
 
 /***************************************************
@@ -4408,7 +4412,7 @@ pmap_remove_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va, vm_offset_t *vap,
 				 */
 				if (*vap != va_next) {
 					pmap_invalidate_range(pmap, *vap, va,
-					    true);
+					    true, TLBI_TTL_L3);
 					*vap = va_next;
 				}
 				rw_wunlock(*lockp);
@@ -4469,7 +4473,8 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 		old_l3 = pmap_load(l3);
 		if (!pmap_l3_valid(old_l3)) {
 			if (va != eva) {
-				pmap_invalidate_range(pmap, va, sva, true);
+				pmap_invalidate_range(pmap, va, sva, true,
+				    TLBI_TTL_L3);
 				va = eva;
 			}
 			continue;
@@ -4521,7 +4526,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 					 */
 					if (va != eva) {
 						pmap_invalidate_range(pmap, va,
-						    sva, true);
+						    sva, true, TLBI_TTL_L3);
 						va = eva;
 					}
 					rw_wunlock(*lockp);
@@ -4548,7 +4553,7 @@ pmap_remove_l3_range(pmap_t pmap, pd_entry_t l2e, vm_offset_t sva,
 			va = sva;
 	}
 	if (va != eva)
-		pmap_invalidate_range(pmap, va, sva, true);
+		pmap_invalidate_range(pmap, va, sva, true, TLBI_TTL_L3);
 }
 
 static void
@@ -4955,7 +4960,7 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 				if (va != va_next) {
 					if (invalidate)
 						pmap_s1_invalidate_range(pmap,
-						    va, sva, true);
+						    va, sva, true, TLBI_TTL_L3);
 					va = va_next;
 				}
 				if ((l3 & ATTR_CONTIGUOUS) != 0) {
@@ -5019,7 +5024,8 @@ pmap_mask_set_locked(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, pt_entry_t m
 				va = sva;
 		}
 		if (va != va_next && invalidate)
-			pmap_s1_invalidate_range(pmap, va, sva, true);
+			pmap_s1_invalidate_range(pmap, va, sva, true,
+			    TLBI_TTL_L3);
 	}
 }
 
@@ -5158,7 +5164,8 @@ pmap_update_entry(pmap_t pmap, pd_entry_t *ptep, pd_entry_t newpte,
 	 * We always inline pmap_update_entry() so that constant propagation
 	 * and dead code elimination will specialize the following code.
 	 */
-	pmap_s1_invalidate_range(pmap, va, va + size, final_only);
+	pmap_s1_invalidate_range(pmap, va, va + size, final_only,
+	    TLBI_TTL_UNKNOWN);
 
 	/* Create the new mapping */
 	pmap_store(ptep, newpte);
@@ -5682,7 +5689,7 @@ restart:
 	if ((origpte & ATTR_DESCR_VALID) != 0 &&
 	    ((origpte ^ newpte) & ~ATTR_SW_WIRED) != 0)
 		pmap_invalidate_range(pmap, va, va + (psind == 1 ?
-		    L3C_SIZE : PAGE_SIZE), true);
+		    L3C_SIZE : PAGE_SIZE), true, TLBI_TTL_UNKNOWN);
 	else
 		dsb(ishst);
 
@@ -5889,7 +5896,7 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 
 	lock = NULL;
 	PMAP_LOCK(pmap);
-	if ((flags & PMAP_ENTER_LARGEPAGE) != 0) {
+	if (__predict_false((flags & PMAP_ENTER_LARGEPAGE) != 0)) {
 		KASSERT((m->oflags & VPO_UNMANAGED) != 0,
 		    ("managed largepage va %#lx flags %#x", va, flags));
 		if (psind == 3) {
@@ -8389,12 +8396,14 @@ pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 			continue;
 maybe_invlrng:
 			if (va != va_next) {
-				pmap_s1_invalidate_range(pmap, va, sva, true);
+				pmap_s1_invalidate_range(pmap, va, sva,
+				    true, TLBI_TTL_L3);
 				va = va_next;
 			}
 		}
 		if (va != va_next)
-			pmap_s1_invalidate_range(pmap, va, sva, true);
+			pmap_s1_invalidate_range(pmap, va, sva, true,
+			    TLBI_TTL_L3);
 	}
 	PMAP_UNLOCK(pmap);
 }
@@ -9485,7 +9494,7 @@ pmap_demote_l3c(pmap_t pmap, pt_entry_t *l3p, vm_offset_t va)
 	}
 	if ((nbits & ATTR_AF) != 0) {
 		pmap_invalidate_range(pmap, va & ~L3C_OFFSET, (va + L3C_SIZE) &
-		    ~L3C_OFFSET, true);
+		    ~L3C_OFFSET, true, TLBI_TTL_L3);
 	}
 
 	/*
