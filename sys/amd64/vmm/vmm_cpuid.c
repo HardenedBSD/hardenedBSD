@@ -223,6 +223,11 @@ cpuid_apply_runtime_reg_state(struct vcpu *vcpu, uint32_t func,
 		}
 
 		/*
+		 * Hide the Silicon Debug functionality.
+		 */
+		regs[2] &= ~(CPUID2_SDBG);
+
+		/*
 		 * AMD APM vol. 3 rev. 3.36 section E.3.2 notes that this bit is
 		 * set only if the "APIC exists and is enabled." Vol. 3 of the
 		 * June 2024 Intel SDM notes in section 11.4.3 that "[t]he CPUID
@@ -801,6 +806,11 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			 * Hide the performance and debug features.
 			 */
 			regs[2] &= ~CPUID2_PDCM;
+
+			/*
+			 * Hide the Silicon Debug functionality.
+			 */
+			regs[2] &= ~(CPUID2_SDBG);
 
 			/*
 			 * No TSC deadline support in the APIC yet
