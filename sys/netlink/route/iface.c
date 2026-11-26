@@ -1508,10 +1508,12 @@ in6_flags_to_nl(uint32_t flags)
 		nl_flags |= IFA_F_DEPRECATED;
 	if (flags & IN6_IFF_TENTATIVE)
 		nl_flags |= IFA_F_TENTATIVE;
+	if (flags & IN6_IFF_OPTIMISTIC)
+		nl_flags |= IFA_F_OPTIMISTIC;
 	if ((flags & (IN6_IFF_AUTOCONF|IN6_IFF_TEMPORARY)) == 0)
-		flags |= IFA_F_PERMANENT;
+		nl_flags |= IFA_F_PERMANENT;
 	if (flags & IN6_IFF_DUPLICATED)
-		flags |= IFA_F_DADFAILED;
+		nl_flags |= IFA_F_DADFAILED;
 	return (nl_flags);
 }
 
@@ -1528,6 +1530,8 @@ nl_flags_to_in6(uint32_t flags)
 		in6_flags |= IN6_IFF_DEPRECATED;
 	if (flags & IFA_F_TENTATIVE)
 		in6_flags |= IN6_IFF_TENTATIVE;
+	if (flags & IFA_F_OPTIMISTIC)
+		in6_flags |= IN6_IFF_OPTIMISTIC;
 	if (flags & IFA_F_DADFAILED)
 		in6_flags |= IN6_IFF_DUPLICATED;
 

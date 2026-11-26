@@ -26,6 +26,8 @@
  * SUCH DAMAGE.
  */
 
+#include <x86/bhyve.h>
+
 #ifndef _X86_H_
 #define	_X86_H_
 
@@ -55,6 +57,11 @@
 #define CPUID_8000_001E	(0x8000001E)
 #define CPUID_8000_0022	(0x80000022)
 
+#define	CPUID_VM_SIGNATURE	0x40000000
+#define	CPUID_VM_HIGH		CPUID_BHYVE_FEATURES
+
+#define	CPUID_VM_BHYVE_OFF	0x100
+
 /*
  * CPUID instruction Fn0000_0001:
  */
@@ -65,9 +72,6 @@
  * CPUID instruction Fn0000_0001 ECX
  */
 #define CPUID_0000_0001_FEAT0_VMX	(1<<5)
-
-int x86_emulate_cpuid(struct vcpu *vcpu, uint64_t *rax, uint64_t *rbx,
-    uint64_t *rcx, uint64_t *rdx);
 
 enum vm_cpuid_capability {
 	VCC_NONE,
