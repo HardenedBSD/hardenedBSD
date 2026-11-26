@@ -140,6 +140,12 @@ static const struct marchid_entry spacemit_marchids[] = {
 	MARCHID_END
 };
 
+static const struct marchid_entry thead_marchids[] = {
+	{ MARCHID_THEAD_C908,	"C908" },
+	{ MARCHID_THEAD_C920V2,	"C920v2" },
+	MARCHID_END
+};
+
 /*
  * Known CPU vendor/manufacturer table.
  */
@@ -150,7 +156,7 @@ static const struct {
 } mvendor_ids[] = {
 	{ MVENDORID_UNIMPL,	"Unspecified",		NULL		},
 	{ MVENDORID_SIFIVE,	"SiFive",		sifive_marchids	},
-	{ MVENDORID_THEAD,	"T-Head",		NULL		},
+	{ MVENDORID_THEAD,	"T-Head",		thead_marchids	},
 	{ MVENDORID_SPACEMIT,	"SpacemiT",		spacemit_marchids	},
 };
 
@@ -590,16 +596,17 @@ handle_thead_quirks(u_int cpu, struct cpu_desc *desc)
 		return;
 
 	/*
-	 * For now, it is assumed that T-HEAD CPUs have both marchid and mimpid
-	 * values of zero (although we leave this unchecked). It is true in
-	 * practice for the early generations of this hardware (C906, C910,
-	 * C920). In the future, the identity checks may need to become more
-	 * granular, but until then all known T-HEAD quirks are applied
-	 * indiscriminantly.
+	 * The early generations of this hardware (C906, C910, C920) report
+	 * marchid and mimpid values of zero and need the XTheadMae page
+	 * attributes and the vendor cache operations. Later cores, such as
+	 * the C908 and C920v2, report non-zero values and implement the
+	 * standard Svpbmt and Zicbom extensions instead.
 	 *
 	 * Note: any changes in this function relating to has_errata_thead_pbmt
 	 * may need to be applied to get_pte_fixup_bits (in locore.S) as well.
 	 */
+	if (marchid != 0 || mimpid != 0)
+		return;
 
 	has_errata_thead_pbmt = true;
 	thead_setup_cache();

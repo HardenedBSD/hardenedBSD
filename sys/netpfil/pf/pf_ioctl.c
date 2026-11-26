@@ -559,10 +559,14 @@ pf_free_eth_rule(struct pf_keth_rule *rule)
 	if (rule->kif)
 		pfi_kkif_unref(rule->kif);
 
-	if (rule->ipsrc.addr.type == PF_ADDR_TABLE)
-		pfr_detach_table(rule->ipsrc.addr.p.tbl);
-	if (rule->ipdst.addr.type == PF_ADDR_TABLE)
-		pfr_detach_table(rule->ipdst.addr.p.tbl);
+	if (rule->ipsrc.addr.type == PF_ADDR_TABLE) {
+		if (rule->ipsrc.addr.p.tbl)
+			pfr_detach_table(rule->ipsrc.addr.p.tbl);
+	}
+	if (rule->ipdst.addr.type == PF_ADDR_TABLE) {
+		if (rule->ipdst.addr.p.tbl)
+			pfr_detach_table(rule->ipdst.addr.p.tbl);
+	}
 
 	counter_u64_free(rule->evaluations);
 	for (int i = 0; i < 2; i++) {
@@ -4406,8 +4410,10 @@ DIOCGETETHRULE_error:
 		rule->timestamp = NULL;
 
 		error = pf_nveth_rule_to_keth_rule(nvl, rule);
-		if (error != 0)
+		if (error != 0) {
+			free(rule, M_PFRULE);
 			ERROUT(error);
+		}
 
 		if (rule->ifname[0])
 			kif = pf_kkif_create(M_WAITOK);
@@ -4639,7 +4645,6 @@ DIOCGETETHRULESETS_error:
 			}
 		}
 
-		PF_RULES_RUNLOCK();
 		if (found) {
 			nvlist_add_number(nvl, "nr", nr);
 			nvlist_add_string(nvl, "name", anchor->name);
@@ -4649,8 +4654,10 @@ DIOCGETETHRULESETS_error:
 			else
 				nvlist_add_string(nvl, "path", "");
 		} else {
+			PF_RULES_RUNLOCK();
 			ERROUT(EBUSY);
 		}
+		PF_RULES_RUNLOCK();
 
 		nvlpacked = nvlist_pack(nvl, &nv->len);
 		if (nvlpacked == NULL)
