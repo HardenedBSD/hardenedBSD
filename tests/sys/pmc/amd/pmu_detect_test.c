@@ -9,7 +9,8 @@
 /*
  * Checks that hwpmc registers the AMD core PMU on Zen CPUs: the K8 class is
  * present with 48-bit counters and at least six core rows, alongside the
- * TSC class.
+ * TSC class.  bhyve clears PerfCtrExtCore and KVM sets it only with a vPMU,
+ * so the cases are gated on that bit rather than on the class.
  */
 
 #include <sys/param.h>
@@ -36,15 +37,13 @@ ATF_TC_HEAD(pmu_detect_k8_class_present, tc)
 
 ATF_TC_BODY(pmu_detect_k8_class_present, tc)
 {
-	const struct pmc_cpuinfo *cpuinfo;
 	struct amd_test_cpu cpu;
 
 	amd_test_skip_unless_zen(&cpu);
+	amd_test_skip_unless_perfctr_extcore();
 	amd_test_skip_unless_hwpmc();
 
-	ATF_REQUIRE_MSG(pmc_cpuinfo(&cpuinfo) == 0,
-	    "pmc_cpuinfo() failed: %s", strerror(errno));
-	ATF_CHECK_MSG(amd_test_find_classinfo(cpuinfo, PMC_CLASS_K8) != NULL,
+	ATF_CHECK_MSG(amd_test_find_classinfo(PMC_CLASS_K8) != NULL,
 	    "PMC_CLASS_K8 not registered on %s", amd_test_zen_name(cpu.zen));
 }
 
@@ -58,16 +57,14 @@ ATF_TC_HEAD(pmu_detect_counter_width, tc)
 
 ATF_TC_BODY(pmu_detect_counter_width, tc)
 {
-	const struct pmc_cpuinfo *cpuinfo;
 	const struct pmc_classinfo *ci;
 	struct amd_test_cpu cpu;
 
 	amd_test_skip_unless_zen(&cpu);
+	amd_test_skip_unless_perfctr_extcore();
 	amd_test_skip_unless_hwpmc();
 
-	ATF_REQUIRE_MSG(pmc_cpuinfo(&cpuinfo) == 0,
-	    "pmc_cpuinfo() failed: %s", strerror(errno));
-	ci = amd_test_find_classinfo(cpuinfo, PMC_CLASS_K8);
+	ci = amd_test_find_classinfo(PMC_CLASS_K8);
 	ATF_REQUIRE_MSG(ci != NULL, "PMC_CLASS_K8 not registered");
 
 	ATF_CHECK_MSG(ci->pm_width == 48,
@@ -108,17 +105,15 @@ ATF_TC_HEAD(pmu_detect_tsc_class_coexists, tc)
 
 ATF_TC_BODY(pmu_detect_tsc_class_coexists, tc)
 {
-	const struct pmc_cpuinfo *cpuinfo;
 	struct amd_test_cpu cpu;
 
 	amd_test_skip_unless_zen(&cpu);
+	amd_test_skip_unless_perfctr_extcore();
 	amd_test_skip_unless_hwpmc();
 
-	ATF_REQUIRE_MSG(pmc_cpuinfo(&cpuinfo) == 0,
-	    "pmc_cpuinfo() failed: %s", strerror(errno));
-	ATF_CHECK_MSG(amd_test_find_classinfo(cpuinfo, PMC_CLASS_K8) != NULL,
+	ATF_CHECK_MSG(amd_test_find_classinfo(PMC_CLASS_K8) != NULL,
 	    "PMC_CLASS_K8 not registered");
-	ATF_CHECK_MSG(amd_test_find_classinfo(cpuinfo, PMC_CLASS_TSC) != NULL,
+	ATF_CHECK_MSG(amd_test_find_classinfo(PMC_CLASS_TSC) != NULL,
 	    "PMC_CLASS_TSC not registered");
 }
 

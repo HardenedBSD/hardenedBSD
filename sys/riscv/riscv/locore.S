@@ -230,6 +230,8 @@ pagetables:
 	or	s2, s2, t0
 	sfence.vma
 	csrw	satp, s2
+	/* Ensure old translations are flushed. */
+	sfence.vma
 
 	.align 2
 va:
@@ -310,6 +312,11 @@ get_pte_fixup_bits:
 	li	t0, MVENDORID_THEAD
 	xor	t0, t0, a1
 	bnez	t0, 1f		/* branch if a1 != t0 */
+	/* Only early T-HEAD cores, with zero marchid and mimpid, need this. */
+	SBI_CALL(SBI_EXT_ID_BASE, SBI_BASE_GET_MARCHID)
+	bnez	a1, 1f
+	SBI_CALL(SBI_EXT_ID_BASE, SBI_BASE_GET_MIMPID)
+	bnez	a1, 1f
 	li	s8, PTE_THEAD_MA_NONE
 1:
 	ret
@@ -385,6 +392,7 @@ ENTRY(mpentry)
 	ld	s2, PM_SATP(t2)
 	sfence.vma
 	csrw	satp, s2
+	sfence.vma
 
 	.align 2
 mpva:
