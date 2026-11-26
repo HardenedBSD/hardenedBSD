@@ -37,7 +37,6 @@
 #include <machine/segments.h>
 #include <machine/specialreg.h>
 #include <machine/vmm.h>
-#include <x86/bhyve.h>
 
 #include <dev/vmm/vmm_ktr.h>
 #include <dev/vmm/vmm_vm.h>
@@ -46,6 +45,7 @@
 #include "vmm_util.h"
 #include "x86.h"
 
+<<<<<<< HEAD
 SYSCTL_DECL(_hw_vmm);
 static SYSCTL_NODE(_hw_vmm, OID_AUTO, topology, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
     NULL);
@@ -668,6 +668,8 @@ default_leaf:
 	return (1);
 }
 
+=======
+>>>>>>> rad/freebsd/current/main
 bool
 vm_cpuid_capability(struct vcpu *vcpu, enum vm_cpuid_capability cap)
 {
