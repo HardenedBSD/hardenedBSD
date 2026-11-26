@@ -123,15 +123,11 @@ msg_elisp_desc="Things related to Emacs Lisp."
 msg_emit_extra_debugging_output="Emit extra debugging output"
 msg_emulators_desc="Utilities for emulating other operating systems."
 msg_enlightenment_desc="Software for the Enlightenment Desktop Environment."
-<<<<<<< HEAD
 msg_enter_a_fully_qualified_pathname_for_the_directory="Enter a fully qualified pathname for the directory\ncontaining the HardenedBSD distribution files:"
-=======
-msg_enter_a_fully_qualified_pathname_for_the_directory="Enter a fully qualified pathname for the directory\ncontaining the FreeBSD distribution files:"
 msg_enter_eap_identity_for="Enter the EAP identity (username) for SSID \`%s':"
 msg_enter_eap_password_for="Enter the EAP password for SSID \`%s':"
 msg_enter_new_value_for="Enter a new value for \`%s'\n(an empty value removes the property):"
 msg_enter_ssid="Enter the SSID (name) of the wireless network\nyou would like to join:"
->>>>>>> rad/freebsd/current/main
 msg_enter_the_device_name_of_a_ufs_formatted_partition="Enter the device-name of a UFS formatted partition"
 msg_enter_wep_key_for="Enter the WEP key for SSID \`%s'\n(10 or 26 hexadecimal digits for a raw key):"
 msg_enter_wpa_passphrase_for="Enter the WPA passphrase (8-63 characters) or 64-digit\nhexadecimal pre-shared key for SSID \`%s':"
@@ -192,13 +188,9 @@ msg_invalid_hostname_value="Invalid hostname value"
 msg_invalid_ipv4_address="Invalid IPv4 address"
 msg_invalid_name_server_ip_address_specified="Invalid name server IP address specified"
 msg_invalid_netmask_value="Invalid netmask value"
-<<<<<<< HEAD
 msg_invalid_nfs_path_specification="Invalid NFS path specification.  Must be of the form:\nhost:/full/pathname/to/HardenedBSD/distdir"
-=======
-msg_invalid_nfs_path_specification="Invalid NFS path specification.  Must be of the form:\nhost:/full/pathname/to/FreeBSD/distdir"
 msg_invalid_wep_key="Invalid WEP key. Use 5 or 13 characters for an ASCII\nkey; 10 or 26 hexadecimal digits for a raw key."
 msg_invalid_wpa_passphrase="Invalid passphrase. A WPA passphrase must be 8 to 63\ncharacters long (or exactly 64 hexadecimal digits for\na raw pre-shared key)."
->>>>>>> rad/freebsd/current/main
 msg_io_error_while_reading_in_the_package="I/O error while reading in the %s package."
 msg_io_or_format_error_on_index_file="I/O or format error on INDEX file.\nPlease verify media (or path to media) and try again."
 msg_ipv4_address="IPv4 Address"
