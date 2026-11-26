@@ -344,11 +344,7 @@ ppc64_init_sysvecs(void *arg)
 	 * we can work around this by adjusting the base address. This also
 	 * avoids two copies of the trampoline code being allocated!
 	 */
-<<<<<<< HEAD
-	elf64_freebsd_sysvec_v2.sv_sigcode_base +=
-=======
 	elf64_freebsd_sysvec_v2_la48.sv_sigcode_offset +=
->>>>>>> rad/freebsd/15-stable/main
 	    (uintptr_t)sigcode64_elfv2 - (uintptr_t)&sigcode64;
 	elf64_freebsd_sysvec_v2_la48.sv_szsigcode = &szsigcode64_elfv2;
 	elf64_freebsd_sysvec_v2_la52.sv_sigcode_offset +=
