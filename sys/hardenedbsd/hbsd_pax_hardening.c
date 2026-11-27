@@ -259,6 +259,8 @@ pax_hardening_init_prison(struct prison *pr, struct vfsoptlist *opts)
 		    &(pr->pr_hbsd.hardening.harden_tty));
 		error = pax_handle_prison_param(opts, "hardening.harden_shm",
 		    &(pr->pr_hbsd.hardening.harden_shm));
+		error = pax_handle_prison_param(opts, "hardening.prohibit_ptrace_capsicum",
+		    &(pr->pr_hbsd.hardening.prohibit_ptrace_capsicum));
 	}
 
 	return (error);
