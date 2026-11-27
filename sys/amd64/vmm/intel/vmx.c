@@ -3337,6 +3337,12 @@ vmxctx_setreg(struct vmxctx *vmxctx, int reg, uint64_t val)
 	register_t *regp;
 
 	if ((regp = vmxctx_regptr(vmxctx, reg)) != NULL) {
+		/*
+		 * DR6 is loaded into the host's register before guest entry,
+		 * where setting any of bits 63:32 raises #GP.
+		 */
+		if (reg == VM_REG_GUEST_DR6 && (val >> 32) != 0)
+			return (EINVAL);
 		*regp = val;
 		return (0);
 	} else
@@ -3427,8 +3433,8 @@ vmx_getreg(void *vcpui, int reg, uint64_t *retval)
 		return (0);
 	}
 
-	if (vmxctx_getreg(&vcpu->ctx, reg, retval) == 0)
-		return (0);
+	if (vmxctx_regptr(&vcpu->ctx, reg) != NULL)
+		return (vmxctx_getreg(&vcpu->ctx, reg, retval));
 
 	return (vmcs_getreg(vcpu->vmcs, running, reg, retval));
 }
@@ -3450,8 +3456,8 @@ vmx_setreg(void *vcpui, int reg, uint64_t val)
 	if (reg == VM_REG_GUEST_INTR_SHADOW)
 		return (vmx_modify_intr_shadow(vcpu, running, val));
 
-	if (vmxctx_setreg(&vcpu->ctx, reg, val) == 0)
-		return (0);
+	if (vmxctx_regptr(&vcpu->ctx, reg) != NULL)
+		return (vmxctx_setreg(&vcpu->ctx, reg, val));
 
 	/* Do not permit user write access to VMCS fields by offset. */
 	if (reg < 0)
@@ -4159,6 +4165,40 @@ vmx_vlapic_cleanup(struct vlapic *vlapic)
 }
 
 #ifdef BHYVE_SNAPSHOT
+/* Registers kept in the vCPU context, in the order they are snapshotted. */
+static const int vmxctx_snapshot_regs[] = {
+	VM_REG_GUEST_RDI, VM_REG_GUEST_RSI, VM_REG_GUEST_RDX, VM_REG_GUEST_RCX,
+	VM_REG_GUEST_R8, VM_REG_GUEST_R9, VM_REG_GUEST_RAX, VM_REG_GUEST_RBX,
+	VM_REG_GUEST_RBP, VM_REG_GUEST_R10, VM_REG_GUEST_R11, VM_REG_GUEST_R12,
+	VM_REG_GUEST_R13, VM_REG_GUEST_R14, VM_REG_GUEST_R15, VM_REG_GUEST_CR2,
+	VM_REG_GUEST_DR0, VM_REG_GUEST_DR1, VM_REG_GUEST_DR2, VM_REG_GUEST_DR3,
+	VM_REG_GUEST_DR6,
+};
+
+static int
+vmxctx_snapshot_reg(struct vmxctx *vmxctx, int reg,
+    struct vm_snapshot_meta *meta)
+{
+	uint64_t val;
+	int ret;
+
+	if (meta->op == VM_SNAPSHOT_SAVE) {
+		ret = vmxctx_getreg(vmxctx, reg, &val);
+		if (ret != 0)
+			goto done;
+
+		SNAPSHOT_VAR_OR_LEAVE(val, meta, ret, done);
+	} else if (meta->op == VM_SNAPSHOT_RESTORE) {
+		SNAPSHOT_VAR_OR_LEAVE(val, meta, ret, done);
+
+		ret = vmxctx_setreg(vmxctx, reg, val);
+	} else
+		ret = EINVAL;
+
+done:
+	return (ret);
+}
+
 static int
 vmx_vcpu_snapshot(void *vcpui, struct vm_snapshot_meta *meta)
 {
@@ -4168,6 +4208,7 @@ vmx_vcpu_snapshot(void *vcpui, struct vm_snapshot_meta *meta)
 	struct vmxctx *vmxctx;
 	uint64_t guest_msrs[GUEST_MSR_NUM];
 	int err, run, hostcpu;
+	u_int i;
 
 	err = 0;
 	vcpu = vcpui;
@@ -4251,27 +4292,16 @@ vmx_vcpu_snapshot(void *vcpui, struct vm_snapshot_meta *meta)
 	    sizeof(vcpu->mtrr), meta, err, done);
 
 	vmxctx = &vcpu->ctx;
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rdi, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rsi, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rdx, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rcx, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r8, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r9, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rax, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rbx, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_rbp, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r10, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r11, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r12, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r13, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r14, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_r15, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_cr2, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_dr0, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_dr1, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_dr2, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_dr3, meta, err, done);
-	SNAPSHOT_VAR_OR_LEAVE(vmxctx->guest_dr6, meta, err, done);
+	/*
+	 * Go through vmxctx_setreg() on restore, so that the registers are
+	 * stored the same way as by VM_SET_REGISTER.
+	 */
+	for (i = 0; i < nitems(vmxctx_snapshot_regs); i++) {
+		err = vmxctx_snapshot_reg(vmxctx, vmxctx_snapshot_regs[i],
+		    meta);
+		if (err != 0)
+			goto done;
+	}
 
 done:
 	return (err);
