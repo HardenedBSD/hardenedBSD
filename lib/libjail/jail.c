@@ -994,6 +994,9 @@ jailparam_free(struct jailparam *jp, unsigned njp)
 	}
 }
 
+/*
+ * Determine whether the current process runs in a jailed context.
+ */
 int
 jailed(void)
 {
@@ -1003,8 +1006,7 @@ jailed(void)
 	val = 0;
 	valsz = sizeof(val);
 
-	if (sysctlbyname("security.jail.jailed", &val, &valsz, NULL
-	    , 0)) {
+	if (sysctlbyname("security.jail.jailed", &val, &valsz, NULL , 0)) {
 		return (0);
 	}
 
