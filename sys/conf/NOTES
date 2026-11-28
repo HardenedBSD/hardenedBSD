@@ -1879,6 +1879,7 @@ device		xmphy		# XaQti XMAC II
 #       L1 PCI express gigabit ethernet controllers.
 # alc:  Support for Atheros AR8131/AR8132 PCIe ethernet controllers.
 # ale:  Support for Atheros AR8121/AR8113/AR8114 PCIe ethernet controllers.
+# aq:   Aquantia / Marvell AQC1xx PCIe Ethernet adapter.
 # ath:  Atheros a/b/g WiFi adapters (requires ath_hal and wlan)
 # bce:	Broadcom NetXtreme II (BCM5706/BCM5708) PCI/PCIe Gigabit Ethernet
 #       adapters.
@@ -1938,6 +1939,7 @@ device		xmphy		# XaQti XMAC II
 # oce:	Emulex 10 Gbit adapters (OneConnect Ethernet)
 # ral:	Ralink Technology IEEE 802.11 wireless adapter
 # re:   RealTek 8139C+/8169/816xS/811xS/8101E PCI/PCIe Ethernet adapter
+# rge:  Realtek 8125/8126/8127 PCIe Ethernet adapter
 # rl:   Support for PCI fast ethernet adapters based on the RealTek 8129/8139
 #       chipset.  Note that the RealTek driver defaults to using programmed
 #       I/O to do register accesses because memory mapped mode seems to cause
@@ -2019,6 +2021,7 @@ device		ix		# Intel Pro/10Gbe PCIE Ethernet
 device		ixv		# Intel Pro/10Gbe PCIE Ethernet VF
 
 # PCI Ethernet NICs.
+device		aq		# Aquantia / Marvell AQC1xx
 device		cxgb		# Chelsio T3 10 Gigabit Ethernet
 device		cxgb_t3fw	# Chelsio T3 10 Gigabit Ethernet firmware
 device		cxgbe		# Chelsio T4-T6 1/10/25/40/100 Gigabit Ethernet
@@ -2026,6 +2029,7 @@ device		cxgbev		# Chelsio T4-T6 Virtual Functions
 device		le		# AMD Am7900 LANCE and Am79C9xx PCnet
 device		mxge		# Myricom Myri-10G 10GbE NIC
 device		oce		# Emulex 10 GbE (OneConnect Ethernet)
+device		rge		# Realtek 8125/8126/8127
 device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 
 # PCI IEEE 802.11 Wireless NICs
