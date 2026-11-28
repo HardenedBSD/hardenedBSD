@@ -44,6 +44,7 @@
 
 #include <dev/rtwn/if_rtwnreg.h>
 #include <dev/rtwn/if_rtwnvar.h>
+#include <dev/rtwn/if_rtwn_fw.h>
 #include <dev/rtwn/if_rtwn_nop.h>
 
 #include <dev/rtwn/usb/rtwn_usb_var.h>
@@ -153,6 +154,7 @@ r88eu_attach(struct rtwn_usb_softc *uc)
 #ifndef RTWN_WITHOUT_UCODE
 	sc->sc_fw_reset			= r88e_fw_reset;
 	sc->sc_fw_download_enable	= r88e_fw_download_enable;
+	sc->sc_fw_write_finish		= rtwn_nop_int_softc;
 #endif
 	sc->sc_llt_init			= r92c_llt_init;
 	sc->sc_enable_mac_txrx		= rtwn_nop_softc;
@@ -202,6 +204,7 @@ r88eu_attach(struct rtwn_usb_softc *uc)
 	sc->name			= "RTL8188EU";
 	sc->fwname			= "rtwn-rtl8188eufw";
 	sc->fwsig			= 0x88e;
+	sc->fw_start_addr		= R92C_FW_START_ADDR;
 
 	sc->page_count			= R88EU_TX_PAGE_COUNT;
 	sc->pktbuf_count		= R88E_TXPKTBUF_COUNT;

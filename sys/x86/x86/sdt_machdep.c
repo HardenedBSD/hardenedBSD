@@ -16,6 +16,14 @@
 #define	SDT_PATCH_SIZE		5
 
 /*
+ * The instruction that _SDT_ASM_PATCH_INSTR assembles to,
+ * "nopw 0(%rax,%rax,1)".
+ */
+static const uint8_t sdt_nop[SDT_PATCH_SIZE] = {
+	0x66, 0x0f, 0x1f, 0x04, 0x00
+};
+
+/*
  * Return true if we can overwrite a nop at "patchpoint" with a jump to the
  * target address.
  */
@@ -67,7 +75,6 @@ sdt_tracepoint_patch(uintptr_t patchpoint, uintptr_t target)
 void
 sdt_tracepoint_restore(uintptr_t patchpoint)
 {
-	uint8_t instr[SDT_PATCH_SIZE];
 	bool old_wp;
 
 #ifdef __amd64__
@@ -75,10 +82,7 @@ sdt_tracepoint_restore(uintptr_t patchpoint)
 	    ("%s: invalid patchpoint %#lx", __func__, patchpoint));
 #endif
 
-	for (int i = 0; i < SDT_PATCH_SIZE; i++)
-		instr[i] = 0x90;
-
 	old_wp = disable_wp();
-	memcpy((void *)patchpoint, instr, sizeof(instr));
+	memcpy((void *)patchpoint, sdt_nop, sizeof(sdt_nop));
 	restore_wp(old_wp);
 }
