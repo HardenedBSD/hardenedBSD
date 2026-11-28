@@ -315,7 +315,7 @@ sdt_disable(void *arg __unused, dtrace_id_t id, void *parg)
 		if (lockstat_enabled_count == 0)
 			lockstat_enabled = false;
 	}
-	probe->id = 0;
+
 	probe->sdtp_lf->nenabled--;
 }
 

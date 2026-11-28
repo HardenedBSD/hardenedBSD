@@ -1656,6 +1656,11 @@ ATF_TC_BODY(largepage_mlock, tc)
 
 /*
  * Test handling of the RO->RW transition for an mlocked largepage mapping.
+ *
+ * Reading every base page first may leave read-only TLB entries.  On amd64,
+ * a page fault invalidates the faulting TLB entry, but other architectures
+ * may require the kernel to invalidate the entries when it upgrades the
+ * mapping in place.
  */
 ATF_TC(largepage_mprotect_wired);
 ATF_TC_HEAD(largepage_mprotect_wired, tc)
@@ -1667,6 +1672,7 @@ ATF_TC_BODY(largepage_mprotect_wired, tc)
 {
 	struct rlimit rl;
 	char *addr;
+	volatile char *p;
 	size_t ps[MAXPAGESIZES], sz;
 	u_long max_wired, wired;
 	int fd, error, pscnt;
@@ -1702,6 +1708,10 @@ ATF_TC_BODY(largepage_mprotect_wired, tc)
 
 		ATF_REQUIRE_MSG(mlock(addr, ps[i]) == 0,
 		    "mlock failed; error=%d", errno);
+
+		p = addr;
+		for (size_t off = 0; off < ps[i]; off += ps[0])
+			ATF_REQUIRE(p[off] == 0);
 
 		ATF_REQUIRE_MSG(mprotect(addr, ps[i],
 		    PROT_READ | PROT_WRITE) == 0,
@@ -1840,6 +1850,48 @@ ATF_TC_BODY(largepage_mprotect, tc)
 
 		ATF_REQUIRE(munmap(addr, ps[i]) == 0);
 		ATF_REQUIRE(munmap(addr1, ps[i]) == 0);
+		ATF_REQUIRE(close(fd) == 0);
+	}
+}
+
+/*
+ * Revoke and then restore write access to a mapped large page, reading every
+ * base page while it is read-only.  The reads may leave read-only TLB
+ * entries.  On amd64, a page fault invalidates the faulting TLB entry, but
+ * other architectures may require the kernel to invalidate the entries when
+ * it re-enters the mapping for the writes that follow.
+ */
+ATF_TC_WITHOUT_HEAD(largepage_mprotect_upgrade);
+ATF_TC_BODY(largepage_mprotect_upgrade, tc)
+{
+	char *addr;
+	volatile char *p;
+	size_t ps[MAXPAGESIZES];
+	int fd, pscnt;
+
+	pscnt = pagesizes(ps, true);
+	for (int i = 1; i < pscnt; i++) {
+		fd = shm_open_large(i, SHM_LARGEPAGE_ALLOC_DEFAULT, ps[i]);
+
+		addr = mmap(NULL, ps[i], PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		    0);
+		ATF_REQUIRE_MSG(addr != MAP_FAILED,
+		    "mmap(%zu bytes) failed; error=%d", ps[i], errno);
+
+		p = addr;
+		for (size_t off = 0; off < ps[i]; off += ps[0])
+			p[off] = 1;
+		largepage_protect(addr, ps[i], PROT_READ, 0);
+		for (size_t off = 0; off < ps[i]; off += ps[0])
+			ATF_REQUIRE(p[off] == 1);
+		largepage_protect(addr, ps[i], PROT_READ | PROT_WRITE, 0);
+		for (size_t off = 0; off < ps[i]; off += ps[0])
+			p[off] = 2;
+		for (size_t off = 0; off < ps[i]; off += ps[0])
+			ATF_REQUIRE_MSG(p[off] == 2,
+			    "byte at offset %zu is %d", off, p[off]);
+
+		ATF_REQUIRE(munmap(addr, ps[i]) == 0);
 		ATF_REQUIRE(close(fd) == 0);
 	}
 }
@@ -2384,6 +2436,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, largepage_mlock);
 	ATF_TP_ADD_TC(tp, largepage_msync);
 	ATF_TP_ADD_TC(tp, largepage_mprotect);
+	ATF_TP_ADD_TC(tp, largepage_mprotect_upgrade);
 	ATF_TP_ADD_TC(tp, largepage_mprotect_wired);
 	ATF_TP_ADD_TC(tp, largepage_minherit);
 	ATF_TP_ADD_TC(tp, largepage_pipe);

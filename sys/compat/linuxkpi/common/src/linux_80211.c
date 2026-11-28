@@ -7475,6 +7475,8 @@ linuxkpi_ieee80211_ifattach(struct ieee80211_hw *hw)
 		ic_printf(ic, "NOTE: rate control not supported by LinuxKPI; "
 		    "expect low rates only\n");
 
+	ic->ic_flags_ext |= IEEE80211_FEXT_SEQNO_OFFLOAD;
+
 	/* Does HW support Fragmentation offload? */
 	if (ieee80211_hw_check(hw, SUPPORTS_TX_FRAG))
 		ic->ic_flags_ext |= IEEE80211_FEXT_FRAG_OFFLOAD;

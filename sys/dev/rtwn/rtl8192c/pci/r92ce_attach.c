@@ -48,6 +48,7 @@
 
 #include <dev/rtwn/if_rtwnreg.h>
 #include <dev/rtwn/if_rtwnvar.h>
+#include <dev/rtwn/if_rtwn_fw.h>
 #include <dev/rtwn/if_rtwn_nop.h>
 
 #include <dev/rtwn/pci/rtwn_pci_var.h>
@@ -81,6 +82,7 @@ r92ce_postattach(struct rtwn_softc *sc)
 	else
 		sc->fwname = "rtwn-rtl8192cfwE_B";
 	sc->fwsig = 0x88c;
+	sc->fw_start_addr		= R92C_FW_START_ADDR;
 
 	rs->rs_scan_start = ic->ic_scan_start;
 	ic->ic_scan_start = r92c_scan_start;
@@ -190,6 +192,7 @@ r92ce_attach(struct rtwn_pci_softc *pc)
 #ifndef RTWN_WITHOUT_UCODE
 	sc->sc_fw_reset			= r92ce_fw_reset;
 	sc->sc_fw_download_enable	= r92c_fw_download_enable;
+	sc->sc_fw_write_finish		= rtwn_nop_int_softc;
 #endif
 	sc->sc_llt_init			= r92c_llt_init;
 	sc->sc_enable_mac_txrx		= rtwn_nop_softc;

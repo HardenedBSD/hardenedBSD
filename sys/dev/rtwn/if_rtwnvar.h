@@ -253,6 +253,7 @@ struct rtwn_softc {
 	uint16_t		fwver;
 	uint16_t		fwsig;
 	int			fwcur;
+	uint16_t		fw_start_addr;
 
 	void		(*sc_node_free)(struct ieee80211_node *);
 	void		(*sc_scan_curchan)(struct ieee80211_scan_state *,
@@ -306,7 +307,9 @@ struct rtwn_softc {
 #ifndef RTWN_WITHOUT_UCODE
 	void		(*sc_fw_reset)(struct rtwn_softc *, int);
 	void		(*sc_fw_download_enable)(struct rtwn_softc *, int);
+	int		(*sc_fw_write_finish)(struct rtwn_softc *);
 #endif
+
 	int		(*sc_llt_init)(struct rtwn_softc *);
 	void		(*sc_enable_mac_txrx)(struct rtwn_softc *);
 	int		(*sc_set_page_size)(struct rtwn_softc *);
@@ -466,6 +469,8 @@ void	rtwn_attach_vht_cap_info_mcs(struct rtwn_softc *);
 	(((_sc)->sc_abort_xfers)((_sc)))
 #define rtwn_fw_write_block(_sc, _buf, _reg, _len) \
 	(((_sc)->sc_fw_write_block)((_sc), (_buf), (_reg), (_len)))
+#define rtwn_fw_write_finish(_sc) \
+	(((_sc)->sc_fw_write_finish)((_sc)))
 #define rtwn_set_qmap(_sc) \
 	(((_sc)->sc_set_qmap)((_sc)))
 #define rtwn_set_desc_addr(_sc) \
