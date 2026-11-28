@@ -55,6 +55,7 @@
 #include <dev/rtwn/if_rtwnreg.h>
 #include <dev/rtwn/if_rtwnvar.h>
 
+#include <dev/rtwn/if_rtwn_fw.h>
 #include <dev/rtwn/if_rtwn_nop.h>
 
 #include <dev/rtwn/usb/rtwn_usb_var.h>
@@ -232,6 +233,7 @@ r12au_attach(struct rtwn_usb_softc *uc)
 #ifndef RTWN_WITHOUT_UCODE
 	sc->sc_fw_reset			= r12a_fw_reset;
 	sc->sc_fw_download_enable	= r12a_fw_download_enable;
+	sc->sc_fw_write_finish		= rtwn_nop_int_softc;
 #endif
 	sc->sc_llt_init			= r92c_llt_init;
 	sc->sc_enable_mac_txrx		= rtwn_nop_softc;
@@ -290,6 +292,7 @@ r12au_attach(struct rtwn_usb_softc *uc)
 	sc->name			= "RTL8812AU";
 	sc->fwname			= "rtwn-rtl8812aufw";
 	sc->fwsig			= 0x950;
+	sc->fw_start_addr		= R92C_FW_START_ADDR;
 
 	sc->page_count			= R12A_TX_PAGE_COUNT;
 	sc->pktbuf_count		= R12A_TXPKTBUF_COUNT;
